@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { formatCurrency, formatDisplayDate } from '@/lib/utils'
 import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { useOnlineStatus } from '@/db/hooks'
@@ -136,6 +138,8 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 
 export default function PayablesPage() {
   const { hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const navigate = useNavigate()
   const { toast } = useToast()
   const online = useOnlineStatus()
   
@@ -144,10 +148,11 @@ export default function PayablesPage() {
   const [products, setProducts] = useState<InventoryItem[]>([])
   const [purchases, setPurchases] = useState<SupplierPurchase[]>([])
   const [payments, setPayments] = useState<SupplierPayment[]>([])
+  const [landlordPayables, setLandlordPayables] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [activeTab, setActiveTab] = useState<'suppliers' | 'purchases' | 'payments'>('suppliers')
+  const [activeTab, setActiveTab] = useState<'suppliers' | 'purchases' | 'payments' | 'landlords'>('suppliers')
   const [summary, setSummary] = useState<any>(null)
   const [showSupplierModal, setShowSupplierModal] = useState(false)
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
@@ -171,6 +176,14 @@ export default function PayablesPage() {
   })
   const [purchaseItems, setPurchaseItems] = useState<PurchaseDraftItem[]>([createEmptyPurchaseItem()])
   const suppliersEnabled = hasPermission('canViewPayable')
+  const landlordPayablesEnabled = suppliersEnabled && (hasFeature('property_management.landlord') || hasFeature('property_management.agent'))
+
+  useEffect(() => {
+    if (!landlordPayablesEnabled) {
+      setLandlordPayables([])
+      if (activeTab === 'landlords') setActiveTab('suppliers')
+    }
+  }, [landlordPayablesEnabled, activeTab])
 
   useEffect(() => {
     if (!suppliersEnabled) {
@@ -183,8 +196,11 @@ export default function PayablesPage() {
     }
     if (activeTab === 'purchases') loadPurchases()
     if (activeTab === 'payments') loadPayments()
+    if (activeTab === 'landlords' && landlordPayablesEnabled) {
+      api.get<any[]>('/api/property-management/payables/owners').then(setLandlordPayables).catch(error => toast({ title: 'Error', description: error instanceof Error ? error.message : 'Could not load landlord payables', variant: 'destructive' }))
+    }
     loadPayablesSummary()
-  }, [suppliersEnabled, activeTab, searchTerm, statusFilter])
+  }, [suppliersEnabled, activeTab, searchTerm, statusFilter, landlordPayablesEnabled])
 
   const loadSuppliers = async (
     showPageLoading = true,
@@ -527,7 +543,7 @@ export default function PayablesPage() {
 
       {/* Tabs */}
       <div className="flex space-x-1 border-b">
-        {['suppliers', 'purchases', 'payments'].map((tab) => (
+        {(['suppliers', 'purchases', 'payments', ...(landlordPayablesEnabled ? ['landlords'] : [])] as string[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab as any)}
@@ -537,7 +553,7 @@ export default function PayablesPage() {
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'landlords' ? 'Landlord Payables' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -752,6 +768,16 @@ export default function PayablesPage() {
               </Card>
             ))
           )}
+        </div>
+      )}
+
+      {activeTab === 'landlords' && landlordPayablesEnabled && (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted/50 text-left"><tr><th className="p-3">Landlord</th><th className="p-3 text-right">Managed properties</th><th className="p-3 text-right">Rent accrued</th><th className="p-3 text-right">Paid out</th><th className="p-3 text-right">Payable balance</th><th className="p-3">Action</th></tr></thead>
+            <tbody>{landlordPayables.filter(owner => `${owner.name} ${owner.phone || ''} ${owner.email || ''}`.toLowerCase().includes(searchTerm.toLowerCase())).map(owner => <tr key={owner.id} className="border-t"><td className="p-3"><div className="font-medium">{owner.name}</div><div className="text-xs text-muted-foreground">{owner.phone || owner.email || 'No contact details'}</div></td><td className="p-3 text-right">{owner.propertyCount}</td><td className="p-3 text-right">{formatCurrency(owner.rentAccrued)}</td><td className="p-3 text-right">{formatCurrency(owner.paid)}</td><td className="p-3 text-right font-semibold">{formatCurrency(owner.balance)}</td><td className="p-3">{hasPermission('canRecordOwnerPayout') && (hasPermission('canViewPropertyPortfolio') || hasPermission('canViewPropertyManagement')) && <Button size="sm" variant="outline" onClick={() => navigate('/tenant/property-management/clients', { state: { recordOwnerPayout: owner.id } })}>Record payout</Button>}</td></tr>)}</tbody>
+          </table>
+          {!landlordPayables.length && <p className="p-6 text-center text-sm text-muted-foreground">No managed landlord balances are recorded.</p>}
         </div>
       )}
 

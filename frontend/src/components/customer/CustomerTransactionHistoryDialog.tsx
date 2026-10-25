@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { apiFetch } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { cn, formatCurrency, formatDisplayDate } from '@/lib/utils'
 import { displayReference } from '@/lib/displayReference'
 import TransactionReceiptButton from '@/components/TransactionReceiptButton'
@@ -135,6 +137,14 @@ type CustomerHistoryResponse = {
   }
   creditHistory?: CustomerCreditHistory
   transactions: CustomerHistoryTransaction[]
+}
+
+type RentalLedgerResponse = {
+  customer: { profilePhotoUrl?: string | null; nationalId?: string | null; nationalIdFrontUrl?: string | null; nationalIdBackUrl?: string | null }
+  tenancies: Array<{ id: string; agreementRef?: string | null; status: string; startDate: string; endDate?: string | null; rentAmount: number; currency: string; balance: number; unit: { unitCode: string; property: { name: string; owner?: { name: string } | null } } }>
+  entries: Array<{ id: string; date: string; type: string; reference: string; description: string; debit: number; credit: number; runningBalance: number; paymentMethod?: string | null }>
+  closingBalance: number
+  access: { identity: boolean }
 }
 
 const normalizeText = (value?: string | null) => String(value || '').replace(/_/g, ' ')
@@ -305,12 +315,21 @@ export default function CustomerTransactionHistoryDialog({
 }) {
   const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
+  const [rentalData, setRentalData] = useState<RentalLedgerResponse | null>(null)
+  const [rentalReload, setRentalReload] = useState(0)
+  const [editingIdentity, setEditingIdentity] = useState(false)
+  const [savingIdentity, setSavingIdentity] = useState(false)
+  const [identityError, setIdentityError] = useState('')
+  const { hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const propertyManagementEnabled = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (!open || !customer?.id) {
       setData(null)
+      setRentalData(null)
       setError('')
       return
     }
@@ -319,6 +338,7 @@ export default function CustomerTransactionHistoryDialog({
     const loadHistory = async () => {
       setLoading(true)
       setError('')
+      setRentalData(null)
       try {
         const response = await apiFetch(`/api/receivables/customers/${customer.id}/history?limit=${viewMode === 'details' ? 1 : 500}`, {
           signal: controller.signal,
@@ -326,6 +346,12 @@ export default function CustomerTransactionHistoryDialog({
         const payload = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(payload?.error || 'Failed to load customer history')
         setData(payload)
+        if (propertyManagementEnabled) {
+          const rentalResponse = await apiFetch(`/api/property-management/customers/${customer.id}/rent-ledger`, { signal: controller.signal } as RequestInit)
+          if (rentalResponse.ok) setRentalData(await rentalResponse.json())
+        } else {
+          setRentalData(null)
+        }
       } catch (err: any) {
         if (err?.name !== 'AbortError') setError(err?.message || 'Failed to load customer history')
       } finally {
@@ -335,7 +361,23 @@ export default function CustomerTransactionHistoryDialog({
 
     loadHistory()
     return () => controller.abort()
-  }, [open, customer?.id, viewMode])
+  }, [open, customer?.id, viewMode, rentalReload, propertyManagementEnabled])
+
+  async function saveIdentity(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const tenancyId = rentalData?.tenancies.find(row => row.status === 'active')?.id || rentalData?.tenancies[0]?.id
+    if (!tenancyId) return
+    setSavingIdentity(true)
+    setIdentityError('')
+    try {
+      const response = await apiFetch(`/api/property-management/tenancies/${tenancyId}/profile`, { method: 'PUT', body: new FormData(event.currentTarget) })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not update renter identity.')
+      setEditingIdentity(false)
+      setRentalReload(value => value + 1)
+    } catch (err: any) { setIdentityError(err?.message || 'Could not update renter identity.') }
+    finally { setSavingIdentity(false) }
+  }
 
   const customerInfo = data?.customer || customer
   const transactions = data?.transactions || []
@@ -345,6 +387,7 @@ export default function CustomerTransactionHistoryDialog({
   ))
   const canViewSalesAndPayments = Boolean(data && (data.access.sales || data.access.payments))
   const canViewCreditHistory = Boolean(data?.access.creditHistory && data.creditHistory)
+  const canViewRent = Boolean(rentalData?.tenancies?.length)
   const creditActivity = transactions.filter((row) => [
     'opening_balance', 'receivable_sale', 'sale_payment_adjustment', 'customer_payment',
     'customer_credit_application', 'credit_note', 'sale_return', 'customer_withdrawal',
@@ -410,24 +453,36 @@ export default function CustomerTransactionHistoryDialog({
 
         {!loading && !error && data && viewMode === 'profile' && (
           <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
-            <TabsList className="grid h-auto w-full grid-cols-2 sm:w-fit sm:grid-cols-4">
+            <TabsList className="flex h-auto w-full flex-wrap justify-start sm:w-fit">
               <TabsTrigger value="overview">Overview</TabsTrigger>
               {canViewLedger && <TabsTrigger value="ledger">Transaction ledger ({Number(data.summary.transactionCount || 0).toLocaleString()})</TabsTrigger>}
               {canViewSalesAndPayments && <TabsTrigger value="sales-payments">Sales &amp; Payments</TabsTrigger>}
               {canViewCreditHistory && <TabsTrigger value="credit-history">Credit History</TabsTrigger>}
+              {canViewRent && <TabsTrigger value="rent">Rent &amp; Tenancies</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
             <div className="grid gap-3 md:grid-cols-[1.2fr_2fr]">
               <div className="rounded-md border p-4">
-                <p className="text-xs font-semibold uppercase text-muted-foreground">Customer</p>
+                <div className="flex items-center gap-3">
+                  {rentalData?.access.identity && rentalData.customer.profilePhotoUrl && <img src={rentalData.customer.profilePhotoUrl} alt={`${data.customer.name} profile`} className="h-16 w-16 rounded-full border object-cover" />}
+                  <div><p className="text-xs font-semibold uppercase text-muted-foreground">Customer{canViewRent ? ' / Tenant' : ''}</p>
                 <h3 className="mt-2 break-words text-lg font-semibold">{data.customer.name}</h3>
+                  </div>
+                </div>
                 <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                   <p>{data.access.phone ? data.customer.phone || 'No phone on file' : data.customer.maskedPhone || '07xxxxxx'}</p>
                   <p className="break-words">{data.access.email ? data.customer.email || 'No email on file' : data.customer.maskedEmail || 'x******@*****'}</p>
                   <p className="break-words">{data.access.address ? data.customer.address || 'No address on file' : data.customer.maskedAddress || '******'}</p>
                 </div>
                 {data.access.notes && data.customer.notes && <p className="mt-3 whitespace-pre-wrap border-t pt-3 text-sm">{data.customer.notes}</p>}
+                {rentalData?.access.identity && <div className="mt-4 border-t pt-3">
+                  <p className="text-sm font-medium">National ID {rentalData.customer.nationalId ? `· ${rentalData.customer.nationalId}` : ''}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    {rentalData.customer.nationalIdFrontUrl && <a href={rentalData.customer.nationalIdFrontUrl} target="_blank" rel="noreferrer"><img src={rentalData.customer.nationalIdFrontUrl} alt="National ID front" className="h-32 w-full rounded border object-cover" /><span className="mt-1 block text-xs text-muted-foreground">Front side</span></a>}
+                    {rentalData.customer.nationalIdBackUrl && <a href={rentalData.customer.nationalIdBackUrl} target="_blank" rel="noreferrer"><img src={rentalData.customer.nationalIdBackUrl} alt="National ID back" className="h-32 w-full rounded border object-cover" /><span className="mt-1 block text-xs text-muted-foreground">Back side</span></a>}
+                  </div>
+                </div>}
                 {!data.access.notes && data.customer.maskedNotes && <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">Customer notes: {data.customer.maskedNotes}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {data.customer.status && <Badge variant="outline">{data.customer.status}</Badge>}
@@ -572,6 +627,27 @@ export default function CustomerTransactionHistoryDialog({
               {data.access.sales && <><Wallet className="ml-2 h-4 w-4" /><span>Cash POS sales are shown as activity but do not change receivables.</span></>}
               {data.access.balance && <><CreditCard className="ml-2 h-4 w-4" /><span>Current balance comes from the customer account.</span></>}
             </div>
+            </TabsContent>}
+
+            {canViewRent && <TabsContent value="rent" className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                {metric('Rental balance', rentalData?.closingBalance)}
+                {metric('Tenancies', rentalData?.tenancies.length)}
+                {metric('Active agreements', rentalData?.tenancies.filter(row => row.status === 'active').length)}
+              </div>
+              <section className="overflow-hidden rounded-md border">
+                <div className="border-b px-4 py-3"><h3 className="font-semibold">Tenancy history</h3></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Property / unit</th><th className="p-3">Agreement</th><th className="p-3">Period</th><th className="p-3 text-right">Monthly rent</th><th className="p-3 text-right">Outstanding</th><th className="p-3">Status</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="p-3">{row.unit.property.name}<div className="text-xs text-muted-foreground">{row.unit.unitCode}{row.unit.property.owner?.name ? ` · ${row.unit.property.owner.name}` : ''}</div></td><td className="p-3">{row.agreementRef || '—'}</td><td className="p-3">{formatDisplayDate(row.startDate)}{row.endDate ? ` – ${formatDisplayDate(row.endDate)}` : ''}</td><td className="p-3 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="p-3 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td><td className="p-3"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td></tr>)}</tbody></table></div>
+              </section>
+              {hasPermission('canRecordRentPayment') && <div className="flex flex-wrap gap-2">{rentalData?.tenancies.filter(row => row.status === 'active' && row.balance > 0).map(row => <Button key={row.id} type="button" variant="outline" size="sm" onClick={() => navigate('/tenant/property-management/rent', { state: { recordRentPayment: row.id } })}>Record rent · {row.unit.property.name} / {row.unit.unitCode}</Button>)}</div>}
+              {hasPermission('canManageTenancies') && <section className="rounded-md border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-semibold">Tenant identity documents</h3><p className="text-xs text-muted-foreground">Update the profile photo and both National ID sides.</p></div><Button type="button" variant="outline" size="sm" onClick={() => setEditingIdentity(value => !value)}>{editingIdentity ? 'Close' : 'Update documents'}</Button></div>
+                {editingIdentity && <form onSubmit={saveIdentity} className="mt-4 space-y-3"><label className="block text-sm">National ID number<input name="nationalId" defaultValue={rentalData?.customer.nationalId || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label><div className="grid gap-3 sm:grid-cols-3">{[['profilePhoto','Profile photo'],['nationalIdFront','National ID · front'],['nationalIdBack','National ID · back']].map(([name,label]) => <label key={name} className="block text-sm">{label}<input name={name} type="file" accept="image/*" className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1.5" /></label>)}</div>{identityError && <p role="alert" className="text-sm text-destructive">{identityError}</p>}<Button type="submit" disabled={savingIdentity}>{savingIdentity ? 'Saving…' : 'Save identity details'}</Button></form>}
+              </section>}
+              <section className="overflow-hidden rounded-md border">
+                <div className="border-b px-4 py-3"><h3 className="font-semibold">Rent ledger</h3><p className="text-xs text-muted-foreground">Rent charges and receipts are shown from the rental ledger.</p></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Date</th><th className="p-3">Description</th><th className="p-3">Reference</th><th className="p-3 text-right">Charge</th><th className="p-3 text-right">Receipt</th><th className="p-3 text-right">Balance</th></tr></thead><tbody>{rentalData?.entries.map(row => <tr key={`${row.type}-${row.id}`} className="border-t"><td className="p-3">{formatDisplayDate(row.date)}</td><td className="p-3">{row.description}</td><td className="p-3">{row.reference}</td><td className="p-3 text-right">{row.debit ? formatCurrency(row.debit) : '—'}</td><td className="p-3 text-right">{row.credit ? formatCurrency(row.credit) : '—'}</td><td className="p-3 text-right font-medium">{formatCurrency(row.runningBalance)}</td></tr>)}</tbody></table>{!rentalData?.entries.length && <p className="p-5 text-sm text-muted-foreground">No rental charges or receipts are recorded.</p>}</div>
+              </section>
             </TabsContent>}
 
             {canViewSalesAndPayments && <TabsContent value="sales-payments" className="space-y-4">

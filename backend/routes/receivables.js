@@ -15,6 +15,7 @@ import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalServ
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
 import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
+import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
 import { applyAvailableCustomerCredit, customerCreditOffset } from '../src/services/customerCreditApplicationService.js'
 import {
@@ -142,6 +143,7 @@ const customerHistoryCounts = {
   serviceContracts: true,
   serviceFeedback: true,
   fuelCards: true,
+  propertyTenancies: true,
   procurementSellerInvoices: true,
   creditNotes: true,
 }
@@ -288,10 +290,34 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
       enrichmentWarnings.push('Repayment scores could not be refreshed.')
     }
     const profileAccess = customerProfileAccess(req.user?.permissions)
+    let rentalBalances = new Map()
+    let rentalIntegrationEnabled = false
+    const canReadRentalBalances = profileAccess.balance && (req.user?.permissions || []).includes('canViewPropertyStatements')
+    if (canReadRentalBalances && scoredCustomers.length) {
+      try {
+        const features = await getTenantFeatures(scope.tenantId)
+        const rentalFeatureEnabled = hasFeatureAccess(features, 'property_management.landlord') || hasFeatureAccess(features, 'property_management.agent')
+        if (rentalFeatureEnabled) {
+          rentalIntegrationEnabled = true
+          const rentals = await prisma.propertyTenancy.findMany({
+            where: { tenantId: scope.tenantId, customerId: { in: scoredCustomers.map(customer => customer.id) } },
+            select: { customerId: true, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true } } },
+          })
+          for (const tenancy of rentals) {
+            if (!tenancy.customerId) continue
+            const outstanding = tenancy.charges.reduce((sum, charge) => sum + Math.max(0, Number(charge.amount) - Number(charge.amountPaid)), 0)
+            rentalBalances.set(tenancy.customerId, Math.round(((rentalBalances.get(tenancy.customerId) || 0) + outstanding) * 100) / 100)
+          }
+        }
+      } catch (error) {
+        console.error('Rental customer balance enrichment failed:', error)
+        enrichmentWarnings.push('Rental balances could not be refreshed.')
+      }
+    }
     const customers = scoredCustomers.map((customer) => {
       const canDelete = customerHasNoBalanceOrHistory(customer)
       const { _count, procurementCounterpartyLink, ...publicCustomer } = customer
-      return { ...customerProfilePayload(publicCustomer, profileAccess), canDelete }
+      return { ...customerProfilePayload({ ...publicCustomer, ...(rentalIntegrationEnabled ? { rentalBalance: rentalBalances.get(customer.id) || 0 } : {}) }, profileAccess), canDelete }
     })
 
     res.json({

@@ -28,6 +28,8 @@ export default function DashboardPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { user, hasPermission } = useJWTAuth()
   const { hasFeature, hasAnyFeature } = useFeatureAccess()
+  const hasLandlordWorkspace = hasFeature('property_management.landlord')
+  const hasAgentWorkspace = hasFeature('property_management.agent')
   const showReports = searchParams.get('view') === 'reports' && hasFeature('reports')
   const [billingReminder, setBillingReminder] = useState<any>(null)
   const [showBillingPrompt, setShowBillingPrompt] = useState(false)
@@ -60,7 +62,7 @@ export default function DashboardPage() {
   const canViewProperty = hasAnyFeature(['property_management.landlord', 'property_management.agent']) && hasPermission('canViewPropertyPortfolio')
   const canViewRestaurant = hasFeature('restaurant') && hasPermission('canViewRestaurant')
   const canViewHR = hasFeature('hr') && hasPermission('canViewHR')
-  const dashboardModules = [canViewProperty && 'Property Management', canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management'].filter(Boolean) as string[]
+  const dashboardModules = [canViewProperty && (hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord' : 'Property Management'), canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management'].filter(Boolean) as string[]
 
   useEffect(() => {
     let active = true
@@ -357,11 +359,12 @@ export default function DashboardPage() {
       {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr) && <section className="space-y-4" aria-label="Module overview">
         {moduleSnapshots.property && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
-            <div><h2 className="text-lg font-semibold">Property portfolio</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, and managed-unit health.</p></div>
-            <Link to="/tenant/property-management" className="text-sm font-medium text-primary hover:underline">Open Property Management</Link>
+            <div><h2 className="text-lg font-semibold">{hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property portfolio'}</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, landlord clients, and managed-unit health.</p></div>
+            <Link to="/tenant/property-management/portfolio" className="text-sm font-medium text-primary hover:underline">Open Property Management</Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ModuleMetric label="Properties" value={moduleSnapshots.property.properties} />
+            {hasAgentWorkspace && <ModuleMetric label="Landlord clients" value={moduleSnapshots.property.landlordClients ?? '—'} />}
+            <ModuleMetric label={hasAgentWorkspace && !hasLandlordWorkspace ? 'Managed properties' : 'My properties'} value={hasAgentWorkspace && !hasLandlordWorkspace ? moduleSnapshots.property.managedProperties ?? '—' : moduleSnapshots.property.properties} />
             <ModuleMetric label="Occupied units" value={`${Number(moduleSnapshots.property.occupied || 0).toLocaleString()} / ${Number(moduleSnapshots.property.units || 0).toLocaleString()}`} />
             <ModuleMetric label="Active tenancies" value={moduleSnapshots.property.activeTenancies} />
             <ModuleMetric label="Outstanding rent" value={formatCurrency(moduleSnapshots.property.outstandingRent || 0)} detail={`${Number(moduleSnapshots.property.vacant || 0).toLocaleString()} vacant units`} />

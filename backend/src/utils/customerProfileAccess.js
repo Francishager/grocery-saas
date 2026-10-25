@@ -68,6 +68,9 @@ export function customerProfilePayload(customer, access) {
       openingBalanceDate: customer.openingBalanceDate,
       openingBalanceNote: customer.openingBalanceNote,
       trustScore: customer.trustScore,
+      ...(customer.rentalBalance !== undefined && customer.rentalBalance !== null
+        ? { rentalBalance: money(customer.rentalBalance) }
+        : {}),
     }),
     ...(access.withdraw && { availableForWithdrawal: Math.max(0, money(-Number(customer.balance || 0))) }),
   }

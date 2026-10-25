@@ -1,11 +1,14 @@
 import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
+import multer from 'multer'
 import prisma from '../db.js'
 import { authenticateToken, requirePermission, requireAnyPermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
 import { requireAnyFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
 import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines } from '../services/propertyAccountingService.js'
+import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 
 const router = Router()
+const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
 const money = value => Math.round((Number(value) || 0) * 100) / 100
 const tenantIdOf = req => req.user?.tenantId
 const monthKey = date => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
@@ -16,12 +19,65 @@ const dueDateFor = (period, dueDay) => {
 }
 const pageSize = value => Math.min(Math.max(Number.parseInt(value, 10) || 100, 1), 500)
 const badRequest = (res, message) => res.status(400).json({ error: message })
+const canViewCustomerIdentity = req => (req.user?.permissions || []).includes('*') || (req.user?.permissions || []).includes('canViewCustomerIdentity')
 
 const PROPERTY_MANAGEMENT_FEATURES = ['property_management.landlord', 'property_management.agent']
 router.use(authenticateToken, loadUserPermissions, requireAnyFeature(PROPERTY_MANAGEMENT_FEATURES))
 
 const paymentMethodsByAccount = { cash: 'cash', safe: 'safe', mobile_money: 'mobile_money', bank: 'bank_transfer', card: 'card' }
 const paymentMethodToAccount = { cash: 'cash', safe: 'safe', mobile_money: 'mobile_money', bank: 'bank', bank_transfer: 'bank', cheque: 'bank', card: 'card' }
+
+async function uploadRenterIdentity(req) {
+  const files = req.files || {}
+  const fields = ['profilePhoto', 'nationalIdFront', 'nationalIdBack']
+  for (const field of fields) {
+    const file = files[field]?.[0]
+    if (file && !String(file.mimetype || '').startsWith('image/')) throw Object.assign(new Error('Upload valid image files for the profile photo and National ID sides.'), { statusCode: 400 })
+  }
+  const tenantId = tenantIdOf(req)
+  const entries = await Promise.all(fields.map(async field => {
+    const file = files[field]?.[0]
+    if (!file) return [field, null]
+    const result = await uploadBufferToCloudinary(file.buffer, {
+      folder: `jibusales/property-tenants/${tenantId}`,
+      publicId: `${Date.now()}-${field}-${safeCloudinaryId(file.originalname)}`,
+      resourceType: 'image',
+      transformation: [{ width: 1600, height: 1600, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
+    })
+    return [field, result.secure_url]
+  }))
+  return Object.fromEntries(entries)
+}
+
+async function findOrCreateRenterCustomer(tx, tenantId, input) {
+  const name = String(input.tenantName || '').trim()
+  const phone = String(input.phone || '').trim() || null
+  const email = String(input.email || '').trim() || null
+  const sameName = { name: { equals: name, mode: 'insensitive' } }
+  let customer = phone
+    ? await tx.customer.findFirst({ where: { tenantId, phone, ...sameName } })
+    : null
+  if (!customer && email) customer = await tx.customer.findFirst({ where: { tenantId, email: { equals: email, mode: 'insensitive' }, ...sameName } })
+  if (customer) {
+    return tx.customer.update({ where: { id: customer.id }, data: {
+      ...(email && !customer.email ? { email } : {}),
+      ...(phone && !customer.phone ? { phone } : {}),
+      ...(input.nationalId ? { nin: String(input.nationalId).trim() } : {}),
+      ...(input.address ? { address: String(input.address).trim() } : {}),
+    } })
+  }
+  return tx.customer.create({ data: {
+    tenantId,
+    name: String(input.tenantName).trim(),
+    phone,
+    email,
+    nin: String(input.nationalId || '').trim() || null,
+    address: String(input.address || '').trim() || null,
+    creditLimit: 0,
+    balance: 0,
+    openingBalance: 0,
+  } })
+}
 
 router.get('/payment-accounts', requireAnyPermission(['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment']), async (req, res) => {
   try {
@@ -40,8 +96,10 @@ router.get('/overview', requireAnyPermission(['canViewPropertyPortfolio', 'canVi
     const tenantId = tenantIdOf(req)
     const now = new Date()
     const canViewCollections = ['*', 'canViewPropertyCollections', 'canViewPropertyReports'].some(permission => req.user?.permissions?.includes(permission))
-    const [propertyCount, unitCounts, tenancies, monthPayments] = await Promise.all([
+    const [propertyCount, managedPropertyCount, ownerCount, unitCounts, tenancies, monthPayments] = await Promise.all([
       prisma.managedProperty.count({ where: { tenantId, status: 'active' } }),
+      prisma.managedProperty.count({ where: { tenantId, status: 'active', ownerId: { not: null } } }),
+      prisma.propertyOwner.count({ where: { tenantId, isActive: true } }),
       prisma.propertyUnit.groupBy({ by: ['status'], where: { property: { tenantId } }, _count: { _all: true } }),
       prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active' }, select: { id: true, rentAmount: true, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true, dueDate: true } } } }),
       canViewCollections ? prisma.propertyRentPayment.aggregate({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), lt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) } }, _sum: { amount: true }, _count: true }) : Promise.resolve(null),
@@ -49,7 +107,7 @@ router.get('/overview', requireAnyPermission(['canViewPropertyPortfolio', 'canVi
     const units = Object.fromEntries(unitCounts.map(row => [row.status, row._count._all]))
     const openCharges = tenancies.flatMap(row => row.charges)
     res.json({
-      properties: propertyCount, units: units.total || Object.values(units).reduce((a, b) => a + b, 0), occupied: units.occupied || 0, vacant: units.vacant || 0,
+      properties: propertyCount, managedProperties: managedPropertyCount, landlordClients: ownerCount, units: units.total || Object.values(units).reduce((a, b) => a + b, 0), occupied: units.occupied || 0, vacant: units.vacant || 0,
       activeTenancies: tenancies.length, monthlyRentRoll: money(tenancies.reduce((sum, row) => sum + Number(row.rentAmount || 0), 0)),
       outstandingRent: money(openCharges.reduce((sum, row) => sum + Math.max(0, Number(row.amount) - Number(row.amountPaid)), 0)),
       arrears: money(openCharges.filter(row => row.dueDate < now).reduce((sum, row) => sum + Math.max(0, Number(row.amount) - Number(row.amountPaid)), 0)),
@@ -67,6 +125,31 @@ router.get('/owners', requireAnyPermission(['canViewPropertyPortfolio', 'canView
     const owners = await prisma.propertyOwner.findMany({ where: { tenantId: tenantIdOf(req) }, orderBy: { name: 'asc' }, include: { _count: { select: { properties: true } } } })
     res.json(owners)
   } catch (error) { console.error('List property owners failed:', error); res.status(500).json({ error: 'Could not load owners.' }) }
+})
+
+router.get('/payables/owners', requirePermission('canViewPayable'), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const [owners, rentTotals, payoutTotals] = await Promise.all([
+      prisma.propertyOwner.findMany({ where: { tenantId }, orderBy: { name: 'asc' }, select: { id: true, name: true, email: true, phone: true, isActive: true, _count: { select: { properties: true } } } }),
+      prisma.$queryRaw`SELECT property."ownerId" AS "ownerId", COALESCE(SUM(charge."amount"), 0)::double precision AS "rentAccrued"
+        FROM "rent_charges" charge
+        JOIN "property_tenancies" tenancy ON tenancy."id" = charge."tenancyId"
+        JOIN "property_units" unit ON unit."id" = tenancy."unitId"
+        JOIN "managed_properties" property ON property."id" = unit."propertyId"
+        WHERE charge."tenantId" = ${tenantId} AND property."tenantId" = ${tenantId}
+          AND property."ownerId" IS NOT NULL AND charge."status" IN ('unpaid', 'partial', 'overdue', 'paid')
+        GROUP BY property."ownerId"`,
+      prisma.propertyOwnerPayout.groupBy({ by: ['ownerId'], where: { tenantId, status: 'posted' }, _sum: { amount: true } }),
+    ])
+    const rentByOwner = new Map(rentTotals.map(row => [row.ownerId, Number(row.rentAccrued || 0)]))
+    const paidByOwner = new Map(payoutTotals.map(row => [row.ownerId, Number(row._sum.amount || 0)]))
+    res.json(owners.map(owner => {
+      const rentAccrued = rentByOwner.get(owner.id) || 0
+      const paid = paidByOwner.get(owner.id) || 0
+      return { id: owner.id, name: owner.name, email: owner.email, phone: owner.phone, isActive: owner.isActive, propertyCount: owner._count.properties, rentAccrued: money(rentAccrued), paid: money(paid), balance: money(rentAccrued - paid) }
+    }).filter(owner => owner.isActive || Math.abs(owner.balance) >= 0.01))
+  } catch (error) { console.error('Load property payables failed:', error); res.status(500).json({ error: 'Could not load landlord payables.' }) }
 })
 
 router.post('/owners', requirePermission('canManagePropertyOwners'), async (req, res) => {
@@ -139,15 +222,18 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
   } catch (error) { console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
 })
 
-router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
+router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements']), async (req, res) => {
   try {
     const where = { tenantId: tenantIdOf(req), ...(req.query.status && req.query.status !== 'all' ? { status: String(req.query.status) } : {}), ...(req.query.ownerId ? { unit: { property: { ownerId: String(req.query.ownerId) } } } : {}) }
     const rows = await prisma.propertyTenancy.findMany({ where, take: pageSize(req.query.limit), orderBy: [{ status: 'asc' }, { tenantName: 'asc' }], include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: { dueDate: 'asc' } } } })
-    res.json(rows.map(row => ({ ...row, balance: money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance: money(row.charges.filter(charge => charge.dueDate < new Date()).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)) })))
+    res.json(rows.map(row => {
+      const { nationalId, ...details } = row
+      return { ...details, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), balance: money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance: money(row.charges.filter(charge => charge.dueDate < new Date()).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)) }
+    }))
   } catch (error) { console.error('List property tenancies failed:', error); res.status(500).json({ error: 'Could not load tenancies.' }) }
 })
 
-router.post('/tenancies', requireAnyPermission(['canCreateTenancies', 'canManageTenancies']), async (req, res) => {
+router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requireAnyPermission(['canCreateTenancies', 'canManageTenancies']), async (req, res) => {
   const tenantName = String(req.body?.tenantName || '').trim()
   const startDate = new Date(req.body?.startDate)
   const rentAmount = Number(req.body?.rentAmount)
@@ -157,13 +243,16 @@ router.post('/tenancies', requireAnyPermission(['canCreateTenancies', 'canManage
   const endDate = req.body?.endDate ? new Date(req.body.endDate) : null
   if (!tenantName || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (endDate && (!Number.isFinite(endDate.getTime()) || endDate < startDate)) || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return badRequest(res, 'Enter a tenant, valid unit and agreement dates, positive monthly rent, deposits where amount already held does not exceed deposit required, and due day (1–31).')
   try {
+    const identity = await uploadRenterIdentity(req)
     const unit = await prisma.propertyUnit.findFirst({ where: { id: req.body.unitId, property: { tenantId: tenantIdOf(req), status: 'active' } } })
     if (!unit) return res.status(404).json({ error: 'Unit not found in this business.' })
     if (unit.status !== 'vacant') return res.status(409).json({ error: 'This unit is not vacant.' })
     const result = await prisma.$transaction(async tx => {
       const claim = await tx.propertyUnit.updateMany({ where: { id: unit.id, status: 'vacant' }, data: { status: 'occupied' } })
       if (claim.count !== 1) throw Object.assign(new Error('This unit has just been assigned. Refresh and choose another vacant unit.'), { statusCode: 409 })
-      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), unitId: unit.id, tenantName, email: req.body.email?.trim() || null, phone: req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || null, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { unit: { include: { property: { include: { owner: true } } } } } })
+      const customer = await findOrCreateRenterCustomer(tx, tenantIdOf(req), req.body)
+      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName, email: req.body.email?.trim() || null, phone: req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || null, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
+      if (Object.values(identity).some(Boolean)) await tx.propertyTenantIdentity.create({ data: { tenantId: tenantIdOf(req), tenancyId: tenancy.id, profilePhotoUrl: identity.profilePhoto, nationalIdFrontUrl: identity.nationalIdFront, nationalIdBackUrl: identity.nationalIdBack } })
       if (depositHeld > 0) {
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
         await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_DEPOSIT_OPENING', sourceId: tenancy.id, date: startDate, reference: tenancy.agreementRef || tenancy.id, description: `Opening tenant security deposit for ${tenantName}`, lines: propertyOpeningDepositLines(config, { amount: depositHeld, reference: tenancy.agreementRef || tenancy.id }) })
@@ -180,6 +269,77 @@ router.post('/tenancies', requireAnyPermission(['canCreateTenancies', 'canManage
     })
     res.status(201).json(result)
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenancy failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create tenancy.' : error.message }) }
+})
+
+router.put('/tenancies/:id/profile', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requirePermission('canManageTenancies'), async (req, res) => {
+  try {
+    const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) } })
+    if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
+    const identity = await uploadRenterIdentity(req)
+    const updated = await prisma.$transaction(async tx => {
+      const customer = tenancy.customerId
+        ? await tx.customer.update({ where: { id: tenancy.customerId }, data: { ...(req.body.nationalId ? { nin: String(req.body.nationalId).trim() } : {}) } })
+        : await findOrCreateRenterCustomer(tx, tenancy.tenantId, tenancy)
+      if (Object.values(identity).some(Boolean)) await tx.propertyTenantIdentity.upsert({
+        where: { tenancyId: tenancy.id },
+        create: { tenantId: tenancy.tenantId, tenancyId: tenancy.id, profilePhotoUrl: identity.profilePhoto, nationalIdFrontUrl: identity.nationalIdFront, nationalIdBackUrl: identity.nationalIdBack },
+        update: {
+          ...(identity.profilePhoto ? { profilePhotoUrl: identity.profilePhoto } : {}),
+          ...(identity.nationalIdFront ? { nationalIdFrontUrl: identity.nationalIdFront } : {}),
+          ...(identity.nationalIdBack ? { nationalIdBackUrl: identity.nationalIdBack } : {}),
+        },
+      })
+      return tx.propertyTenancy.update({ where: { id: tenancy.id }, data: {
+        customerId: customer.id,
+        ...(req.body.nationalId ? { nationalId: String(req.body.nationalId).trim() } : {}),
+      }, select: { id: true, customerId: true, nationalId: true } })
+    })
+    res.json(updated)
+  } catch (error) { console.error('Update renter profile failed:', error); res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Could not update tenant profile.' }) }
+})
+
+router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPropertyStatements'), async (req, res) => {
+  try {
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId: tenantIdOf(req) } })
+    if (!customer) return res.status(404).json({ error: 'Customer not found.' })
+    const tenancies = await prisma.propertyTenancy.findMany({
+      where: { tenantId: tenantIdOf(req), customerId: customer.id },
+      orderBy: { startDate: 'desc' },
+      include: {
+        unit: { include: { property: { include: { owner: { select: { id: true, name: true } } } } } },
+        charges: {
+          orderBy: { dueDate: 'asc' },
+          include: {
+            allocations: {
+              include: {
+                payment: { select: { id: true, receiptNo: true, paymentDate: true, paymentMethod: true, status: true } },
+              },
+            },
+          },
+        },
+        payments: { where: { status: 'posted', paymentType: 'rent' }, orderBy: { paymentDate: 'asc' } },
+        identity: true,
+      },
+    })
+    const includeIdentity = canViewCustomerIdentity(req)
+    const entries = tenancies.flatMap(tenancy => [
+      ...tenancy.charges.map(charge => ({ id: charge.id, tenancyId: tenancy.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: `${charge.description} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: charge.amount, credit: 0, status: charge.status })),
+      ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: 'rent_payment', reference: payment.receiptNo, description: `Rent payment · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
+    ]).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    let balance = 0
+    for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
+    const identity = tenancies.find(row => row.identity)?.identity
+    res.json({
+      customer: { id: customer.id, name: customer.name, ...(includeIdentity ? { profilePhotoUrl: identity?.profilePhotoUrl, nationalId: customer.nin, nationalIdFrontUrl: identity?.nationalIdFrontUrl, nationalIdBackUrl: identity?.nationalIdBackUrl } : {}) },
+      tenancies: tenancies.map(({ charges, payments, identity: _identity, ...tenancy }) => {
+        const { nationalId, ...details } = tenancy
+        return { ...details, ...(includeIdentity ? { nationalId } : {}), balance: money(charges.reduce((sum, charge) => sum + charge.amount - charge.amountPaid, 0)) }
+      }),
+      entries,
+      closingBalance: balance,
+      access: { identity: includeIdentity },
+    })
+  } catch (error) { console.error('Load renter ledger failed:', error); res.status(500).json({ error: 'Could not load rental history.' }) }
 })
 
 router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canManageTenancies']), async (req, res) => {
@@ -207,7 +367,8 @@ router.get('/tenancies/:id/statement', requirePermission('canViewPropertyStateme
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     let balance = 0
     for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
-    res.json({ tenancy: { ...tenancy, charges: undefined, payments: undefined }, entries, closingBalance: balance })
+    const { nationalId, ...tenancyDetails } = tenancy
+    res.json({ tenancy: { ...tenancyDetails, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), charges: undefined, payments: undefined }, entries, closingBalance: balance })
   } catch (error) { console.error('Property tenancy statement failed:', error); res.status(500).json({ error: 'Could not load statement.' }) }
 })
 
@@ -263,8 +424,12 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
 
 router.get('/payments', requirePermission('canViewPropertyCollections'), async (req, res) => {
   try {
-    const dateFilter = req.query.from || req.query.to ? { paymentDate: { ...(req.query.from ? { gte: new Date(`${req.query.from}T00:00:00`) } : {}), ...(req.query.to ? { lte: new Date(`${req.query.to}T23:59:59.999`) } : {}) } } : {}
-    const payments = await prisma.propertyRentPayment.findMany({ where: { tenantId: tenantIdOf(req), ...dateFilter }, take: pageSize(req.query.limit), orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, tenancy: { include: { unit: { include: { property: true } } } }, allocations: { include: { charge: true } } } })
+    const from = req.query.from ? new Date(`${req.query.from}T00:00:00`) : null
+    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999`) : null
+    if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from > to)) return badRequest(res, 'Choose a valid collection date range.')
+    const dateFilter = from || to ? { paymentDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}
+    const ownerId = String(req.query.ownerId || '').trim()
+    const payments = await prisma.propertyRentPayment.findMany({ where: { tenantId: tenantIdOf(req), ...dateFilter, ...(ownerId ? { tenancy: { unit: { property: { ownerId } } } } : {}) }, take: pageSize(req.query.limit), orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: { include: { charge: true } } } })
     res.json(payments.map(payment => ({ ...payment, tenancy: { ...payment.tenancy, charges: undefined } })))
   } catch (error) { console.error('List rent payments failed:', error); res.status(500).json({ error: 'Could not load payment history.' }) }
 })
@@ -316,11 +481,14 @@ router.get('/reports', requirePermission('canViewPropertyReports'), async (req, 
     const tenantId = tenantIdOf(req)
     const from = req.query.from ? new Date(`${req.query.from}T00:00:00`) : new Date(new Date().getFullYear(), new Date().getMonth(), 1)
     const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999`) : new Date()
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return badRequest(res, 'Choose a valid report date range.')
+    const ownerId = String(req.query.ownerId || '').trim()
+    const propertyScope = ownerId ? { unit: { property: { ownerId } } } : {}
     const [charges, payments, tenancies, payouts] = await Promise.all([
-      prisma.rentCharge.findMany({ where: { tenantId, dueDate: { gte: from, lte: to } }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: true }, orderBy: { dueDate: 'asc' } }),
-      prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: from, lte: to } }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } } }, orderBy: { paymentDate: 'asc' } }),
-      prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active' }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } }),
-      prisma.propertyOwnerPayout.findMany({ where: { tenantId, status: 'posted', payoutDate: { gte: from, lte: to } }, include: { owner: true, cashAccount: { select: { name: true } } }, orderBy: { payoutDate: 'asc' } }),
+      prisma.rentCharge.findMany({ where: { tenantId, dueDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: true }, orderBy: { dueDate: 'asc' } }),
+      prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } } }, orderBy: { paymentDate: 'asc' } }),
+      prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active', ...(ownerId ? { unit: { property: { ownerId } } } : {}) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } }),
+      prisma.propertyOwnerPayout.findMany({ where: { tenantId, status: 'posted', payoutDate: { gte: from, lte: to }, ...(ownerId ? { ownerId } : {}) }, include: { owner: true, cashAccount: { select: { name: true } } }, orderBy: { payoutDate: 'asc' } }),
     ])
     const arrears = tenancies.map(tenancy => {
       const due = tenancy.charges.filter(charge => charge.dueDate < new Date())
@@ -353,7 +521,9 @@ export async function runPropertyRentAutomation(now = new Date()) {
       })
     }
   }
-  const candidates = await prisma.rentCharge.findMany({ where: { status: { in: ['unpaid', 'partial', 'overdue'] }, dueDate: { lte: new Date(now.getTime() + 3 * 86400000) }, tenancy: { status: 'active' } }, include: { tenancy: { include: { unit: { include: { property: true } } } } } })
+  const candidates = enabledTenants.size
+    ? await prisma.rentCharge.findMany({ where: { tenantId: { in: [...enabledTenants] }, status: { in: ['unpaid', 'partial', 'overdue'] }, dueDate: { lte: new Date(now.getTime() + 3 * 86400000) }, tenancy: { status: 'active' } }, include: { tenancy: { include: { unit: { include: { property: true } } } } } })
+    : []
   for (const charge of candidates) {
     const remaining = money(Math.max(0, charge.amount - charge.amountPaid))
     if (!remaining) continue

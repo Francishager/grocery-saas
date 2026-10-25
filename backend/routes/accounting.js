@@ -3,6 +3,7 @@ import prisma from "../src/db.js";
 import { isCostOfSalesAccount, loadLedgerBalances, ledgerBalanceSheet } from "../src/utils/reportAccounting.js";
 import { authenticateToken, requirePermission, requireAnyPermission, getPaymentMethodPermissions, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
+import { canViewPropertyNotification, stripPropertySystemAccounts, tenantHasPropertyManagement } from "../src/utils/propertyFeatureAccess.js";
 import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils/branchAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSetupService.js";
@@ -393,7 +394,12 @@ router.get("/accounts", authenticateToken, requireAnyPermission(["canViewAccount
       },
       orderBy: { code: "asc" },
     });
-    res.json(markHrProtectedAccounts(accounts, protectedIds));
+    const propertyAccountsVisible = await tenantHasPropertyManagement(tenantId) &&
+      canViewPropertyNotification(req.user, req.userPermissions);
+    const visibleAccounts = propertyAccountsVisible
+      ? accounts
+      : stripPropertySystemAccounts(accounts);
+    res.json(markHrProtectedAccounts(visibleAccounts, protectedIds));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch accounts" });
   }

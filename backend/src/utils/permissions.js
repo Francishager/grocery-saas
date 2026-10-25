@@ -100,6 +100,7 @@ const PERMISSION_TO_FEATURES = {
   canViewCustomer: ['customers', 'crm'],
   canViewCustomerPhone: ['customers', 'crm'],
   canViewCustomerEmail: ['customers', 'crm'],
+  canViewCustomerIdentity: ['customers', 'crm'],
   canViewCustomerAddress: ['customers', 'crm'],
   canViewCustomerBalance: ['customers', 'crm'],
   canViewCustomerSalesHistory: ['customers', 'crm'],
@@ -301,7 +302,7 @@ export const ALL_PERMISSION_KEYS = [
   "canCreateExpense", "canViewExpense", "canEditExpense", "canDeleteExpense", "canViewStaffTillSheet",
   // Customers / Receivables
   "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
-  "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerAddress", "canViewCustomerBalance",
+  "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerIdentity", "canViewCustomerAddress", "canViewCustomerBalance",
   "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
   "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
   "canViewCustomerNotes", "canRecordCustomerPayment", "canPrintCustomerReceipts",
@@ -564,6 +565,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canViewCustomerEmail: {
     name: 'View customer email addresses',
     description: 'See customer email addresses in customer lists and profiles.',
+  },
+  canViewCustomerIdentity: {
+    name: 'View customer identity documents',
+    description: 'View customer profile photos and National ID images on authorized profiles.',
   },
   canViewCustomerAddress: {
     name: 'View customer addresses',

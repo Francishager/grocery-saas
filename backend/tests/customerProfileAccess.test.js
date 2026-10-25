@@ -30,6 +30,15 @@ test('customer profile exposes only specifically granted contact and balance fie
   assert.equal(customer.maskedEmail, 'x******@*****')
 })
 
+test('rental balance is omitted unless the feature-aware caller provides it', () => {
+  const access = customerProfileAccess(['canViewCustomerBalance'])
+  const ordinaryCustomer = customerProfilePayload({ id: 'customer-1', name: 'A Customer', status: 'active' }, access)
+  const renter = customerProfilePayload({ id: 'customer-2', name: 'A Tenant', status: 'active', rentalBalance: 90000 }, access)
+
+  assert.equal('rentalBalance' in ordinaryCustomer, false)
+  assert.equal(renter.rentalBalance, 90000)
+})
+
 test('masked contact formats retain only the requested phone prefix and no email address characters', () => {
   assert.equal(maskCustomerPhone('0754938901'), '07xxxxxxxx')
   assert.equal(maskCustomerPhone('+256 770 123 456'), '+256 7xx xxx xxx')

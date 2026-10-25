@@ -1,14 +1,15 @@
 import { Router } from "express";
 import prisma from "../src/db.js";
-import { authenticateToken, requirePermission } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, loadUserPermissions } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { notifyOwnerOfDailySalesSummary, notifyOwnerOfExpiringProducts } from "../src/utils/notifications.js";
 import { sendNotificationToUser, sendNotificationToTenant } from "../src/services/fcm.js";
+import { canViewPropertyNotification, filterPropertyManagementNotifications, isPropertyManagementNotification, tenantHasPropertyManagement } from "../src/utils/propertyFeatureAccess.js";
 
 const router = Router();
 
 // List notifications for current user
-router.get("/", authenticateToken, async (req, res) => {
+router.get("/", authenticateToken, loadUserPermissions, async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const notifications = await prisma.notification.findMany({
@@ -21,7 +22,7 @@ router.get("/", authenticateToken, async (req, res) => {
       },
       orderBy: { createdAt: "desc" },
     });
-    res.json(notifications);
+    res.json(await filterPropertyManagementNotifications(tenantId, notifications, req.user, req.userPermissions));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch notifications" });
   }
@@ -52,9 +53,17 @@ router.post("/", authenticateToken, requirePermission("canCreateCommunication"),
 });
 
 // Mark as read
-router.put("/:id/read", authenticateToken, async (req, res) => {
+router.put("/:id/read", authenticateToken, loadUserPermissions, async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const existing = await prisma.notification.findFirst({
+      where: { id: req.params.id, tenantId, OR: [{ userId: req.user.id }, { userId: null }] },
+      select: { id: true, metadata: true },
+    });
+    const propertyDataAllowed = await tenantHasPropertyManagement(tenantId) && canViewPropertyNotification(req.user, req.userPermissions);
+    if (!existing || (isPropertyManagementNotification(existing) && !propertyDataAllowed)) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
     const updated = await prisma.notification.updateMany({
       where: { id: req.params.id, tenantId, OR: [{ userId: req.user.id }, { userId: null }] },
       data: { isRead: true },
@@ -82,13 +91,15 @@ router.put("/read-all", authenticateToken, async (req, res) => {
 });
 
 // Unread count
-router.get("/unread-count", authenticateToken, async (req, res) => {
+router.get("/unread-count", authenticateToken, loadUserPermissions, async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const count = await prisma.notification.count({
+    const notifications = await prisma.notification.findMany({
       where: { tenantId, userId: req.user.id, isRead: false },
+      select: { metadata: true },
     });
-    res.json({ count });
+    const visible = await filterPropertyManagementNotifications(tenantId, notifications, req.user, req.userPermissions);
+    res.json({ count: visible.length });
   } catch (err) {
     res.status(500).json({ error: "Failed to get unread count" });
   }

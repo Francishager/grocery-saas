@@ -167,6 +167,7 @@ model Tenant {
   propertyOwners                  PropertyOwner[]
   managedProperties               ManagedProperty[]
   propertyTenancies               PropertyTenancy[]
+  propertyTenantIdentities         PropertyTenantIdentity[]
   rentCharges                     RentCharge[]
   propertyRentPayments            PropertyRentPayment[]
   rentReminders                   PropertyRentReminder[]
@@ -1473,6 +1474,7 @@ model Customer {
   Tenant                          Tenant                                   @relation(fields: [tenantId], references: [id])
   procurementCounterpartyLink     ProcurementCustomerLink?
   procurementSellerInvoices       ProcurementInvoice[]                     @relation("ProcurementInvoiceSellerCustomer")
+  propertyTenancies               PropertyTenancy[]
 
   creditNotes CreditNote[]
 
@@ -2648,6 +2650,8 @@ model PropertyTenancy {
   unitId            String
   unit              PropertyUnit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
   tenantName        String
+  customerId        String?
+  customer          Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
   email             String?
   phone             String?
   nationalId        String?
@@ -2662,13 +2666,31 @@ model PropertyTenancy {
   agreementNotes    String?
   charges           RentCharge[]
   payments          PropertyRentPayment[]
+  identity          PropertyTenantIdentity?
   reminders         PropertyRentReminder[]
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
   @@index([tenantId, status, dueDay])
   @@index([unitId, status])
+  @@index([tenantId, customerId])
   @@map("property_tenancies")
+}
+
+model PropertyTenantIdentity {
+  id                String          @id @default(cuid())
+  tenantId          String
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId         String          @unique
+  tenancy           PropertyTenancy @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  profilePhotoUrl   String?
+  nationalIdFrontUrl String?
+  nationalIdBackUrl  String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@map("property_tenant_identities")
 }
 
 model RentCharge {

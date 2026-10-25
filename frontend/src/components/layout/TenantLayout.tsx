@@ -3,7 +3,7 @@ import { canViewReportItem, GRANULAR_REPORT_PERMISSION_KEYS } from '@/lib/report
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { MessageSquare, Trash2 } from 'lucide-react'
 import { trashPermissions } from '@/lib/trashPermissions'
-import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar, Store, Handshake, Table2, Beaker, ChefHat, Wine } from 'lucide-react'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar, Store, Handshake, Table2, Beaker, ChefHat, Wine, Home } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
 import { getApiBaseUrl } from '@/lib/apiConfig'
@@ -89,12 +89,6 @@ const restaurantSubItems = [
   { to: '/tenant/restaurant/happy-hour', label: 'Promotions & Happy Hour', icon: Tags, permission: 'canViewRestaurant', feature: 'restaurant.happy_hour' },
   { to: '/tenant/restaurant/combos', label: 'Combo Meals', icon: Gift, permission: 'canViewRestaurant', feature: 'restaurant.combos' },
   { to: '/tenant/restaurant/tips', label: 'Tips', icon: DollarSign, permission: 'canViewRestaurant', feature: 'restaurant.tips' },
-]
-
-const propertyManagementSubItems = [
-  { to: '/tenant/property-management/portfolio', label: 'Portfolio', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'], feature: ['property_management.landlord', 'property_management.agent'] },
-  { to: '/tenant/property-management/tenancies', label: 'Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'], feature: ['property_management.landlord', 'property_management.agent'] },
-  { to: '/tenant/property-management/collections', label: 'Collections & Reports', icon: Wallet, permission: ['canViewPropertyCollections', 'canViewPropertyReports'], feature: ['property_management.landlord', 'property_management.agent'] },
 ]
 
 const navItems = [
@@ -606,7 +600,23 @@ export function TenantLayout() {
   const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible).filter(item =>
     !waiterMode || ['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(item.to)
   )
-  const visiblePropertyManagementSubItems = propertyManagementSubItems.filter(subItemVisible)
+  const propertyManagementSubItems = [
+    ...(canAccessFeature('property_management.landlord') ? [
+      { to: '/tenant/property-management/my-properties', label: 'My Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
+      { to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
+      { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
+      { to: '/tenant/property-management/rent', label: 'Rent & Receivables', icon: Wallet, permission: ['canViewPropertyCollections', 'canViewPropertyReports'] },
+      { to: '/tenant/property-management/reports', label: 'Financial Reports', icon: BarChart3, permission: 'canViewPropertyReports' },
+    ] : []),
+    ...(canAccessFeature('property_management.agent') ? [
+      { to: '/tenant/property-management/clients', label: 'Landlord Clients', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
+      { to: '/tenant/property-management/managed-properties', label: 'Managed Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] }] : []),
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] }] : []),
+      { to: '/tenant/property-management/collections', label: 'Rent Collection', icon: Wallet, permission: 'canViewPropertyCollections' },
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/reports', label: 'Client & Portfolio Reports', icon: BarChart3, permission: 'canViewPropertyReports' }] : []),
+    ] : []),
+  ].filter(subItemVisible)
   const visibleProcurementBuyerItems = procurementBuyerItems.filter(subItemVisible)
   const visibleProcurementSellerItems = procurementSellerItems.filter(subItemVisible)
   const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)

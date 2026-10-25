@@ -1,7 +1,8 @@
 import { Router } from 'express'
 import prisma from '../db.js'
-import { authenticateToken } from '../../middleware/auth.js'
+import { authenticateToken, loadUserPermissions } from '../../middleware/auth.js'
 import { sendNotificationToUser, sendNotificationToTenant, sendNotificationToPlatformAdmins } from '../services/fcm.js'
+import { filterPropertyManagementNotifications } from '../utils/propertyFeatureAccess.js'
 
 const router = Router()
 
@@ -10,7 +11,7 @@ const router = Router()
  * Register or update a device token for the authenticated user.
  * Body: { token, platform?, tenantId? }
  */
-router.post('/register', authenticateToken, async (req, res) => {
+router.post('/register', authenticateToken, loadUserPermissions, async (req, res) => {
   try {
     const { token, platform = 'web', tenantId } = req.body
     if (!token) return res.status(400).json({ error: 'Token is required' })
@@ -33,7 +34,8 @@ router.post('/register', authenticateToken, async (req, res) => {
       orderBy: { createdAt: 'desc' },
       take: 20,
     })
-    for (const n of unreadNotifs) {
+    const visibleUnreadNotifs = await filterPropertyManagementNotifications(userTenantId, unreadNotifs, req.user, req.userPermissions)
+    for (const n of visibleUnreadNotifs) {
       sendNotificationToUser(userId, {
         title: n.title,
         body: n.message,
@@ -41,7 +43,7 @@ router.post('/register', authenticateToken, async (req, res) => {
       }).catch(() => {})
     }
 
-    res.json({ message: 'Token registered', pushToken, unreadPushed: unreadNotifs.length })
+    res.json({ message: 'Token registered', pushToken, unreadPushed: visibleUnreadNotifs.length })
   } catch (error) {
     console.error('Register push token error:', error)
     res.status(500).json({ error: 'Failed to register token' })

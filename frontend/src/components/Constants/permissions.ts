@@ -113,6 +113,7 @@ export const permissions: Permission[] = [
   { id: 'canViewCustomer', name: 'View Customers', description: 'View customers list', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerPhone', name: 'View Customer Phone Numbers', description: 'View full customer phone numbers', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerEmail', name: 'View Customer Email Addresses', description: 'View customer email addresses', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerIdentity', name: 'View Customer Identity Documents', description: 'View customer profile photos and National ID images', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerAddress', name: 'View Customer Addresses', description: 'View customer physical addresses', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerBalance', name: 'View Customer Balances & Credit Limits', description: 'View opening/current balances, limits, and trust scores', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerSalesHistory', name: 'View Customer Sales History', description: 'View customer sales, items, amounts, and receipts', category: 'customers', accessesBusinessData: true },

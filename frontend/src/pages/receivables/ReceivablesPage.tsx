@@ -58,6 +58,7 @@ interface Customer {
   maskedEmail?: string
   creditLimit?: number
   balance?: number
+  rentalBalance?: number
   availableForWithdrawal?: number
   openingBalance?: number
   openingBalanceDate?: string | null
@@ -1751,7 +1752,7 @@ export default function ReceivablesPage() {
                       {canViewCustomerBalance && <>
                         <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.openingBalance || 0)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(customer.balance || 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(customer.balance || 0)}{Number(customer.rentalBalance || 0) > 0 && <span className="mt-1 block text-xs font-normal text-amber-700">Rent due: {formatCurrency(Number(customer.rentalBalance))}</span>}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>
                         <td className={`whitespace-nowrap px-3 py-3 text-right font-semibold ${getTrustScoreColor(customer.trustScore || 0)}`}>{customer.trustScore || 0}/100</td>
                       </>}
