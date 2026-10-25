@@ -142,7 +142,7 @@ type CustomerHistoryResponse = {
 type RentalLedgerResponse = {
   customer: { profilePhotoUrl?: string | null; nationalId?: string | null; nationalIdFrontUrl?: string | null; nationalIdBackUrl?: string | null }
   tenancies: Array<{ id: string; agreementRef?: string | null; status: string; startDate: string; endDate?: string | null; rentAmount: number; currency: string; balance: number; unit: { unitCode: string; property: { name: string; owner?: { name: string } | null } } }>
-  entries: Array<{ id: string; date: string; type: string; reference: string; description: string; debit: number; credit: number; runningBalance: number; paymentMethod?: string | null }>
+  entries: Array<{ id: string; date: string; type: string; reference: string; description: string; debit: number; credit: number; runningBalance: number; paymentMethod?: string | null; status?: string }>
   closingBalance: number
   access: { identity: boolean }
 }
@@ -156,6 +156,10 @@ function metric(label: string, value: number | undefined, tone?: string) {
       <p className={cn('mt-1 break-words text-sm font-semibold sm:text-base', tone)}>{formatCurrency(Number(value || 0))}</p>
     </div>
   )
+}
+
+function countMetric(label: string, value: number | undefined) {
+  return <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold sm:text-base">{Number(value || 0).toLocaleString()}</p></div>
 }
 
 function maskedMetric(label: string) {
@@ -323,6 +327,7 @@ export default function CustomerTransactionHistoryDialog({
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const propertyManagementEnabled = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
+  const canLoadRentalProfile = propertyManagementEnabled && hasPermission('canViewPropertyStatements')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -346,7 +351,7 @@ export default function CustomerTransactionHistoryDialog({
         const payload = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(payload?.error || 'Failed to load customer history')
         setData(payload)
-        if (propertyManagementEnabled) {
+        if (canLoadRentalProfile) {
           const rentalResponse = await apiFetch(`/api/property-management/customers/${customer.id}/rent-ledger`, { signal: controller.signal } as RequestInit)
           if (rentalResponse.ok) setRentalData(await rentalResponse.json())
         } else {
@@ -361,7 +366,7 @@ export default function CustomerTransactionHistoryDialog({
 
     loadHistory()
     return () => controller.abort()
-  }, [open, customer?.id, viewMode, rentalReload, propertyManagementEnabled])
+  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile])
 
   async function saveIdentity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -385,13 +390,30 @@ export default function CustomerTransactionHistoryDialog({
     data.access.sales || data.access.payments || data.access.returns || data.access.creditNotes ||
     data.access.withdrawals || data.access.businessActivity || data.access.balance
   ))
-  const canViewSalesAndPayments = Boolean(data && (data.access.sales || data.access.payments))
   const canViewCreditHistory = Boolean(data?.access.creditHistory && data.creditHistory)
-  const canViewRent = Boolean(rentalData?.tenancies?.length)
+  const canViewRent = canLoadRentalProfile
+  const hasRentalTenancies = Boolean(rentalData?.tenancies.length)
   const creditActivity = transactions.filter((row) => [
     'opening_balance', 'receivable_sale', 'sale_payment_adjustment', 'customer_payment',
     'customer_credit_application', 'credit_note', 'sale_return', 'customer_withdrawal',
   ].includes(row.source))
+  const commercialActivity = transactions.filter(row => {
+    if (['receivable_sale', 'pos_sale', 'customer_invoice'].includes(row.source)) return data?.access.sales
+    if (['customer_payment', 'sale_payment_adjustment'].includes(row.source)) return data?.access.payments
+    if (row.source === 'customer_withdrawal') return data?.access.withdrawals
+    if (row.source === 'credit_note') return data?.access.creditNotes
+    if (row.source === 'sale_return') return data?.access.returns
+    return false
+  })
+  const canViewSalesAndPayments = Boolean(data && (
+    data.access.sales || data.access.payments || data.access.withdrawals || data.access.creditNotes || data.access.returns || hasRentalTenancies
+  ))
+  const hasCommercialHistory = commercialActivity.length > 0
+  const rentalCharges = rentalData?.entries.filter(row => row.type === 'rent_due') || []
+  const rentalPayments = rentalData?.entries.filter(row => row.type === 'rent_payment') || []
+  const totalRentCharged = rentalCharges.reduce((total, row) => total + Number(row.debit || 0), 0)
+  const totalRentCollected = rentalPayments.reduce((total, row) => total + Number(row.credit || 0), 0)
+  const activeTenancies = rentalData?.tenancies.filter(row => row.status === 'active') || []
   const lastDate = useMemo(() => data?.summary?.lastTransactionDate ? formatDisplayDate(data.summary.lastTransactionDate) : 'No activity yet', [data?.summary?.lastTransactionDate])
 
   const content = (
@@ -401,7 +423,7 @@ export default function CustomerTransactionHistoryDialog({
             <Button variant="outline" onClick={() => navigate('/tenant/receivables/customers')}>Back to customers</Button>
             <div>
               <h1 className="text-xl font-semibold">{customerInfo?.name || 'Customer'}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Customer profile and transaction ledger available to your role.</p>
+              <p className="mt-1 text-sm text-muted-foreground">{hasRentalTenancies ? 'Shared customer and tenant profile with separate trade and rental accounts.' : 'Customer profile and transaction ledger available to your role.'}</p>
             </div>
           </div>
         ) : <DialogHeader>
@@ -409,7 +431,7 @@ export default function CustomerTransactionHistoryDialog({
             <UserRound className="h-5 w-5 text-primary" />
             <span className="min-w-0 break-words">{customerInfo?.name || 'Customer'}</span>
           </DialogTitle>
-          <DialogDescription>{viewMode === 'details' ? 'Customer details available to your role.' : 'Customer profile and the transaction history available to your role.'}</DialogDescription>
+          <DialogDescription>{viewMode === 'details' ? (hasRentalTenancies ? 'Customer and linked rental details available to your role.' : 'Customer details available to your role.') : (hasRentalTenancies ? 'Shared customer profile with separate trade and rental account activity.' : 'Customer profile and the transaction history available to your role.')}</DialogDescription>
         </DialogHeader>}
 
         {loading && (
@@ -440,25 +462,38 @@ export default function CustomerTransactionHistoryDialog({
               {!data.access.notes && data.customer.maskedNotes && <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">Customer notes: {data.customer.maskedNotes}</p>}
             </section>
             <section className="rounded-md border p-4">
-              <h3 className="font-semibold">Account summary</h3>
+              <h3 className="font-semibold">{hasRentalTenancies ? 'Rental account summary' : 'Account summary'}</h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {data.access.balance ? metric('Current Balance', data.summary.currentBalance) : maskedMetric('Current Balance')}
-                {data.access.balance ? metric('Credit Limit', data.customer.creditLimit) : maskedMetric('Credit Limit')}
-                {data.access.balance ? metric('Opening Balance', data.summary.openingBalance ?? data.customer.openingBalance) : maskedMetric('Opening Balance')}
+                {hasRentalTenancies ? <>
+                  {metric('Rent outstanding', rentalData?.closingBalance, 'text-amber-700')}
+                  {metric('Rent charged', totalRentCharged)}
+                  {metric('Rent collected', totalRentCollected, 'text-green-700')}
+                </> : <>
+                  {data.access.balance ? metric('Current balance', data.summary.currentBalance) : maskedMetric('Current balance')}
+                  {data.access.balance && metric('Credit limit', data.customer.creditLimit)}
+                  {data.access.balance ? metric('Opening balance', data.summary.openingBalance ?? data.customer.openingBalance) : maskedMetric('Opening balance')}
+                </>}
               </div>
               {data.access.balance && (data.summary.openingBalanceDate || data.customer.openingBalanceDate) && <p className="mt-3 text-xs text-muted-foreground">Opening balance date: {formatDisplayDate(data.summary.openingBalanceDate || data.customer.openingBalanceDate || '')}</p>}
             </section>
+            {canViewRent && <section className="rounded-md border p-4 md:col-span-2">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><h3 className="font-semibold">Rental account</h3><p className="mt-1 text-sm text-muted-foreground">Rent is tracked separately from trade receivables and is not netted against the customer account.</p></div>
+                <div className="grid grid-cols-2 gap-3 sm:min-w-72">{metric('Rent outstanding', rentalData?.closingBalance, 'text-amber-700')}{countMetric('Active agreements', rentalData?.tenancies.filter(row => row.status === 'active').length)}</div>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{rentalData?.tenancies.map(row => <div key={row.id} className="rounded-md border p-3"><p className="font-medium">{row.unit.property.name} · {row.unit.unitCode}</p><p className="mt-1 text-xs text-muted-foreground">{row.agreementRef || 'Agreement not specified'} · {row.status}</p><p className="mt-2 text-sm">Monthly rent: {formatCurrency(Number(row.rentAmount), row.currency)}</p><p className="text-sm">Outstanding: {formatCurrency(Number(row.balance), row.currency)}</p></div>)}</div>
+            </section>}
           </div>
         )}
 
         {!loading && !error && data && viewMode === 'profile' && (
           <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
             <TabsList className="flex h-auto w-full flex-wrap justify-start sm:w-fit">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              {canViewLedger && <TabsTrigger value="ledger">Transaction ledger ({Number(data.summary.transactionCount || 0).toLocaleString()})</TabsTrigger>}
-              {canViewSalesAndPayments && <TabsTrigger value="sales-payments">Sales &amp; Payments</TabsTrigger>}
-              {canViewCreditHistory && <TabsTrigger value="credit-history">Credit History</TabsTrigger>}
-              {canViewRent && <TabsTrigger value="rent">Rent &amp; Tenancies</TabsTrigger>}
+              <TabsTrigger value="overview">Profile</TabsTrigger>
+              {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="ledger">{hasRentalTenancies && !hasCommercialHistory ? 'Rent ledger' : hasRentalTenancies ? 'Trade ledger' : 'Transaction ledger'} ({hasRentalTenancies && !hasCommercialHistory ? rentalData?.entries.length || 0 : Number(data.summary.transactionCount || 0)})</TabsTrigger>}
+              {canViewSalesAndPayments && <TabsTrigger value="sales-payments">{hasRentalTenancies && !hasCommercialHistory ? 'Rent activity' : hasRentalTenancies ? 'Trade activity' : 'Account activity'}</TabsTrigger>}
+              {(canViewCreditHistory || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="credit-history">{hasRentalTenancies ? 'Tenant standing' : 'Credit History'}</TabsTrigger>}
+              {canViewRent && <TabsTrigger value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
@@ -466,7 +501,7 @@ export default function CustomerTransactionHistoryDialog({
               <div className="rounded-md border p-4">
                 <div className="flex items-center gap-3">
                   {rentalData?.access.identity && rentalData.customer.profilePhotoUrl && <img src={rentalData.customer.profilePhotoUrl} alt={`${data.customer.name} profile`} className="h-16 w-16 rounded-full border object-cover" />}
-                  <div><p className="text-xs font-semibold uppercase text-muted-foreground">Customer{canViewRent ? ' / Tenant' : ''}</p>
+                  <div><p className="text-xs font-semibold uppercase text-muted-foreground">{hasRentalTenancies ? 'Customer & tenant' : 'Customer'}</p>
                 <h3 className="mt-2 break-words text-lg font-semibold">{data.customer.name}</h3>
                   </div>
                 </div>
@@ -494,19 +529,33 @@ export default function CustomerTransactionHistoryDialog({
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {data.access.balance ? metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700') : maskedMetric('Current Balance')}
-                {data.access.balance ? metric('Available Credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700') : maskedMetric('Available Credit')}
-                {data.access.sales && metric('Credit / Customer Sales', data.summary.receivableSales)}
-                {data.access.sales && metric('Cash POS Sales', data.summary.cashSales)}
-                {data.access.payments ? metric('Payments', data.summary.payments, 'text-green-700') : maskedMetric('Payments')}
-                {data.access.withdrawals ? metric('Withdrawals', data.summary.withdrawals) : maskedMetric('Withdrawals')}
-                {data.access.creditNotes ? metric('Credit Notes', data.summary.creditNotes, 'text-green-700') : maskedMetric('Credit Notes')}
-                {data.access.returns ? metric('Returns', data.summary.returns) : maskedMetric('Returns')}
-                <div className="rounded-md border p-3">
-                  <p className="text-xs text-muted-foreground">Transactions</p>
-                  <p className="mt-1 text-sm font-semibold sm:text-base">{Number(data.summary.transactionCount || 0).toLocaleString()}</p>
-                </div>
+              <div className="grid content-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {hasRentalTenancies ? <>
+                  {metric('Rent outstanding', rentalData?.closingBalance, 'text-amber-700')}
+                  {metric('Rent charged', totalRentCharged)}
+                  {metric('Rent collected', totalRentCollected, 'text-green-700')}
+                  {countMetric('Rental agreements', rentalData?.tenancies.length)}
+                  {countMetric('Active tenancies', activeTenancies.length)}
+                  {countMetric('Rental ledger entries', rentalData?.entries.length)}
+                </> : <>
+                {data.access.balance && metric(canViewRent ? 'Trade receivables balance' : 'Current balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
+                {data.access.balance && metric(canViewRent ? 'Available trade credit' : 'Available credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700')}
+                {data.access.sales && metric(canViewRent ? 'Sales on trade account' : 'Sales on account', data.summary.receivableSales)}
+                {data.access.sales && metric(canViewRent ? 'Counter sales' : 'Cash sales', data.summary.cashSales)}
+                {data.access.payments && metric(canViewRent ? 'Trade account payments' : 'Customer payments', data.summary.payments, 'text-green-700')}
+                {data.access.withdrawals && metric(canViewRent ? 'Trade account withdrawals' : 'Customer withdrawals', data.summary.withdrawals)}
+                {data.access.creditNotes && metric(canViewRent ? 'Trade credit notes' : 'Credit notes', data.summary.creditNotes, 'text-green-700')}
+                {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}
+                {countMetric(canViewRent ? 'Commercial transactions' : 'Transactions', data.summary.transactionCount)}
+                </>}
+                {hasRentalTenancies && commercialActivity.length > 0 && <div className="sm:col-span-2 xl:col-span-3"><p className="mb-2 text-xs font-semibold text-muted-foreground">Trade account activity</p><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {data.access.balance && metric('Trade receivables balance', data.summary.currentBalance)}
+                  {data.access.sales && metric('Sales on account', data.summary.receivableSales)}
+                  {data.access.payments && metric('Customer payments', data.summary.payments, 'text-green-700')}
+                  {data.access.withdrawals && metric('Customer withdrawals', data.summary.withdrawals)}
+                  {data.access.creditNotes && metric('Credit notes', data.summary.creditNotes, 'text-green-700')}
+                  {data.access.returns && metric('Sales returns', data.summary.returns)}
+                </div></div>}
               </div>
             </div>
 
@@ -539,8 +588,10 @@ export default function CustomerTransactionHistoryDialog({
 
             </TabsContent>
 
-            {canViewLedger && <TabsContent value="ledger" className="space-y-4">
-            <div className="overflow-x-auto rounded-md border">
+            {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsContent value="ledger" className="space-y-4">
+            {hasRentalTenancies && !hasCommercialHistory ? <div className="overflow-x-auto rounded-md border">
+              <table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Rental activity</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">Rent charged</th><th className="px-3 py-2 text-right">Payment</th><th className="px-3 py-2 text-right">Balance</th></tr></thead><tbody>{rentalData?.entries.map(row => <tr key={`${row.type}-${row.id}`} className="border-t"><td className="whitespace-nowrap px-3 py-2">{formatDisplayDate(row.date)}</td><td className="px-3 py-2">{row.description}<div className="text-xs text-muted-foreground">{normalizeText(row.type)}</div></td><td className="px-3 py-2">{row.reference || '—'}</td><td className="px-3 py-2 text-right">{row.debit ? formatCurrency(row.debit) : '—'}</td><td className="px-3 py-2 text-right">{row.credit ? formatCurrency(row.credit) : '—'}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(row.runningBalance)}</td></tr>)}{!rentalData?.entries.length && <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">No rent charges or payments have been recorded for these agreements.</td></tr>}</tbody></table>
+            </div> : <div className="overflow-x-auto rounded-md border">
               <table className="min-w-[1320px] w-full text-sm">
                 <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
                   <tr>
@@ -620,24 +671,24 @@ export default function CustomerTransactionHistoryDialog({
                   )}
                 </tbody>
               </table>
-            </div>
+            </div>}
 
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {data.access.balance && <><ReceiptText className="h-4 w-4" /><span>Debit increases the customer balance. Credit reduces the customer balance.</span></>}
               {data.access.sales && <><Wallet className="ml-2 h-4 w-4" /><span>Cash POS sales are shown as activity but do not change receivables.</span></>}
-              {data.access.balance && <><CreditCard className="ml-2 h-4 w-4" /><span>Current balance comes from the customer account.</span></>}
+              {data.access.balance && <><CreditCard className="ml-2 h-4 w-4" /><span>{canViewRent ? 'Trade balance is separate from rent due.' : 'Current balance comes from the customer account.'}</span></>}
             </div>
             </TabsContent>}
 
             {canViewRent && <TabsContent value="rent" className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-3">
-                {metric('Rental balance', rentalData?.closingBalance)}
-                {metric('Tenancies', rentalData?.tenancies.length)}
-                {metric('Active agreements', rentalData?.tenancies.filter(row => row.status === 'active').length)}
+                {metric('Rent outstanding', rentalData?.closingBalance)}
+                {countMetric('Rental agreements', rentalData?.tenancies.length)}
+                {countMetric('Active agreements', rentalData?.tenancies.filter(row => row.status === 'active').length)}
               </div>
               <section className="overflow-hidden rounded-md border">
                 <div className="border-b px-4 py-3"><h3 className="font-semibold">Tenancy history</h3></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Property / unit</th><th className="p-3">Agreement</th><th className="p-3">Period</th><th className="p-3 text-right">Monthly rent</th><th className="p-3 text-right">Outstanding</th><th className="p-3">Status</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="p-3">{row.unit.property.name}<div className="text-xs text-muted-foreground">{row.unit.unitCode}{row.unit.property.owner?.name ? ` · ${row.unit.property.owner.name}` : ''}</div></td><td className="p-3">{row.agreementRef || '—'}</td><td className="p-3">{formatDisplayDate(row.startDate)}{row.endDate ? ` – ${formatDisplayDate(row.endDate)}` : ''}</td><td className="p-3 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="p-3 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td><td className="p-3"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td></tr>)}</tbody></table></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Property / unit</th><th className="p-3">Agreement</th><th className="p-3">Period</th><th className="p-3 text-right">Monthly rent</th><th className="p-3 text-right">Outstanding</th><th className="p-3">Status</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="p-3">{row.unit.property.name}<div className="text-xs text-muted-foreground">{row.unit.unitCode}{row.unit.property.owner?.name ? ` · ${row.unit.property.owner.name}` : ''}</div></td><td className="p-3">{row.agreementRef || '—'}</td><td className="p-3">{formatDisplayDate(row.startDate)}{row.endDate ? ` – ${formatDisplayDate(row.endDate)}` : ''}</td><td className="p-3 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="p-3 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td><td className="p-3"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td></tr>)}{!rentalData?.tenancies.length && <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">No rental agreements are linked to this customer yet.</td></tr>}</tbody></table></div>
               </section>
               {hasPermission('canRecordRentPayment') && <div className="flex flex-wrap gap-2">{rentalData?.tenancies.filter(row => row.status === 'active' && row.balance > 0).map(row => <Button key={row.id} type="button" variant="outline" size="sm" onClick={() => navigate('/tenant/property-management/rent', { state: { recordRentPayment: row.id } })}>Record rent · {row.unit.property.name} / {row.unit.unitCode}</Button>)}</div>}
               {hasPermission('canManageTenancies') && <section className="rounded-md border p-4">
@@ -651,11 +702,23 @@ export default function CustomerTransactionHistoryDialog({
             </TabsContent>}
 
             {canViewSalesAndPayments && <TabsContent value="sales-payments" className="space-y-4">
+              {hasRentalTenancies && !hasCommercialHistory ? <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {metric('Rent charged', totalRentCharged)}
+                  {metric('Rent collected', totalRentCollected, 'text-green-700')}
+                  {metric('Rent outstanding', rentalData?.closingBalance, 'text-amber-700')}
+                  {countMetric('Active tenancies', activeTenancies.length)}
+                </div>
+                <div className="overflow-x-auto rounded-md border"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Payment date</th><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Receipt</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Amount collected</th></tr></thead><tbody>{rentalPayments.map(row => <tr key={row.id} className="border-t"><td className="px-3 py-2">{formatDisplayDate(row.date)}</td><td className="px-3 py-2">{row.description}</td><td className="px-3 py-2">{row.reference || '—'}</td><td className="px-3 py-2 capitalize">{normalizeText(row.paymentMethod) || '—'}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(row.credit)}</td></tr>)}{!rentalPayments.length && <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No rent payments have been recorded for these agreements.</td></tr>}</tbody></table></div>
+              </> : <>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {data.access.sales && metric('Credit / Customer Sales', data.summary.receivableSales)}
-                {data.access.sales && metric('Cash POS Sales', data.summary.cashSales)}
-                {data.access.payments ? metric('Payments Received', data.summary.payments, 'text-green-700') : maskedMetric('Payments Received')}
-                {data.access.balance ? metric('Current Balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700') : maskedMetric('Current Balance')}
+                {data.access.sales && metric(canViewRent ? 'Sales on trade account' : 'Sales on account', data.summary.receivableSales)}
+                {data.access.sales && metric(canViewRent ? 'Counter sales' : 'Cash sales', data.summary.cashSales)}
+                {data.access.payments && metric(canViewRent ? 'Trade account payments received' : 'Customer payments received', data.summary.payments, 'text-green-700')}
+                {data.access.withdrawals && metric(canViewRent ? 'Trade account withdrawals' : 'Customer withdrawals', data.summary.withdrawals)}
+                {data.access.creditNotes && metric(canViewRent ? 'Trade credit notes' : 'Credit notes', data.summary.creditNotes, 'text-green-700')}
+                {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}
+                {data.access.balance && metric(canViewRent ? 'Trade receivables balance' : 'Current balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
               </div>
               <div className="overflow-x-auto rounded-md border">
                 <table className="min-w-[860px] w-full text-sm">
@@ -663,7 +726,7 @@ export default function CustomerTransactionHistoryDialog({
                     <tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Description</th><th className="px-3 py-2 text-right">Amount</th>{data.access.printReceipts && <th className="px-3 py-2 text-right">Reprint</th>}</tr>
                   </thead>
                   <tbody>
-                    {transactions.filter((row) => ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'sale_payment_adjustment'].includes(row.source)).map((row) => (
+                    {commercialActivity.map((row) => (
                       <tr key={row.id} className="border-t align-top hover:bg-muted/30">
                         <td className="whitespace-nowrap px-3 py-2">{row.date ? formatDisplayDate(row.date) : '-'}</td>
                         <td className="px-3 py-2"><Badge variant="outline">{row.type}</Badge></td>
@@ -694,23 +757,36 @@ export default function CustomerTransactionHistoryDialog({
                         />}</td>}
                       </tr>
                     ))}
-                    {!transactions.some((row) => ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'sale_payment_adjustment'].includes(row.source)) && (
+                    {!commercialActivity.length && (
                       <tr><td colSpan={data.access.printReceipts ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground">
-                        {data.access.sales || data.access.payments ? 'No sales or payment activity is available.' : 'Sales and payment activity is not assigned to your role.'}
+                        {canViewSalesAndPayments ? 'No commercial account activity is available.' : 'Commercial account activity is not assigned to your role.'}
                       </td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
+              </>}
             </TabsContent>}
 
-            {canViewCreditHistory && <TabsContent value="credit-history" className="space-y-5">
+            {(canViewCreditHistory || (hasRentalTenancies && canViewRent)) && <TabsContent value="credit-history" className="space-y-5">
+              {hasRentalTenancies ? <>
+                <section aria-label="Tenant rent position" className="space-y-4">
+                  <div><h3 className="font-semibold">Rental account standing</h3><p className="mt-1 text-sm text-muted-foreground">Rent charges and receipts across this tenant’s linked agreements.</p></div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {metric('Rent charged', totalRentCharged)}
+                    {metric('Rent collected', totalRentCollected, 'text-green-700')}
+                    {metric('Current rent outstanding', rentalData?.closingBalance, 'text-amber-700')}
+                    {countMetric('Overdue rent charges', rentalCharges.filter(row => row.status === 'overdue').length)}
+                  </div>
+                  <div className="overflow-x-auto rounded-md border"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Agreement</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Monthly rent</th><th className="px-3 py-2 text-right">Outstanding</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="px-3 py-2">{row.unit.property.name} · {row.unit.unitCode}</td><td className="px-3 py-2">{row.agreementRef || '—'}</td><td className="px-3 py-2"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td><td className="px-3 py-2 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td></tr>)}</tbody></table></div>
+                </section>
+              </> : <>
               <section aria-label="Customer credit position" className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
                 <div className="grid content-start gap-3 sm:grid-cols-2">
-                  {metric('Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
-                  {metric('Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
-                  {metric('Credit limit', data.creditHistory!.creditLimit)}
-                  {metric('Limit remaining', data.creditHistory!.availableLimit, 'text-emerald-700')}
+                  {metric(canViewRent ? 'Trade receivables exposure' : 'Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
+                  {metric(canViewRent ? 'Funds on trade account' : 'Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
+                  {metric(canViewRent ? 'Trade credit limit' : 'Credit limit', data.creditHistory!.creditLimit)}
+                  {metric(canViewRent ? 'Trade limit remaining' : 'Limit remaining', data.creditHistory!.availableLimit, 'text-emerald-700')}
                   <div className="rounded-md border bg-muted/20 p-4 sm:col-span-2">
                     <h3 className="text-sm font-semibold">Credit position at a glance</h3>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -733,7 +809,7 @@ export default function CustomerTransactionHistoryDialog({
                 <div className="mb-3 flex items-center gap-2">
                   <Clock3 className="h-4 w-4 text-muted-foreground" />
                   <div>
-                    <h3 className="text-sm font-semibold">Receivables ageing</h3>
+                    <h3 className="text-sm font-semibold">{canViewRent ? 'Trade receivables ageing' : 'Receivables ageing'}</h3>
                     <p className="text-xs text-muted-foreground">Outstanding credit sales grouped by recorded due date, as of {formatDisplayDate(data.creditHistory!.asOf)}.</p>
                   </div>
                 </div>
@@ -799,6 +875,7 @@ export default function CustomerTransactionHistoryDialog({
                   </table>
                 </div>
               </section>
+              </>}
             </TabsContent>}
           </Tabs>
         )}
