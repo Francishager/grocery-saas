@@ -11,18 +11,31 @@ import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 import { useOnlineStatus } from '@/db/hooks'
 import { SupportContactLinks } from '@/components/SupportContactLinks'
+import { Link, useSearchParams } from 'react-router-dom'
+import ReportsPage from '@/pages/ReportsPage'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
+function ModuleMetric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
+  return <Card><CardContent className="p-4">
+    <p className="text-xs font-medium text-muted-foreground">{label}</p>
+    <p className="mt-1 truncate text-xl font-semibold tabular-nums">{value ?? '—'}</p>
+    {detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}
+  </CardContent></Card>
+}
+
 export default function DashboardPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user, hasPermission } = useJWTAuth()
-  const { hasFeature } = useFeatureAccess()
+  const { hasFeature, hasAnyFeature } = useFeatureAccess()
+  const showReports = searchParams.get('view') === 'reports' && hasFeature('reports')
   const [billingReminder, setBillingReminder] = useState<any>(null)
   const [showBillingPrompt, setShowBillingPrompt] = useState(false)
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: user?.phone || '', email: user?.email || '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
   const [dashboardView, setDashboardView] = useState<'daily' | 'trends' | 'mix'>('daily')
+  const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any }>({ property: null, restaurant: null, hr: null })
   const { toast } = useToast()
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
@@ -43,6 +56,30 @@ export default function DashboardPage() {
   const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
   const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
     loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey, dashboardAccess)
+
+  const canViewProperty = hasAnyFeature(['property_management.landlord', 'property_management.agent']) && hasPermission('canViewPropertyPortfolio')
+  const canViewRestaurant = hasFeature('restaurant') && hasPermission('canViewRestaurant')
+  const canViewHR = hasFeature('hr') && hasPermission('canViewHR')
+  const dashboardModules = [canViewProperty && 'Property Management', canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management'].filter(Boolean) as string[]
+
+  useEffect(() => {
+    let active = true
+    setModuleSnapshots({ property: null, restaurant: null, hr: null })
+    const loadSnapshot = async (key: 'property' | 'restaurant' | 'hr', path: string, enabled: boolean) => {
+      if (!enabled) return
+      try {
+        const response = await apiFetch(path)
+        const snapshot = response.ok ? await response.json() : null
+        if (active && snapshot) setModuleSnapshots(current => ({ ...current, [key]: snapshot }))
+      } catch { /* Module summaries should not block the main dashboard. */ }
+    }
+    void Promise.all([
+      loadSnapshot('property', '/api/property-management/overview', canViewProperty),
+      loadSnapshot('restaurant', '/api/restaurant/dashboard', canViewRestaurant),
+      loadSnapshot('hr', '/api/hr/dashboard', canViewHR),
+    ])
+    return () => { active = false }
+  }, [canViewProperty, canViewRestaurant, canViewHR, scopeKey])
 
   useEffect(() => {
     if (!hasDailyInsights && !hasTrendInsights && !hasMixInsights) return
@@ -269,8 +306,8 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground">Business performance overview</p>
+          <h1 className="text-3xl font-bold tracking-tight">Business Dashboard</h1>
+          <p className="text-muted-foreground">{dashboardModules.length > 1 ? `Mixed operations · ${dashboardModules.join(' · ')}` : 'Unified view of your enabled business features'}</p>
           {isOfflineData && (
             <p className="text-xs text-orange-600 flex items-center gap-1 mt-1"><WifiOff className="h-3 w-3" /> Showing offline data</p>
           )}
@@ -283,8 +320,13 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+      {hasFeature('reports') && <div role="tablist" aria-label="Business dashboard views" className="inline-flex rounded-md border bg-muted/40 p-1">
+        <button role="tab" aria-selected={!showReports} onClick={() => { const next = new URLSearchParams(searchParams); next.delete('view'); next.delete('report'); setSearchParams(next) }} className={`rounded px-3 py-2 text-sm font-medium ${!showReports ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Overview</button>
+        <button role="tab" aria-selected={showReports} onClick={() => { const next = new URLSearchParams(searchParams); next.set('view', 'reports'); setSearchParams(next) }} className={`rounded px-3 py-2 text-sm font-medium ${showReports ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Reports</button>
+      </div>}
+      {showReports ? <ReportsPage /> : <>
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
-      {!Object.values(dashboardAccess).some(Boolean) && !hasPermission('canViewCustomer') && !hasPermission('canViewPayable') && !hasPermission('canViewPurchase') && !hasPermission('canViewTax') && (
+      {!Object.values(dashboardAccess).some(Boolean) && !hasPermission('canViewCustomer') && !hasPermission('canViewPayable') && !hasPermission('canViewPurchase') && !hasPermission('canViewTax') && !canViewProperty && !canViewRestaurant && !canViewHR && (
         <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">Your dashboard is ready. Ask your business admin to grant the module viewing permissions for the insights you need.</p>
       )}
 
@@ -311,6 +353,50 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr) && <section className="space-y-4" aria-label="Module overview">
+        {moduleSnapshots.property && <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div><h2 className="text-lg font-semibold">Property portfolio</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, and managed-unit health.</p></div>
+            <Link to="/tenant/property-management" className="text-sm font-medium text-primary hover:underline">Open Property Management</Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ModuleMetric label="Properties" value={moduleSnapshots.property.properties} />
+            <ModuleMetric label="Occupied units" value={`${Number(moduleSnapshots.property.occupied || 0).toLocaleString()} / ${Number(moduleSnapshots.property.units || 0).toLocaleString()}`} />
+            <ModuleMetric label="Active tenancies" value={moduleSnapshots.property.activeTenancies} />
+            <ModuleMetric label="Outstanding rent" value={formatCurrency(moduleSnapshots.property.outstandingRent || 0)} detail={`${Number(moduleSnapshots.property.vacant || 0).toLocaleString()} vacant units`} />
+            {(hasPermission('canViewPropertyCollections') || hasPermission('canViewPropertyReports')) && <ModuleMetric label="Collected this month" value={formatCurrency(moduleSnapshots.property.collectedThisMonth || 0)} detail={`${Number(moduleSnapshots.property.paymentCount || 0).toLocaleString()} payments`} />}
+            {hasPermission('canViewPropertyReports') && <ModuleMetric label="Overdue rent" value={formatCurrency(moduleSnapshots.property.arrears || 0)} />}
+          </div>
+        </div>}
+
+        {moduleSnapshots.restaurant && <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div><h2 className="text-lg font-semibold">Restaurant &amp; bar</h2><p className="text-sm text-muted-foreground">Today&apos;s service activity and live queues.</p></div>
+            <Link to="/tenant/restaurant/orders" className="text-sm font-medium text-primary hover:underline">Open service operations</Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ModuleMetric label="Orders today" value={moduleSnapshots.restaurant.ordersToday} />
+            <ModuleMetric label="Open tables" value={moduleSnapshots.restaurant.occupiedTables} detail={`${Number(moduleSnapshots.restaurant.openTables || 0).toLocaleString()} available`} />
+            <ModuleMetric label="Kitchen queue" value={moduleSnapshots.restaurant.kitchenOrders} />
+            <ModuleMetric label="Bar queue" value={moduleSnapshots.restaurant.barOrders} />
+            {moduleSnapshots.restaurant.todaySales != null && <ModuleMetric label="Sales today" value={formatCurrency(moduleSnapshots.restaurant.todaySales)} detail={`${Number(moduleSnapshots.restaurant.completedCount || 0).toLocaleString()} completed orders`} />}
+          </div>
+        </div>}
+
+        {moduleSnapshots.hr && <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div><h2 className="text-lg font-semibold">People &amp; payroll</h2><p className="text-sm text-muted-foreground">Workforce, attendance, and payroll items needing attention.</p></div>
+            <Link to="/tenant/hr/employees" className="text-sm font-medium text-primary hover:underline">Open HR Management</Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ModuleMetric label="Active employees" value={moduleSnapshots.hr.stats?.activeEmployees} />
+            <ModuleMetric label="Present today" value={moduleSnapshots.hr.stats?.employeesPresentToday} detail={`${Number(moduleSnapshots.hr.stats?.employeesAbsentToday || 0).toLocaleString()} absent`} />
+            <ModuleMetric label="Salary payable" value={formatCurrency(moduleSnapshots.hr.stats?.salaryPayable || 0)} />
+            <ModuleMetric label="Pending approvals" value={Number(moduleSnapshots.hr.stats?.payrollAwaitingApproval || 0) + Number(moduleSnapshots.hr.stats?.leaveRequestsAwaitingApproval || 0)} detail="Payroll and leave" />
+          </div>
+        </div>}
+      </section>}
 
       {/* KPI Cards Row 1 — only show for enabled features */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -614,6 +700,8 @@ export default function DashboardPage() {
         </Card>
         )}
       </div>}
+
+      </>}
 
       {showBillingPrompt && billingReminder && !billingReminder.isTrial && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

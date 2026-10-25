@@ -8,6 +8,7 @@ import {
   propertyRentChargeLines,
   propertyRentReceiptLines,
 } from '../src/services/propertyAccountingService.js'
+import { PERMISSION_METADATA, permissionAllowedForTenant, resolveEffectivePermissions } from '../src/utils/permissions.js'
 
 const config = {
   rentReceivableAccountId: 'rent-ar',
@@ -47,4 +48,28 @@ test('tenant deposits remain liabilities on receipt, opening migration, and refu
   assert.equal(opening[1].accountId, 'deposit-liability')
   assert.equal(refund[0].accountId, 'deposit-liability')
   balanced(receipt); balanced(opening); balanced(refund)
+})
+
+test('property permissions are exposed under the Property Management category', () => {
+  const keys = [
+    'canViewPropertyPortfolio', 'canViewPropertyCollections', 'canViewPropertyStatements',
+    'canManagePropertyOwners', 'canManageProperties', 'canManagePropertyUnits',
+    'canCreateTenancies', 'canEndTenancies', 'canRecordRentPayment', 'canRecordTenantDeposit',
+    'canRefundTenantDeposit', 'canVoidRentPayment', 'canViewPropertyReports', 'canRecordOwnerPayout',
+  ]
+  for (const key of keys) assert.equal(PERMISSION_METADATA[key]?.category, 'property_management', `${key} must be grouped under Property Management`)
+})
+
+test('legacy property view grants portfolio access without granting financial history access', () => {
+  const permissions = resolveEffectivePermissions({ role: 'staff' }, { canViewPropertyManagement: true })
+  assert.ok(permissions.includes('canViewPropertyPortfolio'))
+  assert.ok(!permissions.includes('canViewPropertyCollections'))
+  assert.ok(!permissions.includes('canViewPropertyStatements'))
+})
+
+test('property permissions require an explicit landlord or property-agent feature', () => {
+  assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management.landlord'])), true)
+  assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management.agent'])), true)
+  assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management'])), false)
+  assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set()), false)
 })

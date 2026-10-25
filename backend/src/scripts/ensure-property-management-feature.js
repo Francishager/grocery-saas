@@ -1,25 +1,25 @@
 import prisma from '../db.js'
-import { ensurePropertyAccounting } from '../services/propertyAccountingService.js'
 
 try {
-  await prisma.feature.upsert({
-    where: { name: 'property_management' },
-    update: { displayName: 'Property & Rent Management', module: 'property_management', category: 'module', isActive: true },
-    create: { name: 'property_management', displayName: 'Property & Rent Management', description: 'Property portfolios, rental units, tenancies, rent collection, statements, reminders and arrears reporting.', module: 'property_management', category: 'module', isActive: true },
-  })
-  const feature = await prisma.feature.findUnique({ where: { name: 'property_management' }, select: { id: true } })
-  const tenants = await prisma.tenant.findMany({ select: { id: true } })
-  for (const tenant of tenants) {
-    await prisma.$transaction(async tx => {
-      await tx.tenantFeature.upsert({
-        where: { tenantId_featureId: { tenantId: tenant.id, featureId: feature.id } },
-        create: { tenantId: tenant.id, featureId: feature.id, enabled: true },
-        update: { enabled: true },
+  await prisma.$transaction(async tx => {
+    const legacy = await tx.feature.findUnique({ where: { name: 'property_management' }, select: { id: true } })
+    if (legacy) {
+      await tx.tenantFeature.deleteMany({ where: { featureId: legacy.id } })
+      await tx.feature.update({ where: { id: legacy.id }, data: { isActive: false } })
+    }
+
+    for (const feature of [
+      { name: 'property_management.landlord', displayName: 'Landlord', description: 'Property portfolio and landlord rental management workflows.' },
+      { name: 'property_management.agent', displayName: 'Property Agent', description: 'Managed property and rental workflows for property agents.' },
+    ]) {
+      await tx.feature.upsert({
+        where: { name: feature.name },
+        update: { ...feature, module: 'property_management', category: 'module', isActive: true },
+        create: { ...feature, module: 'property_management', category: 'module', isActive: true },
       })
-      await ensurePropertyAccounting(tx, tenant.id)
-    }, { timeout: 30000 })
-  }
-  console.log(`Property Management enabled and its system accounts configured for ${tenants.length} existing tenants.`)
+    }
+  })
+  console.log('Property Management feature definitions prepared. Landlord and Property Agent access must be explicitly assigned through a plan or tenant override.')
 } catch (error) {
   console.error('Unable to prepare Property Management feature:', error.code || error.message)
   process.exitCode = 1

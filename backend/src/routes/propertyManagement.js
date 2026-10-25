@@ -1,8 +1,8 @@
 import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
 import prisma from '../db.js'
-import { authenticateToken, requirePermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
-import { requireFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
+import { authenticateToken, requirePermission, requireAnyPermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
+import { requireAnyFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
 import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines } from '../services/propertyAccountingService.js'
 
 const router = Router()
@@ -17,33 +17,34 @@ const dueDateFor = (period, dueDay) => {
 const pageSize = value => Math.min(Math.max(Number.parseInt(value, 10) || 100, 1), 500)
 const badRequest = (res, message) => res.status(400).json({ error: message })
 
-router.use(authenticateToken, loadUserPermissions, requireFeature('property_management'))
+const PROPERTY_MANAGEMENT_FEATURES = ['property_management.landlord', 'property_management.agent']
+router.use(authenticateToken, loadUserPermissions, requireAnyFeature(PROPERTY_MANAGEMENT_FEATURES))
 
 const paymentMethodsByAccount = { cash: 'cash', safe: 'safe', mobile_money: 'mobile_money', bank: 'bank_transfer', card: 'card' }
 const paymentMethodToAccount = { cash: 'cash', safe: 'safe', mobile_money: 'mobile_money', bank: 'bank', bank_transfer: 'bank', cheque: 'bank', card: 'card' }
 
-router.get('/payment-accounts', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/payment-accounts', requireAnyPermission(['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment']), async (req, res) => {
   try {
     const accounts = await prisma.cashAccount.findMany({ where: { tenantId: tenantIdOf(req), isActive: true }, orderBy: { name: 'asc' } })
     const permitted = accounts.flatMap(account => {
       const paymentMethod = paymentMethodsByAccount[String(account.type).toLowerCase()]
-      const hasAction = req.userPermissions?.canRecordRentPayment || req.userPermissions?.canRecordOwnerPayout || req.user?.isOwner || req.user?.role === 'admin'
+      const hasAction = ['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment'].some(key => req.user?.permissions?.includes(key))
       return hasAction && paymentMethod && canUseTransactionAccountForPayment(req, account, paymentMethod) ? [{ id: account.id, name: account.name, type: account.type, balance: account.balance, currency: account.currency, paymentMethod }] : []
     })
     res.json({ accounts: permitted, defaultCashAccountId: req.userCashAccountId || req.user?.cashAccountId || null })
   } catch (error) { console.error('Load property payment accounts failed:', error); res.status(500).json({ error: 'Could not load permitted payment accounts.' }) }
 })
 
-router.get('/overview', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/overview', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
   try {
     const tenantId = tenantIdOf(req)
     const now = new Date()
-    const [propertyCount, unitCounts, tenancies, monthPayments, recentPayments] = await Promise.all([
+    const canViewCollections = ['*', 'canViewPropertyCollections', 'canViewPropertyReports'].some(permission => req.user?.permissions?.includes(permission))
+    const [propertyCount, unitCounts, tenancies, monthPayments] = await Promise.all([
       prisma.managedProperty.count({ where: { tenantId, status: 'active' } }),
       prisma.propertyUnit.groupBy({ by: ['status'], where: { property: { tenantId } }, _count: { _all: true } }),
       prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active' }, select: { id: true, rentAmount: true, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true, dueDate: true } } } }),
-      prisma.propertyRentPayment.aggregate({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), lt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) } }, _sum: { amount: true }, _count: true }),
-      prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted' }, take: 8, orderBy: { paymentDate: 'desc' }, include: { tenancy: { include: { unit: { include: { property: true } } } } } }),
+      canViewCollections ? prisma.propertyRentPayment.aggregate({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), lt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)) } }, _sum: { amount: true }, _count: true }) : Promise.resolve(null),
     ])
     const units = Object.fromEntries(unitCounts.map(row => [row.status, row._count._all]))
     const openCharges = tenancies.flatMap(row => row.charges)
@@ -52,8 +53,7 @@ router.get('/overview', requirePermission('canViewPropertyManagement'), async (r
       activeTenancies: tenancies.length, monthlyRentRoll: money(tenancies.reduce((sum, row) => sum + Number(row.rentAmount || 0), 0)),
       outstandingRent: money(openCharges.reduce((sum, row) => sum + Math.max(0, Number(row.amount) - Number(row.amountPaid)), 0)),
       arrears: money(openCharges.filter(row => row.dueDate < now).reduce((sum, row) => sum + Math.max(0, Number(row.amount) - Number(row.amountPaid)), 0)),
-      collectedThisMonth: money(monthPayments._sum.amount), paymentCount: monthPayments._count,
-      recentPayments: recentPayments.map(paymentSummary),
+      collectedThisMonth: monthPayments ? money(monthPayments._sum.amount) : null, paymentCount: monthPayments?._count ?? null,
     })
   } catch (error) { console.error('Property management overview failed:', error); res.status(500).json({ error: 'Could not load property portfolio.' }) }
 })
@@ -62,7 +62,7 @@ function paymentSummary(payment) {
   return { id: payment.id, receiptNo: payment.receiptNo, amount: payment.amount, paymentDate: payment.paymentDate, paymentMethod: payment.paymentMethod, paymentType: payment.paymentType, tenantName: payment.tenancy?.tenantName, unitCode: payment.tenancy?.unit?.unitCode, propertyName: payment.tenancy?.unit?.property?.name }
 }
 
-router.get('/owners', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/owners', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
   try {
     const owners = await prisma.propertyOwner.findMany({ where: { tenantId: tenantIdOf(req) }, orderBy: { name: 'asc' }, include: { _count: { select: { properties: true } } } })
     res.json(owners)
@@ -87,7 +87,7 @@ router.put('/owners/:id', requirePermission('canManagePropertyOwners'), async (r
   } catch (error) { console.error('Update property owner failed:', error); res.status(500).json({ error: 'Could not update owner.' }) }
 })
 
-router.get('/properties', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
   try {
     const properties = await prisma.managedProperty.findMany({ where: { tenantId: tenantIdOf(req), ...(req.query.ownerId ? { ownerId: String(req.query.ownerId) } : {}), ...(req.query.status ? { status: String(req.query.status) } : {}) }, take: pageSize(req.query.limit), orderBy: { name: 'asc' }, include: { owner: true, units: { orderBy: { unitCode: 'asc' }, include: { _count: { select: { tenancies: true } }, tenancies: { where: { status: 'active' }, take: 1, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true } } } } } } } })
     res.json(properties.map(property => ({ ...property, units: property.units.map(unit => ({ ...unit, currentBalance: money(unit.tenancies[0]?.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0) || 0), tenancies: undefined })) })))
@@ -139,7 +139,7 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
   } catch (error) { console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
 })
 
-router.get('/tenancies', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
   try {
     const where = { tenantId: tenantIdOf(req), ...(req.query.status && req.query.status !== 'all' ? { status: String(req.query.status) } : {}), ...(req.query.ownerId ? { unit: { property: { ownerId: String(req.query.ownerId) } } } : {}) }
     const rows = await prisma.propertyTenancy.findMany({ where, take: pageSize(req.query.limit), orderBy: [{ status: 'asc' }, { tenantName: 'asc' }], include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: { dueDate: 'asc' } } } })
@@ -147,7 +147,7 @@ router.get('/tenancies', requirePermission('canViewPropertyManagement'), async (
   } catch (error) { console.error('List property tenancies failed:', error); res.status(500).json({ error: 'Could not load tenancies.' }) }
 })
 
-router.post('/tenancies', requirePermission('canManageTenancies'), async (req, res) => {
+router.post('/tenancies', requireAnyPermission(['canCreateTenancies', 'canManageTenancies']), async (req, res) => {
   const tenantName = String(req.body?.tenantName || '').trim()
   const startDate = new Date(req.body?.startDate)
   const rentAmount = Number(req.body?.rentAmount)
@@ -182,7 +182,7 @@ router.post('/tenancies', requirePermission('canManageTenancies'), async (req, r
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenancy failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create tenancy.' : error.message }) }
 })
 
-router.post('/tenancies/:id/end', requirePermission('canManageTenancies'), async (req, res) => {
+router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canManageTenancies']), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req), status: 'active' }, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Active tenancy not found.' })
@@ -197,7 +197,7 @@ router.post('/tenancies/:id/end', requirePermission('canManageTenancies'), async
   } catch (error) { console.error('End tenancy failed:', error); res.status(500).json({ error: 'Could not end tenancy.' }) }
 })
 
-router.get('/tenancies/:id/statement', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/tenancies/:id/statement', requirePermission('canViewPropertyStatements'), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { orderBy: { dueDate: 'asc' }, include: { allocations: { include: { payment: true } } } }, payments: { where: { status: 'posted', paymentType: 'rent' }, orderBy: { paymentDate: 'asc' }, include: { allocations: { include: { charge: true } } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
@@ -261,7 +261,7 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record rent payment failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record rent payment.' : error.message }) }
 })
 
-router.get('/payments', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/payments', requirePermission('canViewPropertyCollections'), async (req, res) => {
   try {
     const dateFilter = req.query.from || req.query.to ? { paymentDate: { ...(req.query.from ? { gte: new Date(`${req.query.from}T00:00:00`) } : {}), ...(req.query.to ? { lte: new Date(`${req.query.to}T23:59:59.999`) } : {}) } } : {}
     const payments = await prisma.propertyRentPayment.findMany({ where: { tenantId: tenantIdOf(req), ...dateFilter }, take: pageSize(req.query.limit), orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, tenancy: { include: { unit: { include: { property: true } } } }, allocations: { include: { charge: true } } } })
@@ -269,7 +269,7 @@ router.get('/payments', requirePermission('canViewPropertyManagement'), async (r
   } catch (error) { console.error('List rent payments failed:', error); res.status(500).json({ error: 'Could not load payment history.' }) }
 })
 
-router.get('/payments/:id/receipt', requirePermission('canViewPropertyManagement'), async (req, res) => {
+router.get('/payments/:id/receipt', requireAnyPermission(['canViewPropertyCollections', 'canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment']), async (req, res) => {
   try {
     const payment = await prisma.propertyRentPayment.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { cashAccount: { select: { name: true, type: true } }, tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: { include: { charge: true } } } })
     if (!payment) return res.status(404).json({ error: 'Payment receipt not found.' })
@@ -277,7 +277,7 @@ router.get('/payments/:id/receipt', requirePermission('canViewPropertyManagement
   } catch (error) { console.error('Rent receipt failed:', error); res.status(500).json({ error: 'Could not load receipt.' }) }
 })
 
-router.post('/payments/:id/void', requirePermission('canManageRentPayment'), async (req, res) => {
+router.post('/payments/:id/void', requireAnyPermission(['canVoidRentPayment', 'canManageRentPayment']), async (req, res) => {
   const reason = String(req.body?.reason || '').trim()
   if (reason.length < 5) return badRequest(res, 'Enter a clear reason (at least 5 characters) for voiding this payment.')
   try {
@@ -337,7 +337,8 @@ export async function runPropertyRentAutomation(now = new Date()) {
   const active = await prisma.propertyTenancy.findMany({ where: { status: 'active', tenant: { status: 'active' } }, select: { id: true, tenantId: true, tenantName: true, dueDay: true, rentAmount: true, currency: true, startDate: true, unit: { select: { unitCode: true, property: { select: { name: true, ownerId: true } } } } } })
   const enabledTenants = new Set()
   for (const tenantId of new Set(active.map(row => row.tenantId))) {
-    if (hasFeatureAccess(await getTenantFeatures(tenantId), 'property_management')) enabledTenants.add(tenantId)
+    const features = await getTenantFeatures(tenantId)
+    if (PROPERTY_MANAGEMENT_FEATURES.some(feature => hasFeatureAccess(features, feature))) enabledTenants.add(tenantId)
   }
   await prisma.rentCharge.updateMany({ where: { dueDate: { lt: now }, status: { in: ['unpaid', 'partial'] }, tenantId: { in: [...enabledTenants] } }, data: { status: 'overdue' } })
   for (const tenancy of active.filter(row => enabledTenants.has(row.tenantId))) {
@@ -367,7 +368,7 @@ export async function runPropertyRentAutomation(now = new Date()) {
   }
 }
 
-router.post('/tenancies/:id/deposits', requirePermission('canRecordRentPayment'), async (req, res) => {
+router.post('/tenancies/:id/deposits', requireAnyPermission(['canRecordTenantDeposit']), async (req, res) => {
   const amount = money(req.body?.amount)
   const method = String(req.body?.paymentMethod || 'cash').toLowerCase()
   const cashAccountId = String(req.body?.cashAccountId || '')
@@ -400,7 +401,7 @@ router.post('/tenancies/:id/deposits', requirePermission('canRecordRentPayment')
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record security deposit failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record security deposit.' : error.message }) }
 })
 
-router.post('/tenancies/:id/deposits/refund', requirePermission('canManageRentPayment'), async (req, res) => {
+router.post('/tenancies/:id/deposits/refund', requireAnyPermission(['canRefundTenantDeposit', 'canManageRentPayment']), async (req, res) => {
   const amount = money(req.body?.amount), reason = String(req.body?.reason || '').trim(), cashAccountId = String(req.body?.cashAccountId || ''), method = String(req.body?.paymentMethod || 'cash').toLowerCase(), idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
   if (!(amount > 0) || reason.length < 5 || !cashAccountId || !Object.hasOwn(paymentMethodToAccount, method)) return badRequest(res, 'Enter a positive refund, reason, and permitted payment account.')
   try {

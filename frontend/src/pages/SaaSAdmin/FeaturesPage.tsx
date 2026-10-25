@@ -147,7 +147,8 @@ const MODULES = [
   },
   {
     id: 'property_management', name: 'Property Management', icon: Building2, color: 'text-emerald-700 bg-emerald-100', features: [
-      { name: 'property_management', displayName: 'Property & Rent Management' },
+      { name: 'property_management.landlord', displayName: 'Landlord' },
+      { name: 'property_management.agent', displayName: 'Property Agent' },
     ]
   },
   {

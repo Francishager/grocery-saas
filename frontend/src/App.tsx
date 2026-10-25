@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { AppFeedback } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -22,7 +22,6 @@ import DashboardPage from '@/pages/DashboardPage'
 import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
 import BusinessAdvisorPage from '@/pages/BusinessAdvisorPage'
-import ReportsPage from '@/pages/ReportsPage'
 import AuditLogPage from '@/pages/AuditLogPage'
 import BranchesPage from '@/pages/BranchesPage'
 import TrashPage from '@/pages/TrashPage'
@@ -44,7 +43,6 @@ import StaffTillSheetPage from '@/pages/accounting/StaffTillSheetPage'
 import DataImporterPage from '@/pages/inventory/DataImporterPage'
 import HRPage from '@/pages/HRPage'
 import HRAccountingConfigPage from '@/pages/HRAccountingConfigPage'
-import HRDashboardPage from '@/pages/hr/HRDashboardPage'
 import DepartmentManagementPage from '@/pages/hr/DepartmentManagementPage'
 import PositionManagementPage from '@/pages/hr/PositionManagementPage'
 import EmployeeManagementPage from '@/pages/hr/EmployeeManagementPage'
@@ -102,6 +100,13 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
   }
  
   return <>{children}</>
+}
+
+function ReportsRouteRedirect() {
+  const [searchParams] = useSearchParams()
+  const params = new URLSearchParams(searchParams)
+  params.set('view', 'reports')
+  return <Navigate to={`/tenant/dashboard?${params.toString()}`} replace />
 }
  
 function App() {
@@ -201,14 +206,15 @@ function App() {
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
-          <Route path="property-management" element={<FeatureGuard feature="property_management" permission="canViewPropertyManagement"><PropertyManagementPage /></FeatureGuard>} />
+          <Route path="property-management" element={<Navigate replace to="/tenant/property-management/portfolio" />} />
+          <Route path="property-management/:tab" element={<FeatureGuard feature={['property_management.landlord', 'property_management.agent']} permission={['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyCollections', 'canViewPropertyReports']}><PropertyManagementPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts']}><AccountingPage /></FeatureGuard>} />
           <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense']}><ExpensesPage /></FeatureGuard>} />
           <Route path="accounting/transactions" element={<FeatureGuard feature={['accounting', 'expenses']} permission="canViewTransactionAccount"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
           <Route path="data-importer" element={<FeatureGuard feature="developer.data_importer"><DataImporterPage /></FeatureGuard>} />
-          <Route path="hr" element={<FeatureGuard feature="hr" permission="canViewHR"><HRDashboardPage /></FeatureGuard>} />
+          <Route path="hr" element={<Navigate to="/tenant/dashboard" replace />} />
           {/* Phase 1 HR Core Routes */}
           <Route path="hr/departments" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canManageHRStructure']}><DepartmentManagementPage /></FeatureGuard>} />
           <Route path="hr/positions" element={<FeatureGuard feature="hr" permission={['canViewHR', 'canManageHRStructure']}><PositionManagementPage /></FeatureGuard>} />
@@ -230,7 +236,8 @@ function App() {
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
-          <Route path="restaurant" element={<Navigate to="/tenant/restaurant/dashboard" replace />} />
+          <Route path="restaurant" element={<Navigate to="/tenant/dashboard" replace />} />
+          <Route path="restaurant/dashboard" element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="restaurant/:tab" element={<FeatureGuard feature="restaurant" permission="canViewRestaurant"><RestaurantPage /></FeatureGuard>} />
           <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
           <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station" permission="canViewFuelStation"><FuelStationPage /></FeatureGuard>} />
@@ -238,7 +245,7 @@ function App() {
           <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
           <Route path="service" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
-          <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
+          <Route path="reports" element={<FeatureGuard feature="reports"><ReportsRouteRedirect /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />
           <Route path="trash" element={<TrashPage />} />

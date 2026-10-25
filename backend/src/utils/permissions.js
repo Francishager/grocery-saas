@@ -205,15 +205,23 @@ const PERMISSION_TO_FEATURES = {
   canEditRental: ['rentals', 'inventory.rentals'],
   canDeleteRental: ['rentals', 'inventory.rentals'],
   canProcessRentalReturn: ['rentals', 'inventory.rentals'],
-  canViewPropertyManagement: ['property_management'],
-  canManagePropertyOwners: ['property_management'],
-  canManageProperties: ['property_management'],
-  canManagePropertyUnits: ['property_management'],
-  canManageTenancies: ['property_management'],
-  canRecordRentPayment: ['property_management'],
-  canManageRentPayment: ['property_management'],
-  canViewPropertyReports: ['property_management'],
-  canRecordOwnerPayout: ['property_management'],
+  canViewPropertyManagement: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyPortfolio: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyCollections: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyStatements: ['property_management.landlord', 'property_management.agent'],
+  canManagePropertyOwners: ['property_management.landlord', 'property_management.agent'],
+  canManageProperties: ['property_management.landlord', 'property_management.agent'],
+  canManagePropertyUnits: ['property_management.landlord', 'property_management.agent'],
+  canCreateTenancies: ['property_management.landlord', 'property_management.agent'],
+  canEndTenancies: ['property_management.landlord', 'property_management.agent'],
+  canManageTenancies: ['property_management.landlord', 'property_management.agent'],
+  canRecordRentPayment: ['property_management.landlord', 'property_management.agent'],
+  canRecordTenantDeposit: ['property_management.landlord', 'property_management.agent'],
+  canRefundTenantDeposit: ['property_management.landlord', 'property_management.agent'],
+  canVoidRentPayment: ['property_management.landlord', 'property_management.agent'],
+  canManageRentPayment: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyReports: ['property_management.landlord', 'property_management.agent'],
+  canRecordOwnerPayout: ['property_management.landlord', 'property_management.agent'],
   canViewRestaurant: ['restaurant', 'restaurant.orders'],
   canCreateRestaurant: ['restaurant', 'restaurant.orders'],
   canEditRestaurant: ['restaurant', 'restaurant.orders'],
@@ -341,9 +349,11 @@ export const ALL_PERMISSION_KEYS = [
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
   "canProcessRentalReturn",
-  "canViewPropertyManagement", "canManagePropertyOwners", "canManageProperties",
-  "canManagePropertyUnits", "canManageTenancies", "canRecordRentPayment",
-  "canManageRentPayment", "canViewPropertyReports", "canRecordOwnerPayout",
+  "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements",
+  "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
+  "canCreateTenancies", "canEndTenancies", "canManageTenancies", "canRecordRentPayment", "canRecordTenantDeposit",
+  "canRefundTenantDeposit", "canVoidRentPayment", "canManageRentPayment",
+  "canViewPropertyReports", "canRecordOwnerPayout",
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
   // Fuel Station
@@ -914,13 +924,21 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Process rental returns',
     description: 'Receive returned rental items, update availability, and record charges or balances.',
   },
-  canViewPropertyManagement: { name: 'View property management', description: 'View managed landlords, properties, units, tenancies, rent records, and property portfolio summaries.' },
+  canViewPropertyManagement: { name: 'Property Management (Legacy)', description: 'Legacy access to property portfolio pages. Payment collections and tenancy statements require their dedicated permissions.' },
+  canViewPropertyPortfolio: { name: 'View property portfolio', description: 'View landlords, properties, units, tenancy details, occupancy, and portfolio summaries.' },
+  canViewPropertyCollections: { name: 'View property collections', description: 'View rent and deposit payment history and reprint payment receipts.' },
+  canViewPropertyStatements: { name: 'View tenancy statements', description: 'Open and print tenant rent statements.' },
   canManagePropertyOwners: { name: 'Manage property owners', description: 'Create and update landlord or portfolio-owner records.' },
   canManageProperties: { name: 'Manage properties', description: 'Create and update property records and addresses.' },
   canManagePropertyUnits: { name: 'Manage rental units', description: 'Create and update units, rent terms, and availability.' },
-  canManageTenancies: { name: 'Manage tenancies', description: 'Create tenancy agreements and update occupancy or tenancy status.' },
+  canCreateTenancies: { name: 'Create tenancies', description: 'Create tenancy agreements and assign tenants to vacant units.' },
+  canEndTenancies: { name: 'End tenancies', description: 'End an active tenancy after reviewing any outstanding rent.' },
+  canManageTenancies: { name: 'Manage tenancies (legacy)', description: 'Legacy combined permission for creating and ending tenancy agreements.' },
   canRecordRentPayment: { name: 'Record rent payments', description: 'Record tenant rent receipts and allocate them against outstanding rent periods.' },
-  canManageRentPayment: { name: 'Manage rent payments', description: 'Correct or void rent payment records with audit-safe reversals.' },
+  canRecordTenantDeposit: { name: 'Record tenant deposits', description: 'Collect security deposits and post them to the tenant-deposit liability account.' },
+  canRefundTenantDeposit: { name: 'Refund tenant deposits', description: 'Refund held security deposits with permission-checked cash movements and a reason.' },
+  canVoidRentPayment: { name: 'Void rent payments', description: 'Reverse a rent receipt with a required reason and matched cash/ledger reversal.' },
+  canManageRentPayment: { name: 'Manage rent payments (legacy)', description: 'Legacy combined permission for voiding rent receipts and refunding tenant deposits.' },
   canViewPropertyReports: { name: 'View property reports', description: 'View collections, outstanding rent, arrears aging, statements, and persistent arrears.' },
   canRecordOwnerPayout: { name: 'Record landlord payouts', description: 'Pay collected rent to property owners and record the corresponding payable and cash movement.' },
   canViewRestaurant: {
@@ -1141,6 +1159,7 @@ function permissionCategoryForKey(key) {
     'canCreateWithdrawal',
   ].includes(key)) return 'transactions';
   if (key.startsWith('canUse')) return 'payment_methods';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Report') || key === 'canExportReport') return 'reports';
   if (key.includes('Receipt')) return 'receipts';
   if (key.includes('Sale') || key === 'canGiveDiscount') return 'sales';
@@ -1168,7 +1187,7 @@ function permissionCategoryForKey(key) {
   if (key.includes('ServiceBusiness')) return 'service_business';
   if (key.includes('Service')) return 'services';
   if (key.includes('Rental')) return 'rentals';
-  if (key.includes('Property') || key.includes('Tenancy') || key.includes('RentPayment')) return 'property_management';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Restaurant')) return 'restaurant';
   if (key.includes('FuelStation')) return 'fuel_station';
   if (key.includes('Manufacturing')) return 'manufacturing';
@@ -1316,6 +1335,10 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
       granted.add(key);
     }
   }
+
+  // Preserve the old module-view grant as portfolio access; it does not imply
+  // the newer collections, statement, or financial-action permissions.
+  if (normalized.canViewPropertyManagement) granted.add('canViewPropertyPortfolio');
 
   return [...granted];
 }
