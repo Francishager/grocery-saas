@@ -173,6 +173,8 @@ model Tenant {
   rentReminders                   PropertyRentReminder[]
   propertyAccountingConfig       PropertyAccountingConfig?
   propertyOwnerPayouts            PropertyOwnerPayout[]
+  propertySales                   PropertySale[]
+  propertySalePayments            PropertySalePayment[]
   saleReturns                     SaleReturn[]
   accounts                        Account[]
   journalEntries                  JournalEntry[]
@@ -499,6 +501,8 @@ model User {
   cashAccountId          String? // Assigned cash account for cash handling accountability
   cashAccount            CashAccount? @relation("UserCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
   propertyOwnerPayouts   PropertyOwnerPayout[] @relation("PropertyOwnerPayoutCreator")
+  propertySalesCreated  PropertySale[] @relation("PropertySaleCreator")
+  propertySalePaymentsCreated PropertySalePayment[] @relation("PropertySalePaymentCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -931,6 +935,8 @@ model UserPermission {
   canViewPropertyPortfolio          Boolean  @default(false)
   canViewPropertyCollections        Boolean  @default(false)
   canViewPropertyStatements         Boolean  @default(false)
+  canViewTenantPersonalDetails      Boolean  @default(false)
+  canManageTenantPersonalDetails    Boolean  @default(false)
   canManagePropertyOwners           Boolean  @default(false)
   canManageProperties               Boolean  @default(false)
   canManagePropertyUnits            Boolean  @default(false)
@@ -944,6 +950,12 @@ model UserPermission {
   canManageRentPayment              Boolean  @default(false)
   canViewPropertyReports            Boolean  @default(false)
   canRecordOwnerPayout              Boolean  @default(false)
+  canViewPropertySales               Boolean  @default(false)
+  canCreatePropertySale              Boolean  @default(false)
+  canRecordPropertySalePayment       Boolean  @default(false)
+  canVoidPropertySalePayment         Boolean  @default(false)
+  canCancelPropertySale              Boolean  @default(false)
+  canManagePropertyLandInventory     Boolean  @default(false)
   // Restaurant & Bar
   canViewRestaurant                 Boolean  @default(false)
   canCreateRestaurant               Boolean  @default(false)
@@ -1475,6 +1487,7 @@ model Customer {
   procurementCounterpartyLink     ProcurementCustomerLink?
   procurementSellerInvoices       ProcurementInvoice[]                     @relation("ProcurementInvoiceSellerCustomer")
   propertyTenancies               PropertyTenancy[]
+  propertySales                    PropertySale[]
 
   creditNotes CreditNote[]
 
@@ -2414,6 +2427,7 @@ model CashAccount {
   withdrawals     CustomerWithdrawal[]
   AssignedUsers   User[]               @relation("UserCashAccount")
   propertyRentPayments PropertyRentPayment[]
+  propertySalePayments PropertySalePayment[]
   propertyOwnerPayouts PropertyOwnerPayout[]
 
   @@unique([tenantId, name])
@@ -2594,6 +2608,7 @@ model PropertyOwner {
   isActive    Boolean           @default(true)
   properties  ManagedProperty[]
   payouts     PropertyOwnerPayout[]
+  propertySales PropertySale[]
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
@@ -2614,6 +2629,7 @@ model ManagedProperty {
   notes          String?
   status         String           @default("active")
   units          PropertyUnit[]
+  propertySales  PropertySale[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -2630,10 +2646,12 @@ model PropertyUnit {
   bedrooms       Int?
   bathrooms      Int?
   rentAmount     Float            @default(0)
+  acquisitionCost Float           @default(0)
   currency       String           @default("UGX")
   status         String           @default("vacant")
   notes          String?
   tenancies      PropertyTenancy[]
+  propertySales  PropertySale[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -2655,6 +2673,11 @@ model PropertyTenancy {
   email             String?
   phone             String?
   nationalId        String?
+  maritalStatus     String?
+  spouseNames       String?
+  childrenCount     Int?
+  householdSize     Int?
+  placeOfOrigin     String?
   startDate         DateTime
   endDate           DateTime?
   dueDay            Int                    @default(1)
@@ -2753,6 +2776,7 @@ model PropertyOwnerPayout {
   cashAccountId  String
   cashAccount    CashAccount   @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
   amount         Float
+  payoutType     String        @default("rent")
   payoutDate     DateTime      @default(now())
   reference      String?
   notes          String?
@@ -2783,6 +2807,22 @@ model PropertyAccountingConfig {
   depositLiabilityAccount   Account  @relation("PropertyDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id], onDelete: Restrict)
   depositOpeningEquityAccountId String
   depositOpeningEquityAccount Account @relation("PropertyDepositOpeningEquityAccount", fields: [depositOpeningEquityAccountId], references: [id], onDelete: Restrict)
+  landSaleReceivableAccountId String?
+  landSaleReceivableAccount Account? @relation("PropertyLandSaleReceivableAccount", fields: [landSaleReceivableAccountId], references: [id], onDelete: Restrict)
+  landSaleRevenueAccountId String?
+  landSaleRevenueAccount Account? @relation("PropertyLandSaleRevenueAccount", fields: [landSaleRevenueAccountId], references: [id], onDelete: Restrict)
+  landInventoryAccountId String?
+  landInventoryAccount Account? @relation("PropertyLandInventoryAccount", fields: [landInventoryAccountId], references: [id], onDelete: Restrict)
+  landCostOfSalesAccountId String?
+  landCostOfSalesAccount Account? @relation("PropertyLandCostOfSalesAccount", fields: [landCostOfSalesAccountId], references: [id], onDelete: Restrict)
+  saleCommissionRevenueAccountId String?
+  saleCommissionRevenueAccount Account? @relation("PropertySaleCommissionRevenueAccount", fields: [saleCommissionRevenueAccountId], references: [id], onDelete: Restrict)
+  saleOwnerPayableAccountId String?
+  saleOwnerPayableAccount Account? @relation("PropertySaleOwnerPayableAccount", fields: [saleOwnerPayableAccountId], references: [id], onDelete: Restrict)
+  saleCustomerAdvanceAccountId String?
+  saleCustomerAdvanceAccount Account? @relation("PropertySaleCustomerAdvanceAccount", fields: [saleCustomerAdvanceAccountId], references: [id], onDelete: Restrict)
+  landInventoryOpeningEquityAccountId String?
+  landInventoryOpeningEquityAccount Account? @relation("PropertyLandInventoryOpeningEquityAccount", fields: [landInventoryOpeningEquityAccountId], references: [id], onDelete: Restrict)
   isEnabled                 Boolean  @default(true)
   isSystemManaged           Boolean  @default(true)
   createdAt                 DateTime @default(now())
@@ -2803,6 +2843,107 @@ model RentPaymentAllocation {
   @@unique([paymentId, chargeId])
   @@index([chargeId])
   @@map("rent_payment_allocations")
+}
+
+model PropertySale {
+  id                    String                     @id @default(cuid())
+  tenantId              String
+  tenant                 Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  propertyId            String
+  property               ManagedProperty            @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  unitId                String
+  unit                   PropertyUnit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  buyerId               String
+  buyer                  Customer                   @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  ownerId               String?
+  owner                  PropertyOwner?              @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  createdById           String
+  createdBy              User                        @relation("PropertySaleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  saleNo                String
+  saleMode              String
+  salePrice             Float
+  commissionAmount      Float                        @default(0)
+  costBasis             Float                        @default(0)
+  recognitionMoment     String                       @default("contract")
+  paymentPlan           String                       @default("full")
+  installmentCount      Int                          @default(1)
+  installmentFrequency  String                       @default("monthly")
+  saleDate              DateTime                     @default(now())
+  notes                 String?
+  status                String                       @default("active")
+  installments          PropertySaleInstallment[]
+  payments              PropertySalePayment[]
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  @@unique([tenantId, saleNo])
+  @@index([tenantId, buyerId, saleDate])
+  @@index([tenantId, unitId, status])
+  @@index([tenantId, ownerId, status])
+  @@map("property_sales")
+}
+
+model PropertySaleInstallment {
+  id          String                    @id @default(cuid())
+  tenantId    String
+  saleId      String
+  sale        PropertySale              @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sequence    Int
+  dueDate     DateTime
+  amount      Float
+  amountPaid  Float                     @default(0)
+  status      String                    @default("unpaid")
+  allocations PropertySalePaymentAllocation[]
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@unique([saleId, sequence])
+  @@index([tenantId, dueDate, status])
+  @@map("property_sale_installments")
+}
+
+model PropertySalePayment {
+  id             String                    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  saleId         String
+  sale           PropertySale              @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  cashAccountId  String
+  cashAccount    CashAccount               @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  createdById    String
+  createdBy      User                      @relation("PropertySalePaymentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  receiptNo      String
+  idempotencyKey String?
+  amount         Float
+  paymentDate    DateTime                  @default(now())
+  paymentMethod  String                    @default("cash")
+  transactionRef String?
+  notes          String?
+  status         String                    @default("posted")
+  voidReason     String?
+  voidedAt       DateTime?
+  allocations    PropertySalePaymentAllocation[]
+  createdAt      DateTime                  @default(now())
+
+  @@unique([tenantId, receiptNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, paymentDate])
+  @@index([saleId, paymentDate])
+  @@map("property_sale_payments")
+}
+
+model PropertySalePaymentAllocation {
+  id            String                    @id @default(cuid())
+  paymentId     String
+  payment       PropertySalePayment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  installmentId String
+  installment   PropertySaleInstallment   @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+  amount        Float
+  createdAt     DateTime                  @default(now())
+
+  @@unique([paymentId, installmentId])
+  @@index([installmentId])
+  @@map("property_sale_payment_allocations")
 }
 
 model PropertyRentReminder {
@@ -2916,6 +3057,14 @@ model Account {
   propertyOwnerPayableConfigs              PropertyAccountingConfig[]    @relation("PropertyOwnerPayableAccount")
   propertyDepositLiabilityConfigs          PropertyAccountingConfig[]    @relation("PropertyDepositLiabilityAccount")
   propertyDepositOpeningEquityConfigs      PropertyAccountingConfig[]    @relation("PropertyDepositOpeningEquityAccount")
+  propertyLandSaleReceivableConfigs        PropertyAccountingConfig[]    @relation("PropertyLandSaleReceivableAccount")
+  propertyLandSaleRevenueConfigs           PropertyAccountingConfig[]    @relation("PropertyLandSaleRevenueAccount")
+  propertyLandInventoryConfigs             PropertyAccountingConfig[]    @relation("PropertyLandInventoryAccount")
+  propertyLandCostOfSalesConfigs           PropertyAccountingConfig[]    @relation("PropertyLandCostOfSalesAccount")
+  propertySaleCommissionRevenueConfigs     PropertyAccountingConfig[]    @relation("PropertySaleCommissionRevenueAccount")
+  propertySaleOwnerPayableConfigs          PropertyAccountingConfig[]    @relation("PropertySaleOwnerPayableAccount")
+  propertySaleCustomerAdvanceConfigs       PropertyAccountingConfig[]    @relation("PropertySaleCustomerAdvanceAccount")
+  propertyLandInventoryOpeningEquityConfigs PropertyAccountingConfig[]   @relation("PropertyLandInventoryOpeningEquityAccount")
   createdAt                               DateTime                      @default(now())
   updatedAt                               DateTime                      @updatedAt
 

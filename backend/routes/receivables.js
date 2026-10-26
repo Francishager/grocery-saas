@@ -713,6 +713,24 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       }) : Promise.resolve([]),
       access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
     ])
+    const [propertySales, propertySalePayments] = access.sales || access.payments ? await Promise.all([
+      access.sales ? prisma.propertySale.findMany({
+        where: { tenantId: scope.tenantId, buyerId: id },
+        include: {
+          property: { select: { name: true, address: true, owner: { select: { name: true } } } },
+          unit: { select: { unitCode: true, currency: true } },
+          owner: { select: { name: true } },
+          createdBy: { select: { fname: true, lname: true, name: true } },
+          installments: { orderBy: { sequence: 'asc' } },
+        },
+        orderBy: { saleDate: 'asc' }, take: limit,
+      }) : Promise.resolve([]),
+      access.payments ? prisma.propertySalePayment.findMany({
+        where: { tenantId: scope.tenantId, sale: { buyerId: id } },
+        include: { sale: { include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } } } }, cashAccount: { select: { name: true } } },
+        orderBy: { paymentDate: 'asc' }, take: limit,
+      }) : Promise.resolve([]),
+    ]) : [[], []]
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
     const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
 
@@ -848,6 +866,41 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           items: [],
           sortOrder: 12,
         })
+      })
+    })
+
+    const paidByPropertySale = new Map()
+    propertySalePayments.filter((payment) => payment.status === 'posted').forEach((payment) => {
+      paidByPropertySale.set(payment.saleId, toMoney(paidByPropertySale.get(payment.saleId)) + toMoney(payment.amount))
+    })
+    propertySales.forEach((sale) => {
+      const cancelled = sale.status !== 'active'
+      const paid = toMoney(paidByPropertySale.get(sale.id))
+      const plotLabel = `${sale.property.name} · ${sale.unit.unitCode}`
+      rows.push({
+        id: sale.id, source: 'property_sale', type: cancelled ? 'Cancelled Plot Sale' : 'Plot Sale',
+        date: sale.saleDate, dueDate: sale.installments.find((item) => item.status !== 'paid')?.dueDate || null,
+        reference: sale.saleNo,
+        description: `${plotLabel}${sale.saleMode === 'brokered' ? ` · brokered for ${sale.owner?.name || 'owner'}` : ' · business-owned land'}`,
+        debit: cancelled ? 0 : toMoney(sale.salePrice), credit: 0, amount: toMoney(sale.salePrice),
+        amountPaid: paid, remainingBalance: cancelled ? 0 : Math.max(0, toMoney(sale.salePrice) - paid),
+        balanceImpact: cancelled ? 0 : toMoney(sale.salePrice), affectsBalance: !cancelled,
+        paymentMethod: sale.paymentPlan, status: cancelled ? sale.status : paid >= sale.salePrice - 0.01 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+        branch: '', staff: userName(sale.createdBy),
+        items: [{ productName: plotLabel, quantity: 1, unitPrice: toMoney(sale.salePrice), total: toMoney(sale.salePrice) }],
+        sortOrder: 13,
+      })
+    })
+    propertySalePayments.forEach((payment) => {
+      const posted = payment.status === 'posted'
+      rows.push({
+        id: payment.id, source: 'property_sale_payment', type: posted ? 'Plot Sale Payment' : 'Voided Plot Sale Payment',
+        date: payment.paymentDate, reference: payment.receiptNo,
+        originalReference: payment.sale.saleNo,
+        description: `${payment.sale.property.name} · ${payment.sale.unit.unitCode}${payment.cashAccount?.name ? ` · ${payment.cashAccount.name}` : ''}${payment.voidReason ? ` · ${payment.voidReason}` : ''}`,
+        debit: 0, credit: posted ? toMoney(payment.amount) : 0, amount: toMoney(payment.amount),
+        balanceImpact: posted ? -toMoney(payment.amount) : 0, affectsBalance: posted,
+        paymentMethod: payment.paymentMethod, status: payment.status, branch: '', staff: '', items: [], sortOrder: 14,
       })
     })
 
@@ -1112,30 +1165,37 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     }) : []
     const now = new Date()
     const aging = { notDue: 0, days1To30: 0, days31To60: 0, days61To90: 0, over90Days: 0, noDueDate: 0 }
+    const recordAging = (amount, dueDateValue) => {
+      if (!dueDateValue) { aging.noDueDate += amount; return }
+      const dueDate = new Date(dueDateValue)
+      const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      const dueDay = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate())
+      const overdueDays = Math.floor((today - dueDay) / 86400000)
+      if (overdueDays <= 0) aging.notDue += amount
+      else if (overdueDays <= 30) aging.days1To30 += amount
+      else if (overdueDays <= 60) aging.days31To60 += amount
+      else if (overdueDays <= 90) aging.days61To90 += amount
+      else aging.over90Days += amount
+    }
     for (const sale of openCreditSales) {
       const amount = toMoney(sale.balance)
-      if (!sale.dueDate) aging.noDueDate += amount
-      else {
-        const dueDate = new Date(sale.dueDate)
-        const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-        const dueDay = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate())
-        const overdueDays = Math.floor((today - dueDay) / 86400000)
-        if (overdueDays <= 0) aging.notDue += amount
-        else if (overdueDays <= 30) aging.days1To30 += amount
-        else if (overdueDays <= 60) aging.days31To60 += amount
-        else if (overdueDays <= 90) aging.days61To90 += amount
-        else aging.over90Days += amount
-      }
+      recordAging(amount, sale.dueDate)
     }
+    const openPropertySales = access.balance && access.sales ? propertySales.filter(sale => sale.status === 'active').map(sale => {
+      const paid = toMoney(paidByPropertySale.get(sale.id))
+      const balance = Math.max(0, toMoney(sale.salePrice) - paid)
+      for (const installment of sale.installments) recordAging(Math.max(0, toMoney(installment.amount) - toMoney(installment.amountPaid)), installment.dueDate)
+      return { id: sale.id, reference: sale.saleNo, date: sale.saleDate, dueDate: sale.installments.find(item => item.status !== 'paid')?.dueDate || null, total: toMoney(sale.salePrice), amountPaid: paid, balance, status: balance <= 0.01 ? 'paid' : paid > 0 ? 'partial' : 'unpaid', daysPastDue: null }
+    }).filter(sale => sale.balance > 0.01) : []
     Object.keys(aging).forEach((key) => { aging[key] = toMoney(aging[key]) })
 
     const totals = visibleRows.reduce((acc, row) => {
       acc.debit += toMoney(row.debit)
       acc.credit += toMoney(row.credit)
       acc.amount += toMoney(row.amount)
-      if (row.source === 'receivable_sale') acc.receivableSales += toMoney(row.amount)
+      if (row.source === 'receivable_sale' || row.source === 'property_sale') acc.receivableSales += toMoney(row.amount)
       if (row.source === 'pos_sale') acc.cashSales += toMoney(row.amount)
-      if (row.source === 'customer_payment') acc.payments += toMoney(row.amount)
+      if (row.source === 'customer_payment' || row.source === 'property_sale_payment') acc.payments += toMoney(row.amount)
       if (row.source === 'customer_withdrawal') acc.withdrawals += toMoney(row.amount)
       if (row.source === 'credit_note') acc.creditNotes += toMoney(row.amount)
       if (row.source === 'sale_return') acc.returns += toMoney(row.amount)
@@ -1189,7 +1249,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
             ? Math.round((Math.max(0, toMoney(reconciledCustomer.balance)) / toMoney(customer.creditLimit)) * 10000) / 100
             : null,
           aging,
-          openSales: access.sales ? openCreditSales.map((sale) => ({
+          openSales: access.sales ? [...openCreditSales.map((sale) => ({
             id: sale.id,
             reference: sale.receiptNo,
             date: sale.createdAt,
@@ -1199,7 +1259,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
             balance: toMoney(sale.balance),
             status: sale.paymentStatus,
             daysPastDue: sale.dueDate ? Math.max(0, Math.floor((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - Date.UTC(new Date(sale.dueDate).getUTCFullYear(), new Date(sale.dueDate).getUTCMonth(), new Date(sale.dueDate).getUTCDate())) / 86400000)) : null,
-          })) : [],
+          })), ...openPropertySales] : [],
         },
       }),
       transactions

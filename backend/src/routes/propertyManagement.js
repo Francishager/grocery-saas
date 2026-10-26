@@ -4,8 +4,9 @@ import multer from 'multer'
 import prisma from '../db.js'
 import { authenticateToken, requirePermission, requireAnyPermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
 import { requireAnyFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
-import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines } from '../services/propertyAccountingService.js'
+import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines } from '../services/propertyAccountingService.js'
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
+import { calculateRentAging } from '../utils/rentAging.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -20,7 +21,36 @@ const dueDateFor = (period, dueDay) => {
 const pageSize = value => Math.min(Math.max(Number.parseInt(value, 10) || 100, 1), 500)
 const badRequest = (res, message) => res.status(400).json({ error: message })
 const canViewCustomerIdentity = req => (req.user?.permissions || []).includes('*') || (req.user?.permissions || []).includes('canViewCustomerIdentity')
-
+const canViewTenantPersonalDetails = req => ['*', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails'].some(permission => req.user?.permissions?.includes(permission))
+const canManageTenantPersonalDetails = req => ['*', 'canManageTenantPersonalDetails'].some(permission => req.user?.permissions?.includes(permission))
+const TENANT_PERSONAL_FIELDS = ['maritalStatus', 'spouseNames', 'childrenCount', 'householdSize', 'placeOfOrigin']
+function tenantPersonalDetails(input) {
+  const result = {}
+  if (input.maritalStatus !== undefined) {
+    const maritalStatus = String(input.maritalStatus || '').trim()
+    if (maritalStatus && !['single', 'married', 'separated', 'divorced', 'widowed', 'prefer_not_to_say'].includes(maritalStatus)) throw Object.assign(new Error('Choose a valid marital status.'), { statusCode: 400 })
+    result.maritalStatus = maritalStatus || null
+  }
+  if (input.spouseNames !== undefined) {
+    const spouseNames = String(input.spouseNames || '').trim()
+    if (spouseNames.length > 500) throw Object.assign(new Error('Spouse name details must be 500 characters or fewer.'), { statusCode: 400 })
+    result.spouseNames = spouseNames || null
+  }
+  for (const field of ['childrenCount', 'householdSize']) {
+    if (input[field] === undefined) continue
+    const raw = String(input[field] ?? '').trim()
+    if (!raw) { result[field] = null; continue }
+    const value = Number(raw)
+    if (!Number.isInteger(value) || value < (field === 'householdSize' ? 1 : 0) || value > 100) throw Object.assign(new Error(field === 'childrenCount' ? 'Children count must be between 0 and 100.' : 'Household size must be between 1 and 100.'), { statusCode: 400 })
+    result[field] = value
+  }
+  if (input.placeOfOrigin !== undefined) {
+    const placeOfOrigin = String(input.placeOfOrigin || '').trim()
+    if (placeOfOrigin.length > 200) throw Object.assign(new Error('Place of origin must be 200 characters or fewer.'), { statusCode: 400 })
+    result.placeOfOrigin = placeOfOrigin || null
+  }
+  return result
+}
 const PROPERTY_MANAGEMENT_FEATURES = ['property_management.landlord', 'property_management.agent']
 router.use(authenticateToken, loadUserPermissions, requireAnyFeature(PROPERTY_MANAGEMENT_FEATURES))
 
@@ -79,12 +109,12 @@ async function findOrCreateRenterCustomer(tx, tenantId, input) {
   } })
 }
 
-router.get('/payment-accounts', requireAnyPermission(['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment']), async (req, res) => {
+router.get('/payment-accounts', requireAnyPermission(['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment', 'canRecordPropertySalePayment']), async (req, res) => {
   try {
     const accounts = await prisma.cashAccount.findMany({ where: { tenantId: tenantIdOf(req), isActive: true }, orderBy: { name: 'asc' } })
     const permitted = accounts.flatMap(account => {
       const paymentMethod = paymentMethodsByAccount[String(account.type).toLowerCase()]
-      const hasAction = ['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment'].some(key => req.user?.permissions?.includes(key))
+      const hasAction = ['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment', 'canRecordPropertySalePayment'].some(key => req.user?.permissions?.includes(key))
       return hasAction && paymentMethod && canUseTransactionAccountForPayment(req, account, paymentMethod) ? [{ id: account.id, name: account.name, type: account.type, balance: account.balance, currency: account.currency, paymentMethod }] : []
     })
     res.json({ accounts: permitted, defaultCashAccountId: req.userCashAccountId || req.user?.cashAccountId || null })
@@ -140,7 +170,7 @@ router.get('/payables/owners', requirePermission('canViewPayable'), async (req, 
         WHERE charge."tenantId" = ${tenantId} AND property."tenantId" = ${tenantId}
           AND property."ownerId" IS NOT NULL AND charge."status" IN ('unpaid', 'partial', 'overdue', 'paid')
         GROUP BY property."ownerId"`,
-      prisma.propertyOwnerPayout.groupBy({ by: ['ownerId'], where: { tenantId, status: 'posted' }, _sum: { amount: true } }),
+      prisma.propertyOwnerPayout.groupBy({ by: ['ownerId'], where: { tenantId, payoutType: 'rent', status: 'posted' }, _sum: { amount: true } }),
     ])
     const rentByOwner = new Map(rentTotals.map(row => [row.ownerId, Number(row.rentAccrued || 0)]))
     const paidByOwner = new Map(payoutTotals.map(row => [row.ownerId, Number(row._sum.amount || 0)]))
@@ -150,6 +180,20 @@ router.get('/payables/owners', requirePermission('canViewPayable'), async (req, 
       return { id: owner.id, name: owner.name, email: owner.email, phone: owner.phone, isActive: owner.isActive, propertyCount: owner._count.properties, rentAccrued: money(rentAccrued), paid: money(paid), balance: money(rentAccrued - paid) }
     }).filter(owner => owner.isActive || Math.abs(owner.balance) >= 0.01))
   } catch (error) { console.error('Load property payables failed:', error); res.status(500).json({ error: 'Could not load landlord payables.' }) }
+})
+
+router.get('/sale-payables/owners', requireAnyPermission(['canRecordOwnerPayout', 'canViewPropertySales']), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const owners = await prisma.propertyOwner.findMany({ where: { tenantId, propertySales: { some: { status: 'active', saleMode: 'brokered' } } }, orderBy: { name: 'asc' }, include: { propertySales: { where: { status: 'active', saleMode: 'brokered' }, select: { salePrice: true, commissionAmount: true } } } })
+    const payouts = await prisma.propertyOwnerPayout.groupBy({ by: ['ownerId'], where: { tenantId, payoutType: 'plot_sale', status: 'posted' }, _sum: { amount: true } })
+    const paid = new Map(payouts.map(row => [row.ownerId, Number(row._sum.amount || 0)]))
+    res.json(owners.map(owner => {
+      const earned = owner.propertySales.reduce((sum, sale) => sum + Number(sale.salePrice) - Number(sale.commissionAmount), 0)
+      const settled = paid.get(owner.id) || 0
+      return { id: owner.id, name: owner.name, payable: money(earned), paid: money(settled), balance: money(earned - settled) }
+    }).filter(row => row.balance > 0.01))
+  } catch (error) { console.error('Load plot sale owner payables failed:', error); res.status(500).json({ error: 'Could not load landlord plot sale payables.' }) }
 })
 
 router.post('/owners', requirePermission('canManagePropertyOwners'), async (req, res) => {
@@ -170,7 +214,7 @@ router.put('/owners/:id', requirePermission('canManagePropertyOwners'), async (r
   } catch (error) { console.error('Update property owner failed:', error); res.status(500).json({ error: 'Could not update owner.' }) }
 })
 
-router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
+router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertySales']), async (req, res) => {
   try {
     const properties = await prisma.managedProperty.findMany({ where: { tenantId: tenantIdOf(req), ...(req.query.ownerId ? { ownerId: String(req.query.ownerId) } : {}), ...(req.query.status ? { status: String(req.query.status) } : {}) }, take: pageSize(req.query.limit), orderBy: { name: 'asc' }, include: { owner: true, units: { orderBy: { unitCode: 'asc' }, include: { _count: { select: { tenancies: true } }, tenancies: { where: { status: 'active' }, take: 1, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true } } } } } } } })
     res.json(properties.map(property => ({ ...property, units: property.units.map(unit => ({ ...unit, currentBalance: money(unit.tenancies[0]?.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0) || 0), tenancies: undefined })) })))
@@ -206,9 +250,38 @@ router.post('/properties/:id/units', requirePermission('canManagePropertyUnits')
   try {
     const property = await prisma.managedProperty.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { tenant: { select: { currency: true } } } })
     if (!property) return res.status(404).json({ error: 'Property not found.' })
-    const unit = await prisma.propertyUnit.create({ data: { propertyId: property.id, unitCode, unitType: req.body.unitType?.trim() || null, bedrooms: req.body.bedrooms == null ? null : Number(req.body.bedrooms), bathrooms: req.body.bathrooms == null ? null : Number(req.body.bathrooms), rentAmount: money(rentAmount), currency: property.tenant.currency || 'UGX', notes: req.body.notes?.trim() || null } })
+    const acquisitionCost = money(req.body?.acquisitionCost)
+    if (acquisitionCost < 0 || !Number.isFinite(acquisitionCost)) return badRequest(res, 'Enter a valid non-negative acquisition cost.')
+    if (acquisitionCost > 0 && !req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canManagePropertyLandInventory')) return res.status(403).json({ error: 'You need permission to record owned plot inventory and its cost.' })
+    if (acquisitionCost > 0 && String(property.propertyType).toLowerCase() !== 'land') return badRequest(res, 'Acquisition cost is only supported for a land/plot property. Keep rent units separate from land inventory.')
+    const unit = await prisma.$transaction(async tx => {
+      const created = await tx.propertyUnit.create({ data: { propertyId: property.id, unitCode, unitType: req.body.unitType?.trim() || null, bedrooms: req.body.bedrooms == null ? null : Number(req.body.bedrooms), bathrooms: req.body.bathrooms == null ? null : Number(req.body.bathrooms), rentAmount: money(rentAmount), acquisitionCost, currency: property.tenant.currency || 'UGX', notes: req.body.notes?.trim() || null } })
+      if (acquisitionCost > 0) {
+        const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
+        await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_LAND_ACQUISITION', sourceId: created.id, reference: `LAND-${created.unitCode}`, description: `Initial owned plot inventory recorded: ${property.name} / ${created.unitCode}`, lines: propertyLandAcquisitionLines(config, { amount: acquisitionCost, reference: created.unitCode }) })
+      }
+      return created
+    })
     res.status(201).json(unit)
   } catch (error) { if (error.code === 'P2002') return res.status(409).json({ error: 'That unit code already exists in this property.' }); console.error('Create property unit failed:', error); res.status(500).json({ error: 'Could not save unit.' }) }
+})
+
+router.put('/units/:id/acquisition-cost', requirePermission('canManagePropertyLandInventory'), async (req, res) => {
+  const acquisitionCost = money(req.body?.acquisitionCost)
+  if (!(acquisitionCost > 0) || !Number.isFinite(acquisitionCost)) return badRequest(res, 'Enter an acquisition cost greater than zero.')
+  try {
+    const result = await prisma.$transaction(async tx => {
+      const unit = await tx.propertyUnit.findFirst({ where: { id: req.params.id, property: { tenantId: tenantIdOf(req), propertyType: 'land', ownerId: null } }, include: { property: true } })
+      if (!unit) throw Object.assign(new Error('Owned land plot not found.'), { statusCode: 404 })
+      const saleCount = await tx.propertySale.count({ where: { unitId: unit.id } })
+      if (unit.status === 'sold' || saleCount) throw Object.assign(new Error('The plot has a sale history; its acquisition cost is locked to protect the posted books.'), { statusCode: 409 })
+      if (unit.acquisitionCost > 0) throw Object.assign(new Error('Acquisition cost is already recorded. Use an accounting adjustment with approval; do not overwrite the cost basis.'), { statusCode: 409 })
+      const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
+      await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_LAND_ACQUISITION', sourceId: unit.id, reference: `LAND-${unit.unitCode}`, description: `Initial owned plot inventory recorded: ${unit.property.name} / ${unit.unitCode}`, lines: propertyLandAcquisitionLines(config, { amount: acquisitionCost, reference: unit.unitCode }) })
+      return tx.propertyUnit.update({ where: { id: unit.id }, data: { acquisitionCost } })
+    })
+    res.json(result)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record plot acquisition cost failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record plot cost.' : error.message }) }
 })
 
 router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req, res) => {
@@ -222,13 +295,14 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
   } catch (error) { console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
 })
 
-router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements']), async (req, res) => {
+router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies']), async (req, res) => {
   try {
     const where = { tenantId: tenantIdOf(req), ...(req.query.status && req.query.status !== 'all' ? { status: String(req.query.status) } : {}), ...(req.query.ownerId ? { unit: { property: { ownerId: String(req.query.ownerId) } } } : {}) }
     const rows = await prisma.propertyTenancy.findMany({ where, take: pageSize(req.query.limit), orderBy: [{ status: 'asc' }, { tenantName: 'asc' }], include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: { dueDate: 'asc' } } } })
     res.json(rows.map(row => {
-      const { nationalId, ...details } = row
-      return { ...details, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), balance: money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance: money(row.charges.filter(charge => charge.dueDate < new Date()).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)) }
+      const { nationalId, maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin, ...details } = row
+      const aging = calculateRentAging(row.charges)
+      return { ...details, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), ...(canViewTenantPersonalDetails(req) ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance: money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance: aging.overdueTotal, arrearsAging: aging }
     }))
   } catch (error) { console.error('List property tenancies failed:', error); res.status(500).json({ error: 'Could not load tenancies.' }) }
 })
@@ -243,7 +317,9 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
   const depositHeld = Number(req.body?.depositHeld || 0)
   const endDate = req.body?.endDate ? new Date(req.body.endDate) : null
   if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (endDate && (!Number.isFinite(endDate.getTime()) || endDate < startDate)) || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return badRequest(res, 'Enter a tenant, valid unit and agreement dates, positive monthly rent, deposits where amount already held does not exceed deposit required, and due day (1–31).')
+  if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage renter household details.' })
   try {
+    const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
     const identity = await uploadRenterIdentity(req)
     const unit = await prisma.propertyUnit.findFirst({ where: { id: req.body.unitId, property: { tenantId: tenantIdOf(req), status: 'active' } } })
     if (!unit) return res.status(404).json({ error: 'Unit not found in this business.' })
@@ -256,7 +332,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
         : await findOrCreateRenterCustomer(tx, tenantIdOf(req), req.body)
       if (!customer) throw Object.assign(new Error('Select a tenant from this business, or create a new tenant.'), { statusCode: 400 })
       const renterName = customer.name
-      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName: renterName, email: customer.email || req.body.email?.trim() || null, phone: customer.phone || req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || customer.nin || null, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
+      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName: renterName, email: customer.email || req.body.email?.trim() || null, phone: customer.phone || req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || customer.nin || null, ...personalDetails, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
       if (Object.values(identity).some(Boolean)) await tx.propertyTenantIdentity.create({ data: { tenantId: tenantIdOf(req), tenancyId: tenancy.id, profilePhotoUrl: identity.profilePhoto, nationalIdFrontUrl: identity.nationalIdFront, nationalIdBackUrl: identity.nationalIdBack } })
       if (depositHeld > 0) {
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
@@ -303,6 +379,56 @@ router.put('/tenancies/:id/profile', identityUpload.fields([{ name: 'profilePhot
   } catch (error) { console.error('Update renter profile failed:', error); res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Could not update tenant profile.' }) }
 })
 
+router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canManageTenantPersonalDetails']), async (req, res) => {
+  try {
+    const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) } })
+    if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
+    const canManageTenancy = ['*', 'canManageTenancies'].some(permission => req.user?.permissions?.includes(permission))
+    if (!canManageTenancy && Object.keys(req.body).some(field => !TENANT_PERSONAL_FIELDS.includes(field))) return res.status(403).json({ error: 'You may update renter household details only.' })
+    if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined) && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage renter household details.' })
+    const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
+
+    const tenantName = req.body.tenantName === undefined ? undefined : String(req.body.tenantName).trim()
+    const phone = req.body.phone === undefined ? undefined : String(req.body.phone).trim() || null
+    const email = req.body.email === undefined ? undefined : String(req.body.email).trim() || null
+    const dueDay = req.body.dueDay === undefined ? undefined : Number(req.body.dueDay)
+    const rentAmount = req.body.rentAmount === undefined ? undefined : Number(req.body.rentAmount)
+    const depositRequired = req.body.depositRequired === undefined ? undefined : Number(req.body.depositRequired)
+    if (tenantName !== undefined && !tenantName) return badRequest(res, 'Tenant name is required.')
+    if (dueDay !== undefined && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) return badRequest(res, 'Rent due day must be between 1 and 31.')
+    if (rentAmount !== undefined && (!Number.isFinite(rentAmount) || rentAmount <= 0)) return badRequest(res, 'Monthly rent must be greater than zero.')
+    if (depositRequired !== undefined && (!Number.isFinite(depositRequired) || depositRequired < 0)) return badRequest(res, 'Required deposit cannot be negative.')
+
+    const data = {
+      ...(tenantName !== undefined ? { tenantName } : {}),
+      ...(phone !== undefined ? { phone } : {}),
+      ...(email !== undefined ? { email } : {}),
+      ...(req.body.agreementRef !== undefined ? { agreementRef: String(req.body.agreementRef).trim() || null } : {}),
+      ...(req.body.agreementNotes !== undefined ? { agreementNotes: String(req.body.agreementNotes).trim() || null } : {}),
+      ...personalDetails,
+      ...(dueDay !== undefined ? { dueDay } : {}),
+      ...(rentAmount !== undefined ? { rentAmount: money(rentAmount) } : {}),
+      ...(depositRequired !== undefined ? { depositRequired: money(depositRequired) } : {}),
+    }
+    const updated = await prisma.$transaction(async tx => {
+      if (tenancy.customerId && (tenantName !== undefined || phone !== undefined || email !== undefined)) {
+        await tx.customer.updateMany({ where: { id: tenancy.customerId, tenantId: tenantIdOf(req) }, data: {
+          ...(tenantName !== undefined ? { name: tenantName } : {}),
+          ...(phone !== undefined ? { phone } : {}),
+          ...(email !== undefined ? { email } : {}),
+        } })
+        await tx.propertyTenancy.updateMany({ where: { tenantId: tenantIdOf(req), customerId: tenancy.customerId }, data: {
+          ...(tenantName !== undefined ? { tenantName } : {}),
+          ...(phone !== undefined ? { phone } : {}),
+          ...(email !== undefined ? { email } : {}),
+        } })
+      }
+      return tx.propertyTenancy.update({ where: { id: tenancy.id }, data, include: { unit: { include: { property: true } } } })
+    })
+    res.json(updated)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Update tenancy failed:', error); res.status(status).json({ error: status === 500 ? 'Could not update tenancy details.' : error.message }) }
+})
+
 router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPropertyStatements'), async (req, res) => {
   try {
     const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId: tenantIdOf(req) } })
@@ -327,6 +453,8 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
       },
     })
     const includeIdentity = canViewCustomerIdentity(req)
+    const includePersonalDetails = canViewTenantPersonalDetails(req)
+    const allCharges = tenancies.flatMap(row => row.charges)
     const entries = tenancies.flatMap(tenancy => [
       ...tenancy.charges.map(charge => ({ id: charge.id, tenancyId: tenancy.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: `${charge.description} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: charge.amount, credit: 0, status: charge.status })),
       ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: 'rent_payment', reference: payment.receiptNo, description: `Rent payment · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
@@ -337,14 +465,32 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
     res.json({
       customer: { id: customer.id, name: customer.name, ...(includeIdentity ? { profilePhotoUrl: identity?.profilePhotoUrl, nationalId: customer.nin, nationalIdFrontUrl: identity?.nationalIdFrontUrl, nationalIdBackUrl: identity?.nationalIdBackUrl } : {}) },
       tenancies: tenancies.map(({ charges, payments, identity: _identity, ...tenancy }) => {
-        const { nationalId, ...details } = tenancy
-        return { ...details, ...(includeIdentity ? { nationalId } : {}), balance: money(charges.reduce((sum, charge) => sum + charge.amount - charge.amountPaid, 0)) }
+        const { nationalId, maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin, ...details } = tenancy
+        return { ...details, ...(includeIdentity ? { nationalId } : {}), ...(includePersonalDetails ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance: money(charges.reduce((sum, charge) => sum + charge.amount - charge.amountPaid, 0)), arrearsAging: calculateRentAging(charges) }
       }),
       entries,
       closingBalance: balance,
-      access: { identity: includeIdentity },
+      arrearsAging: calculateRentAging(allCharges),
+      access: { identity: includeIdentity, personalDetails: includePersonalDetails, managePersonalDetails: canManageTenantPersonalDetails(req) },
     })
   } catch (error) { console.error('Load renter ledger failed:', error); res.status(500).json({ error: 'Could not load rental history.' }) }
+})
+
+router.get('/customers/:customerId/household', requireAnyPermission(['canViewTenantPersonalDetails', 'canManageTenantPersonalDetails']), async (req, res) => {
+  try {
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId: tenantIdOf(req) }, select: { id: true } })
+    if (!customer) return res.status(404).json({ error: 'Customer not found.' })
+    const tenancies = await prisma.propertyTenancy.findMany({
+      where: { tenantId: tenantIdOf(req), customerId: customer.id },
+      orderBy: { startDate: 'desc' },
+      select: {
+        id: true, maritalStatus: true, spouseNames: true, childrenCount: true, householdSize: true, placeOfOrigin: true,
+        status: true, startDate: true, endDate: true, agreementRef: true,
+        unit: { select: { unitCode: true, property: { select: { name: true } } } },
+      },
+    })
+    res.json({ tenancies })
+  } catch (error) { console.error('Load renter household details failed:', error); res.status(500).json({ error: 'Could not load renter household details.' }) }
 })
 
 router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canManageTenancies']), async (req, res) => {
@@ -493,7 +639,7 @@ router.get('/reports', requirePermission('canViewPropertyReports'), async (req, 
       prisma.rentCharge.findMany({ where: { tenantId, dueDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: true }, orderBy: { dueDate: 'asc' } }),
       prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } } }, orderBy: { paymentDate: 'asc' } }),
       prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active', ...(ownerId ? { unit: { property: { ownerId } } } : {}) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } }),
-      prisma.propertyOwnerPayout.findMany({ where: { tenantId, status: 'posted', payoutDate: { gte: from, lte: to }, ...(ownerId ? { ownerId } : {}) }, include: { owner: true, cashAccount: { select: { name: true } } }, orderBy: { payoutDate: 'asc' } }),
+      prisma.propertyOwnerPayout.findMany({ where: { tenantId, payoutType: 'rent', status: 'posted', payoutDate: { gte: from, lte: to }, ...(ownerId ? { ownerId } : {}) }, include: { owner: true, cashAccount: { select: { name: true } } }, orderBy: { payoutDate: 'asc' } }),
     ])
     const arrears = tenancies.map(tenancy => {
       const due = tenancy.charges.filter(charge => charge.dueDate < new Date())
@@ -618,7 +764,7 @@ router.post('/owners/:id/payouts', requirePermission('canRecordOwnerPayout'), as
       if (!owner) throw Object.assign(new Error('Property owner not found.'), { statusCode: 404 })
       const [received, paid, config] = await Promise.all([
         tx.propertyRentPayment.aggregate({ where: { tenantId, status: 'posted', paymentType: 'rent', tenancy: { unit: { property: { ownerId: owner.id } } } }, _sum: { amount: true } }),
-        tx.propertyOwnerPayout.aggregate({ where: { tenantId, ownerId: owner.id, status: 'posted' }, _sum: { amount: true } }),
+        tx.propertyOwnerPayout.aggregate({ where: { tenantId, ownerId: owner.id, payoutType: 'rent', status: 'posted' }, _sum: { amount: true } }),
         ensurePropertyAccounting(tx, tenantId),
       ])
       const available = money(Number(received._sum.amount || 0) - Number(paid._sum.amount || 0))
@@ -631,6 +777,263 @@ router.post('/owners/:id/payouts', requirePermission('canRecordOwnerPayout'), as
     })
     res.status(201).json(payout)
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record owner payout failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record owner payout.' : error.message }) }
+})
+
+router.post('/owners/:id/sale-payouts', requirePermission('canRecordOwnerPayout'), async (req, res) => {
+  const amount = money(req.body?.amount), method = String(req.body?.paymentMethod || 'cash').toLowerCase(), cashAccountId = String(req.body?.cashAccountId || '')
+  if (!(amount > 0) || !cashAccountId || !Object.hasOwn(paymentMethodToAccount, method)) return badRequest(res, 'Enter a positive payout and select a permitted payment account.')
+  const payoutDate = req.body?.payoutDate ? new Date(req.body.payoutDate) : new Date(), idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
+  if (!Number.isFinite(payoutDate.getTime())) return badRequest(res, 'Enter a valid payout date.')
+  try {
+    const tenantId = tenantIdOf(req), account = await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+    if (!account || account.type !== paymentMethodToAccount[method]) return badRequest(res, 'The selected account does not match this payment method.')
+    if (!canUseTransactionAccountForPayment(req, account, method)) return res.status(403).json({ error: `You do not have permission to use ${account.name}.` })
+    const payout = await prisma.$transaction(async tx => {
+      const prior = await tx.propertyOwnerPayout.findFirst({ where: { tenantId, idempotencyKey } })
+      if (prior) return prior
+      const owner = await tx.propertyOwner.findFirst({ where: { id: req.params.id, tenantId, isActive: true }, include: { propertySales: { where: { status: 'active', saleMode: 'brokered' }, select: { salePrice: true, commissionAmount: true } } } })
+      if (!owner) throw Object.assign(new Error('Active property owner not found.'), { statusCode: 404 })
+      const paid = await tx.propertyOwnerPayout.aggregate({ where: { tenantId, ownerId: owner.id, payoutType: 'plot_sale', status: 'posted' }, _sum: { amount: true } })
+      const earned = owner.propertySales.reduce((sum, sale) => sum + Number(sale.salePrice) - Number(sale.commissionAmount), 0)
+      const available = money(earned - Number(paid._sum.amount || 0))
+      if (amount - available > 0.01) throw Object.assign(new Error(`Payout exceeds unpaid plot sale proceeds of ${available.toLocaleString()}.`), { statusCode: 409 })
+      const reference = `LAND-OWN-${Date.now()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`
+      const record = await tx.propertyOwnerPayout.create({ data: { tenantId, ownerId: owner.id, cashAccountId: account.id, amount, payoutDate, payoutType: 'plot_sale', reference, notes: req.body?.notes?.trim() || null, idempotencyKey, createdById: req.user.id } })
+      const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: account, amount, direction: 'expense', reference, description: `Landlord plot sale proceeds paid to ${owner.name}` })
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_PLOT_OWNER_PAYOUT', sourceId: record.id, date: payoutDate, reference, description: `Landlord plot sale proceeds paid to ${owner.name}`, lines: propertySaleOwnerPayoutLines(config, { amount, cashAccountLedgerId: movement.ledgerAccount.id, reference }) })
+      return record
+    })
+    res.status(201).json(payout)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record plot sale owner payout failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record plot sale payout.' : error.message }) }
+})
+
+const propertySaleInclude = {
+  property: { include: { owner: true } },
+  unit: true,
+  buyer: { select: { id: true, name: true, phone: true, email: true, balance: true, creditLimit: true } },
+  owner: true,
+  installments: { orderBy: { sequence: 'asc' } },
+  payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, allocations: true } },
+}
+
+router.get('/sale-buyers', requirePermission('canViewPropertySales'), async (req, res) => {
+  try {
+    const buyers = await prisma.customer.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, take: 500, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true, balance: true, creditLimit: true } })
+    res.json(buyers)
+  } catch (error) { console.error('Load plot sale buyers failed:', error); res.status(500).json({ error: 'Could not load buyer accounts.' }) }
+})
+
+router.get('/sales', requirePermission('canViewPropertySales'), async (req, res) => {
+  try {
+    const rows = await prisma.propertySale.findMany({ where: { tenantId: tenantIdOf(req), ...(req.query.status ? { status: String(req.query.status) } : {}) }, take: pageSize(req.query.limit), orderBy: { saleDate: 'desc' }, include: propertySaleInclude })
+    res.json(rows.map(row => ({ ...row, amountPaid: money(row.payments.reduce((sum, payment) => sum + payment.amount, 0)), balance: money(row.salePrice - row.payments.reduce((sum, payment) => sum + payment.amount, 0)) })))
+  } catch (error) { console.error('List plot sales failed:', error); res.status(500).json({ error: 'Could not load plot sales.' }) }
+})
+
+router.post('/sales', requirePermission('canCreatePropertySale'), async (req, res) => {
+  const salePrice = money(req.body?.salePrice)
+  const commissionAmount = money(req.body?.commissionAmount)
+  const paymentPlan = String(req.body?.paymentPlan || 'full').toLowerCase()
+  const installmentCount = paymentPlan === 'full' ? 1 : Number.parseInt(req.body?.installmentCount, 10)
+  const frequency = String(req.body?.installmentFrequency || 'monthly').toLowerCase()
+  const saleDate = req.body?.saleDate ? new Date(req.body.saleDate) : new Date()
+  const allowedFrequency = new Set(['weekly', 'monthly', 'quarterly'])
+  if (!(salePrice > 0) || !Number.isFinite(salePrice) || commissionAmount < 0 || !Number.isFinite(commissionAmount)) return badRequest(res, 'Enter a sale price greater than zero and a valid commission.')
+  if (!['full', 'installments'].includes(paymentPlan) || !Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 120 || !allowedFrequency.has(frequency)) return badRequest(res, 'Choose a valid payment plan, installment count, and frequency.')
+  if (paymentPlan === 'full' && installmentCount !== 1) return badRequest(res, 'A full-payment sale has one due amount.')
+  if (!Number.isFinite(saleDate.getTime())) return badRequest(res, 'Enter a valid sale date.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const buyerId = String(req.body?.buyerId || '')
+    const unitId = String(req.body?.unitId || '')
+    let initialCashAccount = null
+    const initialPaymentMethod = String(req.body?.paymentMethod || '').toLowerCase()
+    if (paymentPlan === 'full') {
+      if (!req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canRecordPropertySalePayment')) throw Object.assign(new Error('Full-payment sale requires permission to record the buyer’s payment. Use an installment contract if another authorized user will collect later.'), { statusCode: 403 })
+      const cashAccountId = String(req.body?.cashAccountId || '')
+      if (!Object.hasOwn(paymentMethodToAccount, initialPaymentMethod) || !cashAccountId) throw Object.assign(new Error('Choose the transaction account and payment method for this full-payment sale.'), { statusCode: 400 })
+      initialCashAccount = await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+      if (!initialCashAccount || initialCashAccount.type !== paymentMethodToAccount[initialPaymentMethod]) throw Object.assign(new Error('The selected account does not match the full-payment method.'), { statusCode: 400 })
+      if (!canUseTransactionAccountForPayment(req, initialCashAccount, initialPaymentMethod)) throw Object.assign(new Error(`You do not have permission to use ${initialCashAccount.name}.`), { statusCode: 403 })
+    }
+    const created = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "property_units" WHERE "id" = ${unitId} FOR UPDATE`
+      const [buyer, unit] = await Promise.all([
+        tx.customer.findFirst({ where: { id: buyerId, tenantId } }),
+        tx.propertyUnit.findFirst({ where: { id: unitId, property: { tenantId, propertyType: 'land', status: 'active' } }, include: { property: { include: { owner: true } } } }),
+      ])
+      if (!buyer) throw Object.assign(new Error('Select a buyer/customer belonging to this business.'), { statusCode: 400 })
+      if (!unit) throw Object.assign(new Error('Select an available plot in this business.'), { statusCode: 400 })
+      if (!['vacant', 'available'].includes(String(unit.status).toLowerCase())) throw Object.assign(new Error('This plot is not available; it may already be sold, reserved, or occupied.'), { statusCode: 409 })
+      if (unit.property.ownerId && !unit.property.owner?.isActive) throw Object.assign(new Error('The plot owner is inactive; reactivate or replace the owner before sale.'), { statusCode: 409 })
+      const saleMode = unit.property.ownerId ? 'brokered' : 'principal'
+      if (saleMode === 'brokered' && commissionAmount > salePrice) throw Object.assign(new Error('Commission cannot exceed the plot sale price.'), { statusCode: 400 })
+      if (saleMode === 'principal' && commissionAmount !== 0) throw Object.assign(new Error('Commission is only entered for a landlord-owned, brokered plot.'), { statusCode: 400 })
+      if (saleMode === 'principal' && !(Number(unit.acquisitionCost) > 0)) throw Object.assign(new Error('This owned plot has no recorded acquisition cost. Record its cost basis before selling.'), { statusCode: 409 })
+      if (paymentPlan === 'installments' && (!(Number(buyer.creditLimit) > 0) || Number(buyer.balance) + salePrice - Number(buyer.creditLimit) > 0.01)) throw Object.assign(new Error('This customer does not have enough available credit for the agreed plot sale. Set or review their credit limit first.'), { statusCode: 409 })
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      const saleNo = `PLOT-${new Date().getUTCFullYear()}-${Date.now().toString().slice(-8)}`
+      const installments = []
+      let allocated = 0
+      for (let sequence = 1; sequence <= installmentCount; sequence += 1) {
+        const amount = sequence === installmentCount ? money(salePrice - allocated) : money(salePrice / installmentCount)
+        allocated = money(allocated + amount)
+        const dueDate = new Date(saleDate)
+        if (sequence > 1) {
+          const offset = sequence - 1
+          if (frequency === 'weekly') dueDate.setUTCDate(dueDate.getUTCDate() + offset * 7)
+          else {
+            const originalDay = dueDate.getUTCDate()
+            dueDate.setUTCDate(1)
+            dueDate.setUTCMonth(dueDate.getUTCMonth() + offset * (frequency === 'quarterly' ? 3 : 1))
+            const lastDay = new Date(Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth() + 1, 0)).getUTCDate()
+            dueDate.setUTCDate(Math.min(originalDay, lastDay))
+          }
+        }
+        installments.push({ tenantId, sequence, dueDate, amount, status: 'unpaid' })
+      }
+      const sale = await tx.propertySale.create({ data: {
+        tenantId, propertyId: unit.propertyId, unitId: unit.id, buyerId, ownerId: unit.property.ownerId,
+        createdById: req.user.id, saleNo, saleMode, salePrice, commissionAmount,
+        costBasis: saleMode === 'principal' ? unit.acquisitionCost : 0,
+        paymentPlan, installmentCount, installmentFrequency: frequency, saleDate,
+        notes: String(req.body?.notes || '').trim() || null,
+        installments: { create: installments },
+      } })
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_PLOT_SALE', sourceId: sale.id, date: saleDate, reference: saleNo, description: `${saleMode === 'brokered' ? 'Brokered' : 'Owned'} plot sale to ${buyer.name}`, lines: propertySaleRecognitionLines(config, { amount: salePrice, commission: commissionAmount, costBasis: sale.costBasis, saleMode, buyerName: buyer.name, reference: saleNo }) })
+      await tx.customer.update({ where: { id: buyer.id }, data: { balance: { increment: salePrice } } })
+      let initialPaymentId = null
+      if (paymentPlan === 'full' && initialCashAccount) {
+        const receiptNo = `PLOT-RCPT-${Date.now()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`
+        const payment = await tx.propertySalePayment.create({ data: { tenantId, saleId: sale.id, cashAccountId: initialCashAccount.id, createdById: req.user.id, receiptNo, idempotencyKey: randomUUID(), amount: salePrice, paymentDate: saleDate, paymentMethod: initialPaymentMethod } })
+        const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: initialCashAccount, amount: salePrice, direction: 'receipt', reference: receiptNo, description: `Full plot sale payment from ${buyer.name} (${saleNo})` })
+        await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_PLOT_SALE_PAYMENT', sourceId: payment.id, date: saleDate, reference: receiptNo, description: `Full plot sale payment received from ${buyer.name}`, lines: propertySalePaymentLines(config, { amount: salePrice, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo }) })
+        const installment = await tx.propertySaleInstallment.findFirst({ where: { saleId: sale.id, sequence: 1 } })
+        await tx.propertySalePaymentAllocation.create({ data: { paymentId: payment.id, installmentId: installment.id, amount: salePrice } })
+        await tx.propertySaleInstallment.update({ where: { id: installment.id }, data: { amountPaid: salePrice, status: 'paid' } })
+        await tx.customer.update({ where: { id: buyer.id }, data: { balance: { decrement: salePrice } } })
+        initialPaymentId = payment.id
+      }
+      await tx.propertyUnit.update({ where: { id: unit.id }, data: { status: 'sold' } })
+      const result = await tx.propertySale.findUnique({ where: { id: sale.id }, include: propertySaleInclude })
+      return { ...result, initialPaymentId }
+    })
+    res.status(201).json({ ...created, amountPaid: paymentPlan === 'full' ? salePrice : 0, balance: paymentPlan === 'full' ? 0 : salePrice })
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create plot sale failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create plot sale.' : error.message }) }
+})
+
+router.post('/sales/:id/payments', requirePermission('canRecordPropertySalePayment'), async (req, res) => {
+  const amount = money(req.body?.amount)
+  const method = String(req.body?.paymentMethod || 'cash').toLowerCase()
+  const cashAccountId = String(req.body?.cashAccountId || '')
+  const paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date()
+  if (!(amount > 0) || !Number.isFinite(amount)) return badRequest(res, 'Enter a payment greater than zero.')
+  if (!Object.hasOwn(paymentMethodToAccount, method) || !cashAccountId) return badRequest(res, 'Select a supported payment method and transaction account.')
+  if (!Number.isFinite(paymentDate.getTime())) return badRequest(res, 'Enter a valid payment date.')
+  const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
+  try {
+    const tenantId = tenantIdOf(req)
+    const account = await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+    if (!account || account.type !== paymentMethodToAccount[method]) return badRequest(res, 'The selected transaction account does not match this payment method or is inactive.')
+    if (!canUseTransactionAccountForPayment(req, account, method)) return res.status(403).json({ error: `You do not have permission to use ${account.name} for plot sale payments.` })
+    const payment = await prisma.$transaction(async tx => {
+      const duplicate = await tx.propertySalePayment.findFirst({ where: { tenantId, idempotencyKey }, include: { sale: { include: propertySaleInclude } } })
+      if (duplicate) return duplicate
+      await tx.$queryRaw`SELECT "id" FROM "property_sales" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const sale = await tx.propertySale.findFirst({ where: { id: req.params.id, tenantId, status: 'active' }, include: { installments: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: [{ dueDate: 'asc' }, { sequence: 'asc' }] }, buyer: true } })
+      if (!sale) throw Object.assign(new Error('Active plot sale not found.'), { statusCode: 404 })
+      const open = money(sale.installments.reduce((sum, row) => sum + Math.max(0, row.amount - row.amountPaid), 0))
+      if (amount - open > 0.01) throw Object.assign(new Error(`Payment exceeds the remaining sale balance of ${open.toLocaleString()}.`), { statusCode: 400 })
+      const cash = await tx.cashAccount.findFirst({ where: { id: account.id, tenantId, isActive: true } })
+      if (!cash) throw Object.assign(new Error('Transaction account is no longer active.'), { statusCode: 409 })
+      const receiptNo = `PLOT-RCPT-${Date.now()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`
+      const record = await tx.propertySalePayment.create({ data: { tenantId, saleId: sale.id, cashAccountId: cash.id, createdById: req.user.id, receiptNo, idempotencyKey, amount, paymentDate, paymentMethod: method, transactionRef: String(req.body?.transactionRef || '').trim() || null, notes: String(req.body?.notes || '').trim() || null } })
+      const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: cash, amount, direction: 'receipt', reference: receiptNo, description: `Plot sale installment from ${sale.buyer.name} (${sale.saleNo})` })
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_PLOT_SALE_PAYMENT', sourceId: record.id, date: paymentDate, reference: receiptNo, description: `Plot sale payment received from ${sale.buyer.name}`, lines: propertySalePaymentLines(config, { amount, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo }) })
+      let remaining = amount
+      for (const installment of sale.installments) {
+        if (remaining <= 0.001) break
+        const due = money(Math.max(0, installment.amount - installment.amountPaid))
+        const applied = money(Math.min(remaining, due))
+        if (!applied) continue
+        const nextPaid = money(installment.amountPaid + applied)
+        await tx.propertySalePaymentAllocation.create({ data: { paymentId: record.id, installmentId: installment.id, amount: applied } })
+        await tx.propertySaleInstallment.update({ where: { id: installment.id }, data: { amountPaid: nextPaid, status: nextPaid + 0.001 >= installment.amount ? 'paid' : 'partial' } })
+        remaining = money(remaining - applied)
+      }
+      await tx.customer.update({ where: { id: sale.buyerId }, data: { balance: { decrement: amount } } })
+      return tx.propertySalePayment.findUnique({ where: { id: record.id }, include: { cashAccount: { select: { id: true, name: true, type: true } }, sale: { include: propertySaleInclude }, allocations: { include: { installment: true } } } })
+    })
+    res.status(201).json(payment)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record plot sale payment failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record plot sale payment.' : error.message }) }
+})
+
+router.get('/sales/:id/receipt', requireAnyPermission(['canViewPropertySales', 'canRecordPropertySalePayment']), async (req, res) => {
+  try {
+    const payment = await prisma.propertySalePayment.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { cashAccount: { select: { name: true, type: true } }, allocations: { include: { installment: true } }, sale: { include: propertySaleInclude } } })
+    if (!payment) return res.status(404).json({ error: 'Plot sale receipt not found.' })
+    const business = await prisma.tenant.findUnique({ where: { id: tenantIdOf(req) }, select: { name: true, address: true, phone: true, logo: true, currency: true } })
+    res.json({ receipt: payment, business })
+  } catch (error) { console.error('Plot sale receipt failed:', error); res.status(500).json({ error: 'Could not load plot sale receipt.' }) }
+})
+
+router.post('/sale-payments/:id/void', requirePermission('canVoidPropertySalePayment'), async (req, res) => {
+  const reason = String(req.body?.reason || '').trim()
+  if (reason.length < 5) return badRequest(res, 'Enter a clear reason of at least five characters.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "property_sale_payments" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const payment = await tx.propertySalePayment.findFirst({ where: { id: req.params.id, tenantId, status: 'posted' }, include: { sale: true, cashAccount: true, allocations: { include: { installment: true } } } })
+      if (!payment) throw Object.assign(new Error('Posted plot payment not found.'), { statusCode: 404 })
+      if (!payment.cashAccount) throw Object.assign(new Error('The original transaction account is unavailable; reconcile before reversing this receipt.'), { statusCode: 409 })
+      if (!canUseTransactionAccountForPayment(req, payment.cashAccount, payment.paymentMethod)) throw Object.assign(new Error(`You do not have permission to reverse funds from ${payment.cashAccount.name}.`), { statusCode: 403 })
+      await tx.propertySalePayment.update({ where: { id: payment.id }, data: { status: 'void', voidReason: reason, voidedAt: new Date() } })
+      await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: payment.cashAccount, amount: payment.amount, direction: 'expense', reference: `VOID-${payment.receiptNo}`, description: `Void plot sale receipt ${payment.receiptNo}` })
+      await reversePropertyJournal(tx, { tenantId, sourceType: 'PROPERTY_PLOT_SALE_PAYMENT', sourceId: payment.id, userId: req.user.id, reason })
+      for (const allocation of payment.allocations) {
+        const nextPaid = money(Math.max(0, allocation.installment.amountPaid - allocation.amount))
+        await tx.propertySaleInstallment.update({ where: { id: allocation.installmentId }, data: { amountPaid: nextPaid, status: nextPaid < 0.01 ? 'unpaid' : nextPaid + 0.001 >= allocation.installment.amount ? 'paid' : 'partial' } })
+      }
+      await tx.customer.update({ where: { id: payment.sale.buyerId }, data: { balance: { increment: payment.amount } } })
+      return { id: payment.id, status: 'void' }
+    })
+    res.json(result)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Void plot sale payment failed:', error); res.status(status).json({ error: status === 500 ? 'Could not reverse plot sale payment.' : error.message }) }
+})
+
+router.post('/sales/:id/cancel', requirePermission('canCancelPropertySale'), async (req, res) => {
+  const reason = String(req.body?.reason || '').trim()
+  if (reason.length < 5) return badRequest(res, 'Enter a cancellation reason of at least five characters.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "property_sales" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const sale = await tx.propertySale.findFirst({ where: { id: req.params.id, tenantId, status: 'active' }, include: { payments: { where: { status: 'posted' }, include: { cashAccount: true, allocations: { include: { installment: true } } } } } })
+      if (!sale) throw Object.assign(new Error('Active plot sale not found.'), { statusCode: 404 })
+      for (const payment of sale.payments) {
+        if (!payment.cashAccount) throw Object.assign(new Error(`Receipt ${payment.receiptNo} has no original transaction account; reconcile it before cancelling this sale.`), { statusCode: 409 })
+        if (!canUseTransactionAccountForPayment(req, payment.cashAccount, payment.paymentMethod)) throw Object.assign(new Error(`You cannot refund receipt ${payment.receiptNo} from ${payment.cashAccount.name} with your current account permissions.`), { statusCode: 403 })
+        await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: payment.cashAccount, amount: payment.amount, direction: 'expense', reference: `CANCEL-${payment.receiptNo}`, description: `Refund plot sale receipt ${payment.receiptNo}` })
+        await reversePropertyJournal(tx, { tenantId, sourceType: 'PROPERTY_PLOT_SALE_PAYMENT', sourceId: payment.id, userId: req.user.id, reason })
+        await tx.propertySalePayment.update({ where: { id: payment.id }, data: { status: 'void', voidReason: `Sale cancellation: ${reason}`, voidedAt: new Date() } })
+        await tx.customer.update({ where: { id: sale.buyerId }, data: { balance: { increment: payment.amount } } })
+        for (const allocation of payment.allocations) {
+          const nextPaid = money(Math.max(0, allocation.installment.amountPaid - allocation.amount))
+          await tx.propertySaleInstallment.update({ where: { id: allocation.installmentId }, data: { amountPaid: nextPaid, status: nextPaid < 0.01 ? 'unpaid' : nextPaid + 0.001 >= allocation.installment.amount ? 'paid' : 'partial' } })
+        }
+      }
+      await reversePropertyJournal(tx, { tenantId, sourceType: 'PROPERTY_PLOT_SALE', sourceId: sale.id, userId: req.user.id, reason })
+      await tx.customer.update({ where: { id: sale.buyerId }, data: { balance: { decrement: sale.salePrice } } })
+      await tx.propertySale.update({ where: { id: sale.id }, data: { status: 'cancelled', notes: [sale.notes, `Cancelled: ${reason}`].filter(Boolean).join('\n') } })
+      await tx.propertySaleInstallment.updateMany({ where: { saleId: sale.id }, data: { status: 'cancelled' } })
+      await tx.propertyUnit.update({ where: { id: sale.unitId }, data: { status: 'vacant' } })
+      return { id: sale.id, status: 'cancelled' }
+    })
+    res.json(result)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Cancel plot sale failed:', error); res.status(status).json({ error: status === 500 ? 'Could not cancel plot sale.' : error.message }) }
 })
 
 export default router

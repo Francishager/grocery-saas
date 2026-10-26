@@ -7,6 +7,14 @@ const roles = [
   ['ownerPayableAccountId', 'Landlord Funds Payable', 'PM-2200', 'liability', 'current_liability'],
   ['depositLiabilityAccountId', 'Tenant Security Deposits Payable', 'PM-2250', 'liability', 'current_liability'],
   ['depositOpeningEquityAccountId', 'Property Deposit Opening Balance Equity', 'PM-3900', 'equity', 'opening_balance'],
+  ['landSaleReceivableAccountId', 'Land Sale Receivable', 'PM-1220', 'asset', 'current_asset'],
+  ['landSaleRevenueAccountId', 'Land Sale Revenue', 'PM-4300', 'revenue', 'operating_revenue'],
+  ['landInventoryAccountId', 'Land Held for Sale', 'PM-1310', 'asset', 'inventory'],
+  ['landCostOfSalesAccountId', 'Land Cost of Sales', 'PM-5300', 'expense', 'cost_of_sales'],
+  ['saleCommissionRevenueAccountId', 'Property Sale Commission Revenue', 'PM-4310', 'revenue', 'operating_revenue'],
+  ['saleOwnerPayableAccountId', 'Landowner Sale Proceeds Payable', 'PM-2210', 'liability', 'current_liability'],
+  ['saleCustomerAdvanceAccountId', 'Plot Buyer Advances', 'PM-2260', 'liability', 'current_liability'],
+  ['landInventoryOpeningEquityAccountId', 'Land Inventory Opening Equity', 'PM-3910', 'equity', 'opening_balance'],
 ]
 const markerFor = role => `JibuSales property accounting role: ${role}`
 const sourceName = (type, id) => `${type}-${id}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
@@ -166,6 +174,14 @@ export function propertyOwnerPayoutLines(config, { amount, cashAccountLedgerId, 
   ]
 }
 
+export function propertySaleOwnerPayoutLines(config, { amount, cashAccountLedgerId, reference }) {
+  const value = money(amount)
+  return [
+    { accountId: config.saleOwnerPayableAccountId, debit: value, credit: 0, description: `Settle landlord plot sale proceeds ${reference}` },
+    { accountId: cashAccountLedgerId, debit: 0, credit: value, description: `Plot sale owner payout ${reference}` },
+  ]
+}
+
 export function propertyDepositRefundLines(config, { amount, cashAccountLedgerId, reference }) {
   const value = money(amount)
   return [
@@ -179,5 +195,43 @@ export function propertyOpeningDepositLines(config, { amount, reference }) {
   return [
     { accountId: config.depositOpeningEquityAccountId, debit: value, credit: 0, description: `Opening tenant deposit balance ${reference}` },
     { accountId: config.depositLiabilityAccountId, debit: 0, credit: value, description: `Tenant security deposit held at migration ${reference}` },
+  ]
+}
+
+export function propertySaleRecognitionLines(config, { amount, commission, costBasis, saleMode, buyerName, reference }) {
+  const value = money(amount)
+  const fee = money(commission)
+  const cost = money(costBasis)
+  if (saleMode === 'brokered') {
+    if (fee > value) throw Object.assign(new Error('Commission cannot exceed the agreed sale price.'), { statusCode: 400 })
+    return [
+      { accountId: config.landSaleReceivableAccountId, debit: value, credit: 0, description: `Plot sale receivable from ${buyerName} ${reference}` },
+      { accountId: config.saleOwnerPayableAccountId, debit: fee, credit: 0, description: `Agent commission earned ${reference}` },
+      { accountId: config.saleOwnerPayableAccountId, debit: 0, credit: value, description: `Net plot proceeds payable to owner ${reference}` },
+      { accountId: config.saleCommissionRevenueAccountId, debit: 0, credit: fee, description: `Property sale commission ${reference}` },
+    ]
+  }
+  if (cost <= 0) throw Object.assign(new Error('Record a positive plot acquisition cost before selling an owned plot.'), { statusCode: 409 })
+  return [
+    { accountId: config.landSaleReceivableAccountId, debit: value, credit: 0, description: `Plot sale receivable from ${buyerName} ${reference}` },
+    { accountId: config.landSaleRevenueAccountId, debit: 0, credit: value, description: `Plot sale revenue ${reference}` },
+    { accountId: config.landCostOfSalesAccountId, debit: cost, credit: 0, description: `Land cost of sale ${reference}` },
+    { accountId: config.landInventoryAccountId, debit: 0, credit: cost, description: `Land inventory relieved ${reference}` },
+  ]
+}
+
+export function propertySalePaymentLines(config, { amount, cashAccountLedgerId, reference }) {
+  const value = money(amount)
+  return [
+    { accountId: cashAccountLedgerId, debit: value, credit: 0, description: `Plot installment received ${reference}` },
+    { accountId: config.landSaleReceivableAccountId, debit: 0, credit: value, description: `Plot sale receivable settled ${reference}` },
+  ]
+}
+
+export function propertyLandAcquisitionLines(config, { amount, reference }) {
+  const value = money(amount)
+  return [
+    { accountId: config.landInventoryAccountId, debit: value, credit: 0, description: `Land acquired and held for sale ${reference}` },
+    { accountId: config.landInventoryOpeningEquityAccountId, debit: 0, credit: value, description: `Initial land inventory funding ${reference}` },
   ]
 }

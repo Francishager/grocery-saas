@@ -78,7 +78,8 @@ export function customerProfilePayload(customer, access) {
 
 export function filterCustomerHistoryRows(rows, access) {
   return rows.filter((row) => {
-    if (['receivable_sale', 'sale_payment_adjustment', 'customer_credit_application', 'pos_sale', 'customer_invoice'].includes(row.source)) return access.sales
+    if (['receivable_sale', 'sale_payment_adjustment', 'customer_credit_application', 'pos_sale', 'customer_invoice', 'property_sale'].includes(row.source)) return access.sales
+    if (row.source === 'property_sale_payment') return access.payments
     if (row.source === 'customer_payment') return access.payments
     if (row.source === 'customer_withdrawal') return access.withdrawals
     if (row.source === 'credit_note') return access.creditNotes

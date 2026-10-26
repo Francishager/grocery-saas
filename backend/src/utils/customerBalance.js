@@ -211,7 +211,7 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   if (!customerIds.length) return new Map();
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId: { in: customerIds } };
-  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications] = await Promise.all([
+  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications, propertySales, propertySalePayments] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
       select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
@@ -239,6 +239,8 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
       where: { tenantId: scope.tenantId, customerId: { in: customerIds } },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
+    client.propertySale?.findMany ? client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: { in: customerIds }, status: 'active' }, select: { id: true, buyerId: true, salePrice: true } }) : Promise.resolve([]),
+    client.propertySalePayment?.findMany ? client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: { in: customerIds }, status: 'active' } }, select: { amount: true, sale: { select: { buyerId: true } } } }) : Promise.resolve([]),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
@@ -252,6 +254,10 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   const creditReturnsMap = new Map();
   creditReturns.forEach((row) => creditReturnsMap.set(row.customerId,
     roundMoney(toMoney(creditReturnsMap.get(row.customerId)) + Math.max(0, toMoney(row.total) - toMoney(appliedByReturn.get(row.id))))));
+  const propertySaleReceivables = new Map()
+  propertySales.forEach((sale) => propertySaleReceivables.set(sale.buyerId, roundMoney(toMoney(propertySaleReceivables.get(sale.buyerId)) + toMoney(sale.salePrice))))
+  const propertySaleReceipts = new Map()
+  propertySalePayments.forEach((payment) => propertySaleReceipts.set(payment.sale.buyerId, roundMoney(toMoney(propertySaleReceipts.get(payment.sale.buyerId)) + toMoney(payment.amount))))
 
   return new Map(customerList.map((customer) => {
     const openingBalance = Math.max(0, toMoney(customer.openingBalance));
@@ -263,7 +269,9 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
     const customerWithdrawals = withdrawalsMap.get(customer.id) || 0;
     const creditNoteTotal = creditNotesMap.get(customer.id) || 0;
     const creditReturnTotal = creditReturnsMap.get(customer.id) || 0;
-    const balance = roundMoney(openingBalance + receivableSales - salePayments + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal);
+    const propertyReceivables = propertySaleReceivables.get(customer.id) || 0
+    const propertyReceipts = propertySaleReceipts.get(customer.id) || 0
+    const balance = roundMoney(openingBalance + receivableSales - salePayments + propertyReceivables - propertyReceipts + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal);
     return [customer.id, {
       customerId: customer.id,
       balance,
@@ -271,6 +279,8 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
         openingBalance,
         receivableSales,
         salePayments,
+        propertySaleReceivables: propertyReceivables,
+        propertySalePayments: propertyReceipts,
         paymentReconciliationIssues: paymentReconciliationIssuesByCustomer.get(customer.id) || [],
         customerPayments,
         customerAccountAllocations,
@@ -301,7 +311,7 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   if (!customer) return null;
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId };
-  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications] = await Promise.all([
+  const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications, propertySales, propertySalePayments] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
       select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
@@ -328,6 +338,8 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
       where: { tenantId: scope.tenantId, customerId },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
+    client.propertySale?.findMany ? client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, status: 'active' }, select: { salePrice: true } }) : Promise.resolve([]),
+    client.propertySalePayment?.findMany ? client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } }) : Promise.resolve([]),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
@@ -343,14 +355,18 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const appliedByReturn = creditApplications.filter((application) => application.sourceType === 'sale_return')
     .reduce((sum, application) => sum + toMoney(application.amount), 0);
   const creditReturnTotal = roundMoney(creditReturns.reduce((sum, row) => sum + toMoney(row.total), 0) - appliedByReturn);
+  const propertySaleReceivables = roundMoney(propertySales.reduce((sum, sale) => sum + toMoney(sale.salePrice), 0))
+  const propertySaleReceipts = roundMoney(propertySalePayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
 
   return {
     customerId,
-    balance: roundMoney(openingBalance + receivableSales - salePayments + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal),
+    balance: roundMoney(openingBalance + receivableSales - salePayments + propertySaleReceivables - propertySaleReceipts + customerWithdrawals - customerPayments - creditNoteTotal - creditReturnTotal),
     components: {
       openingBalance,
       receivableSales,
       salePayments,
+      propertySaleReceivables,
+      propertySalePayments: propertySaleReceipts,
       paymentReconciliationIssues: paymentReconciliationIssuesByCustomer.get(customerId) || [],
       customerPayments,
       customerAccountAllocations,
@@ -366,7 +382,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
   if (!scope?.tenantId || !customerId || !cutoff) return null
   const createdBefore = { createdAt: { lt: cutoff } }
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId }
-  const [customer, sales, payments, allocations, withdrawals, notes, returns, applications] = await Promise.all([
+  const [customer, sales, payments, allocations, withdrawals, notes, returns, applications, propertySales, propertySalePayments] = await Promise.all([
     client.customer.findFirst({
       where: { id: customerId, tenantId: scope.tenantId },
       select: { id: true, openingBalance: true, openingBalanceDate: true, createdAt: true },
@@ -403,6 +419,8 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
       where: { ...tenantCustomerWhere, ...createdBefore },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
+    client.propertySale?.findMany ? client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, ...createdBefore, status: 'active' }, select: { salePrice: true } }) : Promise.resolve([]),
+    client.propertySalePayment?.findMany ? client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, ...createdBefore, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } }) : Promise.resolve([]),
   ])
   if (!customer) return null
 
@@ -420,11 +438,13 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
   const openingBalanceDate = customer.openingBalanceDate || customer.createdAt
   const openingBalance = openingBalanceDate && new Date(openingBalanceDate) < cutoff ? Math.max(0, toMoney(customer.openingBalance)) : 0
   const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0) + (customerAccountAllocationsByCustomer.get(customerId) || 0))
+  const propertySaleReceivables = roundMoney(propertySales.reduce((sum, sale) => sum + toMoney(sale.salePrice), 0))
+  const propertySalePaymentsTotal = roundMoney(propertySalePayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
 
   return {
     customerId,
     balance: roundMoney(
-      openingBalance + (salesByCustomer.get(customerId) || 0) - (salePaymentsByCustomer.get(customerId) || 0) +
+      openingBalance + (salesByCustomer.get(customerId) || 0) - (salePaymentsByCustomer.get(customerId) || 0) + propertySaleReceivables - propertySalePaymentsTotal +
       toMoney(withdrawals._sum?.amount) - customerPayments - effectiveCreditNotes - creditReturns,
     ),
   }

@@ -210,6 +210,8 @@ const PERMISSION_TO_FEATURES = {
   canViewPropertyPortfolio: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyCollections: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyStatements: ['property_management.landlord', 'property_management.agent'],
+  canViewTenantPersonalDetails: ['property_management.landlord', 'property_management.agent'],
+  canManageTenantPersonalDetails: ['property_management.landlord', 'property_management.agent'],
   canManagePropertyOwners: ['property_management.landlord', 'property_management.agent'],
   canManageProperties: ['property_management.landlord', 'property_management.agent'],
   canManagePropertyUnits: ['property_management.landlord', 'property_management.agent'],
@@ -223,6 +225,12 @@ const PERMISSION_TO_FEATURES = {
   canManageRentPayment: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyReports: ['property_management.landlord', 'property_management.agent'],
   canRecordOwnerPayout: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertySales: ['property_management.agent'],
+  canCreatePropertySale: ['property_management.agent'],
+  canRecordPropertySalePayment: ['property_management.agent'],
+  canVoidPropertySalePayment: ['property_management.agent'],
+  canCancelPropertySale: ['property_management.agent'],
+  canManagePropertyLandInventory: ['property_management.agent'],
   canViewRestaurant: ['restaurant', 'restaurant.orders'],
   canCreateRestaurant: ['restaurant', 'restaurant.orders'],
   canEditRestaurant: ['restaurant', 'restaurant.orders'],
@@ -350,11 +358,12 @@ export const ALL_PERMISSION_KEYS = [
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
   "canProcessRentalReturn",
-  "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements",
+  "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
   "canCreateTenancies", "canEndTenancies", "canManageTenancies", "canRecordRentPayment", "canRecordTenantDeposit",
   "canRefundTenantDeposit", "canVoidRentPayment", "canManageRentPayment",
-  "canViewPropertyReports", "canRecordOwnerPayout",
+  "canViewPropertyReports", "canRecordOwnerPayout", "canViewPropertySales", "canCreatePropertySale",
+  "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
   // Fuel Station
@@ -933,6 +942,8 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canViewPropertyPortfolio: { name: 'View property portfolio', description: 'View landlords, properties, units, tenancy details, occupancy, and portfolio summaries.' },
   canViewPropertyCollections: { name: 'View property collections', description: 'View rent and deposit payment history and reprint payment receipts.' },
   canViewPropertyStatements: { name: 'View tenancy statements', description: 'Open and print tenant rent statements.' },
+  canViewTenantPersonalDetails: { name: 'View renter household details', description: 'View renter marital status, spouse names, children, household size, and place of origin.' },
+  canManageTenantPersonalDetails: { name: 'Manage renter household details', description: 'Record and update optional renter household details on a tenancy.' },
   canManagePropertyOwners: { name: 'Manage property owners', description: 'Create and update landlord or portfolio-owner records.' },
   canManageProperties: { name: 'Manage properties', description: 'Create and update property records and addresses.' },
   canManagePropertyUnits: { name: 'Manage rental units', description: 'Create and update units, rent terms, and availability.' },
@@ -945,6 +956,12 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canVoidRentPayment: { name: 'Void rent payments', description: 'Reverse a rent receipt with a required reason and matched cash/ledger reversal.' },
   canManageRentPayment: { name: 'Manage rent payments (legacy)', description: 'Legacy combined permission for voiding rent receipts and refunding tenant deposits.' },
   canViewPropertyReports: { name: 'View property reports', description: 'View collections, outstanding rent, arrears aging, statements, and persistent arrears.' },
+  canViewPropertySales: { name: 'View plot sales', description: 'View plot sale contracts, installment schedules, receipts, and balances.' },
+  canCreatePropertySale: { name: 'Create plot sale', description: 'Create a full-payment or installment sale for an owned or landlord-owned plot.' },
+  canRecordPropertySalePayment: { name: 'Record plot sale payment', description: 'Record and print receipts for buyer installment payments.' },
+  canVoidPropertySalePayment: { name: 'Reverse plot sale payment', description: 'Void a plot payment, reverse its cash and receivable posting, and restore the installment balance.' },
+  canCancelPropertySale: { name: 'Cancel plot sale', description: 'Cancel a plot sale with a balanced accounting reversal when no conflicting settlement exists.' },
+  canManagePropertyLandInventory: { name: 'Manage plot inventory cost', description: 'Record the cost basis of plots owned by the property business.' },
   canRecordOwnerPayout: { name: 'Record landlord payouts', description: 'Pay collected rent to property owners and record the corresponding payable and cash movement.' },
   canViewRestaurant: {
     name: 'View restaurant operations',
@@ -1164,7 +1181,7 @@ function permissionCategoryForKey(key) {
     'canCreateWithdrawal',
   ].includes(key)) return 'transactions';
   if (key.startsWith('canUse')) return 'payment_methods';
-  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('TenantPersonalDetails') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Report') || key === 'canExportReport') return 'reports';
   if (key.includes('Receipt')) return 'receipts';
   if (key.includes('Sale') || key === 'canGiveDiscount') return 'sales';

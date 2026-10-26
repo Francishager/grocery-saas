@@ -141,11 +141,14 @@ type CustomerHistoryResponse = {
 
 type RentalLedgerResponse = {
   customer: { profilePhotoUrl?: string | null; nationalId?: string | null; nationalIdFrontUrl?: string | null; nationalIdBackUrl?: string | null }
-  tenancies: Array<{ id: string; agreementRef?: string | null; status: string; startDate: string; endDate?: string | null; rentAmount: number; currency: string; balance: number; unit: { unitCode: string; property: { name: string; owner?: { name: string } | null } } }>
+  tenancies: Array<{ id: string; agreementRef?: string | null; status: string; startDate: string; endDate?: string | null; rentAmount: number; currency: string; balance: number; maritalStatus?: string | null; spouseNames?: string | null; childrenCount?: number | null; householdSize?: number | null; placeOfOrigin?: string | null; arrearsAging?: RentAging; unit: { unitCode: string; property: { name: string; owner?: { name: string } | null } } }>
   entries: Array<{ id: string; date: string; type: string; reference: string; description: string; debit: number; credit: number; runningBalance: number; paymentMethod?: string | null; status?: string }>
   closingBalance: number
-  access: { identity: boolean }
+  arrearsAging: RentAging
+  access: { identity: boolean; personalDetails: boolean; managePersonalDetails: boolean }
 }
+type RentAging = { notDue: number; days1To30: number; days31To60: number; days61To90: number; over90Days: number; overdueTotal: number }
+type HouseholdTenancy = { id: string; maritalStatus?: string | null; spouseNames?: string | null; childrenCount?: number | null; householdSize?: number | null; placeOfOrigin?: string | null; status: string; startDate: string; endDate?: string | null; agreementRef?: string | null; unit: { unitCode: string; property: { name: string } } }
 
 const normalizeText = (value?: string | null) => String(value || '').replace(/_/g, ' ')
 
@@ -169,6 +172,21 @@ function maskedMetric(label: string) {
       <p className="mt-1 text-sm font-semibold tracking-[0.18em] text-muted-foreground sm:text-base">******</p>
     </div>
   )
+}
+
+function RentArrearsAging({ aging }: { aging?: RentAging }) {
+  const buckets = [
+    { label: 'Due, not yet overdue', amount: Number(aging?.notDue || 0), tone: 'bg-sky-600' },
+    { label: '1–30 days overdue', amount: Number(aging?.days1To30 || 0), tone: 'bg-amber-500' },
+    { label: '31–60 days overdue', amount: Number(aging?.days31To60 || 0), tone: 'bg-orange-600' },
+    { label: '61–90 days overdue', amount: Number(aging?.days61To90 || 0), tone: 'bg-rose-600' },
+    { label: 'Over 90 days overdue', amount: Number(aging?.over90Days || 0), tone: 'bg-red-800' },
+  ]
+  const total = buckets.reduce((sum, bucket) => sum + bucket.amount, 0)
+  return <section aria-label="Rent arrears aging" className="space-y-4 rounded-md border p-4">
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">Rent arrears aging</h3><p className="text-xs text-muted-foreground">Open rent charges grouped by days past due.</p></div><div className="text-right"><p className="text-xs text-muted-foreground">Total overdue</p><p className="text-lg font-semibold text-rose-700">{formatCurrency(Number(aging?.overdueTotal || 0))}</p></div></div>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{buckets.map(bucket => <div key={bucket.label} className="rounded-md bg-muted/30 p-3"><div className="flex items-start justify-between gap-2"><p className="text-xs text-muted-foreground">{bucket.label}</p><p className="text-sm font-semibold">{formatCurrency(bucket.amount)}</p></div><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${bucket.label} share of open rent`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={total ? Math.round(bucket.amount / total * 100) : 0}><div className={`h-full ${bucket.tone}`} style={{ width: `${total ? Math.min(100, bucket.amount / total * 100) : 0}%` }} /></div></div>)}</div>
+  </section>
 }
 
 function CreditUtilizationGauge({ percent, availableLimit, trustScore }: { percent: number | null; availableLimit: number; trustScore: number }) {
@@ -243,7 +261,7 @@ function transactionTone(row: CustomerHistoryTransaction) {
 function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?: string | null) {
   const isCreditNote = row.source === 'credit_note'
   const isReturn = row.source === 'sale_return'
-  const isPayment = row.source === 'customer_payment'
+  const isPayment = row.source === 'customer_payment' || row.source === 'property_sale_payment'
   const amount = Number(row.amount || row.debit || row.credit || 0)
   const title = isCreditNote
     ? 'Customer Credit Note'
@@ -320,14 +338,19 @@ export default function CustomerTransactionHistoryDialog({
   const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
   const [rentalData, setRentalData] = useState<RentalLedgerResponse | null>(null)
+  const [householdTenancies, setHouseholdTenancies] = useState<HouseholdTenancy[]>([])
   const [rentalReload, setRentalReload] = useState(0)
   const [editingIdentity, setEditingIdentity] = useState(false)
   const [savingIdentity, setSavingIdentity] = useState(false)
   const [identityError, setIdentityError] = useState('')
+  const [editingHouseholdTenancyId, setEditingHouseholdTenancyId] = useState<string | null>(null)
+  const [savingHousehold, setSavingHousehold] = useState(false)
+  const [householdError, setHouseholdError] = useState('')
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const propertyManagementEnabled = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
   const canLoadRentalProfile = propertyManagementEnabled && hasPermission('canViewPropertyStatements')
+  const canLoadHouseholdProfile = propertyManagementEnabled && (hasPermission('canViewTenantPersonalDetails') || hasPermission('canManageTenantPersonalDetails'))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -335,6 +358,7 @@ export default function CustomerTransactionHistoryDialog({
     if (!open || !customer?.id) {
       setData(null)
       setRentalData(null)
+      setHouseholdTenancies([])
       setError('')
       return
     }
@@ -344,6 +368,7 @@ export default function CustomerTransactionHistoryDialog({
       setLoading(true)
       setError('')
       setRentalData(null)
+      setHouseholdTenancies([])
       try {
         const response = await apiFetch(`/api/receivables/customers/${customer.id}/history?limit=${viewMode === 'details' ? 1 : 500}`, {
           signal: controller.signal,
@@ -354,8 +379,10 @@ export default function CustomerTransactionHistoryDialog({
         if (canLoadRentalProfile) {
           const rentalResponse = await apiFetch(`/api/property-management/customers/${customer.id}/rent-ledger`, { signal: controller.signal } as RequestInit)
           if (rentalResponse.ok) setRentalData(await rentalResponse.json())
-        } else {
-          setRentalData(null)
+        }
+        if (canLoadHouseholdProfile) {
+          const householdResponse = await apiFetch(`/api/property-management/customers/${customer.id}/household`, { signal: controller.signal } as RequestInit)
+          if (householdResponse.ok) setHouseholdTenancies((await householdResponse.json()).tenancies || [])
         }
       } catch (err: any) {
         if (err?.name !== 'AbortError') setError(err?.message || 'Failed to load customer history')
@@ -366,7 +393,7 @@ export default function CustomerTransactionHistoryDialog({
 
     loadHistory()
     return () => controller.abort()
-  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile])
+  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile])
 
   async function saveIdentity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -384,6 +411,26 @@ export default function CustomerTransactionHistoryDialog({
     finally { setSavingIdentity(false) }
   }
 
+  async function saveHousehold(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingHouseholdTenancyId) return
+    const form = new FormData(event.currentTarget)
+    setSavingHousehold(true)
+    setHouseholdError('')
+    try {
+      const response = await apiFetch(`/api/property-management/tenancies/${editingHouseholdTenancyId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maritalStatus: form.get('maritalStatus'), spouseNames: form.get('spouseNames'), childrenCount: form.get('childrenCount'), householdSize: form.get('householdSize'), placeOfOrigin: form.get('placeOfOrigin') }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not update renter household details.')
+      setEditingHouseholdTenancyId(null)
+      setRentalReload(value => value + 1)
+    } catch (err: any) { setHouseholdError(err?.message || 'Could not update renter household details.') }
+    finally { setSavingHousehold(false) }
+  }
+
   const customerInfo = data?.customer || customer
   const transactions = data?.transactions || []
   const canViewLedger = Boolean(data && (
@@ -392,14 +439,16 @@ export default function CustomerTransactionHistoryDialog({
   ))
   const canViewCreditHistory = Boolean(data?.access.creditHistory && data.creditHistory)
   const canViewRent = canLoadRentalProfile
+  const canViewTenantHousehold = canLoadHouseholdProfile && householdTenancies.length > 0
   const hasRentalTenancies = Boolean(rentalData?.tenancies.length)
+  const canEditRentalDetails = hasPermission('canManageTenancies')
   const creditActivity = transactions.filter((row) => [
-    'opening_balance', 'receivable_sale', 'sale_payment_adjustment', 'customer_payment',
+    'opening_balance', 'receivable_sale', 'property_sale', 'property_sale_payment', 'sale_payment_adjustment', 'customer_payment',
     'customer_credit_application', 'credit_note', 'sale_return', 'customer_withdrawal',
   ].includes(row.source))
   const commercialActivity = transactions.filter(row => {
-    if (['receivable_sale', 'pos_sale', 'customer_invoice'].includes(row.source)) return data?.access.sales
-    if (['customer_payment', 'sale_payment_adjustment'].includes(row.source)) return data?.access.payments
+    if (['receivable_sale', 'property_sale', 'pos_sale', 'customer_invoice'].includes(row.source)) return data?.access.sales
+    if (['customer_payment', 'property_sale_payment', 'sale_payment_adjustment'].includes(row.source)) return data?.access.payments
     if (row.source === 'customer_withdrawal') return data?.access.withdrawals
     if (row.source === 'credit_note') return data?.access.creditNotes
     if (row.source === 'sale_return') return data?.access.returns
@@ -409,6 +458,11 @@ export default function CustomerTransactionHistoryDialog({
     data.access.sales || data.access.payments || data.access.withdrawals || data.access.creditNotes || data.access.returns || hasRentalTenancies
   ))
   const hasCommercialHistory = commercialActivity.length > 0
+  const hasTradeTransactions = transactions.length > 0
+  const hasTradePosition = Boolean(hasCommercialHistory || (data?.access.balance && (
+    Number(data.summary.currentBalance || 0) !== 0 || Number(data.summary.openingBalance ?? data.customer.openingBalance ?? 0) !== 0 ||
+    Number(data.customer.creditLimit || 0) > 0
+  )))
   const rentalCharges = rentalData?.entries.filter(row => row.type === 'rent_due') || []
   const rentalPayments = rentalData?.entries.filter(row => row.type === 'rent_payment') || []
   const totalRentCharged = rentalCharges.reduce((total, row) => total + Number(row.debit || 0), 0)
@@ -490,7 +544,7 @@ export default function CustomerTransactionHistoryDialog({
           <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
             <TabsList className="flex h-auto w-full flex-wrap justify-start sm:w-fit">
               <TabsTrigger value="overview">Profile</TabsTrigger>
-              {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="ledger">{hasRentalTenancies && !hasCommercialHistory ? 'Rent ledger' : hasRentalTenancies ? 'Trade ledger' : 'Transaction ledger'} ({hasRentalTenancies && !hasCommercialHistory ? rentalData?.entries.length || 0 : Number(data.summary.transactionCount || 0)})</TabsTrigger>}
+              {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="ledger">{hasRentalTenancies && !hasTradeTransactions ? 'Rent ledger' : hasRentalTenancies ? 'Trade ledger' : 'Transaction ledger'} ({hasRentalTenancies && !hasTradeTransactions ? rentalData?.entries.length || 0 : Number(data.summary.transactionCount || 0)})</TabsTrigger>}
               {canViewSalesAndPayments && <TabsTrigger value="sales-payments">{hasRentalTenancies && !hasCommercialHistory ? 'Rent activity' : hasRentalTenancies ? 'Trade activity' : 'Account activity'}</TabsTrigger>}
               {(canViewCreditHistory || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="credit-history">{hasRentalTenancies ? 'Tenant standing' : 'Credit History'}</TabsTrigger>}
               {canViewRent && <TabsTrigger value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
@@ -548,18 +602,23 @@ export default function CustomerTransactionHistoryDialog({
                 {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}
                 {countMetric(canViewRent ? 'Commercial transactions' : 'Transactions', data.summary.transactionCount)}
                 </>}
-                {hasRentalTenancies && commercialActivity.length > 0 && <div className="sm:col-span-2 xl:col-span-3"><p className="mb-2 text-xs font-semibold text-muted-foreground">Trade account activity</p><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {hasRentalTenancies && hasTradePosition && <div className="sm:col-span-2 xl:col-span-3"><p className="mb-2 text-xs font-semibold text-muted-foreground">Trade account position</p><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {data.access.balance && metric('Trade receivables balance', data.summary.currentBalance)}
-                  {data.access.sales && metric('Sales on account', data.summary.receivableSales)}
-                  {data.access.payments && metric('Customer payments', data.summary.payments, 'text-green-700')}
-                  {data.access.withdrawals && metric('Customer withdrawals', data.summary.withdrawals)}
-                  {data.access.creditNotes && metric('Credit notes', data.summary.creditNotes, 'text-green-700')}
-                  {data.access.returns && metric('Sales returns', data.summary.returns)}
+                  {data.access.balance && metric('Trade opening balance', data.summary.openingBalance ?? data.customer.openingBalance)}
+                  {data.access.balance && metric('Trade credit limit', data.customer.creditLimit)}
+                  {data.access.balance && metric('Available trade credit', data.summary.availableCredit)}
+                  {data.access.sales && hasCommercialHistory && metric('Sales on account', data.summary.receivableSales)}
+                  {data.access.payments && hasCommercialHistory && metric('Customer payments', data.summary.payments, 'text-green-700')}
+                  {data.access.withdrawals && hasCommercialHistory && metric('Customer withdrawals', data.summary.withdrawals)}
+                  {data.access.creditNotes && hasCommercialHistory && metric('Credit notes', data.summary.creditNotes, 'text-green-700')}
+                  {data.access.returns && hasCommercialHistory && metric('Sales returns', data.summary.returns)}
                 </div></div>}
               </div>
             </div>
 
-            {(data.access.recordPayment || data.access.withdraw || data.access.edit || data.access.delete) && (
+            {canViewTenantHousehold && <section className="space-y-3 rounded-md border p-4"><div><h3 className="font-semibold">Renter household details</h3><p className="text-xs text-muted-foreground">Optional details recorded on each tenancy.</p></div>{householdTenancies.map(row => <div key={row.id} className="space-y-3 border-t pt-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">{row.unit.property.name} · {row.unit.unitCode}</p>{hasPermission('canManageTenantPersonalDetails') && <Button type="button" variant="outline" size="sm" onClick={() => { setEditingHouseholdTenancyId(editingHouseholdTenancyId === row.id ? null : row.id); setHouseholdError('') }}>{editingHouseholdTenancyId === row.id ? 'Close editor' : 'Edit household details'}</Button>}</div>{editingHouseholdTenancyId === row.id ? <form onSubmit={saveHousehold}><HouseholdDetailsFields defaults={row}/>{householdError && <p role="alert" className="mt-2 text-sm text-destructive">{householdError}</p>}<div className="mt-3 flex justify-end"><Button type="submit" disabled={savingHousehold}>{savingHousehold ? 'Saving…' : 'Save household details'}</Button></div></form> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div><p className="text-xs text-muted-foreground">Marital status</p><p className="text-sm">{row.maritalStatus ? normalizeText(row.maritalStatus) : 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Spouse name(s)</p><p className="text-sm">{row.spouseNames || 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Children</p><p className="text-sm">{row.childrenCount == null ? 'Not provided' : row.childrenCount === 0 ? 'No children' : row.childrenCount}</p></div><div><p className="text-xs text-muted-foreground">Household size</p><p className="text-sm">{row.householdSize ?? 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Place of origin</p><p className="text-sm">{row.placeOfOrigin || 'Not provided'}</p></div></div>}</div>)}</section>}
+
+            {(data.access.recordPayment || data.access.withdraw || data.access.edit || data.access.delete || (hasRentalTenancies && canEditRentalDetails && onEditCustomer)) && (
               <div className="flex flex-wrap gap-2 border-b pb-4">
                 {data.access.recordPayment && onRecordPayment && (
                   <Button size="sm" onClick={() => onRecordPayment({ ...data.customer, ...data.summary })}>
@@ -571,10 +630,10 @@ export default function CustomerTransactionHistoryDialog({
                     Withdraw Customer Funds
                   </Button>
                 )}
-                {data.access.edit && onEditCustomer && (
-                  <Button size="sm" variant="outline" onClick={() => onEditCustomer({ ...data.customer, ...data.summary })}>
+                {(hasRentalTenancies ? canEditRentalDetails : data.access.edit) && onEditCustomer && (
+                  <Button size="sm" variant="outline" onClick={() => onEditCustomer({ ...data.customer, ...data.summary, ...(hasRentalTenancies ? { rentalTenancies: rentalData?.tenancies } : {}) })}>
                     <Edit className="mr-1 h-4 w-4" />
-                    Edit Customer
+                    {hasRentalTenancies ? 'Edit tenant details' : 'Edit customer'}
                   </Button>
                 )}
                 {data.access.delete && onDeleteCustomer && Number(data.summary.currentBalance || 0) === 0 && Number(data.summary.transactionCount || 0) === 0 && (
@@ -589,7 +648,7 @@ export default function CustomerTransactionHistoryDialog({
             </TabsContent>
 
             {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsContent value="ledger" className="space-y-4">
-            {hasRentalTenancies && !hasCommercialHistory ? <div className="overflow-x-auto rounded-md border">
+            {hasRentalTenancies && !hasTradeTransactions ? <div className="overflow-x-auto rounded-md border">
               <table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Rental activity</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">Rent charged</th><th className="px-3 py-2 text-right">Payment</th><th className="px-3 py-2 text-right">Balance</th></tr></thead><tbody>{rentalData?.entries.map(row => <tr key={`${row.type}-${row.id}`} className="border-t"><td className="whitespace-nowrap px-3 py-2">{formatDisplayDate(row.date)}</td><td className="px-3 py-2">{row.description}<div className="text-xs text-muted-foreground">{normalizeText(row.type)}</div></td><td className="px-3 py-2">{row.reference || '—'}</td><td className="px-3 py-2 text-right">{row.debit ? formatCurrency(row.debit) : '—'}</td><td className="px-3 py-2 text-right">{row.credit ? formatCurrency(row.credit) : '—'}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(row.runningBalance)}</td></tr>)}{!rentalData?.entries.length && <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">No rent charges or payments have been recorded for these agreements.</td></tr>}</tbody></table>
             </div> : <div className="overflow-x-auto rounded-md border">
               <table className="min-w-[1320px] w-full text-sm">
@@ -659,7 +718,7 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2 text-right">{Number(row.credit || 0) > 0 ? formatCurrency(Number(row.credit)) : '-'}</td>
                       <td className={cn('px-3 py-2 text-right font-semibold', data.access.balance ? transactionTone(row) : 'text-muted-foreground')}>{data.access.balance ? formatCurrency(Number(row.balance || 0)) : '******'}</td>
                       <td className="px-3 py-2">
-                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton label={row.source === 'customer_payment' ? 'Print payment receipt' : 'Print transaction'} data={customerActivityReceipt(row, data.customer.name)} />)}
+                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton label={['customer_payment', 'property_sale_payment'].includes(row.source) ? 'Print payment receipt' : 'Print transaction'} data={customerActivityReceipt(row, data.customer.name)} />)}
                       </td>
                     </tr>
                   )) : (
@@ -686,6 +745,7 @@ export default function CustomerTransactionHistoryDialog({
                 {countMetric('Rental agreements', rentalData?.tenancies.length)}
                 {countMetric('Active agreements', rentalData?.tenancies.filter(row => row.status === 'active').length)}
               </div>
+              <RentArrearsAging aging={rentalData?.arrearsAging} />
               <section className="overflow-hidden rounded-md border">
                 <div className="border-b px-4 py-3"><h3 className="font-semibold">Tenancy history</h3></div>
                 <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Property / unit</th><th className="p-3">Agreement</th><th className="p-3">Period</th><th className="p-3 text-right">Monthly rent</th><th className="p-3 text-right">Outstanding</th><th className="p-3">Status</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="p-3">{row.unit.property.name}<div className="text-xs text-muted-foreground">{row.unit.unitCode}{row.unit.property.owner?.name ? ` · ${row.unit.property.owner.name}` : ''}</div></td><td className="p-3">{row.agreementRef || '—'}</td><td className="p-3">{formatDisplayDate(row.startDate)}{row.endDate ? ` – ${formatDisplayDate(row.endDate)}` : ''}</td><td className="p-3 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="p-3 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td><td className="p-3"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td></tr>)}{!rentalData?.tenancies.length && <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">No rental agreements are linked to this customer yet.</td></tr>}</tbody></table></div>
@@ -733,12 +793,12 @@ export default function CustomerTransactionHistoryDialog({
                         <td className="px-3 py-2 font-mono text-xs">{displayReference(row.reference, row.id, row.type || 'Transaction')}</td>
                         <td className="px-3 py-2">{row.description || '-'}</td>
                         <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || row.debit || row.credit || 0))}</td>
-                        {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'pos_sale', 'customer_invoice', 'customer_payment'].includes(row.source) && <TransactionReceiptButton
-                          label={row.source === 'customer_payment' ? 'Reprint receipt' : row.source === 'pos_sale' ? 'Reprint receipt' : 'Reprint invoice'}
-                          data={row.source === 'customer_payment'
+                        {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'property_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'property_sale_payment'].includes(row.source) && <TransactionReceiptButton
+                          label={['customer_payment', 'property_sale_payment'].includes(row.source) || row.source === 'pos_sale' ? 'Reprint receipt' : 'Reprint invoice'}
+                          data={['customer_payment', 'property_sale_payment'].includes(row.source)
                             ? customerActivityReceipt(row, data.customer.name)
                             : {
-                              title: row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
+                              title: row.source === 'property_sale' ? 'Plot Sale Agreement / Invoice' : row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
                         reference: displayReference(row.reference, row.id, row.type || 'Transaction'),
                               date: row.date || new Date(),
                               amount: Number(row.amount || row.debit || row.credit || 0),
@@ -750,7 +810,7 @@ export default function CustomerTransactionHistoryDialog({
                               })),
                               fields: [
                                 { label: 'Payment status', value: row.status },
-                                ...(row.source === 'receivable_sale' || row.source === 'customer_invoice' ? [{ label: 'Paid to date', value: formatCurrency(Number(row.amountPaid || 0)) }, { label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
+                                ...(row.source === 'receivable_sale' || row.source === 'property_sale' || row.source === 'customer_invoice' ? [{ label: 'Paid to date', value: formatCurrency(Number(row.amountPaid || 0)) }, { label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
                                 { label: 'Payment method', value: row.paymentMethod }, { label: 'Served by', value: row.staff },
                               ],
                             }}
@@ -778,6 +838,7 @@ export default function CustomerTransactionHistoryDialog({
                     {metric('Current rent outstanding', rentalData?.closingBalance, 'text-amber-700')}
                     {countMetric('Overdue rent charges', rentalCharges.filter(row => row.status === 'overdue').length)}
                   </div>
+                  <RentArrearsAging aging={rentalData?.arrearsAging} />
                   <div className="overflow-x-auto rounded-md border"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Agreement</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Monthly rent</th><th className="px-3 py-2 text-right">Outstanding</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="px-3 py-2">{row.unit.property.name} · {row.unit.unitCode}</td><td className="px-3 py-2">{row.agreementRef || '—'}</td><td className="px-3 py-2"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td><td className="px-3 py-2 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td></tr>)}</tbody></table></div>
                 </section>
               </> : <>

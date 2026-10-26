@@ -249,6 +249,8 @@ export const permissions: Permission[] = [
   { id: 'canViewPropertyPortfolio', name: 'View Property Portfolio', description: 'View owners, properties, units, tenancy details, occupancy, and portfolio summaries', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyCollections', name: 'View Property Collections', description: 'View rent/deposit payment history and reprint receipts', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyStatements', name: 'View Tenancy Statements', description: 'Open and print tenant rent statements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewTenantPersonalDetails', name: 'View Renter Household Details', description: 'View optional marital, spouse, children, household size, and origin details', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageTenantPersonalDetails', name: 'Manage Renter Household Details', description: 'Record and update optional household details on tenancy agreements', category: 'property_management', accessesBusinessData: true },
   { id: 'canManagePropertyOwners', name: 'Manage Property Owners', description: 'Create and update landlord/owner records', category: 'property_management', accessesBusinessData: true },
   { id: 'canManageProperties', name: 'Manage Properties', description: 'Create and update managed properties', category: 'property_management', accessesBusinessData: true },
   { id: 'canManagePropertyUnits', name: 'Manage Units', description: 'Create and update rental units and rent terms', category: 'property_management', accessesBusinessData: true },
@@ -262,6 +264,12 @@ export const permissions: Permission[] = [
   { id: 'canManageRentPayment', name: 'Manage Rent Payments (Legacy)', description: 'Legacy combined permission for voiding rent payments and refunding tenant deposits', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyReports', name: 'View Property Reports', description: 'View rent collection, balances, arrears, and statements', category: 'property_management', accessesBusinessData: true },
   { id: 'canRecordOwnerPayout', name: 'Record Landlord Payouts', description: 'Pay collected rent to property owners and record cash and payable movements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertySales', name: 'View Plot Sales', description: 'View plot contracts, installments, receipts, and outstanding balances', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCreatePropertySale', name: 'Create Plot Sales', description: 'Create owned-land or brokered-land sale contracts with full or installment payment terms', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordPropertySalePayment', name: 'Record Plot Sale Payments', description: 'Receive buyer payments to permitted transaction accounts and issue receipts', category: 'property_management', accessesBusinessData: true },
+  { id: 'canVoidPropertySalePayment', name: 'Reverse Plot Sale Payments', description: 'Void a receipt with a balanced cash, receivable, and installment reversal', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCancelPropertySale', name: 'Cancel Plot Sales', description: 'Cancel contracts that have no posted payments and reverse their journals', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManagePropertyLandInventory', name: 'Manage Plot Inventory Cost', description: 'Record owned-plot cost basis and opening inventory journal entries', category: 'property_management', accessesBusinessData: true },
   
   // Restaurant & Bar
   { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },
