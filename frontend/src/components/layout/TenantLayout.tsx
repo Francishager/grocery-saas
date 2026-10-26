@@ -721,7 +721,7 @@ export function TenantLayout() {
   }, [user?.id, onboardingCompleted])
 
   const selectReport = (reportId: string) => {
-    navigate(`/tenant/dashboard?view=reports&report=${serviceReportIds[reportId] || reportId}`)
+    navigate(`/tenant/reports?report=${serviceReportIds[reportId] || reportId}`)
     setSidebarOpen(false)
   }
 

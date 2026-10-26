@@ -565,6 +565,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
     const access = customerProfileAccess(req.user?.permissions)
+    const tenantFeatures = await getTenantFeatures(scope.tenantId)
+    const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord')
+      || hasFeatureAccess(tenantFeatures, 'property_management.agent')
     const limit = Math.min(Math.max(Number(req.query.limit || 250), 25), 1000)
 
     const customer = await prisma.customer.findFirst({
@@ -577,6 +580,17 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     const customerNameFilter = customer.name
       ? { customerName: { equals: customer.name, mode: 'insensitive' } }
       : { id: '__no_matching_customer_name__' }
+    const unavailableActivitySections = []
+    const loadOptionalActivity = async (section, load) => {
+      try {
+        return await load()
+      } catch (error) {
+        if (!['P2021', 'P2022', '42P01', '42703'].includes(error?.code)) throw error
+        unavailableActivitySections.push(section)
+        console.error('Customer profile optional activity unavailable:', { section, code: error?.code, message: error?.message })
+        return []
+      }
+    }
 
     const [receivableSales, payments, withdrawals, posSales, creditNotes, saleReturns, invoices, rentals, restaurantOrders, reservations, deliveries, appointments, workOrders, serviceContracts, balanceSnapshot] = await Promise.all([
       access.sales ? prisma.saleRecord.findMany({
@@ -664,7 +678,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         orderBy: { createdAt: 'asc' },
         take: limit,
       }) : Promise.resolve([]),
-      access.businessActivity ? prisma.rental.findMany({
+      access.businessActivity ? loadOptionalActivity('rentals', () => prisma.rental.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { name: true } },
@@ -673,8 +687,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { hireDate: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
-      access.businessActivity ? prisma.restaurantOrder.findMany({
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('restaurant orders', () => prisma.restaurantOrder.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { name: true } },
@@ -684,14 +698,14 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
-      access.businessActivity ? prisma.reservation.findMany({
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('reservations', () => prisma.reservation.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: { branch: { select: { name: true } }, table: { select: { name: true } } },
         orderBy: { date: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
-      access.businessActivity ? prisma.delivery.findMany({
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('deliveries', () => prisma.delivery.findMany({
         where: {
           tenantId: scope.tenantId,
           customerId: id,
@@ -700,8 +714,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         include: { order: { select: { orderNo: true, branch: { select: { name: true } } } } },
         orderBy: { createdAt: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
-      access.businessActivity ? prisma.appointment.findMany({
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('appointments', () => prisma.appointment.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { name: true } },
@@ -710,8 +724,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { scheduledDate: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
-      access.businessActivity ? prisma.workOrder.findMany({
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('work orders', () => prisma.workOrder.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { name: true } },
@@ -720,16 +734,16 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         },
         orderBy: { createdAt: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
-      access.businessActivity ? prisma.serviceContract.findMany({
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('service contracts', () => prisma.serviceContract.findMany({
         where: scopedWhere(scope, { customerId: id }),
         include: { branch: { select: { name: true } } },
         orderBy: { startDate: 'asc' },
         take: limit,
-      }) : Promise.resolve([]),
+      })) : Promise.resolve([]),
       access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
     ])
-    const [propertySales, propertySalePayments] = access.sales || access.payments ? await Promise.all([
+    const [propertySales, propertySalePayments] = propertyManagementEnabled && (access.sales || access.payments) ? await Promise.all([
       access.sales ? optionalPlotSaleRows(() => prisma.propertySale.findMany({
         where: { tenantId: scope.tenantId, buyerId: id },
         include: {
@@ -1278,6 +1292,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           })), ...openPropertySales] : [],
         },
       }),
+      unavailableActivitySections,
       transactions
     })
   } catch (error) {

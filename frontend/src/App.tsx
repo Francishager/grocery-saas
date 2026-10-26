@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { AppFeedback } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -19,6 +19,7 @@ import UnauthorizedPage from '@/pages/auth/UnauthorizedPage'
  
 // Tenant (Business) Pages
 import DashboardPage from '@/pages/DashboardPage'
+import ReportsPage from '@/pages/ReportsPage'
 import SalesPage from '@/pages/SalesPage'
 import InventoryPage from '@/pages/InventoryPage'
 import BusinessAdvisorPage from '@/pages/BusinessAdvisorPage'
@@ -102,13 +103,6 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
   return <>{children}</>
 }
 
-function ReportsRouteRedirect() {
-  const [searchParams] = useSearchParams()
-  const params = new URLSearchParams(searchParams)
-  params.set('view', 'reports')
-  return <Navigate to={`/tenant/dashboard?${params.toString()}`} replace />
-}
- 
 function App() {
   const { isAuthenticated, isPlatformUser } = useJWTAuth()
   useEffect(() => { if (isAuthenticated && !isPlatformUser()) initSync() }, [isAuthenticated, isPlatformUser])
@@ -245,7 +239,7 @@ function App() {
           <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
           <Route path="service" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
-          <Route path="reports" element={<FeatureGuard feature="reports"><ReportsRouteRedirect /></FeatureGuard>} />
+          <Route path="reports" element={<FeatureGuard feature="reports"><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />
           <Route path="trash" element={<TrashPage />} />

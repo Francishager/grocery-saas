@@ -86,6 +86,7 @@ type CustomerCreditHistory = {
 }
 
 type CustomerHistoryResponse = {
+  unavailableActivitySections?: string[]
   customer: CustomerHistoryTarget & {
     address?: string | null
     maskedAddress?: string
@@ -500,6 +501,13 @@ export default function CustomerTransactionHistoryDialog({
             <span>{error}</span>
           </div>
         )}
+
+        {!loading && !error && data?.unavailableActivitySections?.length ? (
+          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Customer and trade history loaded. Some optional activity is temporarily unavailable: {data.unavailableActivitySections.join(', ')}.</span>
+          </div>
+        ) : null}
 
         {!loading && !error && data && viewMode === 'details' && (
           <div className="grid gap-4 md:grid-cols-2">

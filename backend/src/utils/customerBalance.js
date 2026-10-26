@@ -1,3 +1,5 @@
+import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
+
 const toMoney = (value, fallback = 0) => {
   const amount = Number(value);
   return Number.isFinite(amount) ? amount : fallback;
@@ -20,6 +22,18 @@ async function optionalPropertySaleRows(query) {
       propertySaleSchemaWarningLogged = true
     }
     return []
+  }
+}
+
+async function propertyManagementEnabled(client, tenantId) {
+  if (!tenantId || !client?.tenant) return false
+  try {
+    const features = await getTenantFeatures(tenantId)
+    return hasFeatureAccess(features, 'property_management.landlord')
+      || hasFeatureAccess(features, 'property_management.agent')
+  } catch (error) {
+    console.error('Property feature check failed during customer balance calculation:', error)
+    return false
   }
 }
 
@@ -227,6 +241,7 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   const customerList = customers.filter((customer) => customer?.id);
   const customerIds = [...new Set(customerList.map((customer) => customer.id))];
   if (!customerIds.length) return new Map();
+  const includePropertySales = await propertyManagementEnabled(client, scope.tenantId)
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId: { in: customerIds } };
   const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications, propertySales, propertySalePayments] = await Promise.all([
@@ -257,8 +272,8 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
       where: { tenantId: scope.tenantId, customerId: { in: customerIds } },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
-    client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: { in: customerIds }, status: 'active' }, select: { id: true, buyerId: true, salePrice: true } })) : Promise.resolve([]),
-    client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: { in: customerIds }, status: 'active' } }, select: { amount: true, sale: { select: { buyerId: true } } } })) : Promise.resolve([]),
+    includePropertySales && client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: { in: customerIds }, status: 'active' }, select: { id: true, buyerId: true, salePrice: true } })) : Promise.resolve([]),
+    includePropertySales && client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: { in: customerIds }, status: 'active' } }, select: { amount: true, sale: { select: { buyerId: true } } } })) : Promise.resolve([]),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
@@ -329,6 +344,7 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   if (!customer) return null;
 
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId };
+  const includePropertySales = await propertyManagementEnabled(client, scope.tenantId)
   const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications, propertySales, propertySalePayments] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
@@ -356,8 +372,8 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
       where: { tenantId: scope.tenantId, customerId },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
-    client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, status: 'active' }, select: { salePrice: true } })) : Promise.resolve([]),
-    client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } })) : Promise.resolve([]),
+    includePropertySales && client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, status: 'active' }, select: { salePrice: true } })) : Promise.resolve([]),
+    includePropertySales && client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } })) : Promise.resolve([]),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
@@ -400,6 +416,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
   if (!scope?.tenantId || !customerId || !cutoff) return null
   const createdBefore = { createdAt: { lt: cutoff } }
   const tenantCustomerWhere = { tenantId: scope.tenantId, customerId }
+  const includePropertySales = await propertyManagementEnabled(client, scope.tenantId)
   const [customer, sales, payments, allocations, withdrawals, notes, returns, applications, propertySales, propertySalePayments] = await Promise.all([
     client.customer.findFirst({
       where: { id: customerId, tenantId: scope.tenantId },
@@ -437,8 +454,8 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
       where: { ...tenantCustomerWhere, ...createdBefore },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
-    client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, ...createdBefore, status: 'active' }, select: { salePrice: true } })) : Promise.resolve([]),
-    client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, ...createdBefore, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } })) : Promise.resolve([]),
+    includePropertySales && client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, ...createdBefore, status: 'active' }, select: { salePrice: true } })) : Promise.resolve([]),
+    includePropertySales && client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, ...createdBefore, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } })) : Promise.resolve([]),
   ])
   if (!customer) return null
 
