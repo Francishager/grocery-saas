@@ -18,11 +18,11 @@ import { createSessionTokens } from "../utils/sessionTokens.js";
 const router = Router();
 const ipKey = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
 const identityKey = (req) => `${ipKey(req)}:${String(req.body?.email || '').trim().toLowerCase().slice(0, 254) || 'unknown'}`;
-const loginIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 60, keyGenerator: ipKey, countStatusCodes: [401] });
-const loginIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 12, keyGenerator: identityKey, countStatusCodes: [401] });
-const refreshLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyGenerator: ipKey });
-const resetIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyGenerator: ipKey });
-const resetIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 4, keyGenerator: identityKey });
+const loginIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 200, keyGenerator: ipKey, countStatusCodes: [401] });
+const loginIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 50, keyGenerator: identityKey, countStatusCodes: [401] });
+const refreshLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 100, keyGenerator: ipKey });
+const resetIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyGenerator: ipKey });
+const resetIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 15, keyGenerator: identityKey });
 
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
