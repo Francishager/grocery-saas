@@ -22,22 +22,30 @@ interface DetailedStats {
   planDistribution: { planId: string; planName: string; count: number; price: number; currency: string }[]
   recentTenants: { id: string; name: string; slug: string; status: string; planName: string; userCount: number; createdAt: string }[]
   recentActivity: { id: string; tenantId: string; userEmail: string; action: string; model: string; ip: string | null; createdAt: string }[]
+  warnings?: string[]
 }
 
 export const SaaSAdminDashboard: React.FC = () => {
   const [stats, setStats] = useState<DetailedStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => { fetchStats() }, [])
 
   const fetchStats = async () => {
     setLoading(true)
+    setLoadError('')
     try {
       const res = await apiFetch('/api/platform/stats/detailed', {})
-      if (res.ok) setStats(await res.json())
-    } catch {}
-    setLoading(false)
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload?.error || payload?.message || `Could not load platform data (${res.status}).`)
+      setStats(payload)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load platform data. Check the connection and retry.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const fmt = (n: number, c?: string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'UGX', minimumFractionDigits: 0 }).format(n)
@@ -45,6 +53,15 @@ export const SaaSAdminDashboard: React.FC = () => {
   const fmtDateTime = (d: string) => new Date(d).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 
   if (loading) return <div className="flex items-center justify-center min-h-[400px]"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>
+
+  if (!stats) return <div className="mx-auto max-w-2xl space-y-4 p-6">
+    <div><h1 className="text-2xl font-bold">Platform Dashboard</h1><p className="text-gray-500">Platform data could not be loaded.</p></div>
+    <div role="alert" className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+      <span>{loadError || 'The platform API did not return dashboard data.'}</span>
+    </div>
+    <button onClick={fetchStats} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-gray-50"><RefreshCw size={16} /> Retry</button>
+  </div>
 
   const o = stats?.overview
 
@@ -54,6 +71,9 @@ export const SaaSAdminDashboard: React.FC = () => {
         <div><h1 className="text-2xl font-bold">Platform Dashboard</h1><p className="text-gray-500">Manage tenants, plans, and platform features</p></div>
         <button onClick={fetchStats} className="px-3 py-2 border rounded-lg hover:bg-gray-50 flex items-center gap-2"><RefreshCw size={18} /> Refresh</button>
       </div>
+
+      {loadError && <div role="alert" className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>Some platform data could not be refreshed: {loadError}</span></div>}
+      {stats.warnings?.map((warning, index) => <div key={index} role="status" className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span>{warning}</span></div>)}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white rounded-lg border p-6">

@@ -33,11 +33,17 @@ export function getAuthToken(): string | null {
   return localStorage.getItem('token')
 }
 
-function clearStoredAuth() {
+function clearStoredAuth(): string | null {
+  let role: string | null = null
+  try {
+    const storedUser = localStorage.getItem('auth_user') || localStorage.getItem('user')
+    role = storedUser ? JSON.parse(storedUser)?.role || null : null
+  } catch { /* Continue clearing malformed local auth state. */ }
   localStorage.removeItem('token')
   localStorage.removeItem('auth_tokens')
   localStorage.removeItem('auth_user')
   localStorage.removeItem('user')
+  return role
 }
 
 function isTenantAccountBlockedResponse(status: number, data: any) {
@@ -51,10 +57,10 @@ function rememberTenantAccountBlockedMessage(data: any) {
   )
 }
 
-function redirectToTenantLogin() {
-  if (window.location.pathname !== '/login' && window.location.pathname !== '/saas/login') {
-    window.location.href = '/login'
-  }
+function redirectToTenantLogin(role: string | null = null) {
+  const platformRoles = new Set(['saas_admin', 'platform_admin', 'super_admin', 'platform_staff'])
+  const loginPath = role && platformRoles.has(role) ? '/saas/login' : '/login'
+  if (window.location.pathname !== loginPath) window.location.href = loginPath
 }
 
 function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
@@ -103,12 +109,10 @@ async function request<T>(
   if (!response.ok) {
     if (isTenantAccountBlockedResponse(response.status, data)) {
       rememberTenantAccountBlockedMessage(data)
-      clearStoredAuth()
-      redirectToTenantLogin()
+      redirectToTenantLogin(clearStoredAuth())
     }
     if (response.status === 401 || (response.status === 403 && data?.message === 'Invalid token')) {
-      clearStoredAuth()
-      redirectToTenantLogin()
+      redirectToTenantLogin(clearStoredAuth())
     }
     throw new ApiError(
       data?.error || data?.message || `HTTP ${response.status}`,
@@ -146,8 +150,7 @@ async function tryRefreshToken(): Promise<string | null> {
         const data = await res.clone().json().catch(() => ({}))
         if (isTenantAccountBlockedResponse(res.status, data)) {
           rememberTenantAccountBlockedMessage(data)
-          clearStoredAuth()
-          redirectToTenantLogin()
+          redirectToTenantLogin(clearStoredAuth())
         }
         return null
       }
@@ -179,8 +182,7 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
       const data = await res.clone().json().catch(() => ({}))
       if (isTenantAccountBlockedResponse(res.status, data)) {
         rememberTenantAccountBlockedMessage(data)
-        clearStoredAuth()
-        redirectToTenantLogin()
+        redirectToTenantLogin(clearStoredAuth())
       }
     }
     if (res.status === 401) {
@@ -195,8 +197,7 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
           return fetch(url, { ...init, headers: retryHeaders })
         }
         // Refresh failed — clear auth and redirect
-        clearStoredAuth()
-        redirectToTenantLogin()
+        redirectToTenantLogin(clearStoredAuth())
       }
     }
     return res

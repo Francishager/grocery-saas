@@ -1147,12 +1147,20 @@ router.get('/stats/detailed', authenticateToken, requirePlatformAdmin, async (re
       include: { plan: { select: { name: true } }, _count: { select: { users: true } } }
     })
 
-    // Recent audit activity
-    const recentActivity = await prisma.auditLog.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-      select: { id: true, tenantId: true, userEmail: true, action: true, model: true, ip: true, createdAt: true }
-    })
+    // Audit activity is supplementary; a missing optional audit column must not
+    // take down the platform's tenant and subscription metrics.
+    let recentActivity = []
+    let warnings = []
+    try {
+      recentActivity = await prisma.auditLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: { id: true, tenantId: true, userEmail: true, action: true, model: true, ip: true, createdAt: true }
+      })
+    } catch (error) {
+      console.error('Get platform dashboard activity failed:', { code: error?.code, message: error?.message })
+      warnings.push('Recent activity could not be loaded; platform totals are still available.')
+    }
 
     res.json({
       overview: {
@@ -1181,6 +1189,7 @@ router.get('/stats/detailed', authenticateToken, requirePlatformAdmin, async (re
         createdAt: t.createdAt,
       })),
       recentActivity,
+      warnings,
     })
   } catch (error) {
     console.error('Get detailed stats error:', error)

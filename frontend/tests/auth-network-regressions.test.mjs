@@ -44,3 +44,10 @@ test('expired access tokens are refreshed before the session is cleared and refr
   assert.match(context, /window\.addEventListener\('focus', refreshIfExpiring\)/);
   assert.match(context, /document\.addEventListener\('visibilitychange', refreshIfExpiring\)/);
 });
+
+test('expired SaaS Admin sessions return to the SaaS login page, not business login', () => {
+  const apiSource = readFileSync(sourceRoot + '/lib/api.ts', 'utf8');
+  assert.match(apiSource, /function clearStoredAuth\(\): string \| null[\s\S]*?return role/);
+  assert.match(apiSource, /platformRoles = new Set\(\['saas_admin', 'platform_admin', 'super_admin', 'platform_staff'\]\)/);
+  assert.match(apiSource, /redirectToTenantLogin\(clearStoredAuth\(\)\)/);
+});
