@@ -847,7 +847,7 @@ const propertyLandPurchaseInclude = {
 
 router.get('/land-purchase-options', requirePermission('canCreatePropertyLandPurchase'), async (req, res) => {
   try {
-    const suppliers = await prisma.supplier.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true } })
+    const suppliers = await prisma.supplier.findMany({ where: { tenantId: tenantIdOf(req), status: { in: ['active', 'inactive'] } }, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true, status: true } })
     res.json({ suppliers })
   } catch (error) { console.error('Load plot purchase suppliers failed:', error); res.status(500).json({ error: 'Could not load active suppliers.' }) }
 })
@@ -869,6 +869,10 @@ router.post('/land-purchases', requirePermission('canCreatePropertyLandPurchase'
   const purchaseDate = req.body?.purchaseDate ? new Date(req.body.purchaseDate) : new Date()
   const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : null
   const supplierRef = String(req.body?.supplierRef || '').trim() || null
+  const sellerName = String(req.body?.sellerName || '').trim()
+  const sellerPhone = String(req.body?.sellerPhone || '').trim() || null
+  const sellerEmail = String(req.body?.sellerEmail || '').trim().toLowerCase() || null
+  const sellerAddress = String(req.body?.sellerAddress || '').trim() || null
   const notes = String(req.body?.notes || '').trim() || null
   const idempotencyKey = String(req.body?.idempotencyKey || '').trim() || randomUUID()
   const paidBalance = money(total - amountPaid)
@@ -877,6 +881,7 @@ router.post('/land-purchases', requirePermission('canCreatePropertyLandPurchase'
   if (paidBalance > 0 && !dueDate) return badRequest(res, 'Set a due date for the supplier balance.')
   if (supplierRef && supplierRef.length > 120) return badRequest(res, 'Supplier invoice/reference must be 120 characters or fewer.')
   if (notes && notes.length > 2000) return badRequest(res, 'Purchase notes must be 2,000 characters or fewer.')
+  if (!req.body?.supplierId && (!sellerName || sellerName.length > 160 || (sellerPhone && sellerPhone.length > 40) || (sellerEmail && sellerEmail.length > 160) || (sellerAddress && sellerAddress.length > 500))) return badRequest(res, 'Enter the plot seller name and valid contact details, or select an existing supplier.')
   if (amountPaid > 0 && !req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canRecordPropertyLandPurchasePayment')) return res.status(403).json({ error: 'You need Pay Plot Suppliers permission to make an initial payment.' })
   const paymentMethod = String(req.body?.paymentMethod || '').toLowerCase()
   const cashAccountId = String(req.body?.cashAccountId || '')
@@ -890,15 +895,34 @@ router.post('/land-purchases', requirePermission('canCreatePropertyLandPurchase'
       const duplicate = await tx.propertyLandPurchase.findFirst({ where: { tenantId, idempotencyKey }, include: propertyLandPurchaseInclude })
       if (duplicate) return duplicate
       await tx.$queryRaw`SELECT "id" FROM "property_units" WHERE "id" = ${unitId} FOR UPDATE`
-      const [unit, supplier] = await Promise.all([
-        tx.propertyUnit.findFirst({ where: { id: unitId, property: { tenantId, propertyType: 'land', ownerId: null, status: 'active' } }, include: { property: true } }),
-        tx.supplier.findFirst({ where: { id: supplierId, tenantId, status: 'active' } }),
-      ])
+      const unit = await tx.propertyUnit.findFirst({ where: { id: unitId, property: { tenantId, propertyType: 'land', ownerId: null, status: 'active' } }, include: { property: true } })
       if (!unit) throw Object.assign(new Error('Select an available, business-owned land plot.'), { statusCode: 404 })
-      if (!supplier) throw Object.assign(new Error('Select an active supplier belonging to this business.'), { statusCode: 404 })
       if (!['vacant', 'available'].includes(String(unit.status).toLowerCase())) throw Object.assign(new Error('Only an unsold, available plot can be acquired.'), { statusCode: 409 })
       if (Number(unit.acquisitionCost) > 0 || await tx.propertyLandPurchase.findUnique({ where: { unitId: unit.id } })) throw Object.assign(new Error('This plot already has an acquisition cost or purchase record.'), { statusCode: 409 })
       if (await tx.propertySale.count({ where: { unitId: unit.id, status: 'active' } })) throw Object.assign(new Error('A plot with an active sale contract cannot be purchased again.'), { statusCode: 409 })
+
+      let supplier = supplierId ? await tx.supplier.findFirst({ where: { id: supplierId, tenantId } }) : null
+      if (supplierId && !supplier) throw Object.assign(new Error('The selected supplier does not belong to this business.'), { statusCode: 404 })
+      if (!supplier && !supplierId) {
+        if (sellerPhone) supplier = await tx.supplier.findFirst({ where: { tenantId, phone: sellerPhone }, orderBy: { createdAt: 'asc' } })
+        if (!supplier && sellerEmail) supplier = await tx.supplier.findFirst({ where: { tenantId, email: { equals: sellerEmail, mode: 'insensitive' } }, orderBy: { createdAt: 'asc' } })
+        if (!supplier && !sellerPhone && !sellerEmail) supplier = await tx.supplier.findFirst({ where: { tenantId, name: { equals: sellerName, mode: 'insensitive' } }, orderBy: { createdAt: 'asc' } })
+        if (supplier?.status === 'blocked') throw Object.assign(new Error('This seller is blocked as a supplier. Ask an administrator to review the supplier record before recording this purchase.'), { statusCode: 409 })
+        if (supplier?.status === 'inactive') supplier = await tx.supplier.update({ where: { id: supplier.id }, data: { status: 'active', ...(sellerPhone && !supplier.phone ? { phone: sellerPhone } : {}), ...(sellerEmail && !supplier.email ? { email: sellerEmail } : {}), ...(sellerAddress && !supplier.address ? { address: sellerAddress } : {}) } })
+        if (!supplier) {
+          try {
+            supplier = await tx.supplier.create({ data: { tenantId, branchId: req.user?.branchId || null, name: sellerName, phone: sellerPhone, email: sellerEmail, address: sellerAddress, balance: 0, openingBalance: 0, status: 'active', notes: 'Created from a plot purchase.' } })
+          } catch (error) {
+            if (error.code !== 'P2002') throw error
+            supplier = sellerPhone ? await tx.supplier.findFirst({ where: { tenantId, phone: sellerPhone } }) : sellerEmail ? await tx.supplier.findFirst({ where: { tenantId, email: { equals: sellerEmail, mode: 'insensitive' } } }) : null
+            if (!supplier || supplier.status === 'blocked') throw Object.assign(new Error('A supplier with these details already exists and could not be activated. Review the supplier record.'), { statusCode: 409 })
+            if (supplier.status === 'inactive') supplier = await tx.supplier.update({ where: { id: supplier.id }, data: { status: 'active' } })
+          }
+        }
+      }
+      if (!supplier) throw Object.assign(new Error('Select an existing supplier or enter the plot seller details.'), { statusCode: 400 })
+      if (supplier.status === 'blocked') throw Object.assign(new Error('This supplier is blocked and cannot be used for a plot purchase.'), { statusCode: 409 })
+      if (supplier.status === 'inactive') supplier = await tx.supplier.update({ where: { id: supplier.id }, data: { status: 'active' } })
 
       let cashAccount = null
       let cashLedgerId = null
