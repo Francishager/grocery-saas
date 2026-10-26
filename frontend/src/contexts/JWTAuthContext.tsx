@@ -221,7 +221,15 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
-        throw new Error(data.message || 'Login failed')
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get('retry-after'))
+          const waitMessage = Number.isFinite(retryAfter) && retryAfter > 0
+            ? ` Try again in about ${Math.ceil(retryAfter / 60)} minute(s).`
+            : ''
+          const policy = typeof data.policy === 'string' ? ` (${data.policy})` : ''
+          throw new Error(`${data.error || data.message || 'Login is temporarily rate-limited.'}${policy}${waitMessage}`)
+        }
+        throw new Error(data.message || data.error || 'Login failed')
       }
 
       const data = await response.json()

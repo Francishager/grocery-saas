@@ -29,6 +29,13 @@ test('HTTP and post-login errors cannot be mistaken for an unreachable login ser
   assert.doesNotMatch(context, /!navigator\.onLine|\/fetch\|network\|load\|connect\|offline\|abort\|timeout\/i/);
 });
 
+test('login surfaces the exact rate-limit policy and retry delay returned by the API', () => {
+  const context = readFileSync(sourceRoot + '/contexts/JWTAuthContext.tsx', 'utf8');
+  assert.match(context, /response\.status === 429/);
+  assert.match(context, /data\.policy/);
+  assert.match(context, /response\.headers\.get\('retry-after'\)/);
+});
+
 test('active sessions expire after at least eight idle hours and activity cannot revive an expired session', () => {
   const context = readFileSync(sourceRoot + '/contexts/JWTAuthContext.tsx', 'utf8');
   assert.match(context, /SESSION_IDLE_TIMEOUT_MS\s*=\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
