@@ -253,10 +253,20 @@ router.post('/properties/:id/units', requirePermission('canManagePropertyUnits')
     if (!property) return res.status(404).json({ error: 'Property not found.' })
     const acquisitionCost = money(req.body?.acquisitionCost)
     if (acquisitionCost < 0 || !Number.isFinite(acquisitionCost)) return badRequest(res, 'Enter a valid non-negative acquisition cost.')
+    const isLand = String(property.propertyType).toLowerCase() === 'land'
+    const areaSize = req.body?.areaSize === '' || req.body?.areaSize == null ? null : Number(req.body.areaSize)
+    const frontage = req.body?.frontage === '' || req.body?.frontage == null ? null : Number(req.body.frontage)
+    const depth = req.body?.depth === '' || req.body?.depth == null ? null : Number(req.body.depth)
+    const areaUnit = String(req.body?.areaUnit || '').trim().toLowerCase() || null
+    const dimensionUnit = String(req.body?.dimensionUnit || '').trim().toLowerCase() || null
+    const validAreaUnits = ['sqm', 'sqft', 'acre', 'hectare']
+    const validDimensionUnits = ['m', 'ft']
+    if (isLand && (!Number.isFinite(areaSize) || areaSize <= 0 || !validAreaUnits.includes(areaUnit))) return badRequest(res, 'Enter the plot area and select sqm, sqft, acres, or hectares.')
+    if ([frontage, depth].some(value => value != null && (!Number.isFinite(value) || value <= 0)) || ((frontage != null || depth != null) && !validDimensionUnits.includes(dimensionUnit))) return badRequest(res, 'Enter valid positive dimensions and select metres or feet.')
     if (acquisitionCost > 0 && !req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canManagePropertyLandInventory')) return res.status(403).json({ error: 'You need permission to record owned plot inventory and its cost.' })
     if (acquisitionCost > 0 && String(property.propertyType).toLowerCase() !== 'land') return badRequest(res, 'Acquisition cost is only supported for a land/plot property. Keep rent units separate from land inventory.')
     const unit = await prisma.$transaction(async tx => {
-      const created = await tx.propertyUnit.create({ data: { propertyId: property.id, unitCode, unitType: req.body.unitType?.trim() || null, bedrooms: req.body.bedrooms == null ? null : Number(req.body.bedrooms), bathrooms: req.body.bathrooms == null ? null : Number(req.body.bathrooms), rentAmount: money(rentAmount), acquisitionCost, currency: property.tenant.currency || 'UGX', notes: req.body.notes?.trim() || null } })
+      const created = await tx.propertyUnit.create({ data: { propertyId: property.id, unitCode, unitType: req.body.unitType?.trim() || null, areaSize, areaUnit, frontage, depth, dimensionUnit, plotNumber: String(req.body?.plotNumber || '').trim() || null, blockNumber: String(req.body?.blockNumber || '').trim() || null, titleReference: String(req.body?.titleReference || '').trim() || null, landTenure: String(req.body?.landTenure || '').trim() || null, bedrooms: req.body.bedrooms == null ? null : Number(req.body.bedrooms), bathrooms: req.body.bathrooms == null ? null : Number(req.body.bathrooms), rentAmount: money(rentAmount), acquisitionCost, currency: property.tenant.currency || 'UGX', notes: req.body.notes?.trim() || null } })
       if (acquisitionCost > 0) {
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
         await postPropertyJournal(tx, { tenantId: tenantIdOf(req), userId: req.user.id, sourceType: 'PROPERTY_LAND_ACQUISITION', sourceId: created.id, reference: `LAND-${created.unitCode}`, description: `Initial owned plot inventory recorded: ${property.name} / ${created.unitCode}`, lines: propertyLandAcquisitionLines(config, { amount: acquisitionCost, reference: created.unitCode }) })
@@ -287,11 +297,20 @@ router.put('/units/:id/acquisition-cost', requirePermission('canManagePropertyLa
 
 router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req, res) => {
   try {
-    const unit = await prisma.propertyUnit.findFirst({ where: { id: req.params.id, property: { tenantId: tenantIdOf(req) } } })
+    const unit = await prisma.propertyUnit.findFirst({ where: { id: req.params.id, property: { tenantId: tenantIdOf(req) } }, include: { property: { select: { propertyType: true } } } })
     if (!unit) return res.status(404).json({ error: 'Unit not found.' })
+    if (String(unit.property.propertyType).toLowerCase() === 'land') {
+      const areaSize = req.body.areaSize == null ? unit.areaSize : Number(req.body.areaSize)
+      const areaUnit = String(req.body.areaUnit ?? unit.areaUnit ?? '').toLowerCase()
+      const frontage = req.body.frontage == null || req.body.frontage === '' ? null : Number(req.body.frontage)
+      const depth = req.body.depth == null || req.body.depth === '' ? null : Number(req.body.depth)
+      const dimensionUnit = String(req.body.dimensionUnit ?? unit.dimensionUnit ?? '').toLowerCase()
+      if (areaSize != null && (!Number.isFinite(areaSize) || areaSize <= 0 || !['sqm', 'sqft', 'acre', 'hectare'].includes(areaUnit))) return badRequest(res, 'Enter a positive plot area and a supported area unit.')
+      if ([frontage, depth].some(value => value != null && (!Number.isFinite(value) || value <= 0)) || ((frontage != null || depth != null) && !['m', 'ft'].includes(dimensionUnit))) return badRequest(res, 'Enter valid positive dimensions and select metres or feet.')
+    }
     const active = await prisma.propertyTenancy.count({ where: { unitId: unit.id, status: 'active' } })
     if (active && req.body.status === 'vacant') return res.status(409).json({ error: 'End the active tenancy before marking this unit vacant.' })
-    const updated = await prisma.propertyUnit.update({ where: { id: unit.id }, data: { unitCode: req.body.unitCode?.trim() || unit.unitCode, unitType: req.body.unitType?.trim() || null, rentAmount: req.body.rentAmount == null ? unit.rentAmount : money(req.body.rentAmount), status: req.body.status || unit.status, notes: req.body.notes?.trim() || null } })
+    const updated = await prisma.propertyUnit.update({ where: { id: unit.id }, data: { unitCode: req.body.unitCode?.trim() || unit.unitCode, unitType: req.body.unitType?.trim() || null, areaSize: req.body.areaSize == null ? unit.areaSize : Number(req.body.areaSize), areaUnit: req.body.areaUnit || unit.areaUnit, frontage: req.body.frontage == null ? unit.frontage : Number(req.body.frontage), depth: req.body.depth == null ? unit.depth : Number(req.body.depth), dimensionUnit: req.body.dimensionUnit || unit.dimensionUnit, plotNumber: req.body.plotNumber == null ? unit.plotNumber : String(req.body.plotNumber).trim() || null, blockNumber: req.body.blockNumber == null ? unit.blockNumber : String(req.body.blockNumber).trim() || null, titleReference: req.body.titleReference == null ? unit.titleReference : String(req.body.titleReference).trim() || null, landTenure: req.body.landTenure == null ? unit.landTenure : String(req.body.landTenure).trim() || null, rentAmount: req.body.rentAmount == null ? unit.rentAmount : money(req.body.rentAmount), status: req.body.status || unit.status, notes: req.body.notes?.trim() || null } })
     res.json(updated)
   } catch (error) { console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
 })
@@ -820,7 +839,7 @@ const propertySaleInclude = {
 
 const propertyLandPurchaseInclude = {
   property: { select: { id: true, name: true, address: true } },
-  unit: { select: { id: true, unitCode: true, unitType: true, currency: true, acquisitionCost: true, status: true } },
+  unit: { select: { id: true, unitCode: true, unitType: true, areaSize: true, areaUnit: true, frontage: true, depth: true, dimensionUnit: true, plotNumber: true, blockNumber: true, titleReference: true, landTenure: true, currency: true, acquisitionCost: true, status: true } },
   supplier: { select: { id: true, name: true, phone: true, email: true } },
   createdBy: { select: { id: true, name: true } },
   payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, createdBy: { select: { id: true, name: true } } } },
@@ -981,7 +1000,7 @@ router.post('/land-purchases/:id/payments', requirePermission('canRecordProperty
 router.get('/land-purchases/payments/:paymentId/receipt', requirePermission('canViewPropertyLandPurchases'), async (req, res) => {
   try {
     const [receipt, business] = await Promise.all([
-      prisma.propertyLandPurchasePayment.findFirst({ where: { id: req.params.paymentId, tenantId: tenantIdOf(req), status: 'posted' }, include: { supplier: { select: { id: true, name: true, phone: true, email: true } }, cashAccount: { select: { id: true, name: true, type: true } }, purchase: { include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } } } } } }),
+      prisma.propertyLandPurchasePayment.findFirst({ where: { id: req.params.paymentId, tenantId: tenantIdOf(req), status: 'posted' }, include: { supplier: { select: { id: true, name: true, phone: true, email: true } }, cashAccount: { select: { id: true, name: true, type: true } }, purchase: { include: { property: { select: { name: true } }, unit: { select: { unitCode: true, areaSize: true, areaUnit: true, frontage: true, depth: true, dimensionUnit: true, plotNumber: true, blockNumber: true, titleReference: true, landTenure: true, currency: true } } } } } }),
       prisma.tenant.findUnique({ where: { id: tenantIdOf(req) }, select: { name: true, address: true, phone: true, logo: true } }),
     ])
     if (!receipt) return res.status(404).json({ error: 'Plot supplier receipt not found.' })

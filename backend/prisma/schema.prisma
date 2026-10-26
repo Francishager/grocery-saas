@@ -2655,6 +2655,15 @@ model PropertyUnit {
   property       ManagedProperty  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   unitCode       String
   unitType       String?
+  areaSize       Float?
+  areaUnit       String?
+  frontage       Float?
+  depth          Float?
+  dimensionUnit  String?
+  plotNumber     String?
+  blockNumber    String?
+  titleReference String?
+  landTenure     String?
   bedrooms       Int?
   bathrooms      Int?
   rentAmount     Float            @default(0)
