@@ -153,6 +153,42 @@ type HouseholdTenancy = { id: string; maritalStatus?: string | null; spouseNames
 
 const normalizeText = (value?: string | null) => String(value || '').replace(/_/g, ' ')
 
+function HouseholdDetailsFields({ defaults = {} }: { defaults?: Partial<HouseholdTenancy> }) {
+  return (
+    <section className="mt-4 space-y-3 rounded-md border p-4">
+      <div>
+        <h3 className="text-sm font-semibold">Household details</h3>
+        <p className="mt-1 text-xs text-muted-foreground">Optional renter household details.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm">Marital status
+          <select name="maritalStatus" defaultValue={defaults.maritalStatus || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3">
+            <option value="">Not provided</option>
+            <option value="single">Single</option>
+            <option value="married">Married</option>
+            <option value="separated">Separated</option>
+            <option value="divorced">Divorced</option>
+            <option value="widowed">Widowed</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+        <label className="block text-sm">Spouse name(s)
+          <input name="spouseNames" defaultValue={defaults.spouseNames || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3" />
+        </label>
+        <label className="block text-sm">Number of children
+          <input name="childrenCount" type="number" min="0" max="100" step="1" defaultValue={defaults.childrenCount ?? ''} placeholder="Not provided" className="mt-1 h-10 w-full rounded-md border bg-background px-3" />
+        </label>
+        <label className="block text-sm">Household / family size
+          <input name="householdSize" type="number" min="1" max="100" step="1" defaultValue={defaults.householdSize ?? ''} placeholder="Not provided" className="mt-1 h-10 w-full rounded-md border bg-background px-3" />
+        </label>
+        <label className="block text-sm sm:col-span-2">Place of origin
+          <input name="placeOfOrigin" defaultValue={defaults.placeOfOrigin || ''} placeholder="Town, district, region or country" className="mt-1 h-10 w-full rounded-md border bg-background px-3" />
+        </label>
+      </div>
+    </section>
+  )
+}
+
 function metric(label: string, value: number | undefined, tone?: string) {
   return (
     <div className="rounded-md border p-3">
