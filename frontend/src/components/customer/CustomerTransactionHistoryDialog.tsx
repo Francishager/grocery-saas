@@ -943,6 +943,10 @@ export default function CustomerTransactionHistoryDialog({
             </TabsContent>}
 
             {canViewRentPaymentPlans && <TabsContent value="payment-plans" className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h3 className="font-semibold">Renter repayment plans</h3><p className="text-sm text-muted-foreground">Schedule eligible overdue rent and record installments from this profile.</p></div>
+                {canManageRentPaymentPlans && <Button type="button" disabled={savingPlan || eligiblePlanTenancies.length === 0} title={eligiblePlanTenancies.length ? 'Create a plan for the oldest eligible overdue tenancy' : 'A repayment plan requires unplanned overdue rent'} onClick={() => { setRentPlanError(''); setCreatePlanTenancyId(eligiblePlanTenancies[0]?.tenancyId || '') }}><ReceiptText className="mr-2 h-4 w-4" />Create repayment plan</Button>}
+              </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 {countMetric('Repayment plans', rentPlanData?.plans.length)}
                 {metric('Balance under active plans', activeRentPlanBalance)}
