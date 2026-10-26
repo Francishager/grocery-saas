@@ -4,7 +4,7 @@ import multer from 'multer'
 import prisma from '../db.js'
 import { authenticateToken, requirePermission, requireAnyPermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
 import { requireAnyFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
-import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines, propertyLandPurchaseLines, propertyLandPurchasePaymentLines } from '../services/propertyAccountingService.js'
+import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyRentPlanReclassificationLines, propertyRentPlanReceiptLines, propertyRentPlanCancellationLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines, propertyLandPurchaseLines, propertyLandPurchasePaymentLines } from '../services/propertyAccountingService.js'
 import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '../services/payablesAccountingService.js'
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
@@ -18,6 +18,18 @@ const dueDateFor = (period, dueDay) => {
   const [year, month] = period.split('-').map(Number)
   const day = Math.min(Math.max(Number(dueDay) || 1, 1), new Date(Date.UTC(year, month, 0)).getUTCDate())
   return new Date(Date.UTC(year, month - 1, day, 12))
+}
+const planDueDate = (startDate, sequence, frequency) => {
+  const date = new Date(startDate)
+  if (frequency === 'weekly') date.setUTCDate(date.getUTCDate() + sequence * 7)
+  else if (frequency === 'biweekly') date.setUTCDate(date.getUTCDate() + sequence * 14)
+  else {
+    const day = date.getUTCDate()
+    date.setUTCDate(1)
+    date.setUTCMonth(date.getUTCMonth() + sequence)
+    date.setUTCDate(Math.min(day, new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()))
+  }
+  return date
 }
 const pageSize = value => Math.min(Math.max(Number.parseInt(value, 10) || 100, 1), 500)
 const badRequest = (res, message) => res.status(400).json({ error: message })
@@ -468,7 +480,7 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
             },
           },
         },
-        payments: { where: { status: 'posted', paymentType: 'rent' }, orderBy: { paymentDate: 'asc' } },
+        payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan'] } }, orderBy: { paymentDate: 'asc' }, include: { cashAccount: { select: { name: true } }, rentPaymentPlan: { select: { planNo: true } } } },
         identity: true,
       },
     })
@@ -477,7 +489,7 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
     const allCharges = tenancies.flatMap(row => row.charges)
     const entries = tenancies.flatMap(tenancy => [
       ...tenancy.charges.map(charge => ({ id: charge.id, tenancyId: tenancy.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: `${charge.description} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: charge.amount, credit: 0, status: charge.status })),
-      ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: 'rent_payment', reference: payment.receiptNo, description: `Rent payment · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
+      ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: payment.paymentType === 'rent_plan' ? 'rent_plan_payment' : 'rent_payment', reference: payment.receiptNo, description: `${payment.paymentType === 'rent_plan' ? 'Rent payment plan receipt' : 'Rent payment'} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, currency: tenancy.currency, planNo: payment.rentPaymentPlan?.planNo, cashAccountName: payment.cashAccount?.name, transactionRef: payment.transactionRef, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
     ]).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     let balance = 0
     for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
@@ -513,6 +525,206 @@ router.get('/customers/:customerId/household', requireAnyPermission(['canViewTen
   } catch (error) { console.error('Load renter household details failed:', error); res.status(500).json({ error: 'Could not load renter household details.' }) }
 })
 
+router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canViewRentPaymentPlans', 'canManageRentPaymentPlans']), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
+    if (!customer) return res.status(404).json({ error: 'Renter profile not found.' })
+    const [plans, overdueCharges] = await Promise.all([
+      prisma.propertyRentPaymentPlan.findMany({
+        where: { tenantId, tenancy: { customerId: customer.id } },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          tenancy: { include: { unit: { include: { property: true } } } },
+          installments: { orderBy: { sequence: 'asc' } },
+          chargeAllocations: { include: { charge: { select: { id: true, period: true, dueDate: true, description: true, amount: true } } } },
+          payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, select: { id: true, receiptNo: true, amount: true, paymentDate: true, paymentMethod: true, status: true, transactionRef: true, cashAccount: { select: { name: true } }, planInstallmentAllocations: { select: { amount: true, installment: { select: { sequence: true } } } } } },
+        },
+      }),
+      prisma.rentCharge.findMany({
+        where: { tenantId, tenancy: { customerId: customer.id }, dueDate: { lt: new Date() }, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
+        orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
+        include: { tenancy: { include: { unit: { include: { property: true } } } } },
+      }),
+    ])
+    const eligibleCharges = overdueCharges.filter(charge => money(charge.amount - charge.amountPaid) > 0.01).map(charge => ({
+      id: charge.id, tenancyId: charge.tenancyId, tenancyName: charge.tenancy.tenantName,
+      propertyName: charge.tenancy.unit.property.name, unitCode: charge.tenancy.unit.unitCode,
+      currency: charge.tenancy.currency, period: charge.period, dueDate: charge.dueDate,
+      description: charge.description, amount: money(charge.amount), amountPaid: money(charge.amountPaid),
+      balance: money(charge.amount - charge.amountPaid),
+    }))
+    res.json({ plans, eligibleCharges })
+  } catch (error) { console.error('List renter payment plans failed:', error); res.status(500).json({ error: 'Could not load renter payment plans.' }) }
+})
+
+router.post('/customers/:customerId/payment-plans', requirePermission('canManageRentPaymentPlans'), async (req, res) => {
+  const tenancyId = String(req.body?.tenancyId || '').trim()
+  const installmentCount = Number(req.body?.installmentCount)
+  const frequency = String(req.body?.frequency || 'monthly').toLowerCase()
+  const startDateValue = String(req.body?.startDate || '').trim()
+  const startDate = startDateValue ? new Date(`${startDateValue}T12:00:00.000Z`) : new Date()
+  const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
+  const notes = String(req.body?.notes || '').trim()
+  if (!tenancyId) return badRequest(res, 'Choose the tenancy covered by this payment plan.')
+  if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 36) return badRequest(res, 'Choose between 1 and 36 installments.')
+  if (!['weekly', 'biweekly', 'monthly'].includes(frequency)) return badRequest(res, 'Choose weekly, biweekly, or monthly installments.')
+  if (!Number.isFinite(startDate.getTime())) return badRequest(res, 'Enter a valid first installment date.')
+  if (idempotencyKey.length > 120 || notes.length > 1000) return badRequest(res, 'The request key or notes are too long.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const plan = await prisma.$transaction(async tx => {
+      const existing = await tx.propertyRentPaymentPlan.findFirst({ where: { tenantId, idempotencyKey } })
+      if (existing) return existing
+      await tx.$queryRaw`SELECT "id" FROM "property_tenancies" WHERE "id" = ${tenancyId} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const tenancy = await tx.propertyTenancy.findFirst({ where: { id: tenancyId, tenantId, customerId: req.params.customerId, status: { in: ['active', 'ended'] } }, include: { unit: { include: { property: true } } } })
+      if (!tenancy) throw Object.assign(new Error('Renter tenancy not found.'), { statusCode: 404 })
+      const charges = await tx.rentCharge.findMany({
+        where: { tenantId, tenancyId, dueDate: { lt: new Date() }, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
+        orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
+      })
+      const arrears = charges.map(charge => ({ charge, amount: money(charge.amount - charge.amountPaid) })).filter(item => item.amount > 0.01)
+      const totalAmount = money(arrears.reduce((sum, item) => sum + item.amount, 0))
+      if (!totalAmount) throw Object.assign(new Error('This tenancy has no unplanned overdue rent to schedule.'), { statusCode: 409 })
+      const planNo = `RPL-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`
+      const base = money(totalAmount / installmentCount)
+      const installments = Array.from({ length: installmentCount }, (_, index) => ({
+        sequence: index + 1,
+        dueDate: planDueDate(startDate, index, frequency),
+        amount: index === installmentCount - 1 ? money(totalAmount - base * (installmentCount - 1)) : base,
+        status: 'unpaid',
+      }))
+      const created = await tx.propertyRentPaymentPlan.create({ data: {
+        tenantId, tenancyId, createdById: req.user.id, planNo, idempotencyKey,
+        totalAmount, installmentCount, frequency, startDate, notes: notes || null,
+        chargeAllocations: { create: arrears.map(item => ({ chargeId: item.charge.id, amount: item.amount })) },
+        installments: { create: installments },
+      } })
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      await postPropertyJournal(tx, {
+        tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PLAN_RECLASS', sourceId: created.id,
+        date: new Date(), reference: created.planNo,
+        description: `Reclassify overdue rent for ${tenancy.tenantName}, ${tenancy.unit.property.name} / ${tenancy.unit.unitCode} to an agreed payment plan`,
+        lines: propertyRentPlanReclassificationLines(config, { amount: totalAmount, reference: created.planNo }),
+      })
+      return tx.propertyRentPaymentPlan.findUnique({ where: { id: created.id }, include: { tenancy: { include: { unit: { include: { property: true } } } }, installments: { orderBy: { sequence: 'asc' } }, chargeAllocations: { include: { charge: true } } } })
+    })
+    res.status(201).json(plan)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create renter payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create renter payment plan.' : error.message }) }
+})
+
+router.post('/payment-plans/:id/cancel', requirePermission('canManageRentPaymentPlans'), async (req, res) => {
+  const reason = String(req.body?.reason || '').trim()
+  if (reason.length < 5 || reason.length > 500) return badRequest(res, 'Enter a cancellation reason between 5 and 500 characters.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const plan = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "property_rent_payment_plans" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const current = await tx.propertyRentPaymentPlan.findFirst({ where: { id: req.params.id, tenantId }, include: { tenancy: { include: { unit: { include: { property: true } } } } } })
+      if (!current) throw Object.assign(new Error('Rent payment plan not found.'), { statusCode: 404 })
+      if (current.status !== 'active') throw Object.assign(new Error('Only an active payment plan can be cancelled.'), { statusCode: 409 })
+      const remaining = money(current.totalAmount - current.amountPaid)
+      if (remaining > 0.01) {
+        const config = await ensurePropertyAccounting(tx, tenantId)
+        await postPropertyJournal(tx, {
+          tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PLAN_CANCEL_RECLASS', sourceId: current.id,
+          date: new Date(), reference: current.planNo,
+          description: `Release unpaid balance from cancelled rent payment plan ${current.planNo}: ${reason}`,
+          lines: propertyRentPlanCancellationLines(config, { amount: remaining, reference: current.planNo }),
+        })
+      }
+      return tx.propertyRentPaymentPlan.update({ where: { id: current.id }, data: { status: 'cancelled', notes: [current.notes, `Cancelled: ${reason}`].filter(Boolean).join('\n') } })
+    })
+    res.json(plan)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Cancel renter payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not cancel renter payment plan.' : error.message }) }
+})
+
+router.post('/payment-plans/:id/payments', requirePermission('canRecordRentPayment'), async (req, res) => {
+  const amount = money(req.body?.amount)
+  const paymentMethod = String(req.body?.paymentMethod || 'cash').toLowerCase()
+  const cashAccountId = String(req.body?.cashAccountId || '')
+  const paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date()
+  const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
+  if (!(amount > 0)) return badRequest(res, 'Enter a payment amount greater than zero.')
+  if (!Object.hasOwn(paymentMethodToAccount, paymentMethod)) return badRequest(res, 'Select a valid payment method.')
+  if (!cashAccountId) return badRequest(res, 'Select a permitted transaction account for this payment.')
+  if (!Number.isFinite(paymentDate.getTime())) return badRequest(res, 'Enter a valid payment date.')
+  if (!idempotencyKey || idempotencyKey.length > 120) return badRequest(res, 'Payment request key is invalid.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const expectedType = paymentMethodToAccount[paymentMethod]
+    const permittedAccount = await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+    if (!permittedAccount || permittedAccount.type !== expectedType) return badRequest(res, 'The selected transaction account does not match the payment method or is inactive.')
+    if (!canUseTransactionAccountForPayment(req, permittedAccount, paymentMethod)) return res.status(403).json({ error: `You do not have permission to use ${permittedAccount.name} for rent plan payments.` })
+    const payment = await prisma.$transaction(async tx => {
+      const prior = await tx.propertyRentPayment.findFirst({ where: { tenantId, idempotencyKey }, include: { planInstallmentAllocations: { include: { installment: true } } } })
+      if (prior) return prior
+      await tx.$queryRaw`SELECT "id" FROM "property_rent_payment_plans" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const plan = await tx.propertyRentPaymentPlan.findFirst({
+        where: { id: req.params.id, tenantId, status: 'active' },
+        include: {
+          tenancy: { include: { unit: { include: { property: true } } } },
+          installments: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: [{ dueDate: 'asc' }, { sequence: 'asc' }] },
+          chargeAllocations: {
+            orderBy: { charge: { dueDate: 'asc' } },
+            include: {
+              charge: {
+                include: {
+                  allocations: {
+                    where: { payment: { rentPaymentPlanId: req.params.id, status: 'posted' } },
+                    select: { amount: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+      if (!plan) throw Object.assign(new Error('Active rent payment plan not found.'), { statusCode: 404 })
+      const remainingPlan = money(plan.totalAmount - plan.amountPaid)
+      if (amount - remainingPlan > 0.01) throw Object.assign(new Error(`Payment exceeds this plan's remaining balance of ${plan.tenancy.currency} ${remainingPlan.toLocaleString()}.`), { statusCode: 400 })
+      const account = await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+      if (!account || account.type !== expectedType) throw Object.assign(new Error('Selected transaction account is no longer available; reload and retry.'), { statusCode: 409 })
+      const receiptNo = `RENT-PLAN-${Date.now()}-${randomUUID().slice(0, 4).toUpperCase()}`
+      const record = await tx.propertyRentPayment.create({ data: {
+        tenantId, tenancyId: plan.tenancyId, rentPaymentPlanId: plan.id, cashAccountId: account.id,
+        receiptNo, idempotencyKey, amount, paymentDate, paymentMethod, transactionRef: req.body?.transactionRef?.trim() || null,
+        notes: req.body?.notes?.trim() || null, paymentType: 'rent_plan',
+      } })
+      const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: account, amount, direction: 'receipt', reference: receiptNo, description: `Rent repayment plan ${plan.planNo} payment from ${plan.tenancy.tenantName}` })
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PLAN_PAYMENT', sourceId: record.id, date: paymentDate, reference: receiptNo, description: `Rent repayment plan receipt from ${plan.tenancy.tenantName}`, lines: propertyRentPlanReceiptLines(config, { amount, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo }) })
+      let chargeRemaining = amount
+      for (const allocation of plan.chargeAllocations) {
+        if (chargeRemaining <= 0.001) break
+        const paidInPlan = allocation.charge.allocations.reduce((sum, row) => sum + Number(row.amount), 0)
+        const balanceInPlan = money(allocation.amount - paidInPlan)
+        const applied = money(Math.min(chargeRemaining, balanceInPlan))
+        if (!applied) continue
+        const charge = allocation.charge
+        const nextPaid = money(charge.amountPaid + applied)
+        await tx.rentPaymentAllocation.create({ data: { paymentId: record.id, chargeId: charge.id, amount: applied } })
+        await tx.rentCharge.update({ where: { id: charge.id }, data: { amountPaid: nextPaid, status: nextPaid + 0.001 >= charge.amount ? 'paid' : 'partial' } })
+        chargeRemaining = money(chargeRemaining - applied)
+      }
+      let installmentRemaining = amount
+      for (const installment of plan.installments) {
+        if (installmentRemaining <= 0.001) break
+        const applied = money(Math.min(installmentRemaining, Math.max(0, installment.amount - installment.amountPaid)))
+        if (!applied) continue
+        const nextPaid = money(installment.amountPaid + applied)
+        await tx.rentPlanInstallmentPaymentAllocation.create({ data: { paymentId: record.id, installmentId: installment.id, amount: applied } })
+        await tx.rentPaymentPlanInstallment.update({ where: { id: installment.id }, data: { amountPaid: nextPaid, status: nextPaid + 0.001 >= installment.amount ? 'paid' : 'partial' } })
+        installmentRemaining = money(installmentRemaining - applied)
+      }
+      const nextPlanPaid = money(plan.amountPaid + amount)
+      await tx.propertyRentPaymentPlan.update({ where: { id: plan.id }, data: { amountPaid: nextPlanPaid, status: nextPlanPaid + 0.001 >= plan.totalAmount ? 'completed' : 'active' } })
+      return tx.propertyRentPayment.findUnique({ where: { id: record.id }, include: { tenancy: { include: { unit: { include: { property: true } } } }, cashAccount: { select: { id: true, name: true, type: true } }, allocations: { include: { charge: true } }, planInstallmentAllocations: { include: { installment: true } } } })
+    })
+    res.status(201).json(payment)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record rent plan payment failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record rent plan payment.' : error.message }) }
+})
+
 router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canManageTenancies']), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req), status: 'active' }, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } })
@@ -530,11 +742,11 @@ router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canM
 
 router.get('/tenancies/:id/statement', requirePermission('canViewPropertyStatements'), async (req, res) => {
   try {
-    const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { orderBy: { dueDate: 'asc' }, include: { allocations: { include: { payment: true } } } }, payments: { where: { status: 'posted', paymentType: 'rent' }, orderBy: { paymentDate: 'asc' }, include: { allocations: { include: { charge: true } } } } } })
+    const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { orderBy: { dueDate: 'asc' }, include: { allocations: { include: { payment: true } } } }, payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan'] } }, orderBy: { paymentDate: 'asc' }, include: { allocations: { include: { charge: true } } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
     const entries = [
       ...tenancy.charges.map(charge => ({ id: charge.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: charge.description, debit: charge.amount, credit: 0, paid: charge.amountPaid, balance: money(charge.amount - charge.amountPaid), status: charge.status })),
-      ...tenancy.payments.map(payment => ({ id: payment.id, date: payment.paymentDate, type: 'payment', reference: payment.receiptNo, description: `Rent payment (${payment.paymentMethod})`, debit: 0, credit: payment.amount, amount: payment.amount, status: payment.status })),
+      ...tenancy.payments.map(payment => ({ id: payment.id, date: payment.paymentDate, type: payment.paymentType === 'rent_plan' ? 'payment_plan_receipt' : 'payment', reference: payment.receiptNo, description: `${payment.paymentType === 'rent_plan' ? 'Rent payment plan' : 'Rent'} payment (${payment.paymentMethod})`, debit: 0, credit: payment.amount, amount: payment.amount, status: payment.status })),
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     let balance = 0
     for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
@@ -565,7 +777,7 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
       const prior = await tx.propertyRentPayment.findFirst({ where: { tenantId, idempotencyKey }, include: { tenancy: { include: { unit: { include: { property: true } } } }, allocations: { include: { charge: true } } } })
       if (prior) return prior
       await tx.$queryRaw`SELECT "id" FROM "property_tenancies" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
-      const tenancy = await tx.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId, status: { in: ['active', 'ended'] } }, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }] } } })
+      const tenancy = await tx.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId, status: { in: ['active', 'ended'] } }, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } }, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }] } } })
       if (!tenancy) throw Object.assign(new Error('Tenancy not found.'), { statusCode: 404 })
       const open = tenancy.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
       if (amount - open > 0.01) throw Object.assign(new Error(`Payment exceeds outstanding rent of ${tenancy.currency} ${money(open).toLocaleString()}.`), { statusCode: 400 })
@@ -620,16 +832,20 @@ router.post('/payments/:id/void', requireAnyPermission(['canVoidRentPayment', 'c
     const tenantId = tenantIdOf(req)
     const result = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT "id" FROM "property_rent_payments" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
-      const payment = await tx.propertyRentPayment.findFirst({ where: { id: req.params.id, tenantId, status: 'posted' }, include: { cashAccount: true, allocations: { include: { charge: true } } } })
+      const payment = await tx.propertyRentPayment.findFirst({ where: { id: req.params.id, tenantId, status: 'posted' }, include: { cashAccount: true, allocations: { include: { charge: true } }, planInstallmentAllocations: { include: { installment: true } } } })
       if (!payment) throw Object.assign(new Error('Posted rent payment not found.'), { statusCode: 404 })
       if (!payment.cashAccount) throw Object.assign(new Error('This legacy receipt has no saved transaction account; reconcile its original cash/bank account before voiding.'), { statusCode: 409 })
       if (!canUseTransactionAccountForPayment(req, payment.cashAccount, payment.paymentMethod)) throw Object.assign(new Error(`You do not have permission to reverse a movement from ${payment.cashAccount.name}.`), { statusCode: 403 })
       const claim = await tx.propertyRentPayment.updateMany({ where: { id: payment.id, tenantId, status: 'posted' }, data: { status: 'void', voidReason: reason, voidedAt: new Date() } })
       if (claim.count !== 1) throw Object.assign(new Error('This payment has already been voided.'), { statusCode: 409 })
+      if (!payment.rentPaymentPlanId && payment.allocations.length) {
+        const plannedCharge = await tx.rentPaymentPlanChargeAllocation.findFirst({ where: { chargeId: { in: payment.allocations.map(row => row.chargeId) }, plan: { status: 'active' } }, select: { id: true } })
+        if (plannedCharge) throw Object.assign(new Error('This receipt affects an active rent payment plan. Cancel that plan before voiding the earlier receipt.'), { statusCode: 409 })
+      }
       const reversalRef = `VOID-${payment.receiptNo}`
       const isDepositRefund = payment.paymentType === 'deposit_refund'
       await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: payment.cashAccount, amount: payment.amount, direction: isDepositRefund ? 'receipt' : 'expense', reference: reversalRef, description: `Void property receipt ${payment.receiptNo}` })
-      const journalSource = payment.paymentType === 'deposit' ? 'PROPERTY_DEPOSIT_RECEIPT' : isDepositRefund ? 'PROPERTY_DEPOSIT_REFUND' : 'PROPERTY_RENT_PAYMENT'
+      const journalSource = payment.rentPaymentPlanId ? 'PROPERTY_RENT_PLAN_PAYMENT' : payment.paymentType === 'deposit' ? 'PROPERTY_DEPOSIT_RECEIPT' : isDepositRefund ? 'PROPERTY_DEPOSIT_REFUND' : 'PROPERTY_RENT_PAYMENT'
       await reversePropertyJournal(tx, { tenantId, sourceType: journalSource, sourceId: payment.id, userId: req.user.id, reason })
       if (payment.paymentType === 'deposit' || isDepositRefund) {
         await tx.propertyTenancy.update({ where: { id: payment.tenancyId }, data: { depositHeld: { [isDepositRefund ? 'increment' : 'decrement']: payment.amount } } })
@@ -640,6 +856,30 @@ router.post('/payments/:id/void', requireAnyPermission(['canVoidRentPayment', 'c
         const nextPaid = money(Math.max(0, Number(charge.amountPaid) - Number(allocation.amount)))
         const status = nextPaid >= Number(charge.amount) ? 'paid' : nextPaid > 0 ? 'partial' : new Date(charge.dueDate) < new Date() ? 'overdue' : 'unpaid'
         await tx.rentCharge.update({ where: { id: charge.id }, data: { amountPaid: nextPaid, status } })
+      }
+      if (payment.rentPaymentPlanId) {
+        for (const allocation of payment.planInstallmentAllocations) {
+          const installment = allocation.installment
+          const nextPaid = money(Math.max(0, installment.amountPaid - allocation.amount))
+          const status = nextPaid + 0.001 >= installment.amount ? 'paid' : nextPaid > 0 ? 'partial' : new Date(installment.dueDate) < new Date() ? 'overdue' : 'unpaid'
+          await tx.rentPaymentPlanInstallment.update({ where: { id: installment.id }, data: { amountPaid: nextPaid, status } })
+        }
+        const plan = await tx.propertyRentPaymentPlan.findFirst({ where: { id: payment.rentPaymentPlanId, tenantId } })
+        if (plan) {
+          const nextPaid = money(Math.max(0, plan.amountPaid - payment.amount))
+          if (plan.status === 'cancelled') {
+            const config = await ensurePropertyAccounting(tx, tenantId)
+            await postPropertyJournal(tx, {
+              tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PLAN_CANCEL_VOID_RECLASS', sourceId: payment.id,
+              date: new Date(), reference: reversalRef,
+              description: `Return voided rent plan receipt ${payment.receiptNo} to ordinary rent receivable while preserving the cancelled plan`,
+              lines: propertyRentPlanCancellationLines(config, { amount: payment.amount, reference: reversalRef }),
+            })
+            await tx.propertyRentPaymentPlan.update({ where: { id: plan.id }, data: { amountPaid: nextPaid } })
+          } else {
+            await tx.propertyRentPaymentPlan.update({ where: { id: plan.id }, data: { amountPaid: nextPaid, status: 'active' } })
+          }
+        }
       }
       return tx.propertyRentPayment.findUnique({ where: { id: payment.id }, include: { tenancy: { include: { unit: { include: { property: true } } } } } })
     })
@@ -657,7 +897,7 @@ router.get('/reports', requirePermission('canViewPropertyReports'), async (req, 
     const propertyScope = ownerId ? { unit: { property: { ownerId } } } : {}
     const [charges, payments, tenancies, payouts] = await Promise.all([
       prisma.rentCharge.findMany({ where: { tenantId, dueDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: true }, orderBy: { dueDate: 'asc' } }),
-      prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted', paymentType: 'rent', paymentDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } } }, orderBy: { paymentDate: 'asc' } }),
+      prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted', paymentType: { in: ['rent', 'rent_plan'] }, paymentDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } } }, orderBy: { paymentDate: 'asc' } }),
       prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active', ...(ownerId ? { unit: { property: { ownerId } } } : {}) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } }),
       prisma.propertyOwnerPayout.findMany({ where: { tenantId, payoutType: 'rent', status: 'posted', payoutDate: { gte: from, lte: to }, ...(ownerId ? { ownerId } : {}) }, include: { owner: true, cashAccount: { select: { name: true } } }, orderBy: { payoutDate: 'asc' } }),
     ])

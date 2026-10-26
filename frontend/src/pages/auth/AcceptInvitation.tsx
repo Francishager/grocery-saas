@@ -405,6 +405,7 @@ const AcceptInvitation: React.FC = () => {
                   <option value="salon_spa">Salon & Spa</option>
                   <option value="repair_shop">Repair Shop</option>
                   <option value="manufacturing">Manufacturing</option>
+                  <option value="property_management">Property Management</option>
                   <option value="other">Other</option>
                 </select>
               </div>

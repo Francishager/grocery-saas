@@ -262,6 +262,8 @@ export const permissions: Permission[] = [
   { id: 'canRefundTenantDeposit', name: 'Refund Tenant Deposits', description: 'Refund held deposits with audited cash and ledger reversals', category: 'property_management', accessesBusinessData: true },
   { id: 'canVoidRentPayment', name: 'Void Rent Payments', description: 'Reverse a rent receipt with a reason', category: 'property_management', accessesBusinessData: true },
   { id: 'canManageRentPayment', name: 'Manage Rent Payments (Legacy)', description: 'Legacy combined permission for voiding rent payments and refunding tenant deposits', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewRentPaymentPlans', name: 'View Rent Payment Plans', description: 'View renter repayment schedules, balances, installments, and payment history', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageRentPaymentPlans', name: 'Manage Rent Payment Plans', description: 'Create and cancel renter arrears plans with balanced accounting reclassification', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyReports', name: 'View Property Reports', description: 'View rent collection, balances, arrears, and statements', category: 'property_management', accessesBusinessData: true },
   { id: 'canRecordOwnerPayout', name: 'Record Landlord Payouts', description: 'Pay collected rent to property owners and record cash and payable movements', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertySales', name: 'View Plot Sales', description: 'View plot contracts, installments, receipts, and outstanding balances', category: 'property_management', accessesBusinessData: true },

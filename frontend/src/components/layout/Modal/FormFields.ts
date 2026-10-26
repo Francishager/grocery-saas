@@ -179,6 +179,7 @@ export const businessSettingsFormFields: FormField[] = [
       { value: 'salon_spa', label: 'Salon & Spa' },
       { value: 'repair_shop', label: 'Repair Shop' },
       { value: 'manufacturing', label: 'Manufacturing' },
+      { value: 'property_management', label: 'Property Management' },
       { value: 'other', label: 'Other' },
     ],
   },

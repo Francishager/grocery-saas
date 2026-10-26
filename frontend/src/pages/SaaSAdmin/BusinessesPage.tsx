@@ -23,7 +23,7 @@ const BUSINESS_TYPE_LABELS: Record<string, string> = {
   bar: 'Bar', restaurant_bar: 'Restaurant & Bar', cafe: 'Cafe',
   coffee_shop: 'Coffee Shop', fast_food: 'Fast Food', hotel_restaurant: 'Hotel Restaurant',
   bakery: 'Bakery', service: 'Service Business', salon_spa: 'Salon & Spa',
-  repair_shop: 'Repair Shop', manufacturing: 'Manufacturing', other: 'Other',
+  repair_shop: 'Repair Shop', manufacturing: 'Manufacturing', property_management: 'Property Management', other: 'Other',
 }
 
 interface Plan {

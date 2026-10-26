@@ -114,7 +114,7 @@ model Tenant {
   attendanceRadiusMeters Int          @default(200)
   logo                   String?
   status                 TenantStatus @default(active)
-  businessType           String? // retail, pharmacy, hardware, supermarket, wholesale, restaurant, bar, restaurant_bar, cafe, coffee_shop, fast_food, hotel_restaurant, bakery, service, salon_spa, repair_shop, manufacturing, other
+  businessType           String? // retail, pharmacy, hardware, supermarket, wholesale, restaurant, bar, restaurant_bar, cafe, coffee_shop, fast_food, hotel_restaurant, bakery, service, salon_spa, repair_shop, manufacturing, property_management, other
 
   // =====================
   // PLAN RELATION
@@ -170,6 +170,7 @@ model Tenant {
   propertyTenantIdentities         PropertyTenantIdentity[]
   rentCharges                     RentCharge[]
   propertyRentPayments            PropertyRentPayment[]
+  rentPaymentPlans                PropertyRentPaymentPlan[]
   rentReminders                   PropertyRentReminder[]
   propertyAccountingConfig       PropertyAccountingConfig?
   propertyOwnerPayouts            PropertyOwnerPayout[]
@@ -507,6 +508,7 @@ model User {
   propertySalePaymentsCreated PropertySalePayment[] @relation("PropertySalePaymentCreator")
   propertyLandPurchasesCreated PropertyLandPurchase[] @relation("PropertyLandPurchaseCreator")
   propertyLandPurchasePaymentsCreated PropertyLandPurchasePayment[] @relation("PropertyLandPurchasePaymentCreator")
+  rentPaymentPlansCreated PropertyRentPaymentPlan[] @relation("PropertyRentPaymentPlanCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -952,6 +954,8 @@ model UserPermission {
   canRefundTenantDeposit            Boolean  @default(false)
   canVoidRentPayment                Boolean  @default(false)
   canManageRentPayment              Boolean  @default(false)
+  canViewRentPaymentPlans           Boolean  @default(false)
+  canManageRentPaymentPlans         Boolean  @default(false)
   canViewPropertyReports            Boolean  @default(false)
   canRecordOwnerPayout              Boolean  @default(false)
   canViewPropertySales               Boolean  @default(false)
@@ -2711,6 +2715,7 @@ model PropertyTenancy {
   agreementNotes    String?
   charges           RentCharge[]
   payments          PropertyRentPayment[]
+  paymentPlans      PropertyRentPaymentPlan[]
   identity          PropertyTenantIdentity?
   reminders         PropertyRentReminder[]
   createdAt         DateTime               @default(now())
@@ -2751,6 +2756,7 @@ model RentCharge {
   amountPaid     Float                  @default(0)
   status         String                 @default("unpaid")
   allocations    RentPaymentAllocation[]
+  planAllocations RentPaymentPlanChargeAllocation[]
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
 
@@ -2780,13 +2786,92 @@ model PropertyRentPayment {
   voidReason       String?
   voidedAt         DateTime?
   allocations      RentPaymentAllocation[]
+  rentPaymentPlanId String?
+  rentPaymentPlan   PropertyRentPaymentPlan? @relation(fields: [rentPaymentPlanId], references: [id], onDelete: Restrict)
+  planInstallmentAllocations RentPlanInstallmentPaymentAllocation[]
   createdAt        DateTime               @default(now())
 
   @@unique([tenantId, receiptNo])
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, paymentDate])
   @@index([tenancyId, paymentDate])
+  @@index([rentPaymentPlanId, paymentDate])
   @@map("property_rent_payments")
+}
+
+model PropertyRentPaymentPlan {
+  id                 String                         @id @default(cuid())
+  tenantId           String
+  tenant             Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId          String
+  tenancy            PropertyTenancy                @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  createdById        String
+  createdBy          User                           @relation("PropertyRentPaymentPlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  planNo             String
+  idempotencyKey     String?
+  status             String                         @default("active")
+  totalAmount        Float
+  amountPaid         Float                          @default(0)
+  installmentCount   Int
+  frequency          String
+  startDate          DateTime
+  notes              String?
+  chargeAllocations  RentPaymentPlanChargeAllocation[]
+  installments       RentPaymentPlanInstallment[]
+  payments           PropertyRentPayment[]
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+
+  @@unique([tenantId, planNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, tenancyId, status])
+  @@map("property_rent_payment_plans")
+}
+
+model RentPaymentPlanChargeAllocation {
+  id        String                  @id @default(cuid())
+  planId    String
+  plan      PropertyRentPaymentPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  chargeId  String
+  charge    RentCharge              @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  amount    Float
+  createdAt DateTime                @default(now())
+
+  @@unique([planId, chargeId])
+  @@index([chargeId])
+  @@map("rent_payment_plan_charge_allocations")
+}
+
+model RentPaymentPlanInstallment {
+  id                 String                            @id @default(cuid())
+  planId             String
+  plan               PropertyRentPaymentPlan           @relation(fields: [planId], references: [id], onDelete: Cascade)
+  sequence           Int
+  dueDate            DateTime
+  amount             Float
+  amountPaid         Float                             @default(0)
+  status             String                            @default("unpaid")
+  paymentAllocations RentPlanInstallmentPaymentAllocation[]
+  createdAt          DateTime                          @default(now())
+  updatedAt          DateTime                          @updatedAt
+
+  @@unique([planId, sequence])
+  @@index([planId, dueDate, status])
+  @@map("rent_payment_plan_installments")
+}
+
+model RentPlanInstallmentPaymentAllocation {
+  id            String                     @id @default(cuid())
+  paymentId     String
+  payment       PropertyRentPayment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  installmentId String
+  installment   RentPaymentPlanInstallment @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+  amount        Float
+  createdAt     DateTime                   @default(now())
+
+  @@unique([paymentId, installmentId])
+  @@index([installmentId])
+  @@map("rent_plan_installment_payment_allocations")
 }
 
 model PropertyOwnerPayout {
@@ -2829,6 +2914,8 @@ model PropertyAccountingConfig {
   depositLiabilityAccount   Account  @relation("PropertyDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id], onDelete: Restrict)
   depositOpeningEquityAccountId String
   depositOpeningEquityAccount Account @relation("PropertyDepositOpeningEquityAccount", fields: [depositOpeningEquityAccountId], references: [id], onDelete: Restrict)
+  rentPlanReceivableAccountId String?
+  rentPlanReceivableAccount Account? @relation("PropertyRentPlanReceivableAccount", fields: [rentPlanReceivableAccountId], references: [id], onDelete: Restrict)
   landSaleReceivableAccountId String?
   landSaleReceivableAccount Account? @relation("PropertyLandSaleReceivableAccount", fields: [landSaleReceivableAccountId], references: [id], onDelete: Restrict)
   landSaleRevenueAccountId String?
@@ -3142,6 +3229,7 @@ model Account {
   payablesFreightInventoryConfigs         PayablesAccountingConfig[]    @relation("PayablesFreightInventoryAccount")
   payablesFreightExpenseConfigs           PayablesAccountingConfig[]    @relation("PayablesFreightExpenseAccount")
   propertyRentReceivableConfigs            PropertyAccountingConfig[]    @relation("PropertyRentReceivableAccount")
+  propertyRentPlanReceivableConfigs        PropertyAccountingConfig[]    @relation("PropertyRentPlanReceivableAccount")
   propertyRentIncomeConfigs                PropertyAccountingConfig[]    @relation("PropertyRentIncomeAccount")
   propertyOwnerPayableConfigs              PropertyAccountingConfig[]    @relation("PropertyOwnerPayableAccount")
   propertyDepositLiabilityConfigs          PropertyAccountingConfig[]    @relation("PropertyDepositLiabilityAccount")

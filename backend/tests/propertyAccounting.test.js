@@ -7,6 +7,9 @@ import {
   propertyOwnerPayoutLines,
   propertyRentChargeLines,
   propertyRentReceiptLines,
+  propertyRentPlanReclassificationLines,
+  propertyRentPlanReceiptLines,
+  propertyRentPlanCancellationLines,
   propertySaleRecognitionLines,
   propertySalePaymentLines,
   propertySaleOwnerPayoutLines,
@@ -18,6 +21,7 @@ import { PERMISSION_METADATA, permissionAllowedForTenant, resolveEffectivePermis
 
 const config = {
   rentReceivableAccountId: 'rent-ar',
+  rentPlanReceivableAccountId: 'rent-plan-ar',
   rentIncomeAccountId: 'rent-income',
   ownerPayableAccountId: 'owner-payable',
   depositLiabilityAccountId: 'deposit-liability',
@@ -89,6 +93,17 @@ test('rent receipts and landlord payouts settle their respective control account
   balanced(receipt); balanced(payout)
 })
 
+test('rent payment plans reclass existing arrears without creating income and settle through the plan receivable', () => {
+  const reclass = propertyRentPlanReclassificationLines(config, { amount: 240000, reference: 'RPL-1' })
+  const receipt = propertyRentPlanReceiptLines(config, { amount: 80000, cashAccountLedgerId: 'cash', reference: 'RPL-RCPT-1' })
+  const cancel = propertyRentPlanCancellationLines(config, { amount: 160000, reference: 'RPL-1' })
+  assert.deepEqual(reclass.map(line => [line.accountId, line.debit, line.credit]), [['rent-plan-ar', 240000, 0], ['rent-ar', 0, 240000]])
+  assert.deepEqual(receipt.map(line => [line.accountId, line.debit, line.credit]), [['cash', 80000, 0], ['rent-plan-ar', 0, 80000]])
+  assert.deepEqual(cancel.map(line => [line.accountId, line.debit, line.credit]), [['rent-ar', 160000, 0], ['rent-plan-ar', 0, 160000]])
+  assert.ok(!reclass.some(line => line.accountId === config.rentIncomeAccountId))
+  balanced(reclass); balanced(receipt); balanced(cancel)
+})
+
 test('tenant deposits remain liabilities on receipt, opening migration, and refund', () => {
   const receipt = propertyDepositReceiptLines(config, { amount: 30000, cashAccountLedgerId: 'cash', reference: 'D-1' })
   const opening = propertyOpeningDepositLines(config, { amount: 30000, reference: 'D-1' })
@@ -101,7 +116,7 @@ test('tenant deposits remain liabilities on receipt, opening migration, and refu
 
 test('property permissions are exposed under the Property Management category', () => {
   const keys = [
-    'canViewPropertyPortfolio', 'canViewPropertyCollections', 'canViewPropertyStatements', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails',
+    'canViewPropertyPortfolio', 'canViewPropertyCollections', 'canViewPropertyStatements', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails', 'canViewRentPaymentPlans', 'canManageRentPaymentPlans',
     'canManagePropertyOwners', 'canManageProperties', 'canManagePropertyUnits',
     'canCreateTenancies', 'canEndTenancies', 'canRecordRentPayment', 'canRecordTenantDeposit',
     'canRefundTenantDeposit', 'canVoidRentPayment', 'canViewPropertyReports', 'canRecordOwnerPayout',

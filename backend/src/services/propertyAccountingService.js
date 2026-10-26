@@ -3,6 +3,7 @@ import { cashAccountMarker, linkedCashAccountId } from '../utils/accountingSync.
 const money = value => Math.round((Number(value) || 0) * 100) / 100
 const roles = [
   ['rentReceivableAccountId', 'Property Rent Receivable', 'PM-1210', 'asset', 'current_asset'],
+  ['rentPlanReceivableAccountId', 'Rent Payment Plan Receivable', 'PM-1215', 'asset', 'current_asset'],
   ['rentIncomeAccountId', 'Property Rental Income', 'PM-4200', 'revenue', 'operating_revenue'],
   ['ownerPayableAccountId', 'Landlord Funds Payable', 'PM-2200', 'liability', 'current_liability'],
   ['depositLiabilityAccountId', 'Tenant Security Deposits Payable', 'PM-2250', 'liability', 'current_liability'],
@@ -51,7 +52,7 @@ export async function ensurePropertyAccounting(tx, tenantId) {
     where: { tenantId },
     create: { tenantId, ...values, isEnabled: true, isSystemManaged: true },
     update: { ...values, isEnabled: true, isSystemManaged: true },
-    include: { rentReceivableAccount: true, rentIncomeAccount: true, ownerPayableAccount: true, depositLiabilityAccount: true },
+    include: { rentReceivableAccount: true, rentPlanReceivableAccount: true, rentIncomeAccount: true, ownerPayableAccount: true, depositLiabilityAccount: true },
   })
 }
 
@@ -155,6 +156,33 @@ export function propertyRentReceiptLines(config, { amount, cashAccountLedgerId, 
   return [
     { accountId: cashAccountLedgerId, debit: value, credit: 0, description: `Rent receipt ${reference}` },
     { accountId: config.rentReceivableAccountId, debit: 0, credit: value, description: `Tenant rent receivable settled ${reference}` },
+  ]
+}
+
+export function propertyRentPlanReclassificationLines(config, { amount, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !config.rentPlanReceivableAccountId) throw Object.assign(new Error('Rent payment plan accounting details are invalid.'), { statusCode: 400 })
+  return [
+    { accountId: config.rentPlanReceivableAccountId, debit: value, credit: 0, description: `Reclassify agreed rent arrears to payment plan ${reference}` },
+    { accountId: config.rentReceivableAccountId, debit: 0, credit: value, description: `Reclassify rent receivable to payment plan ${reference}` },
+  ]
+}
+
+export function propertyRentPlanReceiptLines(config, { amount, cashAccountLedgerId, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !config.rentPlanReceivableAccountId || !cashAccountLedgerId) throw Object.assign(new Error('Rent plan receipt accounting details are invalid.'), { statusCode: 400 })
+  return [
+    { accountId: cashAccountLedgerId, debit: value, credit: 0, description: `Rent payment plan receipt ${reference}` },
+    { accountId: config.rentPlanReceivableAccountId, debit: 0, credit: value, description: `Rent payment plan receivable settled ${reference}` },
+  ]
+}
+
+export function propertyRentPlanCancellationLines(config, { amount, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !config.rentPlanReceivableAccountId) throw Object.assign(new Error('Rent payment plan cancellation accounting details are invalid.'), { statusCode: 400 })
+  return [
+    { accountId: config.rentReceivableAccountId, debit: value, credit: 0, description: `Return unpaid plan balance to rent receivable ${reference}` },
+    { accountId: config.rentPlanReceivableAccountId, debit: 0, credit: value, description: `Release cancelled plan receivable ${reference}` },
   ]
 }
 
