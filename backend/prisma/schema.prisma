@@ -2391,7 +2391,7 @@ model Expense {
   category       String // rent, transport, salaries, utilities, etc.
   description    String
   amount         Float
-  balanceAfter   Float
+  balanceAfter   Float?
   paymentMethod  String
   cashAccountId  String? // Which cash account this expense was paid from
   cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
