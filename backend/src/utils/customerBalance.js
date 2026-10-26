@@ -5,6 +5,24 @@ const toMoney = (value, fallback = 0) => {
 
 const roundMoney = (value) => Math.round(toMoney(value) * 100) / 100;
 
+let propertySaleSchemaWarningLogged = false
+const isMissingPropertySaleSchema = error => {
+  const detail = `${error?.message || ''} ${error?.meta?.table || ''} ${error?.meta?.column || ''}`.toLowerCase()
+  return ['P2021', 'P2022'].includes(error?.code) && /property_sales|property_sale_payments|property_sale_installments/.test(detail)
+    || ['42P01', '42703'].includes(error?.code) && /property_sales|property_sale_payments|property_sale_installments/.test(detail)
+}
+async function optionalPropertySaleRows(query) {
+  try { return await query() }
+  catch (error) {
+    if (!isMissingPropertySaleSchema(error)) throw error
+    if (!propertySaleSchemaWarningLogged) {
+      console.warn('Plot-sale tables are not migrated yet; omitting plot-sale amounts from customer balance calculations until migration deployment.')
+      propertySaleSchemaWarningLogged = true
+    }
+    return []
+  }
+}
+
 const hasNumericValue = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
 
 function saleLineNetSubtotal(sale) {
@@ -239,8 +257,8 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
       where: { tenantId: scope.tenantId, customerId: { in: customerIds } },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
-    client.propertySale?.findMany ? client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: { in: customerIds }, status: 'active' }, select: { id: true, buyerId: true, salePrice: true } }) : Promise.resolve([]),
-    client.propertySalePayment?.findMany ? client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: { in: customerIds }, status: 'active' } }, select: { amount: true, sale: { select: { buyerId: true } } } }) : Promise.resolve([]),
+    client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: { in: customerIds }, status: 'active' }, select: { id: true, buyerId: true, salePrice: true } })) : Promise.resolve([]),
+    client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: { in: customerIds }, status: 'active' } }, select: { amount: true, sale: { select: { buyerId: true } } } })) : Promise.resolve([]),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
@@ -338,8 +356,8 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
       where: { tenantId: scope.tenantId, customerId },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
-    client.propertySale?.findMany ? client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, status: 'active' }, select: { salePrice: true } }) : Promise.resolve([]),
-    client.propertySalePayment?.findMany ? client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } }) : Promise.resolve([]),
+    client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, status: 'active' }, select: { salePrice: true } })) : Promise.resolve([]),
+    client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } })) : Promise.resolve([]),
   ]);
 
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer, paymentReconciliationIssuesByCustomer } =
@@ -419,8 +437,8 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
       where: { ...tenantCustomerWhere, ...createdBefore },
       select: { customerId: true, saleId: true, sourceType: true, sourceId: true, amount: true },
     }),
-    client.propertySale?.findMany ? client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, ...createdBefore, status: 'active' }, select: { salePrice: true } }) : Promise.resolve([]),
-    client.propertySalePayment?.findMany ? client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, ...createdBefore, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } }) : Promise.resolve([]),
+    client.propertySale?.findMany ? optionalPropertySaleRows(() => client.propertySale.findMany({ where: { tenantId: scope.tenantId, buyerId: customerId, ...createdBefore, status: 'active' }, select: { salePrice: true } })) : Promise.resolve([]),
+    client.propertySalePayment?.findMany ? optionalPropertySaleRows(() => client.propertySalePayment.findMany({ where: { tenantId: scope.tenantId, ...createdBefore, status: 'posted', sale: { buyerId: customerId, status: 'active' } }, select: { amount: true } })) : Promise.resolve([]),
   ])
   if (!customer) return null
 

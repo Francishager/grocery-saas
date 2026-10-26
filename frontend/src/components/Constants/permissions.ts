@@ -270,6 +270,9 @@ export const permissions: Permission[] = [
   { id: 'canVoidPropertySalePayment', name: 'Reverse Plot Sale Payments', description: 'Void a receipt with a balanced cash, receivable, and installment reversal', category: 'property_management', accessesBusinessData: true },
   { id: 'canCancelPropertySale', name: 'Cancel Plot Sales', description: 'Cancel contracts that have no posted payments and reverse their journals', category: 'property_management', accessesBusinessData: true },
   { id: 'canManagePropertyLandInventory', name: 'Manage Plot Inventory Cost', description: 'Record owned-plot cost basis and opening inventory journal entries', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyLandPurchases', name: 'View Plot Purchases', description: 'View owned plot acquisition records, supplier balances, payment history, and receipts', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCreatePropertyLandPurchase', name: 'Record Plot Purchases', description: 'Record an owned plot purchase and post inventory cost, cash, and supplier payable', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordPropertyLandPurchasePayment', name: 'Pay Plot Suppliers', description: 'Record permitted transaction-account payments against plot purchase balances', category: 'property_management', accessesBusinessData: true },
   
   // Restaurant & Bar
   { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },

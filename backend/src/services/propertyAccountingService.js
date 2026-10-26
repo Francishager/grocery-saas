@@ -235,3 +235,35 @@ export function propertyLandAcquisitionLines(config, { amount, reference }) {
     { accountId: config.landInventoryOpeningEquityAccountId, debit: 0, credit: value, description: `Initial land inventory funding ${reference}` },
   ]
 }
+
+export function propertyLandPurchaseLines(config, { costBasis, recoverableTax = 0, total, amountPaid, payableAccountId, inputTaxAccountId, cashAccountLedgerId, reference }) {
+  const inventoryCost = money(costBasis)
+  const tax = money(recoverableTax)
+  const invoiceTotal = money(total)
+  const paid = money(amountPaid)
+  const balance = money(invoiceTotal - paid)
+  if (!(inventoryCost > 0) || tax < 0 || money(inventoryCost + tax) !== invoiceTotal || paid < 0 || balance < 0) throw Object.assign(new Error('Plot purchase values are invalid.'), { statusCode: 400 })
+  const lines = [{ accountId: config.landInventoryAccountId, debit: inventoryCost, credit: 0, description: `Land inventory acquired from supplier ${reference}` }]
+  if (tax > 0) {
+    if (!inputTaxAccountId) throw Object.assign(new Error('Map an input-tax asset account before recording recoverable tax on a plot purchase.'), { statusCode: 409 })
+    lines.push({ accountId: inputTaxAccountId, debit: tax, credit: 0, description: `Recoverable input tax on plot acquisition ${reference}` })
+  }
+  if (paid > 0) {
+    if (!cashAccountLedgerId) throw Object.assign(new Error('A linked transaction account is required for the amount paid.'), { statusCode: 409 })
+    lines.push({ accountId: cashAccountLedgerId, debit: 0, credit: paid, description: `Plot supplier payment at purchase ${reference}` })
+  }
+  if (balance > 0) {
+    if (!payableAccountId) throw Object.assign(new Error('A supplier payable account is required for a purchase on credit.'), { statusCode: 409 })
+    lines.push({ accountId: payableAccountId, debit: 0, credit: balance, description: `Plot supplier payable ${reference}` })
+  }
+  return lines
+}
+
+export function propertyLandPurchasePaymentLines({ amount, payableAccountId, cashAccountLedgerId, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !payableAccountId || !cashAccountLedgerId) throw Object.assign(new Error('Plot supplier payment posting details are invalid.'), { statusCode: 400 })
+  return [
+    { accountId: payableAccountId, debit: value, credit: 0, description: `Settle plot supplier balance ${reference}` },
+    { accountId: cashAccountLedgerId, debit: 0, credit: value, description: `Plot supplier payment ${reference}` },
+  ]
+}

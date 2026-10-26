@@ -11,6 +11,8 @@ import {
   propertySalePaymentLines,
   propertySaleOwnerPayoutLines,
   propertyLandAcquisitionLines,
+  propertyLandPurchaseLines,
+  propertyLandPurchasePaymentLines,
 } from '../src/services/propertyAccountingService.js'
 import { PERMISSION_METADATA, permissionAllowedForTenant, resolveEffectivePermissions } from '../src/utils/permissions.js'
 
@@ -55,6 +57,20 @@ test('owned plot sales recognize revenue, remove inventory at cost, and receipt 
   balanced(sale); balanced(receipt); balanced(acquisition)
 })
 
+test('plot acquisitions capitalize land and split upfront cash from supplier payable', () => {
+  const acquisition = propertyLandPurchaseLines(config, { costBasis: 1100000, recoverableTax: 100000, total: 1200000, amountPaid: 300000, payableAccountId: 'supplier-payable', inputTaxAccountId: 'input-tax', cashAccountLedgerId: 'cash', reference: 'LAND-PUR-1' })
+  const paidInFull = propertyLandPurchaseLines(config, { costBasis: 300000, recoverableTax: 0, total: 300000, amountPaid: 300000, payableAccountId: null, cashAccountLedgerId: 'cash', reference: 'LAND-PUR-2' })
+  const centBalance = propertyLandPurchaseLines(config, { costBasis: 1, total: 1, amountPaid: 0.99, payableAccountId: 'supplier-payable', cashAccountLedgerId: 'cash', reference: 'LAND-PUR-3' })
+  const settlement = propertyLandPurchasePaymentLines({ amount: 250000, payableAccountId: 'supplier-payable', cashAccountLedgerId: 'cash', reference: 'LAND-PAY-1' })
+  assert.deepEqual(acquisition.map(line => [line.accountId, line.debit, line.credit]), [
+    ['land-inventory', 1100000, 0], ['input-tax', 100000, 0], ['cash', 0, 300000], ['supplier-payable', 0, 900000],
+  ])
+  assert.deepEqual(paidInFull.map(line => [line.accountId, line.debit, line.credit]), [['land-inventory', 300000, 0], ['cash', 0, 300000]])
+  assert.deepEqual(centBalance.map(line => [line.accountId, line.debit, line.credit]), [['land-inventory', 1, 0], ['cash', 0, 0.99], ['supplier-payable', 0, 0.01]])
+  assert.deepEqual(settlement.map(line => [line.accountId, line.debit, line.credit]), [['supplier-payable', 250000, 0], ['cash', 0, 250000]])
+  balanced(acquisition); balanced(paidInFull); balanced(centBalance); balanced(settlement)
+})
+
 test('brokered plot sale separates owner proceeds from earned commission', () => {
   const sale = propertySaleRecognitionLines(config, { amount: 1000000, commission: 100000, costBasis: 0, saleMode: 'brokered', buyerName: 'Buyer', reference: 'P-2' })
   const payout = propertySaleOwnerPayoutLines(config, { amount: 900000, cashAccountLedgerId: 'cash', reference: 'OWN-1' })
@@ -91,6 +107,7 @@ test('property permissions are exposed under the Property Management category', 
     'canRefundTenantDeposit', 'canVoidRentPayment', 'canViewPropertyReports', 'canRecordOwnerPayout',
     'canViewPropertySales', 'canCreatePropertySale', 'canRecordPropertySalePayment',
     'canVoidPropertySalePayment', 'canCancelPropertySale', 'canManagePropertyLandInventory',
+    'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment',
   ]
   for (const key of keys) assert.equal(PERMISSION_METADATA[key]?.category, 'property_management', `${key} must be grouped under Property Management`)
 })

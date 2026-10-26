@@ -175,6 +175,8 @@ model Tenant {
   propertyOwnerPayouts            PropertyOwnerPayout[]
   propertySales                   PropertySale[]
   propertySalePayments            PropertySalePayment[]
+  propertyLandPurchases           PropertyLandPurchase[]
+  propertyLandPurchasePayments    PropertyLandPurchasePayment[]
   saleReturns                     SaleReturn[]
   accounts                        Account[]
   journalEntries                  JournalEntry[]
@@ -503,6 +505,8 @@ model User {
   propertyOwnerPayouts   PropertyOwnerPayout[] @relation("PropertyOwnerPayoutCreator")
   propertySalesCreated  PropertySale[] @relation("PropertySaleCreator")
   propertySalePaymentsCreated PropertySalePayment[] @relation("PropertySalePaymentCreator")
+  propertyLandPurchasesCreated PropertyLandPurchase[] @relation("PropertyLandPurchaseCreator")
+  propertyLandPurchasePaymentsCreated PropertyLandPurchasePayment[] @relation("PropertyLandPurchasePaymentCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -956,6 +960,9 @@ model UserPermission {
   canVoidPropertySalePayment         Boolean  @default(false)
   canCancelPropertySale              Boolean  @default(false)
   canManagePropertyLandInventory     Boolean  @default(false)
+  canViewPropertyLandPurchases       Boolean  @default(false)
+  canCreatePropertyLandPurchase      Boolean  @default(false)
+  canRecordPropertyLandPurchasePayment Boolean @default(false)
   // Restaurant & Bar
   canViewRestaurant                 Boolean  @default(false)
   canCreateRestaurant               Boolean  @default(false)
@@ -1835,6 +1842,8 @@ model Supplier {
 
   purchases SupplierPurchase[]
   payments  SupplierPayment[]
+  propertyLandPurchases PropertyLandPurchase[]
+  propertyLandPurchasePayments PropertyLandPurchasePayment[]
   fuelDeliveries FuelDelivery[]
   Tenant    Tenant             @relation(fields: [tenantId], references: [id])
 
@@ -2382,6 +2391,7 @@ model Expense {
   category       String // rent, transport, salaries, utilities, etc.
   description    String
   amount         Float
+  balanceAfter   Float
   paymentMethod  String
   cashAccountId  String? // Which cash account this expense was paid from
   cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
@@ -2428,6 +2438,7 @@ model CashAccount {
   AssignedUsers   User[]               @relation("UserCashAccount")
   propertyRentPayments PropertyRentPayment[]
   propertySalePayments PropertySalePayment[]
+  propertyLandPurchasePayments PropertyLandPurchasePayment[]
   propertyOwnerPayouts PropertyOwnerPayout[]
 
   @@unique([tenantId, name])
@@ -2630,6 +2641,7 @@ model ManagedProperty {
   status         String           @default("active")
   units          PropertyUnit[]
   propertySales  PropertySale[]
+  landPurchases  PropertyLandPurchase[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -2652,6 +2664,7 @@ model PropertyUnit {
   notes          String?
   tenancies      PropertyTenancy[]
   propertySales  PropertySale[]
+  landPurchase   PropertyLandPurchase?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -2944,6 +2957,73 @@ model PropertySalePaymentAllocation {
   @@unique([paymentId, installmentId])
   @@index([installmentId])
   @@map("property_sale_payment_allocations")
+}
+
+model PropertyLandPurchase {
+  id             String                       @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  propertyId     String
+  property       ManagedProperty              @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  unitId         String                       @unique
+  unit           PropertyUnit                 @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  supplierId     String
+  supplier       Supplier                     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdById    String
+  createdBy      User                         @relation("PropertyLandPurchaseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  purchaseNo     String
+  idempotencyKey String?
+  supplierRef    String?
+  purchaseDate   DateTime                     @default(now())
+  purchasePrice  Float
+  capitalizedCosts Float                      @default(0)
+  recoverableTax Float                        @default(0)
+  costBasis      Float
+  total          Float
+  amountPaid     Float                        @default(0)
+  balance        Float                        @default(0)
+  paymentStatus  String                       @default("unpaid")
+  dueDate        DateTime?
+  notes          String?
+  payments       PropertyLandPurchasePayment[]
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+
+  @@unique([tenantId, purchaseNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, supplierId, purchaseDate])
+  @@index([tenantId, dueDate, paymentStatus])
+  @@map("property_land_purchases")
+}
+
+model PropertyLandPurchasePayment {
+  id             String               @id @default(cuid())
+  tenantId       String
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseId     String
+  purchase       PropertyLandPurchase @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  supplierId     String
+  supplier       Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  cashAccountId  String
+  cashAccount    CashAccount           @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  createdById    String
+  createdBy      User                 @relation("PropertyLandPurchasePaymentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  receiptNo      String
+  idempotencyKey String?
+  amount         Float
+  balanceAfter   Float
+  paymentMethod  String
+  paymentDate    DateTime             @default(now())
+  transactionRef String?
+  notes          String?
+  status         String               @default("posted")
+  createdAt      DateTime             @default(now())
+
+  @@unique([tenantId, receiptNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, supplierId, paymentDate])
+  @@index([purchaseId, paymentDate])
+  @@map("property_land_purchase_payments")
 }
 
 model PropertyRentReminder {

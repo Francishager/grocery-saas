@@ -199,14 +199,20 @@ router.get('/suppliers', authenticateToken, requirePermission('canViewPayable'),
       prisma.supplier.count({ where })
     ])
 
-    const openPurchaseBalances = suppliers.length
-      ? await prisma.supplierPurchase.groupBy({
-          by: ['supplierId'],
-          where: scopedWhere(scope, { supplierId: { in: suppliers.map((supplier) => supplier.id) }, balance: { gt: 0 } }),
-          _sum: { balance: true }
-        })
-      : []
-    const openPurchasesBySupplier = new Map(openPurchaseBalances.map((row) => [row.supplierId, Number(row._sum.balance || 0)]))
+    const [openPurchaseBalances, openLandPurchaseBalances] = suppliers.length ? await Promise.all([
+      prisma.supplierPurchase.groupBy({
+        by: ['supplierId'],
+        where: scopedWhere(scope, { supplierId: { in: suppliers.map((supplier) => supplier.id) }, balance: { gt: 0 } }),
+        _sum: { balance: true }
+      }),
+      prisma.propertyLandPurchase.groupBy({
+        by: ['supplierId'],
+        where: { tenantId: scope.tenantId, supplierId: { in: suppliers.map((supplier) => supplier.id) }, balance: { gt: 0 } },
+        _sum: { balance: true }
+      }),
+    ]) : [[], []]
+    const openPurchasesBySupplier = new Map()
+    for (const row of [...openPurchaseBalances, ...openLandPurchaseBalances]) openPurchasesBySupplier.set(row.supplierId, (openPurchasesBySupplier.get(row.supplierId) || 0) + Number(row._sum.balance || 0))
     const suppliersWithOpeningBalanceDue = suppliers.map((supplier) => ({
       ...supplier,
       openingBalanceOutstanding: Math.max(0, Number(supplier.balance || 0) - (openPurchasesBySupplier.get(supplier.id) || 0))
@@ -753,14 +759,15 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
       if (!purchase) return res.status(404).json({ error: 'Purchase not found for this supplier' })
       if (paidAmount > purchase.balance) return res.status(400).json({ error: 'Payment exceeds purchase balance' })
     } else {
-      const [openPurchases, currentSupplier] = await Promise.all([
+      const [openPurchases, openLandPurchases, currentSupplier] = await Promise.all([
         prisma.supplierPurchase.aggregate({
           where: scopedWhere(scope, { supplierId, balance: { gt: 0 } }),
           _sum: { balance: true }
         }),
+        prisma.propertyLandPurchase.aggregate({ where: { tenantId: scope.tenantId, supplierId, balance: { gt: 0 } }, _sum: { balance: true } }),
         prisma.supplier.findFirst({ where: scopedWhere(scope, { id: supplierId }) })
       ])
-      const openingBalanceOutstanding = Math.max(0, Number(currentSupplier?.balance || 0) - Number(openPurchases._sum.balance || 0))
+      const openingBalanceOutstanding = Math.max(0, Number(currentSupplier?.balance || 0) - Number(openPurchases._sum.balance || 0) - Number(openLandPurchases._sum.balance || 0))
       if (paidAmount > openingBalanceOutstanding) {
         return res.status(400).json({ error: 'Payment exceeds the supplier opening balance still outstanding' })
       }

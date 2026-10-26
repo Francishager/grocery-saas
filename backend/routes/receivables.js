@@ -34,6 +34,22 @@ const toMoney = (value, fallback = 0) => {
   return Number.isFinite(num) ? Math.round(num * 100) / 100 : fallback
 }
 
+let plotSaleHistorySchemaWarningLogged = false
+async function optionalPlotSaleRows(query) {
+  try { return await query() }
+  catch (error) {
+    const detail = `${error?.message || ''} ${error?.meta?.table || ''} ${error?.meta?.column || ''}`.toLowerCase()
+    const isMissingPlotSaleSchema = ['P2021', 'P2022', '42P01', '42703'].includes(error?.code)
+      && /property_sales|property_sale_payments|property_sale_installments/.test(detail)
+    if (!isMissingPlotSaleSchema) throw error
+    if (!plotSaleHistorySchemaWarningLogged) {
+      console.warn('Plot-sale history tables are not migrated yet; omitting plot-sale history until migration deployment.')
+      plotSaleHistorySchemaWarningLogged = true
+    }
+    return []
+  }
+}
+
 const receivablePaymentFingerprint = (saleId, salePaid, linkedPayments) =>
   `${saleId}:${toMoney(salePaid).toFixed(2)}:${toMoney(linkedPayments).toFixed(2)}`
 
@@ -714,7 +730,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
     ])
     const [propertySales, propertySalePayments] = access.sales || access.payments ? await Promise.all([
-      access.sales ? prisma.propertySale.findMany({
+      access.sales ? optionalPlotSaleRows(() => prisma.propertySale.findMany({
         where: { tenantId: scope.tenantId, buyerId: id },
         include: {
           property: { select: { name: true, address: true, owner: { select: { name: true } } } },
@@ -724,12 +740,12 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           installments: { orderBy: { sequence: 'asc' } },
         },
         orderBy: { saleDate: 'asc' }, take: limit,
-      }) : Promise.resolve([]),
-      access.payments ? prisma.propertySalePayment.findMany({
+      })) : Promise.resolve([]),
+      access.payments ? optionalPlotSaleRows(() => prisma.propertySalePayment.findMany({
         where: { tenantId: scope.tenantId, sale: { buyerId: id } },
         include: { sale: { include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } } } }, cashAccount: { select: { name: true } } },
         orderBy: { paymentDate: 'asc' }, take: limit,
-      }) : Promise.resolve([]),
+      })) : Promise.resolve([]),
     ]) : [[], []]
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
     const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)

@@ -39,7 +39,7 @@ export default function DashboardPage() {
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
   const canViewSalesDashboard = hasPermission('canViewSale') || hasPermission('canViewReportSalesSummary') || hasPermission('canViewReportSalesDaily')
-  const canViewFinancialDashboard = hasPermission('canViewReportFinancialProfitLoss')
+  const canViewFinancialDashboard = hasFeature('reports.financial') && hasPermission('canViewReportFinancialProfitLoss')
   const dashboardAccess = {
     sales: canViewSalesDashboard,
     finance: canViewFinancialDashboard,

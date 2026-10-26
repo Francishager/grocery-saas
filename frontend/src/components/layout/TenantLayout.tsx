@@ -615,6 +615,7 @@ export function TenantLayout() {
       ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies'] }] : []),
       { to: '/tenant/property-management/collections', label: 'Rent Collection', icon: Wallet, permission: 'canViewPropertyCollections' },
       { to: '/tenant/property-management/sales', label: 'Plot Sales & Installments', icon: Receipt, permission: 'canViewPropertySales' },
+      { to: '/tenant/property-management/purchases', label: 'Plot Purchases & Supplier Payments', icon: Receipt, permission: ['canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment'] },
       ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/reports', label: 'Client & Portfolio Reports', icon: BarChart3, permission: 'canViewPropertyReports' }] : []),
     ] : []),
   ].filter(subItemVisible)

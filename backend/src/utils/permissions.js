@@ -231,6 +231,9 @@ const PERMISSION_TO_FEATURES = {
   canVoidPropertySalePayment: ['property_management.agent'],
   canCancelPropertySale: ['property_management.agent'],
   canManagePropertyLandInventory: ['property_management.agent'],
+  canViewPropertyLandPurchases: ['property_management.agent'],
+  canCreatePropertyLandPurchase: ['property_management.agent'],
+  canRecordPropertyLandPurchasePayment: ['property_management.agent'],
   canViewRestaurant: ['restaurant', 'restaurant.orders'],
   canCreateRestaurant: ['restaurant', 'restaurant.orders'],
   canEditRestaurant: ['restaurant', 'restaurant.orders'],
@@ -364,6 +367,7 @@ export const ALL_PERMISSION_KEYS = [
   "canRefundTenantDeposit", "canVoidRentPayment", "canManageRentPayment",
   "canViewPropertyReports", "canRecordOwnerPayout", "canViewPropertySales", "canCreatePropertySale",
   "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
+  "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
   // Fuel Station
@@ -962,6 +966,9 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canVoidPropertySalePayment: { name: 'Reverse plot sale payment', description: 'Void a plot payment, reverse its cash and receivable posting, and restore the installment balance.' },
   canCancelPropertySale: { name: 'Cancel plot sale', description: 'Cancel a plot sale with a balanced accounting reversal when no conflicting settlement exists.' },
   canManagePropertyLandInventory: { name: 'Manage plot inventory cost', description: 'Record the cost basis of plots owned by the property business.' },
+  canViewPropertyLandPurchases: { name: 'View plot purchases', description: 'View land acquisition invoices, supplier balances, payment history, and receipts.' },
+  canCreatePropertyLandPurchase: { name: 'Record plot purchases', description: 'Record an owned plot bought from a supplier and post its inventory cost and payable.' },
+  canRecordPropertyLandPurchasePayment: { name: 'Pay plot suppliers', description: 'Record and receipt payments against outstanding plot acquisition invoices.' },
   canRecordOwnerPayout: { name: 'Record landlord payouts', description: 'Pay collected rent to property owners and record the corresponding payable and cash movement.' },
   canViewRestaurant: {
     name: 'View restaurant operations',

@@ -156,6 +156,18 @@ test('balance map uses the same paid-sale reconciliation as single-customer calc
   assert.equal(result[1].components.salePayments, 60);
 });
 
+test('missing additive plot-sale tables do not break legacy customer balance reads', async () => {
+  const data = makeClient({ customer, sales: [sale({ total: 275, subtotal: 275 })] });
+  data.propertySale = { findMany: async () => { throw Object.assign(new Error('The table public.property_sales does not exist'), { code: 'P2021', meta: { table: 'public.property_sales' } }); } };
+  data.propertySalePayment = { findMany: async () => { throw Object.assign(new Error('The table public.property_sale_payments does not exist'), { code: 'P2021', meta: { table: 'public.property_sale_payments' } }); } };
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
+
+  assert.equal(result.balance, 275);
+  assert.equal(result.components.propertySaleReceivables, 0);
+  assert.equal(result.components.propertySalePayments, 0);
+});
+
 test('explicit receipt allocations, not receipt totals, reduce invoice receivables', async () => {
   const data = makeClient({
     customer,

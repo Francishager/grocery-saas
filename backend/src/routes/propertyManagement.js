@@ -4,7 +4,8 @@ import multer from 'multer'
 import prisma from '../db.js'
 import { authenticateToken, requirePermission, requireAnyPermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
 import { requireAnyFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
-import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines } from '../services/propertyAccountingService.js'
+import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines, propertyLandPurchaseLines, propertyLandPurchasePaymentLines } from '../services/propertyAccountingService.js'
+import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '../services/payablesAccountingService.js'
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
 
@@ -109,12 +110,12 @@ async function findOrCreateRenterCustomer(tx, tenantId, input) {
   } })
 }
 
-router.get('/payment-accounts', requireAnyPermission(['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment', 'canRecordPropertySalePayment']), async (req, res) => {
+router.get('/payment-accounts', requireAnyPermission(['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment', 'canRecordPropertySalePayment', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment']), async (req, res) => {
   try {
     const accounts = await prisma.cashAccount.findMany({ where: { tenantId: tenantIdOf(req), isActive: true }, orderBy: { name: 'asc' } })
     const permitted = accounts.flatMap(account => {
       const paymentMethod = paymentMethodsByAccount[String(account.type).toLowerCase()]
-      const hasAction = ['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment', 'canRecordPropertySalePayment'].some(key => req.user?.permissions?.includes(key))
+      const hasAction = ['canRecordRentPayment', 'canRecordTenantDeposit', 'canRefundTenantDeposit', 'canRecordOwnerPayout', 'canManageRentPayment', 'canRecordPropertySalePayment', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment'].some(key => req.user?.permissions?.includes(key))
       return hasAction && paymentMethod && canUseTransactionAccountForPayment(req, account, paymentMethod) ? [{ id: account.id, name: account.name, type: account.type, balance: account.balance, currency: account.currency, paymentMethod }] : []
     })
     res.json({ accounts: permitted, defaultCashAccountId: req.userCashAccountId || req.user?.cashAccountId || null })
@@ -214,7 +215,7 @@ router.put('/owners/:id', requirePermission('canManagePropertyOwners'), async (r
   } catch (error) { console.error('Update property owner failed:', error); res.status(500).json({ error: 'Could not update owner.' }) }
 })
 
-router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertySales']), async (req, res) => {
+router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertySales', 'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase']), async (req, res) => {
   try {
     const properties = await prisma.managedProperty.findMany({ where: { tenantId: tenantIdOf(req), ...(req.query.ownerId ? { ownerId: String(req.query.ownerId) } : {}), ...(req.query.status ? { status: String(req.query.status) } : {}) }, take: pageSize(req.query.limit), orderBy: { name: 'asc' }, include: { owner: true, units: { orderBy: { unitCode: 'asc' }, include: { _count: { select: { tenancies: true } }, tenancies: { where: { status: 'active' }, take: 1, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true } } } } } } } })
     res.json(properties.map(property => ({ ...property, units: property.units.map(unit => ({ ...unit, currentBalance: money(unit.tenancies[0]?.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0) || 0), tenancies: undefined })) })))
@@ -816,6 +817,177 @@ const propertySaleInclude = {
   installments: { orderBy: { sequence: 'asc' } },
   payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, allocations: true } },
 }
+
+const propertyLandPurchaseInclude = {
+  property: { select: { id: true, name: true, address: true } },
+  unit: { select: { id: true, unitCode: true, unitType: true, currency: true, acquisitionCost: true, status: true } },
+  supplier: { select: { id: true, name: true, phone: true, email: true } },
+  createdBy: { select: { id: true, name: true } },
+  payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, createdBy: { select: { id: true, name: true } } } },
+}
+
+router.get('/land-purchase-options', requirePermission('canCreatePropertyLandPurchase'), async (req, res) => {
+  try {
+    const suppliers = await prisma.supplier.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true } })
+    res.json({ suppliers })
+  } catch (error) { console.error('Load plot purchase suppliers failed:', error); res.status(500).json({ error: 'Could not load active suppliers.' }) }
+})
+
+router.get('/land-purchases', requirePermission('canViewPropertyLandPurchases'), async (req, res) => {
+  try {
+    const rows = await prisma.propertyLandPurchase.findMany({ where: { tenantId: tenantIdOf(req) }, take: pageSize(req.query.limit), orderBy: { purchaseDate: 'desc' }, include: propertyLandPurchaseInclude })
+    res.json(rows)
+  } catch (error) { console.error('List plot purchases failed:', error); res.status(500).json({ error: 'Could not load plot purchases.' }) }
+})
+
+router.post('/land-purchases', requirePermission('canCreatePropertyLandPurchase'), async (req, res) => {
+  const purchasePrice = money(req.body?.purchasePrice)
+  const capitalizedCosts = money(req.body?.capitalizedCosts)
+  const recoverableTax = money(req.body?.recoverableTax)
+  const costBasis = money(purchasePrice + capitalizedCosts)
+  const total = money(costBasis + recoverableTax)
+  const amountPaid = money(req.body?.amountPaid)
+  const purchaseDate = req.body?.purchaseDate ? new Date(req.body.purchaseDate) : new Date()
+  const dueDate = req.body?.dueDate ? new Date(req.body.dueDate) : null
+  const supplierRef = String(req.body?.supplierRef || '').trim() || null
+  const notes = String(req.body?.notes || '').trim() || null
+  const idempotencyKey = String(req.body?.idempotencyKey || '').trim() || randomUUID()
+  const paidBalance = money(total - amountPaid)
+  if (!(purchasePrice > 0) || capitalizedCosts < 0 || recoverableTax < 0 || ![purchasePrice, capitalizedCosts, recoverableTax, total].every(Number.isFinite) || amountPaid < 0 || amountPaid > total) return badRequest(res, 'Enter a valid land price, costs, recoverable tax, and an initial payment no greater than the total.')
+  if (!Number.isFinite(purchaseDate.getTime()) || (dueDate && !Number.isFinite(dueDate.getTime()))) return badRequest(res, 'Enter valid purchase and due dates.')
+  if (paidBalance > 0 && !dueDate) return badRequest(res, 'Set a due date for the supplier balance.')
+  if (supplierRef && supplierRef.length > 120) return badRequest(res, 'Supplier invoice/reference must be 120 characters or fewer.')
+  if (notes && notes.length > 2000) return badRequest(res, 'Purchase notes must be 2,000 characters or fewer.')
+  if (amountPaid > 0 && !req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canRecordPropertyLandPurchasePayment')) return res.status(403).json({ error: 'You need Pay Plot Suppliers permission to make an initial payment.' })
+  const paymentMethod = String(req.body?.paymentMethod || '').toLowerCase()
+  const cashAccountId = String(req.body?.cashAccountId || '')
+  if (amountPaid > 0 && (!Object.hasOwn(paymentMethodToAccount, paymentMethod) || !cashAccountId)) return badRequest(res, 'Choose an allowed payment method and transaction account for the amount paid.')
+  if (amountPaid > 0 && !canUseTransactionAccountForPayment(req, { id: cashAccountId }, paymentMethod)) return res.status(403).json({ error: `You do not have permission to use ${paymentMethod} for this plot purchase.` })
+  try {
+    const tenantId = tenantIdOf(req)
+    const unitId = String(req.body?.unitId || '')
+    const supplierId = String(req.body?.supplierId || '')
+    const purchase = await prisma.$transaction(async tx => {
+      const duplicate = await tx.propertyLandPurchase.findFirst({ where: { tenantId, idempotencyKey }, include: propertyLandPurchaseInclude })
+      if (duplicate) return duplicate
+      await tx.$queryRaw`SELECT "id" FROM "property_units" WHERE "id" = ${unitId} FOR UPDATE`
+      const [unit, supplier] = await Promise.all([
+        tx.propertyUnit.findFirst({ where: { id: unitId, property: { tenantId, propertyType: 'land', ownerId: null, status: 'active' } }, include: { property: true } }),
+        tx.supplier.findFirst({ where: { id: supplierId, tenantId, status: 'active' } }),
+      ])
+      if (!unit) throw Object.assign(new Error('Select an available, business-owned land plot.'), { statusCode: 404 })
+      if (!supplier) throw Object.assign(new Error('Select an active supplier belonging to this business.'), { statusCode: 404 })
+      if (!['vacant', 'available'].includes(String(unit.status).toLowerCase())) throw Object.assign(new Error('Only an unsold, available plot can be acquired.'), { statusCode: 409 })
+      if (Number(unit.acquisitionCost) > 0 || await tx.propertyLandPurchase.findUnique({ where: { unitId: unit.id } })) throw Object.assign(new Error('This plot already has an acquisition cost or purchase record.'), { statusCode: 409 })
+      if (await tx.propertySale.count({ where: { unitId: unit.id, status: 'active' } })) throw Object.assign(new Error('A plot with an active sale contract cannot be purchased again.'), { statusCode: 409 })
+
+      let cashAccount = null
+      let cashLedgerId = null
+      if (amountPaid > 0) {
+        cashAccount = await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+        if (!cashAccount || cashAccount.type !== paymentMethodToAccount[paymentMethod]) throw Object.assign(new Error('The selected transaction account does not match the payment method or is inactive.'), { statusCode: 400 })
+        if (!canUseTransactionAccountForPayment(req, cashAccount, paymentMethod)) throw Object.assign(new Error(`You do not have permission to use ${cashAccount.name}.`), { statusCode: 403 })
+      }
+
+      let payableAccountId = null
+      let inputTaxAccountId = null
+      if (paidBalance > 0 || recoverableTax > 0) {
+        const payableConfig = await getPayablesAccountingConfig(tx, tenantId)
+        const validation = await validatePayablesAccountingConfig(tx, tenantId, payableConfig, { requireEnabled: true })
+        if (!validation.valid) throw Object.assign(new Error(`Enable valid Payables accounting mappings before recording a plot purchase with a supplier balance or recoverable tax. ${validation.errors?.join(' ') || 'Complete the required payable accounts.'}`), { statusCode: 409 })
+        if (paidBalance > 0) payableAccountId = payableConfig.payableAccountId
+        if (recoverableTax > 0) {
+          if (!payableConfig.inputTaxAccountId) throw Object.assign(new Error('Configure the input-tax asset account before recording recoverable tax on a plot purchase.'), { statusCode: 409 })
+          inputTaxAccountId = payableConfig.inputTaxAccountId
+        }
+      }
+
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      const purchaseNo = `LAND-PUR-${new Date(purchaseDate).getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`
+      const created = await tx.propertyLandPurchase.create({ data: {
+        tenantId, propertyId: unit.propertyId, unitId: unit.id, supplierId, createdById: req.user.id,
+        purchaseNo, idempotencyKey, supplierRef, purchaseDate, total, amountPaid, balance: paidBalance,
+        purchasePrice, capitalizedCosts, recoverableTax, costBasis,
+        paymentStatus: paidBalance <= 0 ? 'paid' : amountPaid > 0 ? 'partial' : 'unpaid', dueDate,
+        notes,
+      } })
+
+      if (amountPaid > 0 && cashAccount) {
+        const receiptNo = `LAND-RCPT-${new Date(purchaseDate).getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`
+        const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount, amount: amountPaid, direction: 'expense', reference: receiptNo, description: `Initial plot acquisition payment to ${supplier.name} (${created.purchaseNo})` })
+        await tx.propertyLandPurchasePayment.create({ data: { tenantId, purchaseId: created.id, supplierId, cashAccountId: cashAccount.id, createdById: req.user.id, receiptNo, idempotencyKey: `${idempotencyKey}:initial`, amount: amountPaid, balanceAfter: paidBalance, paymentMethod, paymentDate: purchaseDate, transactionRef: String(req.body?.transactionRef || '').trim() || null, notes } })
+        cashLedgerId = movement.ledgerAccount.id
+      }
+      if (paidBalance > 0) await tx.supplier.update({ where: { id: supplier.id }, data: { balance: { increment: paidBalance } } })
+      await tx.propertyUnit.update({ where: { id: unit.id }, data: { acquisitionCost: costBasis } })
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_LAND_PURCHASE', sourceId: created.id, date: purchaseDate, reference: supplierRef || created.purchaseNo, description: `Land purchase from ${supplier.name}: ${unit.property.name} / ${unit.unitCode}`, lines: propertyLandPurchaseLines(config, { costBasis, recoverableTax, total, amountPaid, payableAccountId, inputTaxAccountId, cashAccountLedgerId: cashLedgerId, reference: created.purchaseNo }) })
+      return tx.propertyLandPurchase.findUnique({ where: { id: created.id }, include: propertyLandPurchaseInclude })
+    })
+    res.status(201).json({ id: purchase.id, purchaseNo: purchase.purchaseNo, paymentId: purchase.payments?.[0]?.id || null })
+  } catch (error) {
+    const status = error.statusCode || 500
+    if (status === 500) console.error('Record plot purchase failed:', error)
+    res.status(status).json({ error: status === 500 ? 'Could not record plot purchase.' : error.message })
+  }
+})
+
+router.post('/land-purchases/:id/payments', requirePermission('canRecordPropertyLandPurchasePayment'), async (req, res) => {
+  const amount = money(req.body?.amount)
+  const paymentDate = req.body?.paymentDate ? new Date(req.body.paymentDate) : new Date()
+  const paymentMethod = String(req.body?.paymentMethod || '').toLowerCase()
+  const cashAccountId = String(req.body?.cashAccountId || '')
+  const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
+  if (!(amount > 0) || !Number.isFinite(amount)) return badRequest(res, 'Enter a payment greater than zero.')
+  if (!Number.isFinite(paymentDate.getTime())) return badRequest(res, 'Enter a valid payment date.')
+  if (!Object.hasOwn(paymentMethodToAccount, paymentMethod) || !cashAccountId) return badRequest(res, 'Choose a supported payment method and transaction account.')
+  if (!canUseTransactionAccountForPayment(req, { id: cashAccountId }, paymentMethod)) return res.status(403).json({ error: `You do not have permission to use ${paymentMethod} for supplier payments.` })
+  try {
+    const tenantId = tenantIdOf(req)
+    const payment = await prisma.$transaction(async tx => {
+      const duplicate = await tx.propertyLandPurchasePayment.findFirst({ where: { tenantId, idempotencyKey }, include: { cashAccount: true, supplier: true, purchase: true } })
+      if (duplicate) return duplicate
+      await tx.$queryRaw`SELECT "id" FROM "property_land_purchases" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const purchase = await tx.propertyLandPurchase.findFirst({ where: { id: req.params.id, tenantId }, include: { supplier: true, unit: true, property: true } })
+      if (!purchase) throw Object.assign(new Error('Plot purchase not found.'), { statusCode: 404 })
+       if (amount > Number(purchase.balance)) throw Object.assign(new Error('Payment exceeds the outstanding supplier balance.'), { statusCode: 400 })
+      const account = await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
+      if (!account || account.type !== paymentMethodToAccount[paymentMethod]) throw Object.assign(new Error('The selected transaction account does not match this payment method or is inactive.'), { statusCode: 400 })
+      if (!canUseTransactionAccountForPayment(req, account, paymentMethod)) throw Object.assign(new Error(`You do not have permission to use ${account.name}.`), { statusCode: 403 })
+      const payableConfig = await getPayablesAccountingConfig(tx, tenantId)
+      const validation = await validatePayablesAccountingConfig(tx, tenantId, payableConfig, { requireEnabled: true })
+      if (!validation.valid) throw Object.assign(new Error(`Valid Payables accounting mappings are required to settle this supplier balance. ${validation.errors?.join(' ') || ''}`), { statusCode: 409 })
+      const receiptNo = `LAND-PAY-${new Date(paymentDate).getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`
+      const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: account, amount, direction: 'expense', reference: receiptNo, description: `Plot supplier payment to ${purchase.supplier.name} (${purchase.purchaseNo})` })
+      const balance = money(Number(purchase.balance) - amount)
+      const paidTotal = money(Number(purchase.amountPaid) + amount)
+      const createdPayment = await tx.propertyLandPurchasePayment.create({ data: { tenantId, purchaseId: purchase.id, supplierId: purchase.supplierId, cashAccountId: account.id, createdById: req.user.id, receiptNo, idempotencyKey, amount, balanceAfter: balance, paymentMethod, paymentDate, transactionRef: String(req.body?.transactionRef || '').trim() || null, notes: String(req.body?.notes || '').trim() || null } })
+      await tx.$queryRaw`SELECT "id" FROM "suppliers" WHERE "id" = ${purchase.supplierId} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const supplier = await tx.supplier.findFirst({ where: { id: purchase.supplierId, tenantId } })
+       if (!supplier || money(supplier.balance) < amount) throw Object.assign(new Error('Supplier control balance is lower than this invoice payment. Review the supplier ledger before paying.'), { statusCode: 409 })
+      await tx.supplier.update({ where: { id: supplier.id }, data: { balance: { decrement: amount } } })
+       await tx.propertyLandPurchase.update({ where: { id: purchase.id }, data: { amountPaid: paidTotal, balance, paymentStatus: balance <= 0 ? 'paid' : 'partial' } })
+      const config = await ensurePropertyAccounting(tx, tenantId)
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_LAND_PURCHASE_PAYMENT', sourceId: createdPayment.id, date: paymentDate, reference: receiptNo, description: `Plot supplier payment to ${purchase.supplier.name} (${purchase.purchaseNo})`, lines: propertyLandPurchasePaymentLines({ amount, payableAccountId: payableConfig.payableAccountId, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo }) })
+      return tx.propertyLandPurchasePayment.findUnique({ where: { id: createdPayment.id }, include: { purchase: { include: propertyLandPurchaseInclude }, cashAccount: true, supplier: true, createdBy: { select: { id: true, name: true } } } })
+    })
+    res.status(201).json({ id: payment.id, receiptNo: payment.receiptNo, purchaseId: payment.purchaseId })
+  } catch (error) {
+    const status = error.statusCode || 500
+    if (status === 500) console.error('Record plot supplier payment failed:', error)
+    res.status(status).json({ error: status === 500 ? 'Could not record plot supplier payment.' : error.message })
+  }
+})
+
+router.get('/land-purchases/payments/:paymentId/receipt', requirePermission('canViewPropertyLandPurchases'), async (req, res) => {
+  try {
+    const [receipt, business] = await Promise.all([
+      prisma.propertyLandPurchasePayment.findFirst({ where: { id: req.params.paymentId, tenantId: tenantIdOf(req), status: 'posted' }, include: { supplier: { select: { id: true, name: true, phone: true, email: true } }, cashAccount: { select: { id: true, name: true, type: true } }, purchase: { include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } } } } } }),
+      prisma.tenant.findUnique({ where: { id: tenantIdOf(req) }, select: { name: true, address: true, phone: true, logo: true } }),
+    ])
+    if (!receipt) return res.status(404).json({ error: 'Plot supplier receipt not found.' })
+    res.json({ receipt, business })
+  } catch (error) { console.error('Load plot purchase receipt failed:', error); res.status(500).json({ error: 'Could not load plot supplier receipt.' }) }
+})
 
 router.get('/sale-buyers', requirePermission('canViewPropertySales'), async (req, res) => {
   try {
