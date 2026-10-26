@@ -63,6 +63,32 @@ test('failure-only rate limits ignore successful and subscription-denied respons
   assert.match(blocked.body.error, /failed attempts/i);
 });
 
+test('rate limit responses identify the policy that blocked the request', () => {
+  const limiter = createRateLimiter({
+    windowMs: 60_000,
+    max: 1,
+    keyGenerator: (req) => req.ip,
+    policyName: 'login-ip',
+  });
+  const call = () => {
+    const result = { statusCode: 200, headers: {}, body: null };
+    const req = { ip: 'client-a' };
+    const res = {
+      set(name, value) { result.headers[name] = value; return this; },
+      status(value) { result.statusCode = value; return this; },
+      json(value) { result.body = value; return this; },
+    };
+    limiter(req, res, () => { result.continued = true; });
+    return result;
+  };
+
+  call();
+  const blocked = call();
+  assert.equal(blocked.statusCode, 429);
+  assert.equal(blocked.headers['X-RateLimit-Policy'], 'login-ip');
+  assert.equal(blocked.body.policy, 'login-ip');
+});
+
 test('public registration cannot create an account or choose a role', async () => {
   const source = await readFile(new URL('../src/routes/auth.js', import.meta.url), 'utf8');
   const registerRoute = source.split('router.post("/register"')[1].split('// Refresh access token')[0];

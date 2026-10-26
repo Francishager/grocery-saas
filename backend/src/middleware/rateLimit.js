@@ -1,4 +1,4 @@
-export function createRateLimiter({ windowMs, max, keyGenerator = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown', countStatusCodes = null }) {
+export function createRateLimiter({ windowMs, max, keyGenerator = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown', countStatusCodes = null, policyName = 'default' }) {
   const buckets = new Map();
   let requestsSinceCleanup = 0;
   const countedStatuses = Array.isArray(countStatusCodes) ? new Set(countStatusCodes) : null;
@@ -22,7 +22,8 @@ export function createRateLimiter({ windowMs, max, keyGenerator = (req) => req.h
     if (countedStatuses) {
       if (bucket.count + bucket.pending >= max) {
         res.set('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
-        return res.status(429).json({ error: 'Too many failed attempts. Please wait and try again.' });
+        res.set('X-RateLimit-Policy', policyName);
+        return res.status(429).json({ error: 'Too many failed attempts. Please wait and try again.', code: 'RATE_LIMITED', policy: policyName });
       }
       bucket.pending += 1;
       res.once('finish', () => {
@@ -43,7 +44,8 @@ export function createRateLimiter({ windowMs, max, keyGenerator = (req) => req.h
 
     if (!countedStatuses && bucket.count > max) {
       res.set('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
-      return res.status(429).json({ error: 'Too many attempts. Please wait and try again.' });
+      res.set('X-RateLimit-Policy', policyName);
+      return res.status(429).json({ error: 'Too many attempts. Please wait and try again.', code: 'RATE_LIMITED', policy: policyName });
     }
 
     next();
