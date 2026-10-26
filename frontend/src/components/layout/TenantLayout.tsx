@@ -118,7 +118,7 @@ const navItems = [
   { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: 'referrals' },
 ]
 
-interface ReportSubItem { id: string; label: string }
+interface ReportSubItem { id: string; label: string; permission?: string }
 interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string | string[]; feature?: string; items: ReportSubItem[] }
 
 const reportCategories: ReportCategoryDef[] = [
@@ -249,6 +249,20 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'rentalsReturns', label: 'Rental Returns Report' },
       { id: 'rentalsDaily', label: 'Daily Rental Report' },
       { id: 'rentalsMonthly', label: 'Monthly Rental Report' },
+    ],
+  },
+  {
+    id: 'property-management', label: 'Property Management Reports', icon: Building2, permission: 'canViewPropertyReports',
+    items: [
+      { id: 'propertyRentRoll', label: 'Rent Roll' },
+      { id: 'propertyRentArrears', label: 'Rent Arrears & Aging' },
+      { id: 'propertyRentCollections', label: 'Rent Collections' },
+      { id: 'propertyRenterStatement', label: 'Renter Statement', permission: 'canViewPropertyStatements' },
+      { id: 'propertyPaymentPlans', label: 'Repayment Plan Progress' },
+      { id: 'propertyOwnerPayables', label: 'Landlord Payables', permission: 'canViewPayable' },
+      { id: 'propertyOwnerPayouts', label: 'Landlord Payout History' },
+      { id: 'propertyPlotSales', label: 'Plot Sales & Receivables', permission: 'canViewPropertySales' },
+      { id: 'propertyPlotPurchases', label: 'Plot Purchases & Supplier Payables', permission: 'canViewPropertyLandPurchases' },
     ],
   },
   {
@@ -606,7 +620,6 @@ export function TenantLayout() {
       { to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
       { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies'] },
       { to: '/tenant/property-management/rent', label: 'Rent & Receivables', icon: Wallet, permission: ['canViewPropertyCollections', 'canViewPropertyReports'] },
-      { to: '/tenant/property-management/reports', label: 'Financial Reports', icon: BarChart3, permission: 'canViewPropertyReports' },
     ] : []),
     ...(canAccessFeature('property_management.agent') ? [
       { to: '/tenant/property-management/clients', label: 'Landlord Clients', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
@@ -616,7 +629,6 @@ export function TenantLayout() {
       { to: '/tenant/property-management/collections', label: 'Rent Collection', icon: Wallet, permission: 'canViewPropertyCollections' },
       { to: '/tenant/property-management/sales', label: 'Plot Sales & Installments', icon: Receipt, permission: 'canViewPropertySales' },
       { to: '/tenant/property-management/purchases', label: 'Plot Purchases & Supplier Payments', icon: Receipt, permission: ['canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment'] },
-      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/reports', label: 'Client & Portfolio Reports', icon: BarChart3, permission: 'canViewPropertyReports' }] : []),
     ] : []),
   ].filter(subItemVisible)
   const visiblePropertyManagementSubItems = propertyManagementSubItems
@@ -626,9 +638,10 @@ export function TenantLayout() {
   const visibleReportCategories = reportCategories.map(cat => ({ ...cat, items: cat.items.filter(item =>
     cat.id === 'service'
       ? hasPermission(serviceReportPermissions[serviceReportIds[item.id]])
-      : canViewReportItem(item.id, cat.permission, hasPermission)
+      : canViewReportItem(item.id, item.permission || cat.permission, hasPermission)
   ) })).filter((cat) => {
     if (!cat.items.length) return false
+    if (cat.id === 'property-management' && !canAccessFeature('property_management.landlord') && !canAccessFeature('property_management.agent')) return false
     if (cat.feature && !canAccessFeature(cat.feature)) return false
     return true
   })

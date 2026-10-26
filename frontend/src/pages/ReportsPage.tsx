@@ -34,13 +34,15 @@ type IconType = React.ComponentType<{ className?: string }>
 
 interface ReportItem {
   feature?: string
+  permission?: string
+  dataKey?: string
   id: string
   label: string
   apiFn: (params?: ReportParams) => Promise<any>
-  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched' | 'dailyBusiness'
+  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched' | 'dailyBusiness' | 'propertyManagement'
   columns?: { key: string; label: string; format?: 'currency' | 'number' | 'date' | 'text' }[]
   summaryKeys?: { key: string; label: string; format?: 'currency' | 'number' | 'text' }[]
-  entityType?: 'customer' | 'supplier' | 'product'
+  entityType?: 'customer' | 'supplier' | 'product' | 'tenancy'
   ledgerType?: 'customer' | 'supplier' | 'product' | 'financial'
   showBranchFilter?: boolean
 }
@@ -510,6 +512,20 @@ const CATEGORIES: ReportCategory[] = [
         columns: [textCol('month', 'Month'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
       },
     ]
+  },
+  {
+    id: 'property-management', label: 'Property Management Reports', icon: Building2, permission: 'canViewPropertyReports',
+    items: [
+      { id: 'propertyRentRoll', label: 'Rent Roll', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'rentRoll', summaryKeys: [{ key: 'activeTenancies', label: 'Active Tenancies', format: 'number' }, { key: 'occupiedUnits', label: 'Occupied Units', format: 'number' }, { key: 'vacantUnits', label: 'Vacant Units', format: 'number' }, { key: 'periodOutstanding', label: 'Open Rent Balance', format: 'currency' }], columns: [textCol('tenantName', 'Renter'), textCol('propertyName', 'Property'), textCol('unitCode', 'Unit'), textCol('ownerName', 'Owner'), textCol('agreementRef', 'Agreement'), dateCol('startDate', 'Start Date'), currencyCol('rentAmount', 'Rent'), currencyCol('openBalance', 'Open Balance'), currencyCol('overdueBalance', 'Overdue')] },
+      { id: 'propertyRentArrears', label: 'Rent Arrears & Aging', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'arrears', summaryKeys: [{ key: 'arrears', label: 'Total Arrears', format: 'currency' }, { key: 'persistentArrearsCount', label: 'Persistent Arrears', format: 'number' }, { key: 'days1To30', label: '1–30 Days', format: 'currency' }, { key: 'days31To60', label: '31–60 Days', format: 'currency' }, { key: 'days61To90', label: '61–90 Days', format: 'currency' }, { key: 'over90Days', label: 'Over 90 Days', format: 'currency' }], columns: [textCol('tenantName', 'Renter'), textCol('propertyName', 'Property'), textCol('unitCode', 'Unit'), textCol('ownerName', 'Owner'), currencyCol('rentAmount', 'Monthly Rent'), currencyCol('balance', 'Total Balance'), currencyCol('overdueBalance', 'Overdue'), numberCol('overduePeriods', 'Overdue Periods'), currencyCol('days1To30', '1–30 Days'), currencyCol('days31To60', '31–60 Days'), currencyCol('days61To90', '61–90 Days'), currencyCol('over90Days', 'Over 90 Days'), textCol('persistentArrears', 'Persistent Arrears')] },
+      { id: 'propertyRentCollections', label: 'Rent Collections', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'collections', summaryKeys: [{ key: 'rentCharged', label: 'Rent Charged', format: 'currency' }, { key: 'collected', label: 'Collected', format: 'currency' }, { key: 'periodOutstanding', label: 'Period Balance', format: 'currency' }, { key: 'ownerPayouts', label: 'Owner Payouts', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('receiptNo', 'Receipt'), textCol('tenantName', 'Renter'), textCol('property', 'Property'), textCol('unit', 'Unit'), textCol('owner', 'Owner'), textCol('paymentMethod', 'Method'), currencyCol('amount', 'Amount')] },
+      { id: 'propertyRenterStatement', label: 'Renter Statement', apiFn: (params) => reportsApiV2.propertyTenancyStatement(String(params?.tenancyId || '')), renderType: 'propertyManagement', dataKey: 'entries', entityType: 'tenancy', summaryKeys: [{ key: 'closingBalance', label: 'Closing Balance', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('type', 'Transaction'), textCol('reference', 'Reference'), textCol('description', 'Description'), currencyCol('debit', 'Charge'), currencyCol('credit', 'Payment'), currencyCol('runningBalance', 'Balance')] },
+      { id: 'propertyPaymentPlans', label: 'Repayment Plan Progress', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'paymentPlans', summaryKeys: [{ key: 'paymentPlanValue', label: 'Plan Value', format: 'currency' }, { key: 'paymentPlanCollected', label: 'Collected', format: 'currency' }, { key: 'paymentPlanBalance', label: 'Outstanding', format: 'currency' }], columns: [dateCol('createdAt', 'Created'), textCol('planNo', 'Plan'), textCol('tenantName', 'Renter'), textCol('property', 'Property'), textCol('unit', 'Unit'), currencyCol('totalAmount', 'Plan Amount'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance'), numberCol('installmentCount', 'Installments'), numberCol('paidInstallments', 'Paid'), numberCol('overdueInstallments', 'Overdue'), dateCol('nextDueDate', 'Next Due'), textCol('status', 'Status')] },
+      { id: 'propertyOwnerPayables', label: 'Landlord Payables', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'ownerPayables', permission: 'canViewPayable', summaryKeys: [{ key: 'ownerPayableBalance', label: 'Owner Payable Balance', format: 'currency' }], columns: [textCol('owner', 'Landlord'), currencyCol('rentAccrued', 'Rent Accrued'), currencyCol('paid', 'Paid'), currencyCol('balance', 'Amount Due')] },
+      { id: 'propertyOwnerPayouts', label: 'Landlord Payout History', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'ownerPayouts', summaryKeys: [{ key: 'ownerPayouts', label: 'Paid to Owners', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('reference', 'Reference'), textCol('owner', 'Landlord'), textCol('account', 'Paid From'), currencyCol('amount', 'Amount')] },
+      { id: 'propertyPlotSales', label: 'Plot Sales & Receivables', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'plotSales', permission: 'canViewPropertySales', summaryKeys: [{ key: 'plotSaleValue', label: 'Sales Value', format: 'currency' }, { key: 'plotSalesCollected', label: 'Collected', format: 'currency' }, { key: 'plotSaleBalance', label: 'Buyer Balance', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('saleNo', 'Sale'), textCol('buyer', 'Buyer'), textCol('property', 'Property'), textCol('unit', 'Plot / Unit'), textCol('mode', 'Sale Mode'), textCol('owner', 'Owner'), currencyCol('salePrice', 'Sale Price'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance'), currencyCol('costBasis', 'Cost Basis'), currencyCol('commission', 'Commission'), textCol('status', 'Status')] },
+      { id: 'propertyPlotPurchases', label: 'Plot Purchases & Supplier Payables', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'plotPurchases', permission: 'canViewPropertyLandPurchases', summaryKeys: [{ key: 'plotPurchaseValue', label: 'Purchase Value', format: 'currency' }, { key: 'plotPurchaseBalance', label: 'Supplier Balance', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('purchaseNo', 'Purchase'), textCol('supplier', 'Supplier'), textCol('property', 'Property'), textCol('unit', 'Plot / Unit'), currencyCol('purchasePrice', 'Price'), currencyCol('capitalizedCosts', 'Capitalized Costs'), currencyCol('recoverableTax', 'Recoverable Tax'), currencyCol('total', 'Total Cost'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due'), textCol('paymentStatus', 'Status')] },
+    ],
   },
   {
     id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport', feature: 'fuel_station.reports',
@@ -1166,6 +1182,20 @@ function getPerformanceChartSpecs(reportId: string, data: any): PerformanceChart
           ]
 }
 
+function getPropertyManagementChartSpecs(reportId: string, data: any): PerformanceChartSpec[] {
+  if (reportId === 'propertyRentArrears') return [{ title: 'Rent arrears aging', labelKey: 'bucket', rows: data?.agingSummary || [], series: [{ key: 'amount', label: 'Outstanding rent', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyRentRoll') return [{ title: 'Portfolio occupancy', labelKey: 'status', rows: data?.occupancySummary || [], series: [{ key: 'units', label: 'Units', color: '#0f9f6e', format: 'number' }] }]
+  if (reportId === 'propertyRentCollections') return [{ title: 'Rent collected by day', labelKey: 'date', rows: data?.collectionsByDate || [], series: [{ key: 'amount', label: 'Collected', color: '#3987d7', format: 'currency' }] }]
+  if (reportId === 'propertyPaymentPlans') return [{ title: 'Repayment plan progress', labelKey: 'planNo', rows: data?.paymentPlans || [], series: [{ key: 'amountPaid', label: 'Paid', color: '#0f9f6e', format: 'currency' }, { key: 'balance', label: 'Outstanding', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyPlotSales') return [{ title: 'Plot sale settlement', labelKey: 'saleNo', rows: data?.plotSales || [], series: [{ key: 'amountPaid', label: 'Paid', color: '#0f9f6e', format: 'currency' }, { key: 'balance', label: 'Outstanding', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyPlotPurchases') return [{ title: 'Plot supplier settlement', labelKey: 'purchaseNo', rows: data?.plotPurchases || [], series: [{ key: 'amountPaid', label: 'Paid', color: '#0f9f6e', format: 'currency' }, { key: 'balance', label: 'Outstanding', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyOwnerPayouts') {
+    const grouped = (data?.ownerPayouts || []).reduce((map: Map<string, number>, row: any) => map.set(row.owner, (map.get(row.owner) || 0) + Number(row.amount || 0)), new Map<string, number>())
+    return [{ title: 'Payouts by landlord', labelKey: 'owner', rows: [...grouped].map(([owner, amount]) => ({ owner, amount })), series: [{ key: 'amount', label: 'Paid out', color: '#7765c4', format: 'currency' }] }]
+  }
+  return []
+}
+
 function PerformanceAxisTick({ x, y, payload }: any) {
   const label = String(payload?.value ?? '')
   const shortened = label.length > 17 ? `${label.slice(0, 16)}…` : label
@@ -1245,6 +1275,19 @@ function BusinessPerformanceCharts({ reportId, data }: { reportId: string; data:
         {charts.map(chart => (
           <PerformanceChart key={chart.title} title={chart.title} rows={chart.rows} labelKey={chart.labelKey} series={chart.series} />
         ))}
+      </div>
+    </div>
+  )
+}
+
+function PropertyManagementCharts({ reportId, data }: { reportId: string; data: any }) {
+  const charts = getPropertyManagementChartSpecs(reportId, data).filter(chart => chart.rows.length > 0)
+  if (!charts.length) return null
+  return (
+    <div className="space-y-3 border-b pb-4">
+      <h2 className="text-sm font-semibold">Portfolio insights</h2>
+      <div className={cn('grid min-w-0 gap-x-8 gap-y-5', charts.length > 1 ? 'lg:grid-cols-2' : 'grid-cols-1')}>
+        {charts.map(chart => <PerformanceChart key={chart.title} {...chart} />)}
       </div>
     </div>
   )
@@ -1986,8 +2029,8 @@ export default function ReportsPage() {
   const visibleCategories = useMemo(() => CATEGORIES.flatMap(c => c.id === 'services' ? [
     { ...c, items: c.items.filter(item => !serviceReportPermissions[item.id]) },
     { ...c, id: 'service-business', label: 'Service Business Reports', feature: 'service.reports', items: c.items.filter(item => serviceReportPermissions[item.id]) },
-  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => (!item.feature || canAccessFeature(item.feature)) && canViewReportItem(item.id, serviceReportPermissions[item.id] || c.permission, hasPermission)) }))
-    .filter(c => c.items.length > 0 && (!c.feature || canAccessFeature(c.feature))), [hasPermission, canAccessFeature])
+  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => (!item.feature || canAccessFeature(item.feature)) && canViewReportItem(item.id, item.permission || serviceReportPermissions[item.id] || c.permission, hasPermission)) }))
+    .filter(c => c.items.length > 0 && (c.id !== 'property-management' || canAccessFeature('property_management.landlord') || canAccessFeature('property_management.agent')) && (!c.feature || canAccessFeature(c.feature))), [hasPermission, canAccessFeature])
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
 
   const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])
@@ -2038,6 +2081,9 @@ export default function ReportsPage() {
         } else if (entityType === 'product') {
           const products = await inventoryApi.list()
           if (!cancelled) setEntityList(products.map((p: any) => ({ id: p.id, label: p.name })))
+        } else if (entityType === 'tenancy') {
+          const tenancies = await reportsApiV2.propertyTenancies()
+          if (!cancelled) setEntityList(tenancies.map((row: any) => ({ id: row.id, label: `${row.tenantName} · ${row.unit?.property?.name || 'Property'} / ${row.unit?.unitCode || ''}` })))
         }
       } catch { /* ignore */ }
     })()
@@ -2123,6 +2169,7 @@ export default function ReportsPage() {
     setLoading(true)
     setReportData(null)
     try {
+      if (currentReport.entityType === 'tenancy' && !selectedEntityId) return
       if (!online && (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness")) {
         throw new Error("Connect to the internet to load complete accounting data.")
       }
@@ -2133,6 +2180,7 @@ export default function ReportsPage() {
         if (currentReport.entityType === 'customer' && selectedEntityId) params.customerId = selectedEntityId
         if (currentReport.entityType === 'supplier' && selectedEntityId) params.supplierId = selectedEntityId
         if (currentReport.entityType === 'product' && selectedEntityId) params.productId = selectedEntityId
+        if (currentReport.entityType === 'tenancy' && selectedEntityId) params.tenancyId = selectedEntityId
         if (currentReport.showBranchFilter && selectedBranchId && selectedBranchId !== 'all') params.branchId = selectedBranchId
         params.reportId = currentReport.id
         if (currentReport.id === 'salesDaily') {
@@ -2151,7 +2199,7 @@ export default function ReportsPage() {
         setReportData(result)
       }
     } catch (error: any) {
-      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness") {
+      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'propertyManagement') {
         setReportData(null)
         toast({ variant: "destructive", title: "Report unavailable", description: error.message })
         return
@@ -2244,6 +2292,10 @@ export default function ReportsPage() {
 
   // Get data and columns for export based on report type
   const getExportData = () => {
+    if (currentReport?.renderType === 'propertyManagement') {
+      if (currentReport.id === 'propertyRenterStatement') return { data: reportData?.entries || [], columns: currentReport.columns }
+      return { data: reportData?.[currentReport.dataKey || ''] || [], columns: currentReport.columns }
+    }
     if (currentReport?.id === 'salesWeekly') {
       return {
         data: reportData?.transactions || [],
@@ -2275,12 +2327,16 @@ export default function ReportsPage() {
 
   const reportTitle = () => {
     const entityName = reportData?.customer?.name || reportData?.supplier?.name || ''
+    if (currentReport?.id === 'propertyRenterStatement' && reportData?.tenancy?.tenantName) return `${currentReport.label} - ${reportData.tenancy.tenantName}`
     if (currentReport?.renderType === 'statement' && entityName) return `${currentReport.label} - ${entityName}`
     if (currentReport?.renderType === 'dailyBusiness' && reportData?.header?.businessName) return `${currentReport.label} - ${reportData.header.businessName}`
     return currentReport?.label || 'Report'
   }
 
   const getExportCharts = () => {
+    if (currentReport?.renderType === 'propertyManagement') {
+      return getPropertyManagementChartSpecs(currentReport.id, reportData)
+    }
     if (currentReport?.id === 'salesWeekly' && reportData?.weeklyTrend?.length) return [{
       title: 'Weekly sales and net revenue', labelKey: 'label', rows: reportData.weeklyTrend,
       series: [{ key: 'grossSales', label: 'Gross sales', color: '#0f9f6e', format: 'currency' as const }, { key: 'revenue', label: 'Net revenue', color: '#3987d7', format: 'currency' as const }],
@@ -2369,16 +2425,16 @@ export default function ReportsPage() {
                 {currentReport.entityType && (
                   <div>
                     <Label className="text-xs">
-                      {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : 'Product'}
+                      {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : currentReport.entityType === 'tenancy' ? 'Renter / tenancy' : 'Product'}
                     </Label>
                     <Select value={selectedEntityId || 'all'} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
                       <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder={`Select ${currentReport.entityType}...`} />
+                        <SelectValue placeholder={currentReport.entityType === 'tenancy' ? 'Select renter...' : `Select ${currentReport.entityType}...`} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All {currentReport.entityType}s</SelectItem>
+                        {currentReport.entityType !== 'tenancy' && <SelectItem value="all">All {currentReport.entityType}s</SelectItem>}
                         {entityList.length === 0 ? (
-                          <SelectItem value="_none" disabled>No {currentReport.entityType}s found</SelectItem>
+                          <SelectItem value="_none" disabled>No {currentReport.entityType === 'tenancy' ? 'renters' : `${currentReport.entityType}s`} found</SelectItem>
                         ) : (
                           entityList.map(e => <SelectItem key={e.id} value={e.id}>{e.label}</SelectItem>)
                         )}
@@ -2488,7 +2544,7 @@ export default function ReportsPage() {
                   </div>
                 ) : reportData ? (
                   <div className="space-y-4">
-                    {currentReport.renderType !== 'dailyBusiness' && currentReport.renderType !== 'aging' && reportData.summary && (
+                    {currentReport.renderType !== 'dailyBusiness' && currentReport.renderType !== 'aging' && currentReport.renderType !== 'propertyManagement' && reportData.summary && (
                       <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
                         {Object.entries(reportData.summary).map(([k, v]) => {
                           // Skip complex objects that should be displayed as breakdowns
@@ -2501,6 +2557,23 @@ export default function ReportsPage() {
                           )
                         })}
                       </div>
+                    )}
+                    {currentReport.renderType === 'propertyManagement' && currentReport.id !== 'propertyRenterStatement' && (
+                      <SummaryCards data={reportData.summary} keys={currentReport.summaryKeys} />
+                    )}
+                    {currentReport.renderType === 'propertyManagement' && currentReport.id === 'propertyRenterStatement' && (
+                      <>
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+                          <div>
+                            <p className="text-xs font-medium uppercase text-muted-foreground">Renter Statement</p>
+                            <p className="text-lg font-semibold">{reportData.tenancy?.tenantName || 'Renter'} · {reportData.tenancy?.unit?.property?.name || 'Property'} / {reportData.tenancy?.unit?.unitCode || ''}</p>
+                          </div>
+                          <div className="text-right"><p className="text-xs text-muted-foreground">Closing balance</p><p className="text-xl font-semibold">{formatCurrency(reportData.closingBalance || 0)}</p></div>
+                        </div>
+                      </>
+                    )}
+                    {currentReport.renderType === 'propertyManagement' && currentReport.id !== 'propertyRenterStatement' && (
+                      <PropertyManagementCharts reportId={currentReport.id} data={reportData} />
                     )}
                     {currentReport.id === 'salesDiscounts' && reportData?.summary && (
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -2521,6 +2594,7 @@ export default function ReportsPage() {
                       <BusinessPerformanceCharts reportId={currentReport.id} data={reportData} />
                     )}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'propertyManagement' && <ReportTable data={currentReport.dataKey ? reportData[currentReport.dataKey] || [] : []} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
                     {currentReport.id === 'salesWeekly' && <WeeklySalesCharts data={reportData} />}
@@ -2550,7 +2624,7 @@ export default function ReportsPage() {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <FileText className="h-10 w-10 text-muted-foreground/50" />
-                    <p className="mt-3 text-sm text-muted-foreground">Click "Generate" to load the report</p>
+                    <p className="mt-3 text-sm text-muted-foreground">{currentReport.entityType === 'tenancy' && !selectedEntityId ? 'Select a renter to load their statement' : 'Click "Generate" to load the report'}</p>
                   </div>
                 )}
               </CardContent>

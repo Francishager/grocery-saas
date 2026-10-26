@@ -742,7 +742,7 @@ router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canM
 
 router.get('/tenancies/:id/statement', requirePermission('canViewPropertyStatements'), async (req, res) => {
   try {
-    const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { orderBy: { dueDate: 'asc' }, include: { allocations: { include: { payment: true } } } }, payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan'] } }, orderBy: { paymentDate: 'asc' }, include: { allocations: { include: { charge: true } } } } } })
+    const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { select: { name: true, owner: { select: { name: true } } } } } }, charges: { orderBy: { dueDate: 'asc' }, include: { allocations: { include: { payment: true } } } }, payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan'] } }, orderBy: { paymentDate: 'asc' }, include: { allocations: { include: { charge: true } } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
     const entries = [
       ...tenancy.charges.map(charge => ({ id: charge.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: charge.description, debit: charge.amount, credit: 0, paid: charge.amountPaid, balance: money(charge.amount - charge.amountPaid), status: charge.status })),
@@ -750,9 +750,20 @@ router.get('/tenancies/:id/statement', requirePermission('canViewPropertyStateme
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     let balance = 0
     for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
-    const { nationalId, ...tenancyDetails } = tenancy
-    res.json({ tenancy: { ...tenancyDetails, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), charges: undefined, payments: undefined }, entries, closingBalance: balance })
+    res.json({ tenancy: { id: tenancy.id, tenantName: tenancy.tenantName, currency: tenancy.currency, agreementRef: tenancy.agreementRef, unit: tenancy.unit }, entries, closingBalance: balance })
   } catch (error) { console.error('Property tenancy statement failed:', error); res.status(500).json({ error: 'Could not load statement.' }) }
+})
+
+router.get('/reports/tenancies', requirePermission('canViewPropertyStatements'), async (req, res) => {
+  try {
+    const rows = await prisma.propertyTenancy.findMany({
+      where: { tenantId: tenantIdOf(req) },
+      take: 500,
+      orderBy: [{ status: 'asc' }, { tenantName: 'asc' }],
+      select: { id: true, tenantName: true, status: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } },
+    })
+    res.json(rows)
+  } catch (error) { console.error('Property statement renter list failed:', error); res.status(500).json({ error: 'Could not load renter list.' }) }
 })
 
 router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment'), async (req, res) => {
@@ -895,19 +906,105 @@ router.get('/reports', requirePermission('canViewPropertyReports'), async (req, 
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return badRequest(res, 'Choose a valid report date range.')
     const ownerId = String(req.query.ownerId || '').trim()
     const propertyScope = ownerId ? { unit: { property: { ownerId } } } : {}
-    const [charges, payments, tenancies, payouts] = await Promise.all([
+    const permissions = req.user?.permissions || []
+    const canViewPlotSales = ['*', 'canViewPropertySales'].some(permission => permissions.includes(permission))
+    const canViewPlotPurchases = ['*', 'canViewPropertyLandPurchases'].some(permission => permissions.includes(permission))
+    const canViewOwnerPayables = ['*', 'canViewPayable'].some(permission => permissions.includes(permission))
+    const [charges, payments, tenancies, payouts, units, plotSales, plotPurchases, paymentPlans, ownerRentTotals, lifetimePayoutTotals] = await Promise.all([
       prisma.rentCharge.findMany({ where: { tenantId, dueDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: true }, orderBy: { dueDate: 'asc' } }),
       prisma.propertyRentPayment.findMany({ where: { tenantId, status: 'posted', paymentType: { in: ['rent', 'rent_plan'] }, paymentDate: { gte: from, lte: to }, tenancy: propertyScope }, include: { tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } } }, orderBy: { paymentDate: 'asc' } }),
       prisma.propertyTenancy.findMany({ where: { tenantId, status: 'active', ...(ownerId ? { unit: { property: { ownerId } } } : {}) }, include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } } } } }),
       prisma.propertyOwnerPayout.findMany({ where: { tenantId, payoutType: 'rent', status: 'posted', payoutDate: { gte: from, lte: to }, ...(ownerId ? { ownerId } : {}) }, include: { owner: true, cashAccount: { select: { name: true } } }, orderBy: { payoutDate: 'asc' } }),
+      prisma.propertyUnit.findMany({ where: { property: { tenantId, ...(ownerId ? { ownerId } : {}) } }, select: { status: true } }),
+      canViewPlotSales ? prisma.propertySale.findMany({ where: { tenantId, saleDate: { gte: from, lte: to }, ...(ownerId ? { ownerId } : {}) }, include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } }, buyer: { select: { name: true } }, owner: { select: { name: true } }, payments: { where: { status: 'posted' }, select: { amount: true } } }, orderBy: { saleDate: 'asc' } }) : Promise.resolve([]),
+      canViewPlotPurchases ? prisma.propertyLandPurchase.findMany({ where: { tenantId, purchaseDate: { gte: from, lte: to }, ...(ownerId ? { property: { ownerId } } : {}) }, include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } }, supplier: { select: { name: true } } }, orderBy: { purchaseDate: 'asc' } }) : Promise.resolve([]),
+      prisma.propertyRentPaymentPlan.findMany({
+        where: { tenantId, createdAt: { gte: from, lte: to }, ...(ownerId ? { tenancy: { unit: { property: { ownerId } } } } : {}) },
+        include: {
+          tenancy: {
+            include: {
+              unit: {
+                include: {
+                  property: { include: { owner: { select: { name: true } } } },
+                },
+              },
+            },
+          },
+          installments: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      canViewOwnerPayables ? prisma.$queryRaw`SELECT property."ownerId" AS "ownerId", COALESCE(SUM(charge."amount"), 0)::double precision AS "rentAccrued"
+        FROM "rent_charges" charge
+        JOIN "property_tenancies" tenancy ON tenancy."id" = charge."tenancyId"
+        JOIN "property_units" unit ON unit."id" = tenancy."unitId"
+        JOIN "managed_properties" property ON property."id" = unit."propertyId"
+        WHERE charge."tenantId" = ${tenantId} AND property."tenantId" = ${tenantId} AND property."ownerId" IS NOT NULL
+          AND charge."status" IN ('unpaid', 'partial', 'overdue', 'paid')
+        GROUP BY property."ownerId"` : Promise.resolve([]),
+      canViewOwnerPayables ? prisma.propertyOwnerPayout.groupBy({ by: ['ownerId'], where: { tenantId, payoutType: 'rent', status: 'posted' }, _sum: { amount: true } }) : Promise.resolve([]),
     ])
     const arrears = tenancies.map(tenancy => {
       const due = tenancy.charges.filter(charge => charge.dueDate < new Date())
-      const overdueBalance = money(due.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
-      return { tenancyId: tenancy.id, tenantName: tenancy.tenantName, phone: tenancy.phone, email: tenancy.email, ownerName: tenancy.unit.property.owner?.name || 'Own portfolio', propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, balance: money(tenancy.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance, overduePeriods: due.length, persistentArrears: due.length >= 3 }
+      const aging = calculateRentAging(tenancy.charges)
+      const overdueBalance = aging.overdueTotal
+      return { tenancyId: tenancy.id, tenantName: tenancy.tenantName, ownerName: tenancy.unit.property.owner?.name || 'Own portfolio', propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, currency: tenancy.currency, rentAmount: money(tenancy.rentAmount), balance: money(tenancy.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance, overduePeriods: due.length, persistentArrears: due.length >= 3, ...aging }
     }).filter(row => row.balance > 0).sort((a, b) => b.overdueBalance - a.overdueBalance)
+    const rentRoll = tenancies.map(tenancy => ({ tenancyId: tenancy.id, tenantName: tenancy.tenantName, propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, ownerName: tenancy.unit.property.owner?.name || 'Own portfolio', agreementRef: tenancy.agreementRef, startDate: tenancy.startDate, rentAmount: money(tenancy.rentAmount), currency: tenancy.currency, openBalance: money(tenancy.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance: money(calculateRentAging(tenancy.charges).overdueTotal) }))
+    const agingSummary = ['notDue', 'days1To30', 'days31To60', 'days61To90', 'over90Days'].map(key => ({ bucket: ({ notDue: 'Not yet due', days1To30: '1-30 days', days31To60: '31-60 days', days61To90: '61-90 days', over90Days: 'Over 90 days' })[key], amount: money(arrears.reduce((sum, row) => sum + Number(row[key] || 0), 0)) }))
+    const occupancySummary = [
+      { status: 'Occupied', units: units.filter(unit => unit.status === 'occupied').length },
+      { status: 'Vacant', units: units.filter(unit => unit.status === 'vacant').length },
+      { status: 'Other status', units: units.filter(unit => !['occupied', 'vacant'].includes(unit.status)).length },
+    ]
     const outstanding = money(charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
-    res.json({ period: { from, to }, summary: { rentCharged: money(charges.reduce((sum, charge) => sum + charge.amount, 0)), collected: money(payments.reduce((sum, payment) => sum + payment.amount, 0)), ownerPayouts: money(payouts.reduce((sum, payout) => sum + payout.amount, 0)), periodOutstanding: outstanding, arrears: money(arrears.reduce((sum, row) => sum + row.overdueBalance, 0)), persistentArrearsCount: arrears.filter(row => row.persistentArrears).length, activeTenancies: tenancies.length }, arrears, collections: payments.map(payment => ({ date: payment.paymentDate, receiptNo: payment.receiptNo, tenantName: payment.tenancy.tenantName, property: payment.tenancy.unit.property.name, unit: payment.tenancy.unit.unitCode, owner: payment.tenancy.unit.property.owner?.name || 'Own portfolio', paymentMethod: payment.paymentMethod, amount: payment.amount })), ownerPayouts: payouts.map(payout => ({ date: payout.payoutDate, reference: payout.reference, owner: payout.owner.name, account: payout.cashAccount.name, amount: payout.amount })) })
+    const collections = payments.map(payment => ({ date: payment.paymentDate, receiptNo: payment.receiptNo, tenantName: payment.tenancy.tenantName, property: payment.tenancy.unit.property.name, unit: payment.tenancy.unit.unitCode, owner: payment.tenancy.unit.property.owner?.name || 'Own portfolio', paymentMethod: payment.paymentMethod, amount: payment.amount }))
+    const collectionsByDate = [...collections.reduce((groups, row) => {
+      const day = new Date(row.date).toISOString().slice(0, 10)
+      groups.set(day, money((groups.get(day) || 0) + Number(row.amount || 0)))
+      return groups
+    }, new Map())].map(([date, amount]) => ({ date, amount }))
+    const ownerPayoutRows = payouts.map(payout => ({ date: payout.payoutDate, reference: payout.reference, owner: payout.owner.name, account: payout.cashAccount.name, amount: payout.amount }))
+    const paidByOwner = new Map(lifetimePayoutTotals.map(row => [row.ownerId, Number(row._sum.amount || 0)]))
+    const accruedByOwner = new Map(ownerRentTotals.map(row => [row.ownerId, Number(row.rentAccrued || 0)]))
+    const ownerPayables = canViewOwnerPayables ? (await prisma.propertyOwner.findMany({ where: { tenantId }, select: { id: true, name: true, isActive: true } }))
+      .map(owner => ({ owner: owner.name, rentAccrued: money(accruedByOwner.get(owner.id) || 0), paid: money(paidByOwner.get(owner.id) || 0), balance: money((accruedByOwner.get(owner.id) || 0) - (paidByOwner.get(owner.id) || 0)) }))
+      .filter(row => row.rentAccrued !== 0 || row.paid !== 0) : []
+    const plotSaleRows = canViewPlotSales ? plotSales.map(sale => {
+      const amountPaid = money(sale.payments.reduce((sum, payment) => sum + payment.amount, 0))
+      return { date: sale.saleDate, saleNo: sale.saleNo, buyer: sale.buyer.name, property: sale.property.name, unit: sale.unit.unitCode, currency: sale.unit.currency, mode: sale.saleMode, owner: sale.owner?.name || 'Business-owned', salePrice: money(sale.salePrice), amountPaid, balance: money(sale.salePrice - amountPaid), costBasis: money(sale.costBasis), commission: money(sale.commissionAmount), status: sale.status }
+    }) : []
+    const plotPurchaseRows = canViewPlotPurchases ? plotPurchases.map(purchase => ({ date: purchase.purchaseDate, purchaseNo: purchase.purchaseNo, supplier: purchase.supplier.name, property: purchase.property.name, unit: purchase.unit.unitCode, currency: purchase.unit.currency, purchasePrice: money(purchase.purchasePrice), capitalizedCosts: money(purchase.capitalizedCosts), recoverableTax: money(purchase.recoverableTax), total: money(purchase.total), amountPaid: money(purchase.amountPaid), balance: money(purchase.balance), paymentStatus: purchase.paymentStatus, dueDate: purchase.dueDate })) : []
+    const paymentPlanRows = paymentPlans.map(plan => ({ createdAt: plan.createdAt, planNo: plan.planNo, tenantName: plan.tenancy.tenantName, property: plan.tenancy.unit.property.name, unit: plan.tenancy.unit.unitCode, owner: plan.tenancy.unit.property.owner?.name || 'Own portfolio', totalAmount: money(plan.totalAmount), amountPaid: money(plan.amountPaid), balance: money(plan.totalAmount - plan.amountPaid), installmentCount: plan.installmentCount, paidInstallments: plan.installments.filter(row => row.status === 'paid').length, overdueInstallments: plan.installments.filter(row => row.status !== 'paid' && row.dueDate < new Date()).length, nextDueDate: plan.installments.filter(row => row.status !== 'paid').sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0]?.dueDate || null, status: plan.status }))
+    res.json({
+      period: { from, to },
+      summary: {
+        rentCharged: money(charges.reduce((sum, charge) => sum + charge.amount, 0)),
+        collected: money(payments.reduce((sum, payment) => sum + payment.amount, 0)),
+        ownerPayouts: money(payouts.reduce((sum, payout) => sum + payout.amount, 0)),
+        ownerPayableBalance: money(ownerPayables.reduce((sum, row) => sum + row.balance, 0)),
+        periodOutstanding: outstanding,
+        arrears: money(arrears.reduce((sum, row) => sum + row.overdueBalance, 0)),
+        persistentArrearsCount: arrears.filter(row => row.persistentArrears).length,
+        activeTenancies: tenancies.length,
+        occupiedUnits: occupancySummary.find(row => row.status === 'Occupied').units,
+        vacantUnits: occupancySummary.find(row => row.status === 'Vacant').units,
+        days1To30: agingSummary.find(row => row.bucket === '1-30 days').amount,
+        days31To60: agingSummary.find(row => row.bucket === '31-60 days').amount,
+        days61To90: agingSummary.find(row => row.bucket === '61-90 days').amount,
+        over90Days: agingSummary.find(row => row.bucket === 'Over 90 days').amount,
+        plotSaleValue: money(plotSaleRows.reduce((sum, row) => sum + row.salePrice, 0)),
+        plotSalesCollected: money(plotSaleRows.reduce((sum, row) => sum + row.amountPaid, 0)),
+        plotSaleBalance: money(plotSaleRows.reduce((sum, row) => sum + row.balance, 0)),
+        plotPurchaseValue: money(plotPurchaseRows.reduce((sum, row) => sum + row.total, 0)),
+        plotPurchaseBalance: money(plotPurchaseRows.reduce((sum, row) => sum + row.balance, 0)),
+        paymentPlanValue: money(paymentPlanRows.reduce((sum, row) => sum + row.totalAmount, 0)),
+        paymentPlanCollected: money(paymentPlanRows.reduce((sum, row) => sum + row.amountPaid, 0)),
+        paymentPlanBalance: money(paymentPlanRows.reduce((sum, row) => sum + row.balance, 0)),
+      },
+      rentRoll, arrears, agingSummary, occupancySummary, collections, collectionsByDate,
+      ownerPayouts: ownerPayoutRows, ownerPayables, plotSales: plotSaleRows, plotPurchases: plotPurchaseRows, paymentPlans: paymentPlanRows,
+    })
   } catch (error) { console.error('Property reports failed:', error); res.status(500).json({ error: 'Could not generate property reports.' }) }
 })
 
