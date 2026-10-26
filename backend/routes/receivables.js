@@ -750,7 +750,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           property: { select: { name: true, address: true, owner: { select: { name: true } } } },
           unit: { select: { unitCode: true, currency: true } },
           owner: { select: { name: true } },
-          createdBy: { select: { fname: true, lname: true, name: true } },
+          createdBy: { select: { id: true, fname: true, lname: true } },
           installments: { orderBy: { sequence: 'asc' } },
         },
         orderBy: { saleDate: 'asc' }, take: limit,

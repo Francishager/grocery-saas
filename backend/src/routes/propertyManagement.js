@@ -841,8 +841,8 @@ const propertyLandPurchaseInclude = {
   property: { select: { id: true, name: true, address: true } },
   unit: { select: { id: true, unitCode: true, unitType: true, areaSize: true, areaUnit: true, frontage: true, depth: true, dimensionUnit: true, plotNumber: true, blockNumber: true, titleReference: true, landTenure: true, currency: true, acquisitionCost: true, status: true } },
   supplier: { select: { id: true, name: true, phone: true, email: true } },
-  createdBy: { select: { id: true, name: true } },
-  payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, createdBy: { select: { id: true, name: true } } } },
+  createdBy: { select: { id: true, fname: true, lname: true } },
+  payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, createdBy: { select: { id: true, fname: true, lname: true } } } },
 }
 
 router.get('/land-purchase-options', requirePermission('canCreatePropertyLandPurchase'), async (req, res) => {
@@ -1016,7 +1016,7 @@ router.post('/land-purchases/:id/payments', requirePermission('canRecordProperty
        await tx.propertyLandPurchase.update({ where: { id: purchase.id }, data: { amountPaid: paidTotal, balance, paymentStatus: balance <= 0 ? 'paid' : 'partial' } })
       const config = await ensurePropertyAccounting(tx, tenantId)
       await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_LAND_PURCHASE_PAYMENT', sourceId: createdPayment.id, date: paymentDate, reference: receiptNo, description: `Plot supplier payment to ${purchase.supplier.name} (${purchase.purchaseNo})`, lines: propertyLandPurchasePaymentLines({ amount, payableAccountId: payableConfig.payableAccountId, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo }) })
-      return tx.propertyLandPurchasePayment.findUnique({ where: { id: createdPayment.id }, include: { purchase: { include: propertyLandPurchaseInclude }, cashAccount: true, supplier: true, createdBy: { select: { id: true, name: true } } } })
+      return tx.propertyLandPurchasePayment.findUnique({ where: { id: createdPayment.id }, include: { purchase: { include: propertyLandPurchaseInclude }, cashAccount: true, supplier: true, createdBy: { select: { id: true, fname: true, lname: true } } } })
     })
     res.status(201).json({ id: payment.id, receiptNo: payment.receiptNo, purchaseId: payment.purchaseId })
   } catch (error) {
