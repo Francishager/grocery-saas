@@ -194,11 +194,12 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-// Prepare new permission fields before login or Prisma permission reads. Health checks stay independent.
-app.use("/api", async (req, res, next) => {
+// Keep service-module schema preparation isolated. A service migration issue must
+// not take authentication, billing, dashboards, or unrelated tenant APIs offline.
+const ensureServiceModuleSchema = async (req, res, next) => {
   try { await ensureServicePermissionSchema(); await ensureSaleServiceSchema(); next(); }
   catch (error) { console.error("Service permission schema unavailable:", error.code || error.message); res.status(503).json({ error: "Access settings are being updated. Please try again shortly." }); }
-});
+};
 
 // API routes
 app.use("/api/auth", authRoutes);
@@ -270,7 +271,7 @@ app.use("/api/restaurant", restaurantRouter);
 app.use("/api/fuel", fuelRouter);
 app.use("/api/manufacturing", manufacturingRouter);
 app.use("/api/agriculture", agricultureRouter);
-app.use("/api/service", serviceRouter);
+app.use("/api/service", ensureServiceModuleSchema, serviceRouter);
 app.use("/api/referrals", referralRoutes);
 app.use("/api/user-guide", userGuideRoutes);
 app.use("/api/widgets", widgetsRouter);

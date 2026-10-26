@@ -25,7 +25,7 @@ export function FeatureGuard({
   children,
   fallback,
 }: FeatureGuardProps) {
-  const { hasFeature, hasAnyFeature, loading, features } = useFeatureAccess();
+  const { hasFeature, hasAnyFeature, loading, error, retryFeatureLoad, features } = useFeatureAccess();
   const { hasPermission, user } = useJWTAuth();
   const featureEnabled = Array.isArray(feature)
     ? hasAnyFeature(feature)
@@ -45,6 +45,26 @@ export function FeatureGuard({
     return (
       <div className="flex h-[60vh] items-center justify-center">
         <div className="text-muted-foreground">Loading plan features…</div>
+      </div>
+    );
+  }
+
+  if (error && Object.keys(features).length === 0) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <CardTitle className="text-xl">Feature access temporarily unavailable</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              JibuSales could not verify this business’s enabled features. Your plan has not been changed.
+            </p>
+            <Button className="w-full" onClick={() => void retryFeatureLoad()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

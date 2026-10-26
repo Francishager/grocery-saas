@@ -34,6 +34,8 @@ class FeatureAccessService {
   private features: FeatureAccess = {}
   private usageLimits: UsageLimits | null = null
   private loading = false
+  private loadingTenantId: string | null = null
+  private loadRequestId = 0
   private loadedTenantId: string | null = null
   private error: string | null = null
   private listeners: Array<() => void> = []
@@ -71,21 +73,29 @@ class FeatureAccessService {
     if (!tenantId) return
     // Skip if already loaded for this tenant and not in error state
     if (this.loadedTenantId === tenantId && !this.error && Object.keys(this.features).length > 0) return
-    // Prevent concurrent loads — if already loading, skip
-    if (this.loading) return
+    // A request for another tenant must not prevent this tenant's entitlements
+    // from loading, nor may its late response overwrite the current tenant.
+    if (this.loading && this.loadingTenantId === tenantId) return
 
+    const requestId = ++this.loadRequestId
     this.loading = true
+    this.loadingTenantId = tenantId
     this.error = null
+    if (this.loadedTenantId !== tenantId) {
+      this.features = {}
+      this.usageLimits = null
+    }
     this.notifyListeners()
 
     try {
       const response = await apiFetch('/api/admin/me/features', { cache: 'no-store' })
 
       if (!response.ok) {
-        throw new Error('Failed to load features')
+        throw new Error(`Feature access could not be checked (${response.status})`)
       }
 
       const data = await response.json()
+      if (requestId !== this.loadRequestId) return
       this.features = this.normalizeFeatures(data.features || {})
       this.loadedTenantId = tenantId
       localStorage.setItem('cachedFeatures', JSON.stringify(this.features))
@@ -94,14 +104,21 @@ class FeatureAccessService {
       await this.loadUsageLimits(tenantId)
 
     } catch (error) {
+      if (requestId !== this.loadRequestId) return
       console.error('Failed to load features:', error)
-      this.features = {}
-      localStorage.removeItem('cachedFeatures')
-      this.loadedTenantId = null
+      if (this.loadedTenantId !== tenantId) {
+        this.features = {}
+        this.usageLimits = null
+        localStorage.removeItem('cachedFeatures')
+        this.loadedTenantId = null
+      }
       this.error = error instanceof Error ? error.message : 'Failed to load features'
     } finally {
-      this.loading = false
-      this.notifyListeners()
+      if (requestId === this.loadRequestId) {
+        this.loading = false
+        this.loadingTenantId = null
+        this.notifyListeners()
+      }
     }
   }
 
@@ -299,11 +316,13 @@ class FeatureAccessService {
 
   // Reset service
   reset() {
+    this.loadRequestId += 1
     this.stopAutoRefresh()
     this.features = {}
     this.usageLimits = null
     localStorage.removeItem('cachedFeatures')
     this.loading = false
+    this.loadingTenantId = null
     this.loadedTenantId = null
     this.error = null
     this.notifyListeners()
@@ -311,8 +330,14 @@ class FeatureAccessService {
 
   // Force reload — clears cache and reloads (use after plan changes)
   async forceReload(tenantId?: string) {
+    this.loadRequestId += 1
     this.features = {}
-    this.loading = false // reset so loadFeatures doesn't skip
+    this.usageLimits = null
+    this.loadedTenantId = null
+    this.loading = false
+    this.loadingTenantId = null
+    this.error = null
+    this.notifyListeners()
     return this.loadFeatures(tenantId)
   }
 
@@ -438,6 +463,11 @@ export function useFeatureAccess() {
     featureAccessService.clearError()
   }
 
+  const retryFeatureLoad = useCallback(() => {
+    if (user?.tenantId) return featureAccessService.forceReload(user.tenantId)
+    return Promise.resolve()
+  }, [user?.tenantId])
+
   return {
     features,
     usageLimits,
@@ -451,6 +481,7 @@ export function useFeatureAccess() {
     getFeaturesByCategory,
     checkUsageLimit,
     getUsageLimit,
-    clearError
+    clearError,
+    retryFeatureLoad
   }
 }
