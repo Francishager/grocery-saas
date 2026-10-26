@@ -1281,7 +1281,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       transactions
     })
   } catch (error) {
-    console.error('Customer history error:', error)
+    console.error('Customer history error:', { code: error?.code, message: error?.message, meta: error?.meta })
+    const schemaNotReady = ['P2021', 'P2022', '42P01', '42703'].includes(error?.code)
+    if (schemaNotReady) return res.status(503).json({ error: 'Customer transaction history is temporarily unavailable while the accounting schema is synchronized. Retry after the backend schema sync completes.' })
     handleBranchError(res, error, 'Failed to fetch customer transaction history')
   }
 })

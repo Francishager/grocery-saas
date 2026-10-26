@@ -859,7 +859,6 @@ router.get('/land-purchases', requirePermission('canViewPropertyLandPurchases'),
   } catch (error) {
     console.error('List plot purchases failed:', { code: error?.code, message: error?.message, meta: error?.meta })
     const schemaNotReady = ['P2021', 'P2022', '42P01', '42703'].includes(error?.code)
-      && /property_land_purchases|property_land_purchase_payments|property_units|managed_properties/.test(`${error?.message || ''} ${error?.meta?.table || ''} ${error?.meta?.column || ''}`)
     if (schemaNotReady) return res.status(503).json({ error: 'Plot-purchase schema is not ready on this server. Redeploy the backend and let its Prisma schema sync finish successfully, then retry.' })
     res.status(500).json({ error: 'Could not load plot purchases.' })
   }
