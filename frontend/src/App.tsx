@@ -8,6 +8,7 @@ import { SaaSAdminLayout } from '@/components/layout/SaaSAdminLayout'
 import { TenantLayout } from '@/components/layout/TenantLayout'
 import { RoleRoute } from '@/guard/RoleRoute'
 import { FeatureGuard } from '@/components/FeatureGuard'
+import { PwaRefreshControl } from '@/components/PwaRefreshControl'
  
 // Auth Pages
 import LoginPage from '@/pages/auth/LoginPage'
@@ -257,6 +258,7 @@ function App() {
         {/* ========== Catch-all ========== */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      <PwaRefreshControl />
       <Toaster />
       <AppFeedback />
     </BrowserRouter>

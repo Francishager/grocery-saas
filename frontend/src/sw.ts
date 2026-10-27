@@ -9,9 +9,12 @@ import { sanitizeNotificationText, notificationLink } from './lib/notificationDi
 
 declare let self: ServiceWorkerGlobalScope
 
-self.skipWaiting()
 clientsClaim()
 precacheAndRoute(self.__WB_MANIFEST || [])
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') event.waitUntil(self.skipWaiting())
+})
 
 // Runtime caching for Google Fonts
 registerRoute(

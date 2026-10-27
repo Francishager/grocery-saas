@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         strategies: 'injectManifest',
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         cleanupOutdatedCaches: true,
         srcDir: 'src',
         filename: 'sw.ts',
