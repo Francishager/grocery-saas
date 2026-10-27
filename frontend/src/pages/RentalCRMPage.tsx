@@ -136,7 +136,7 @@ export default function RentalCRMPage() {
       <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-medium text-muted-foreground">Rentals</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Renter CRM</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">CRM</h1>
           <p className="mt-1 text-sm text-muted-foreground">Bookings, renter relationships, balances, and follow-ups in one place.</p>
         </div>
         <Button asChild><Link to="/tenant/rentals/bookings"><CalendarDays className="mr-2 h-4 w-4" />Open bookings</Link></Button>

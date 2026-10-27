@@ -1,15 +1,45 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { authenticateToken, requirePermission, requireTenant, canUseTransactionAccountForPayment } from "../middleware/auth.js";
+import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../src/utils/branchAccess.js";
 import { requireFeature } from "../middleware/featureCheck.js";
 import { requestBusinessAdvice } from "../src/services/businessAdvisor.js";
+import { checkUsageLimit } from "../src/utils/usageLimits.js";
+import { customerIdentityConflictMessage, findCustomerIdentityConflict } from "../src/utils/customerIdentity.js";
 import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalRevenueRecognitionLines, rentalDamageChargeLines, ensureLegacyRentalOpeningEntry } from "../src/services/rentalAccountingService.js";
 
 const router = Router();
 const prisma = new PrismaClient();
 const contractRequests = new Map();
+const crmCollections = new Set(["leads", "activities", "cases", "campaigns"]);
+const crmStages = new Set(["new", "qualified", "proposal", "won", "lost"]);
+const crmPriorities = new Set(["low", "normal", "high", "urgent"]);
+const crmColors = new Set(["yellow", "pink", "blue", "green", "orange", "purple"]);
+
+function crmCanView(req, permission) {
+  return req.userPermissions?.[permission] === true || req.user?.permissions?.includes(permission) || req.user?.permissions?.includes("*");
+}
+
+function crmWorkspaceForUser(workspace, req) {
+  const data = workspace && typeof workspace === "object" && !Array.isArray(workspace) ? workspace : {};
+  return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Array.isArray(value) && key === "leads" ? value.map(lead => ({
+    ...lead,
+    ...(!crmCanView(req, "canViewCustomerPhone") ? { contactPhone: null } : {}),
+    ...(!crmCanView(req, "canViewCustomerEmail") ? { contactEmail: null } : {}),
+  })) : value]));
+}
+
+async function mutateCrmWorkspace(tenantId, mutate) {
+  return prisma.$transaction(async (tx) => {
+    await tx.tenantCRMWorkspace.upsert({ where: { tenantId }, create: { tenantId, data: {} }, update: {} });
+    const [row] = await tx.$queryRaw`SELECT data FROM tenant_crm_workspaces WHERE "tenantId" = ${tenantId} FOR UPDATE`;
+    const workspace = row?.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data : {};
+    const next = await mutate(workspace);
+    await tx.tenantCRMWorkspace.update({ where: { tenantId }, data: { data: next } });
+    return next;
+  }, { isolationLevel: "Serializable" });
+}
 
 const toMoney = (value, fallback = 0) => {
   const num = Number(value);
@@ -201,6 +231,200 @@ router.get("/", authenticateToken, requirePermission("canViewRental"), requireTe
   }
 });
 
+router.get("/crm/workspace", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const workspace = await prisma.tenantCRMWorkspace.findUnique({ where: { tenantId }, select: { data: true, updatedAt: true } });
+    const data = workspace?.data || { leads: [], activities: [], cases: [], campaigns: [] };
+    const visible = scope.branchId ? Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Array.isArray(value) ? value.filter(record => record.branchId === scope.branchId) : value])) : data;
+    res.json({ workspace: crmWorkspaceForUser(visible, req), updatedAt: workspace?.updatedAt || null });
+  } catch (err) {
+    console.error("CRM workspace read error:", err);
+    handleBranchError(res, err, "Could not load CRM workspace.");
+  }
+});
+
+router.post("/crm/workspace/:collection", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const { collection } = req.params;
+    if (!crmCollections.has(collection)) return res.status(404).json({ error: "CRM record type not found." });
+    const body = req.body || {};
+    const title = String(body.title || body.subject || body.name || "").trim();
+    const customerId = body.customerId ? String(body.customerId) : null;
+    if (!title || title.length > 180) return res.status(400).json({ error: "Enter a title up to 180 characters." });
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: { tenantId: scope.tenantId, id: customerId, ...(scope.branchId ? { branchId: scope.branchId } : {}) }, select: { id: true } });
+      if (!customer) return res.status(404).json({ error: "CRM contact not found in your permitted business scope." });
+    }
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    let record;
+    if (collection === "leads") {
+      const prospectName = String(body.prospectName || body.contactName || "").trim();
+      if (!prospectName) return res.status(400).json({ error: "Enter the prospect or business name." });
+      const stage = crmStages.has(body.stage) && body.stage !== "won" ? body.stage : "new";
+      const estimatedValue = Math.max(0, Number(body.estimatedValue) || 0);
+      record = { id, customerId, title, prospectName: prospectName.slice(0, 180), contactName: String(body.contactName || "").trim().slice(0, 180), contactPhone: crmCanView(req, "canViewCustomerPhone") ? String(body.contactPhone || "").trim().slice(0, 80) || null : null, contactEmail: crmCanView(req, "canViewCustomerEmail") ? String(body.contactEmail || "").trim().slice(0, 180) || null : null, stage, stageHistory: [{ stage, at: now, userId: req.user.id }], source: String(body.source || "manual").slice(0, 80), estimatedValue, notes: String(body.notes || "").slice(0, 5000), assignedTo: String(body.assignedTo || req.user.id).slice(0, 120), nextAction: String(body.nextAction || "").slice(0, 180), nextActionAt: body.nextActionAt ? new Date(body.nextActionAt).toISOString() : null, createdAt: now, updatedAt: now, branchId: scope.branchId || null };
+    } else if (collection === "activities") {
+      const occurredAt = body.occurredAt ? new Date(body.occurredAt) : new Date();
+      if (Number.isNaN(occurredAt.getTime())) return res.status(400).json({ error: "Choose a valid activity date." });
+      const nextFollowUpAt = body.nextFollowUpAt ? new Date(body.nextFollowUpAt) : null;
+      if (nextFollowUpAt && Number.isNaN(nextFollowUpAt.getTime())) return res.status(400).json({ error: "Choose a valid follow-up date." });
+      record = { id, customerId, kind: ["call", "email", "meeting", "note", "follow_up"].includes(body.kind) ? body.kind : "note", subject: title, details: String(body.details || "").slice(0, 5000), occurredAt: occurredAt.toISOString(), nextFollowUpAt: nextFollowUpAt?.toISOString() || null, completed: false, color: crmColors.has(body.color) ? body.color : "blue", userId: req.user.id, createdAt: now, branchId: scope.branchId || null };
+    } else if (collection === "cases") {
+      record = { id, customerId, subject: title, details: String(body.details || "").slice(0, 5000), status: "open", priority: crmPriorities.has(body.priority) ? body.priority : "normal", assignedTo: String(body.assignedTo || req.user.id).slice(0, 120), dueAt: body.dueAt ? new Date(body.dueAt).toISOString() : null, color: crmColors.has(body.color) ? body.color : "orange", createdAt: now, updatedAt: now, branchId: scope.branchId || null };
+    } else {
+      record = { id, name: title, segment: ["all", "active", "overdue", "loyal", "inactive"].includes(body.segment) ? body.segment : "all", subject: String(body.subject || "").slice(0, 180), content: String(body.content || "").slice(0, 10000), status: "draft", scheduledAt: null, createdAt: now, updatedAt: now, createdBy: req.user.id, branchId: scope.branchId || null };
+    }
+    const workspace = await mutateCrmWorkspace(scope.tenantId, (current) => ({ ...current, [collection]: [...(Array.isArray(current[collection]) ? current[collection] : []), record] }));
+    res.status(201).json({ record: crmWorkspaceForUser({ [collection]: [record] }, req)[collection][0], workspace: crmWorkspaceForUser(workspace, req) });
+  } catch (err) {
+    if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry your action." });
+    if (err instanceof RangeError || err instanceof TypeError) return res.status(400).json({ error: "Check the CRM entry dates and values." });
+    console.error("CRM record create error:", err);
+    handleBranchError(res, err, "Could not create CRM record.");
+  }
+});
+
+router.patch("/crm/workspace/:collection/:id", authenticateToken, requirePermission("canEditRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const { collection, id } = req.params;
+    if (!crmCollections.has(collection)) return res.status(404).json({ error: "CRM record type not found." });
+    if (Object.hasOwn(req.body || {}, "customerId") && req.body.customerId) {
+      const customer = await prisma.customer.findFirst({ where: { id: String(req.body.customerId), tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}) }, select: { id: true } });
+      if (!customer) return res.status(404).json({ error: "CRM contact not found in your permitted business scope." });
+    }
+    let updatedRecord = null;
+    const workspace = await mutateCrmWorkspace(scope.tenantId, (current) => {
+      const records = Array.isArray(current[collection]) ? current[collection] : [];
+      const index = records.findIndex((record) => record.id === id && (!scope.branchId || record.branchId === scope.branchId));
+      if (index < 0) return current;
+      const old = records[index];
+      const patch = req.body || {};
+      const allowed = collection === "leads"
+        ? ["title", "prospectName", "customerId", "contactName", "contactPhone", "contactEmail", "stage", "source", "estimatedValue", "notes", "assignedTo", "nextAction", "nextActionAt"]
+        : collection === "activities"
+          ? ["subject", "customerId", "details", "kind", "occurredAt", "nextFollowUpAt", "completed", "color"]
+          : collection === "cases"
+            ? ["subject", "customerId", "details", "status", "priority", "assignedTo", "dueAt", "color"]
+            : ["name", "segment", "subject", "content", "status", "scheduledAt"];
+      const changes = {};
+      for (const key of allowed) if (Object.hasOwn(patch, key)) changes[key] = patch[key];
+      if (!crmCanView(req, "canViewCustomerPhone")) delete changes.contactPhone;
+      if (!crmCanView(req, "canViewCustomerEmail")) delete changes.contactEmail;
+      if (collection === "leads" && changes.stage && !crmStages.has(changes.stage)) throw Object.assign(new Error("Choose a valid pipeline stage."), { statusCode: 400 });
+      if (collection === "leads" && changes.stage === "won" && old.stage !== "won") throw Object.assign(new Error("Convert the prospect to a customer to mark this opportunity won."), { statusCode: 400 });
+      if (collection === "cases" && changes.priority && !crmPriorities.has(changes.priority)) throw Object.assign(new Error("Choose a valid case priority."), { statusCode: 400 });
+      if (["activities", "cases"].includes(collection) && changes.color && !crmColors.has(changes.color)) throw Object.assign(new Error("Choose a valid calendar color."), { statusCode: 400 });
+      if (collection === "cases" && changes.status && !["open", "in_progress", "waiting", "resolved", "closed"].includes(changes.status)) throw Object.assign(new Error("Choose a valid case status."), { statusCode: 400 });
+      if (collection === "campaigns" && changes.status && !["draft", "scheduled"].includes(changes.status)) throw Object.assign(new Error("Campaign delivery is not enabled from CRM."), { statusCode: 400 });
+      for (const key of ["title", "subject", "name"]) if (changes[key] !== undefined) changes[key] = String(changes[key]).trim().slice(0, 180);
+      for (const key of ["notes", "details", "content"]) if (changes[key] !== undefined) changes[key] = String(changes[key]).slice(0, 10000);
+      for (const key of ["nextActionAt", "occurredAt", "nextFollowUpAt", "dueAt", "scheduledAt"]) if (changes[key] !== undefined) changes[key] = changes[key] ? new Date(changes[key]).toISOString() : null;
+      if (changes.estimatedValue !== undefined) changes.estimatedValue = Math.max(0, Number(changes.estimatedValue) || 0);
+      if (collection === "leads" && changes.stage && changes.stage !== old.stage) {
+        changes.stageHistory = [...(Array.isArray(old.stageHistory) ? old.stageHistory : []), { stage: changes.stage, from: old.stage, at: new Date().toISOString(), userId: req.user.id }];
+      }
+      if (collection === "leads") {
+        for (const key of ["prospectName", "contactName"]) if (changes[key] !== undefined) changes[key] = String(changes[key]).trim().slice(0, 180);
+        if (changes.contactPhone !== undefined) changes.contactPhone = String(changes.contactPhone).trim().slice(0, 80) || null;
+        if (changes.contactEmail !== undefined) changes.contactEmail = String(changes.contactEmail).trim().slice(0, 180) || null;
+      }
+      updatedRecord = { ...old, ...changes, updatedAt: new Date().toISOString() };
+      const nextRecords = [...records];
+      nextRecords[index] = updatedRecord;
+      return { ...current, [collection]: nextRecords };
+    });
+    if (!updatedRecord) return res.status(404).json({ error: "CRM record not found." });
+    res.json({ record: crmWorkspaceForUser({ [collection]: [updatedRecord] }, req)[collection][0], workspace: crmWorkspaceForUser(workspace, req) });
+  } catch (err) {
+    if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry your action." });
+    if (err instanceof RangeError || err instanceof TypeError) return res.status(400).json({ error: "Check the CRM entry fields and dates." });
+    console.error("CRM record update error:", err);
+    handleBranchError(res, err, "Could not update CRM record.");
+  }
+});
+
+router.post("/crm/leads/:id/convert", authenticateToken, requirePermission("canEditRental"), requireAnyPermission(["canCreateCustomer", "canCreateReceivable"]), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const { customerId } = req.body || {};
+    if (customerId && !crmCanView(req, "canViewCustomer")) return res.status(403).json({ error: "View Customers permission is required to link an existing customer." });
+    if (!customerId) await checkUsageLimit(scope.tenantId, "customers");
+
+    const result = await prisma.$transaction(async tx => {
+      await tx.tenantCRMWorkspace.upsert({ where: { tenantId: scope.tenantId }, create: { tenantId: scope.tenantId, data: {} }, update: {} });
+      const [row] = await tx.$queryRaw`SELECT data FROM tenant_crm_workspaces WHERE "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const workspace = row?.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data : {};
+      const leads = Array.isArray(workspace.leads) ? workspace.leads : [];
+      const index = leads.findIndex(lead => lead.id === req.params.id && (!scope.branchId || lead.branchId === scope.branchId));
+      if (index < 0) throw Object.assign(new Error("Prospect not found in your permitted business scope."), { statusCode: 404 });
+      const lead = leads[index];
+      if (lead.stage === "lost") throw Object.assign(new Error("A lost opportunity cannot be converted. Reopen it first."), { statusCode: 409 });
+
+      let customer;
+      if (lead.customerId) {
+        if (customerId && customerId !== lead.customerId) throw Object.assign(new Error("This prospect is already linked to a customer."), { statusCode: 409 });
+        customer = await tx.customer.findFirst({ where: { id: lead.customerId, tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}) }, select: { id: true, name: true } });
+        if (!customer) throw Object.assign(new Error("The linked customer is no longer available in this branch."), { statusCode: 404 });
+        if (lead.stage === "won") return { customer, lead };
+      } else if (customerId) {
+        customer = await tx.customer.findFirst({ where: { id: String(customerId), tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}) }, select: { id: true, name: true } });
+        if (!customer) throw Object.assign(new Error("Select a customer from this business and branch."), { statusCode: 404 });
+      } else {
+        const name = String(req.body?.customerName || lead.prospectName || lead.contactName || lead.title || "").trim();
+        const creditLimit = Number(req.body?.creditLimit);
+        if (!name) throw Object.assign(new Error("A prospect or business name is required."), { statusCode: 400 });
+        if (!Number.isFinite(creditLimit) || creditLimit <= 0) throw Object.assign(new Error("Set a credit limit greater than zero before converting this prospect."), { statusCode: 400 });
+        const email = crmCanView(req, "canViewCustomerEmail") ? String(lead.contactEmail || "").trim() || null : null;
+        const phone = crmCanView(req, "canViewCustomerPhone") ? String(lead.contactPhone || "").trim() || null : null;
+        const identityConflict = await findCustomerIdentityConflict(tx, { tenantId: scope.tenantId, identity: { name, email, phone } });
+        if (identityConflict) throw Object.assign(new Error(customerIdentityConflictMessage(identityConflict.field)), { code: "CRM_CUSTOMER_DUPLICATE", duplicateField: identityConflict.field });
+        customer = await tx.customer.create({ data: { tenantId: scope.tenantId, branchId: scope.branchId || null, name, email, phone, creditLimit, notes: `Converted from CRM prospect: ${lead.title}` }, select: { id: true, name: true } });
+      }
+
+      const now = new Date().toISOString();
+      const updatedLead = { ...lead, customerId: customer.id, stage: "won", convertedAt: lead.convertedAt || now, stageHistory: [...(Array.isArray(lead.stageHistory) ? lead.stageHistory : []), { stage: "won", from: lead.stage, at: now, userId: req.user.id }], updatedAt: now };
+      const nextLeads = [...leads];
+      nextLeads[index] = updatedLead;
+      await tx.tenantCRMWorkspace.update({ where: { tenantId: scope.tenantId }, data: { data: { ...workspace, leads: nextLeads } } });
+      return { customer, lead: updatedLead };
+    }, { isolationLevel: "Serializable" });
+    res.json({ customer: result.customer, lead: crmWorkspaceForUser({ leads: [result.lead] }, req).leads[0] });
+  } catch (err) {
+    if (err.code === "CRM_CUSTOMER_DUPLICATE") return res.status(409).json({ error: err.message, code: err.code, duplicateField: err.duplicateField });
+    if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry the conversion." });
+    if (err.code === "LIMIT_REACHED") return res.status(403).json({ error: err.message });
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    console.error("CRM prospect conversion error:", err);
+    handleBranchError(res, err, "Could not convert this prospect.");
+  }
+});
+
+router.delete("/crm/workspace/:collection/:id", authenticateToken, requirePermission("canDeleteRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const { collection, id } = req.params;
+    if (!crmCollections.has(collection)) return res.status(404).json({ error: "CRM record type not found." });
+    let deleted = false;
+    const workspace = await mutateCrmWorkspace(scope.tenantId, (current) => {
+      const records = Array.isArray(current[collection]) ? current[collection] : [];
+      const nextRecords = records.filter((record) => !(record.id === id && (!scope.branchId || record.branchId === scope.branchId)));
+      deleted = nextRecords.length !== records.length;
+      return { ...current, [collection]: nextRecords };
+    });
+    if (!deleted) return res.status(404).json({ error: "CRM record not found." });
+    res.json({ workspace: crmWorkspaceForUser(workspace, req) });
+  } catch (err) {
+    if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry your action." });
+    console.error("CRM record delete error:", err);
+    handleBranchError(res, err, "Could not delete CRM record.");
+  }
+});
+
 router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
@@ -214,13 +438,16 @@ router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"
     const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "25"), 10) || 25));
     const search = String(req.query.search || "").trim().slice(0, 120);
     const canViewCustomerPhone = req.userPermissions?.canViewCustomerPhone === true || req.user?.permissions?.includes("canViewCustomerPhone");
+    const canViewCustomerEmail = req.userPermissions?.canViewCustomerEmail === true || req.user?.permissions?.includes("canViewCustomerEmail");
+    const canViewCustomerBalance = req.userPermissions?.canViewCustomerBalance === true || req.user?.permissions?.includes("canViewCustomerBalance");
     const relationshipWhere = scopedWhere(scope, { status: { not: "cancelled" } });
     const customerWhere = {
       tenantId: scope.tenantId,
-      rentals: { some: relationshipWhere },
+      ...(scope.branchId ? { branchId: scope.branchId } : {}),
       ...(search ? { OR: [
         { name: { contains: search, mode: "insensitive" } },
         ...(canViewCustomerPhone ? [{ phone: { contains: search } }] : []),
+        ...(canViewCustomerEmail ? [{ email: { contains: search, mode: "insensitive" } }] : []),
       ] } : {}),
     };
 
@@ -234,13 +461,13 @@ router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"
       ],
     });
 
-    const [customers, customerTotal, rentals, calendarTotal] = await Promise.all([
+    const [customers, customerTotal, rentals, calendarTotal, allAudience, activeAudience, overdueAudience, inactiveAudience, loyalGroups] = await Promise.all([
       prisma.customer.findMany({
         where: customerWhere,
         orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
         skip: (page - 1) * limit,
         take: limit,
-        select: { id: true, name: true, ...(canViewCustomerPhone ? { phone: true } : {}), updatedAt: true },
+        select: { id: true, name: true, ...(canViewCustomerPhone ? { phone: true } : {}), ...(canViewCustomerEmail ? { email: true } : {}), updatedAt: true },
       }),
       prisma.customer.count({ where: customerWhere }),
       prisma.rental.findMany({
@@ -257,6 +484,11 @@ router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"
         },
       }),
       prisma.rental.count({ where: calendarWhere }),
+      prisma.customer.count({ where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}) } }),
+      prisma.customer.count({ where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}), rentals: { some: { status: "active", ...(scope.branchId ? { branchId: scope.branchId } : {}) } } } }),
+      prisma.customer.count({ where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}), rentals: { some: { status: { in: ["active", "overdue"] }, expectedReturnDate: { lt: new Date() }, balance: { gt: 0 }, ...(scope.branchId ? { branchId: scope.branchId } : {}) } } } }),
+      prisma.customer.count({ where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}), rentals: { none: { status: { not: "cancelled" }, hireDate: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) }, ...(scope.branchId ? { branchId: scope.branchId } : {}) } } } }),
+      prisma.rental.groupBy({ by: ["customerId"], where: scopedWhere(scope, { status: { not: "cancelled" }, customerId: { not: null } }), _count: { id: true } }),
     ]);
 
     const customerIds = customers.map((customer) => customer.id);
@@ -293,13 +525,13 @@ router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"
           rentalCount: total?._count._all || 0,
           activeRentalCount: activeByCustomer.get(customer.id) || 0,
           overdueRentalCount: overdueByCustomer.get(customer.id) || 0,
-          lifetimeRentalValue: Number(total?._sum.totalAmount || 0),
-          outstandingBalance: Number(total?._sum.balance || 0),
+          ...(canViewCustomerBalance ? { outstandingBalance: Number(total?._sum.balance || 0), lifetimeRentalValue: Number(total?._sum.totalAmount || 0) } : {}),
           lastHireDate: total?._max.hireDate || null,
           nextReturnDate: nextReturnByCustomer.get(customer.id) || null,
         };
       }),
       customerPagination: { page, limit, total: customerTotal, pages: Math.ceil(customerTotal / limit) },
+      segmentCounts: { all: allAudience, active: activeAudience, overdue: overdueAudience, inactive: inactiveAudience, loyal: loyalGroups.filter(row => row._count.id >= 3).length },
       calendarRentals: rentals,
       calendarPagination: { total: calendarTotal, limit: 500, truncated: calendarTotal > rentals.length },
       range: { from, to },

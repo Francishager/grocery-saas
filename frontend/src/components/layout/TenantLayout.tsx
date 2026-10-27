@@ -34,7 +34,7 @@ const inventorySubItems = [
 const rentalSubItems = [
   { to: '/tenant/rentals/bookings', label: 'Bookings & Check-out', icon: Calendar, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/rentals/planner', label: 'Planner', icon: CalendarClock, permission: 'canViewRental', feature: 'rentals' },
-  { to: '/tenant/rentals/crm', label: 'Renter CRM', icon: Users, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/rentals/returns', label: 'Returns', icon: RotateCcw, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/rentals/payments', label: 'Payments & Receipts', icon: Receipt, permission: 'canViewRental', feature: 'rentals' },
 ]

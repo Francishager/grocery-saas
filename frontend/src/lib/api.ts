@@ -448,6 +448,17 @@ function mapProductToInventory(p: any): InventoryItem {
 export const rentalsApi = {
   crmOverview: async (params: { from: string; to: string; page?: number; limit?: number; search?: string }) =>
     api.get<any>('/api/rentals/crm/overview', { params }),
+  crmWorkspace: () => api.get<any>('/api/rentals/crm/workspace'),
+  crmCreate: (collection: 'leads' | 'activities' | 'cases' | 'campaigns', data: any) =>
+    api.post<any>(`/api/rentals/crm/workspace/${collection}`, { body: data }),
+  crmUpdate: (collection: 'leads' | 'activities' | 'cases' | 'campaigns', id: string, data: any) =>
+    api.patch<any>(`/api/rentals/crm/workspace/${collection}/${id}`, { body: data }),
+  crmDelete: (collection: 'leads' | 'activities' | 'cases' | 'campaigns', id: string) =>
+    api.delete<any>(`/api/rentals/crm/workspace/${collection}/${id}`),
+  crmConvert: (id: string, data: { customerId?: string; creditLimit?: number; customerName?: string }) =>
+    api.post<any>(`/api/rentals/crm/leads/${id}/convert`, { body: data }),
+  crmFindCustomers: (params: { page: number; limit: number; search: string }) =>
+    api.get<any>('/api/receivables/customers', { params }),
 
   list: async (params?: { status?: string; customerId?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
     const data = await api.get<any>('/api/rentals', { params })
