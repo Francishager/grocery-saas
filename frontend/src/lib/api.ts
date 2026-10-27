@@ -212,6 +212,11 @@ export const api = {
   delete: <T>(path: string, options?: RequestOptions) => request<T>('DELETE', path, options),
 }
 
+export const aiWritingApi = {
+  draft: (module: 'crm' | 'planner', field: string, instruction: string) =>
+    api.post<{ text: string }>(`/api/ai-writing/${module}`, { body: { field, instruction } }),
+}
+
 // Auth endpoints
 export const authApi = {
   login: (email: string, password: string) =>
