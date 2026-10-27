@@ -1,12 +1,16 @@
 import { Router } from 'express'
 import prisma from '../src/db.js'
-import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
-import { requireFeature } from '../middleware/featureCheck.js'
+import { authenticateToken, requireAnyPermission, requireTenant } from '../middleware/auth.js'
+import { requireAnyFeature } from '../middleware/featureCheck.js'
 
 const router = Router()
 const plannerStorageId = (userId) => `planner_data_${userId}`
+const requirePlannerPermission = (permission, legacy = 'canViewRental') => (req, res, next) => {
+  const permissions = req.tenantFeatures?.has('rentals') ? [permission, 'canManagePlanner', legacy] : [permission, 'canManagePlanner']
+  return requireAnyPermission(permissions)(req, res, next)
+}
 
-router.get('/planner', authenticateToken, requireTenant, requirePermission('canViewRental'), requireFeature('rentals'), async (req, res) => {
+router.get('/planner', authenticateToken, requireTenant, requireAnyFeature(['planner', 'rentals']), requirePlannerPermission('canViewPlanner'), async (req, res) => {
   try {
     const stored = await prisma.stickyNote.findFirst({ where: { id: plannerStorageId(req.user.id), userId: req.user.id } })
     const items = stored?.lines && !Array.isArray(stored.lines) && Array.isArray(stored.lines.items) ? stored.lines.items : []
@@ -17,7 +21,7 @@ router.get('/planner', authenticateToken, requireTenant, requirePermission('canV
   }
 })
 
-router.put('/planner', authenticateToken, requireTenant, requirePermission('canViewRental'), requireFeature('rentals'), async (req, res) => {
+router.put('/planner', authenticateToken, requireTenant, requireAnyFeature(['planner', 'rentals']), requirePlannerPermission('canManagePlanner'), async (req, res) => {
   try {
     if (!Array.isArray(req.body?.items) || req.body.items.length > 500) return res.status(400).json({ error: 'Planner must contain no more than 500 entries.' })
     const allowedKinds = new Set(['task', 'appointment', 'goal', 'note', 'habit'])

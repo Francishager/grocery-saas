@@ -9,6 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 type PlannerKind = 'task' | 'appointment' | 'goal' | 'note' | 'habit'
 type PlannerPriority = 'low' | 'normal' | 'high'
@@ -57,6 +59,9 @@ const blankForm = () => ({ kind: 'task' as PlannerKind, title: '', details: '', 
 
 export default function RentalPlannerPage() {
   const { toast } = useToast()
+  const { hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const canManage = hasPermission('canManagePlanner') || (hasFeature('rentals') && hasPermission('canViewRental'))
   const [entries, setEntries] = useState<PlannerEntry[]>([])
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -177,7 +182,7 @@ export default function RentalPlannerPage() {
           <Button type="button" variant="outline" onClick={() => setOpenCalendar(true)} title="Open calendar">
             <CalendarDays className="mr-2 h-4 w-4" /><span>{dateFilter ? prettyDate(`${dateFilter}T12:00:00`, { day: 'numeric', month: 'short' }) : `Today · ${new Date().getDate()}`}</span>
           </Button>
-          <Button onClick={() => beginCreate()} disabled={!loaded}><Plus className="mr-2 h-4 w-4" />Add to planner</Button>
+          {canManage && <Button onClick={() => beginCreate()} disabled={!loaded}><Plus className="mr-2 h-4 w-4" />Add to planner</Button>}
         </div>
       </header>
 
@@ -200,18 +205,18 @@ export default function RentalPlannerPage() {
             <select value={kindFilter} onChange={event => setKindFilter(event.target.value as any)} className="h-10 rounded-md border border-input bg-background px-3 text-sm sm:w-44"><option value="all">All planner items</option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}s</option>)}</select>
           </div>
           <div className="space-y-3">
-            {!loaded ? <div className="rounded-lg border p-10 text-center text-sm text-muted-foreground">{loadError ? <><p>Planner data could not be loaded, so nothing has been overwritten.</p><Button className="mt-3" variant="outline" onClick={() => void load()}>Retry loading</Button></> : 'Loading planner…'}</div> : visibleEntries.length === 0 ? <div className="rounded-lg border border-dashed p-10 text-center"><NotebookPen className="mx-auto mb-3 h-7 w-7 text-muted-foreground" /><p className="font-medium">Nothing on this list yet</p><p className="mt-1 text-sm text-muted-foreground">Add a task, appointment, goal, habit, or note to get started.</p><Button className="mt-4" onClick={() => beginCreate()}><Plus className="mr-2 h-4 w-4" />Create an entry</Button></div> : visibleEntries.map(entry => <PlannerCard key={entry.id} entry={entry} linkedGoalTitle={entries.find(goal => goal.id === entry.goalId)?.title} onToggle={() => toggleComplete(entry.id)} onEdit={() => beginEdit(entry)} onDelete={() => deleteEntry(entry.id)} />)}
+            {!loaded ? <div className="rounded-lg border p-10 text-center text-sm text-muted-foreground">{loadError ? <><p>Planner data could not be loaded, so nothing has been overwritten.</p><Button className="mt-3" variant="outline" onClick={() => void load()}>Retry loading</Button></> : 'Loading planner…'}</div> : visibleEntries.length === 0 ? <div className="rounded-lg border border-dashed p-10 text-center"><NotebookPen className="mx-auto mb-3 h-7 w-7 text-muted-foreground" /><p className="font-medium">Nothing on this list yet</p><p className="mt-1 text-sm text-muted-foreground">{canManage ? 'Add a task, appointment, goal, habit, or note to get started.' : 'There are no planner entries to show.'}</p>{canManage && <Button className="mt-4" onClick={() => beginCreate()}><Plus className="mr-2 h-4 w-4" />Create an entry</Button>}</div> : visibleEntries.map(entry => <PlannerCard key={entry.id} entry={entry} canManage={canManage} linkedGoalTitle={entries.find(goal => goal.id === entry.goalId)?.title} onToggle={() => toggleComplete(entry.id)} onEdit={() => beginEdit(entry)} onDelete={() => deleteEntry(entry.id)} />)}
           </div>
         </div>
 
         <aside className="space-y-4">
           <Card>
             <div className="flex items-start justify-between gap-3 border-b p-4"><div><h2 className="font-semibold">Quick capture</h2><p className="text-sm text-muted-foreground">Drop it into the right list in one step.</p></div><NotebookPen className="h-5 w-5 text-muted-foreground" /></div>
-            <CardContent className="grid grid-cols-2 gap-2 p-4">{(['task', 'appointment', 'goal', 'note', 'habit'] as PlannerKind[]).map(kind => { const Icon = kindIcons[kind]; return <Button key={kind} variant="outline" className="justify-start" disabled={!loaded} onClick={() => beginCreate(kind)}><Icon className="mr-2 h-4 w-4" />{kindLabels[kind]}</Button> })}</CardContent>
+            <CardContent className="grid grid-cols-2 gap-2 p-4">{canManage ? (['task', 'appointment', 'goal', 'note', 'habit'] as PlannerKind[]).map(kind => { const Icon = kindIcons[kind]; return <Button key={kind} variant="outline" className="justify-start" disabled={!loaded} onClick={() => beginCreate(kind)}><Icon className="mr-2 h-4 w-4" />{kindLabels[kind]}</Button> }) : <p className="col-span-2 text-sm text-muted-foreground">View-only access</p>}</CardContent>
           </Card>
           <Card>
             <div className="border-b p-4"><h2 className="font-semibold">Today</h2><p className="text-sm text-muted-foreground">A short view of today's commitments.</p></div>
-            <CardContent className="space-y-2 p-4">{todayEntries.length ? todayEntries.slice(0, 6).map(item => <button key={item.id} onClick={() => beginEdit(item)} className="flex w-full items-start gap-2 rounded-md p-2 text-left hover:bg-muted/50"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[item.color].dot }} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="text-xs text-muted-foreground">{kindLabels[item.kind]}{item.startAt ? ` · ${prettyDate(item.startAt, { hour: '2-digit', minute: '2-digit' })}` : ''}</span></span></button>) : <p className="py-4 text-center text-sm text-muted-foreground">Your day is clear. Capture a task or plan when ready.</p>}</CardContent>
+            <CardContent className="space-y-2 p-4">{todayEntries.length ? todayEntries.slice(0, 6).map(item => <button key={item.id} onClick={() => canManage && beginEdit(item)} className="flex w-full items-start gap-2 rounded-md p-2 text-left hover:bg-muted/50"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[item.color].dot }} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="text-xs text-muted-foreground">{kindLabels[item.kind]}{item.startAt ? ` · ${prettyDate(item.startAt, { hour: '2-digit', minute: '2-digit' })}` : ''}</span></span></button>) : <p className="py-4 text-center text-sm text-muted-foreground">Your day is clear. Capture a task or plan when ready.</p>}</CardContent>
           </Card>
           <div className="rounded-md border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-100"><p className="font-medium">Keep the next step small</p><p className="mt-1 opacity-80">Break a larger goal into one action you can complete today.</p></div>
         </aside>
@@ -246,17 +251,17 @@ export default function RentalPlannerPage() {
   )
 }
 
-function PlannerCard({ entry, linkedGoalTitle, onToggle, onEdit, onDelete }: { entry: PlannerEntry; linkedGoalTitle?: string; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
+function PlannerCard({ entry, linkedGoalTitle, canManage, onToggle, onEdit, onDelete }: { entry: PlannerEntry; linkedGoalTitle?: string; canManage: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
   const paper = colors[entry.color] || colors.yellow
   const Icon = kindIcons[entry.kind]
   return <article className="overflow-hidden rounded-md border shadow-sm" style={{ borderColor: paper.edge, borderLeftWidth: 4, background: paper.bg, color: '#1c1917' }}>
     <div className="flex items-start gap-3 p-4">
-      {(entry.kind === 'task' || entry.kind === 'habit' || entry.kind === 'goal') ? <button type="button" onClick={onToggle} aria-label={entry.completed ? 'Mark incomplete' : 'Mark complete'} className={cn('mt-0.5 rounded-full', entry.completed ? 'text-emerald-600' : 'text-muted-foreground hover:text-foreground')}>{entry.completed ? <Check className="h-5 w-5" /> : <Circle className="h-5 w-5" />}</button> : <span className="mt-0.5 rounded-md p-2" style={{ color: paper.dot, background: paper.bg }}><Icon className="h-4 w-4" /></span>}
+      {(entry.kind === 'task' || entry.kind === 'habit' || entry.kind === 'goal') ? <button type="button" disabled={!canManage} onClick={onToggle} aria-label={entry.completed ? 'Mark incomplete' : 'Mark complete'} className={cn('mt-0.5 rounded-full', entry.completed ? 'text-emerald-600' : 'text-muted-foreground hover:text-foreground')}>{entry.completed ? <Check className="h-5 w-5" /> : <Circle className="h-5 w-5" />}</button> : <span className="mt-0.5 rounded-md p-2" style={{ color: paper.dot, background: paper.bg }}><Icon className="h-4 w-4" /></span>}
       <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className={cn('font-semibold', entry.completed && 'text-muted-foreground line-through')}>{entry.title}</h3><span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: paper.dot, background: paper.bg }}>{kindLabels[entry.kind]}</span>{entry.priority === 'high' && <span className="inline-flex items-center gap-1 text-xs text-red-700 dark:text-red-400"><Flag className="h-3 w-3" />High priority</span>}</div>
         {entry.details && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-700">{entry.details}</p>}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-700">{entry.startAt && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />{prettyDate(entry.startAt)}</span>}{entry.dueAt && <span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />Due {prettyDate(entry.dueAt)}</span>}{entry.reminderAt && !entry.completed && <span className="inline-flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />Reminder {prettyDate(entry.reminderAt)}</span>}{linkedGoalTitle && <span className="inline-flex items-center gap-1"><Target className="h-3.5 w-3.5" />Goal: {linkedGoalTitle}</span>}</div>
       </div>
-      <div className="flex shrink-0 items-center gap-1"><Button variant="ghost" size="icon" title="Edit entry" aria-label="Edit entry" onClick={onEdit}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" title="Delete entry" aria-label="Delete entry" onClick={onDelete}><Trash2 className="h-4 w-4" /></Button></div>
+      {canManage && <div className="flex shrink-0 items-center gap-1"><Button variant="ghost" size="icon" title="Edit entry" aria-label="Edit entry" onClick={onEdit}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" title="Delete entry" aria-label="Delete entry" onClick={onDelete}><Trash2 className="h-4 w-4" /></Button></div>}
     </div>
   </article>
 }

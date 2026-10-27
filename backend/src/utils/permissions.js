@@ -207,6 +207,12 @@ const PERMISSION_TO_FEATURES = {
   canDeleteRental: ['rentals', 'inventory.rentals'],
   canProcessRentalReturn: ['rentals', 'inventory.rentals'],
   canGenerateRentalContract: ['rentals', 'inventory.rentals'],
+  canViewPlanner: ['planner', 'rentals'],
+  canManagePlanner: ['planner', 'rentals'],
+  canViewCRM: ['crm', 'rentals'],
+  canCreateCRM: ['crm', 'rentals'],
+  canEditCRM: ['crm', 'rentals'],
+  canDeleteCRM: ['crm', 'rentals'],
   canViewPropertyManagement: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyPortfolio: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyCollections: ['property_management.landlord', 'property_management.agent'],
@@ -364,6 +370,7 @@ export const ALL_PERMISSION_KEYS = [
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
   "canProcessRentalReturn", "canGenerateRentalContract",
+  "canViewPlanner", "canManagePlanner", "canViewCRM", "canCreateCRM", "canEditCRM", "canDeleteCRM",
   "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
   "canCreateTenancies", "canEndTenancies", "canManageTenancies", "canRecordRentPayment", "canRecordTenantDeposit",
@@ -949,6 +956,12 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Generate rental contract drafts',
     description: 'Create and save AI-assisted rental contract drafts for human review.',
   },
+  canViewPlanner: { name: 'View Planner', description: 'View your tasks, appointments, notes, goals, and reminders.' },
+  canManagePlanner: { name: 'Manage Planner', description: 'Create, edit, complete, and delete your own planner entries.' },
+  canViewCRM: { name: 'View CRM', description: 'View CRM contacts and customer relationship records.' },
+  canCreateCRM: { name: 'Create CRM records', description: 'Create prospects, interactions, support cases, and campaign drafts.' },
+  canEditCRM: { name: 'Edit CRM records', description: 'Update CRM workspace records.' },
+  canDeleteCRM: { name: 'Delete CRM records', description: 'Delete CRM workspace records.' },
   canViewPropertyManagement: { name: 'Property Management (Legacy)', description: 'Legacy access to property portfolio pages. Payment collections and tenancy statements require their dedicated permissions.' },
   canViewPropertyPortfolio: { name: 'View property portfolio', description: 'View landlords, properties, units, tenancy details, occupancy, and portfolio summaries.' },
   canViewPropertyCollections: { name: 'View property collections', description: 'View rent and deposit payment history and reprint payment receipts.' },
@@ -1225,6 +1238,8 @@ function permissionCategoryForKey(key) {
   if (key.includes('ServiceBusiness')) return 'service_business';
   if (key.includes('Service')) return 'services';
   if (key.includes('Rental')) return 'rentals';
+  if (key.includes('Planner')) return 'planner';
+  if (key.includes('CRM')) return 'crm';
   if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Restaurant')) return 'restaurant';
   if (key.includes('FuelStation')) return 'fuel_station';

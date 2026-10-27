@@ -141,6 +141,8 @@ async function seedFeatures() {
 
     // ===== Rentals =====
     { name: 'rentals', displayName: 'Rental Bookings', module: 'rentals', category: 'advanced', description: 'Rental booking management' },
+    { name: 'planner', displayName: 'Planner', module: 'business_tools', category: 'advanced', description: 'Personal tasks, schedules, goals, notes, and reminders' },
+    { name: 'crm', displayName: 'Customer Relationship Management (CRM)', module: 'business_tools', category: 'advanced', description: 'Customer contacts, prospects, pipeline, interactions, and support' },
 
     // ===== Restaurant =====
     { name: 'restaurant', displayName: 'Restaurant Module', module: 'restaurant', category: 'advanced', description: 'Restaurant and bar management' },

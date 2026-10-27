@@ -145,6 +145,10 @@ const MODULES = [
       { name: 'rentals', displayName: 'Rentals (Bookings & Hire Assets)' },
     ]
   },
+  { id: 'business_tools', name: 'Business Tools', icon: Clock, color: 'text-sky-700 bg-sky-100', features: [
+    { name: 'planner', displayName: 'Planner' },
+    { name: 'crm', displayName: 'Customer Relationship Management (CRM)' },
+  ] },
   {
     id: 'property_management', name: 'Property Management', icon: Building2, color: 'text-emerald-700 bg-emerald-100', features: [
       { name: 'property_management.landlord', displayName: 'Landlord' },

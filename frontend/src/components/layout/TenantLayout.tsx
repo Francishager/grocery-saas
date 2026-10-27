@@ -33,8 +33,8 @@ const inventorySubItems = [
 
 const rentalSubItems = [
   { to: '/tenant/rentals/bookings', label: 'Bookings & Check-out', icon: Calendar, permission: 'canViewRental', feature: 'rentals' },
-  { to: '/tenant/rentals/planner', label: 'Planner', icon: CalendarClock, permission: 'canViewRental', feature: 'rentals' },
-  { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/planner', label: 'Planner', icon: CalendarClock, permission: ['canViewPlanner', 'canManagePlanner', 'canViewRental'], feature: ['rentals', 'planner'] },
+  { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: ['canViewCRM', 'canViewRental'], feature: ['rentals', 'crm'] },
   { to: '/tenant/rentals/returns', label: 'Returns', icon: RotateCcw, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/rentals/payments', label: 'Payments & Receipts', icon: Receipt, permission: 'canViewRental', feature: 'rentals' },
 ]
@@ -109,6 +109,8 @@ const navItems = [
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
   { to: '/tenant/procurement', label: 'Procurement Network', icon: Truck, permission: 'canViewProcurement', isProcurement: true },
   { to: '/tenant/rentals/bookings', label: 'Rentals', icon: Clock, permission: 'canViewRental', feature: 'rentals', isRentals: true },
+  { to: '/tenant/rentals/planner', label: 'Planner', icon: CalendarClock, permission: ['canViewPlanner', 'canManagePlanner'], feature: 'planner', isStandalonePlanner: true },
+  { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: 'canViewCRM', feature: 'crm', isStandaloneCRM: true },
   { to: '/tenant/property-management/portfolio', label: 'Property Management', icon: Building2, isPropertyManagement: true },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
@@ -622,7 +624,7 @@ export function TenantLayout() {
     .map((item: any) => item.children ? { ...item, children: item.children.filter(subItemVisible) } : item)
     .filter((item: any) => item.children ? item.children.length > 0 && subItemVisible(item) : subItemVisible(item))
   const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
-  const visibleRentalSubItems = rentalSubItems.filter(subItemVisible)
+  const visibleRentalSubItems = canAccessFeature('rentals') ? rentalSubItems.filter(subItemVisible) : []
   const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
@@ -666,6 +668,8 @@ export function TenantLayout() {
     if (item.feature === 'dashboard') return canAccessFeature('dashboard')
     if (item.isPropertyManagement) return visiblePropertyManagementSubItems.length > 0
     if (item.isRentals) return visibleRentalSubItems.length > 0
+    if (item.isStandalonePlanner) return !canAccessFeature('rentals') && canAccessFeature('planner') && hasRequiredPermission(item.permission)
+    if (item.isStandaloneCRM) return !canAccessFeature('rentals') && canAccessFeature('crm') && hasRequiredPermission(item.permission)
     if (item.isInventory) return visibleInventorySubItems.length > 0
     if (item.isProcurement) return visibleProcurementBuyerItems.length > 0 || visibleProcurementSellerItems.length > 0
     // Special handling for Communication: only show if the exact 'communication' feature is enabled

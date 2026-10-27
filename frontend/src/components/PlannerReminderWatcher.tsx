@@ -2,13 +2,16 @@ import { useEffect } from 'react'
 import { plannerApi } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useToast } from '@/hooks/use-toast'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 export function PlannerReminderWatcher() {
-  const { user } = useJWTAuth()
+  const { user, hasPermission } = useJWTAuth()
   const { toast } = useToast()
+  const { hasFeature } = useFeatureAccess()
+  const canReadPlanner = ((hasPermission('canViewPlanner') || hasPermission('canManagePlanner')) && (hasFeature('planner') || hasFeature('rentals'))) || (hasFeature('rentals') && hasPermission('canViewRental'))
 
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id || !canReadPlanner) return
     let stopped = false
     const key = `planner_reminders_seen_${user.id}`
     const check = async () => {
@@ -32,7 +35,7 @@ export function PlannerReminderWatcher() {
     void check()
     const timer = window.setInterval(() => { void check() }, 60_000)
     return () => { stopped = true; window.clearInterval(timer) }
-  }, [user?.id, toast])
+  }, [user?.id, toast, canReadPlanner])
 
   return null
 }

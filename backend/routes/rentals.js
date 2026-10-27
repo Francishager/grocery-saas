@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../src/utils/branchAccess.js";
-import { requireFeature } from "../middleware/featureCheck.js";
+import { requireFeature, requireAnyFeature, hasFeatureAccess } from "../middleware/featureCheck.js";
 import { requestBusinessAdvice } from "../src/services/businessAdvisor.js";
 import { checkUsageLimit } from "../src/utils/usageLimits.js";
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from "../src/utils/customerIdentity.js";
@@ -19,6 +19,15 @@ const crmColors = new Set(["yellow", "pink", "blue", "green", "orange", "purple"
 
 function crmCanView(req, permission) {
   return req.userPermissions?.[permission] === true || req.user?.permissions?.includes(permission) || req.user?.permissions?.includes("*");
+}
+
+function requireCrmPermission(permission, legacyPermission) {
+  return (req, res, next) => {
+    const required = hasFeatureAccess(req.tenantFeatures || new Set(), "rentals")
+      ? [permission, legacyPermission]
+      : [permission];
+    return requireAnyPermission(required)(req, res, next);
+  };
 }
 
 function crmWorkspaceForUser(workspace, req) {
@@ -231,7 +240,7 @@ router.get("/", authenticateToken, requirePermission("canViewRental"), requireTe
   }
 });
 
-router.get("/crm/workspace", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.get("/crm/workspace", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canViewCRM", "canViewRental"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
@@ -245,7 +254,7 @@ router.get("/crm/workspace", authenticateToken, requirePermission("canViewRental
   }
 });
 
-router.post("/crm/workspace/:collection", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.post("/crm/workspace/:collection", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canCreateCRM", "canCreateRental"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { collection } = req.params;
@@ -288,7 +297,7 @@ router.post("/crm/workspace/:collection", authenticateToken, requirePermission("
   }
 });
 
-router.patch("/crm/workspace/:collection/:id", authenticateToken, requirePermission("canEditRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.patch("/crm/workspace/:collection/:id", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canEditCRM", "canEditRental"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { collection, id } = req.params;
@@ -348,7 +357,7 @@ router.patch("/crm/workspace/:collection/:id", authenticateToken, requirePermiss
   }
 });
 
-router.post("/crm/leads/:id/convert", authenticateToken, requirePermission("canEditRental"), requireAnyPermission(["canCreateCustomer", "canCreateReceivable"]), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.post("/crm/leads/:id/convert", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canEditCRM", "canEditRental"), requireAnyPermission(["canCreateCustomer", "canCreateReceivable"]), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { customerId } = req.body || {};
@@ -404,7 +413,7 @@ router.post("/crm/leads/:id/convert", authenticateToken, requirePermission("canE
   }
 });
 
-router.delete("/crm/workspace/:collection/:id", authenticateToken, requirePermission("canDeleteRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.delete("/crm/workspace/:collection/:id", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canDeleteCRM", "canDeleteRental"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { collection, id } = req.params;
@@ -425,7 +434,7 @@ router.delete("/crm/workspace/:collection/:id", authenticateToken, requirePermis
   }
 });
 
-router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.get("/crm/overview", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canViewCRM", "canViewRental"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const from = new Date(String(req.query.from || ""));
@@ -437,6 +446,33 @@ router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"
     const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
     const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "25"), 10) || 25));
     const search = String(req.query.search || "").trim().slice(0, 120);
+    if (!hasFeatureAccess(req.tenantFeatures || new Set(), "rentals")) {
+      const canViewPhone = req.userPermissions?.canViewCustomerPhone === true || req.user?.permissions?.includes("canViewCustomerPhone");
+      const canViewEmail = req.userPermissions?.canViewCustomerEmail === true || req.user?.permissions?.includes("canViewCustomerEmail");
+      const where = {
+        tenantId: scope.tenantId,
+        ...(scope.branchId ? { branchId: scope.branchId } : {}),
+        ...(search ? { OR: [
+          { name: { contains: search, mode: "insensitive" } },
+          ...(canViewPhone ? [{ phone: { contains: search } }] : []),
+          ...(canViewEmail ? [{ email: { contains: search, mode: "insensitive" } }] : []),
+        ] } : {}),
+      };
+      const [customers, total, allAudience, activeAudience] = await Promise.all([
+        prisma.customer.findMany({ where, orderBy: [{ updatedAt: "desc" }, { name: "asc" }], skip: (page - 1) * limit, take: limit,
+          select: { id: true, name: true, ...(canViewPhone ? { phone: true } : {}), ...(canViewEmail ? { email: true } : {}), updatedAt: true } }),
+        prisma.customer.count({ where }),
+        prisma.customer.count({ where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}) } }),
+        prisma.customer.count({ where: { tenantId: scope.tenantId, ...(scope.branchId ? { branchId: scope.branchId } : {}), updatedAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) } } }),
+      ]);
+      return res.json({
+        customers,
+        customerPagination: { page, limit, total, pages: Math.ceil(total / limit) },
+        segmentCounts: { all: allAudience, active: activeAudience, overdue: 0, inactive: Math.max(0, allAudience - activeAudience), loyal: 0 },
+        calendarRentals: [], calendarPagination: { total: 0, limit: 500, truncated: false },
+        range: { from, to },
+      });
+    }
     const canViewCustomerPhone = req.userPermissions?.canViewCustomerPhone === true || req.user?.permissions?.includes("canViewCustomerPhone");
     const canViewCustomerEmail = req.userPermissions?.canViewCustomerEmail === true || req.user?.permissions?.includes("canViewCustomerEmail");
     const canViewCustomerBalance = req.userPermissions?.canViewCustomerBalance === true || req.user?.permissions?.includes("canViewCustomerBalance");
