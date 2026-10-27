@@ -834,7 +834,9 @@ export default function ReceivablesPage() {
     const balanceAfterPayment = Math.max(0, saleTotal - paidAmount)
     if (balanceAfterPayment > 0) {
       const customerCreditLimit = Number(selectedSaleCustomer?.creditLimit || 0)
-      if (customerCreditLimit <= 0) {
+      const currentCustomerBalance = Number(selectedSaleCustomer?.balance || 0)
+      const projectedCustomerBalance = currentCustomerBalance + balanceAfterPayment
+      if (projectedCustomerBalance > 0.01 && customerCreditLimit <= 0) {
         toast({
           title: 'Credit limit required',
           description: `Set a credit limit for ${selectedSaleCustomer?.name || 'this customer'} before making a credit sale.`,
@@ -842,8 +844,7 @@ export default function ReceivablesPage() {
         })
         return
       }
-      const currentCustomerBalance = Number(selectedSaleCustomer?.balance || 0)
-      if (currentCustomerBalance + balanceAfterPayment > customerCreditLimit) {
+      if (projectedCustomerBalance > customerCreditLimit + 0.01) {
         toast({
           title: 'Credit limit exceeded',
           description: `Available credit is ${formatCurrency(Math.max(0, customerCreditLimit - currentCustomerBalance))}.`,
@@ -2134,7 +2135,7 @@ export default function ReceivablesPage() {
                           {formatCurrency(saleCreditAppliedPreview)} customer credit will be applied automatically. Remaining on this invoice: {formatCurrency(saleBalanceAfterCredit)}. No cash withdrawal or receipt will be recorded.
                         </p>
                       )}
-                      {saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
+                      {Number(selectedSaleCustomer.balance || 0) + saleBalanceAfterPayment > 0.01 && saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
                         <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
                           Set a credit limit for this customer before recording a credit sale.
                         </p>
