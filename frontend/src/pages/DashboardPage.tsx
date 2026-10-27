@@ -11,7 +11,6 @@ import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
 import { useOnlineStatus } from '@/db/hooks'
 import { SupportContactLinks } from '@/components/SupportContactLinks'
-import { Link } from 'react-router-dom'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
@@ -24,6 +23,7 @@ function ModuleMetric({ label, value, detail }: { label: string; value: string |
 }
 
 export default function DashboardPage() {
+  type DashboardView = 'overview' | 'sales' | 'finance' | 'inventory' | 'operations'
   const { user, hasPermission } = useJWTAuth()
   const { hasFeature, hasAnyFeature } = useFeatureAccess()
   const hasLandlordWorkspace = hasFeature('property_management.landlord')
@@ -33,7 +33,7 @@ export default function DashboardPage() {
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: user?.phone || '', email: user?.email || '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
-  const [dashboardView, setDashboardView] = useState<'daily' | 'trends' | 'mix'>('daily')
+  const [dashboardView, setDashboardView] = useState<DashboardView>('overview')
   const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any; rentals: any }>({ property: null, restaurant: null, hr: null, rentals: null })
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -49,10 +49,8 @@ export default function DashboardPage() {
     receivables: hasPermission('canViewReceivable'),
     tax: hasPermission('canViewTax'),
   }
-  const hasDailyInsights = hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard
-  const hasTrendInsights = hasFeature('sales') && (canViewSalesDashboard || dashboardAccess.expenses) || hasFeature('accounting') && canViewFinancialDashboard
-  const hasMixInsights = hasFeature('inventory') && dashboardAccess.inventory && canViewSalesDashboard || hasFeature('sales') && hasPermission('canViewSale')
   const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
+  const dashboardPreferenceKey = user?.id ? `jibusales_dashboard_view:${user.tenantId || 'platform'}:${user.id}` : null
   const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
     loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey, dashboardAccess)
 
@@ -61,6 +59,29 @@ export default function DashboardPage() {
   const canViewHR = hasFeature('hr') && hasPermission('canViewHR')
   const canViewRentals = hasFeature('rentals') && hasPermission('canViewRental')
   const dashboardModules = [canViewProperty && (hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord' : 'Property Management'), canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management', canViewRentals && 'Rentals'].filter(Boolean) as string[]
+  const availableDashboards: Array<{ id: DashboardView; label: string }> = [
+    { id: 'overview', label: 'Overview' },
+    ...(hasFeature('sales') && canViewSalesDashboard ? [{ id: 'sales' as const, label: 'Sales' }] : []),
+    ...((hasFeature('accounting') && canViewFinancialDashboard) || (hasFeature('expenses') && dashboardAccess.expenses) ? [{ id: 'finance' as const, label: 'Finance' }] : []),
+    ...(hasFeature('inventory') && dashboardAccess.inventory ? [{ id: 'inventory' as const, label: 'Inventory' }] : []),
+    ...(dashboardModules.length > 0 ? [{ id: 'operations' as const, label: 'Operations' }] : []),
+  ]
+  const showOverview = dashboardView === 'overview'
+  const showSales = dashboardView === 'sales'
+  const showFinance = dashboardView === 'finance'
+  const showInventory = dashboardView === 'inventory'
+  const showOperations = dashboardView === 'operations'
+
+  useEffect(() => {
+    if (!dashboardPreferenceKey) return
+    const savedView = window.localStorage.getItem(dashboardPreferenceKey)
+    if (availableDashboards.some(view => view.id === savedView)) setDashboardView(savedView as DashboardView)
+  }, [dashboardPreferenceKey, availableDashboards.map(view => view.id).join(':')])
+
+  const selectDashboardView = (view: DashboardView) => {
+    setDashboardView(view)
+    if (dashboardPreferenceKey) window.localStorage.setItem(dashboardPreferenceKey, view)
+  }
 
   useEffect(() => {
     let active = true
@@ -83,11 +104,13 @@ export default function DashboardPage() {
   }, [canViewProperty, canViewRestaurant, canViewHR, canViewRentals, scopeKey])
 
   useEffect(() => {
-    if (!hasDailyInsights && !hasTrendInsights && !hasMixInsights) return
-    if (dashboardView === 'daily' && !hasDailyInsights) setDashboardView(hasTrendInsights ? 'trends' : 'mix')
-    else if (dashboardView === 'trends' && !hasTrendInsights) setDashboardView(hasDailyInsights ? 'daily' : 'mix')
-    else if (dashboardView === 'mix' && !hasMixInsights) setDashboardView(hasDailyInsights ? 'daily' : 'trends')
-  }, [dashboardView, hasDailyInsights, hasTrendInsights, hasMixInsights])
+    if (availableDashboards.some(view => view.id === dashboardView)) return
+    const fallback = availableDashboards[0]?.id || 'overview'
+    if (fallback !== dashboardView) {
+      setDashboardView(fallback)
+      if (dashboardPreferenceKey) window.localStorage.setItem(dashboardPreferenceKey, fallback)
+    }
+  }, [dashboardView, dashboardPreferenceKey, availableDashboards.map(view => view.id).join(':')])
 
   useEffect(() => {
     setBillingForm(current => ({
@@ -321,6 +344,15 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+      {availableDashboards.length > 1 && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
+        <div>
+          <p className="text-sm font-semibold">Dashboard view</p>
+          <p className="text-xs text-muted-foreground">Choose the business area you want to focus on.</p>
+        </div>
+        <select aria-label="Choose dashboard view" value={dashboardView} onChange={event => selectDashboardView(event.target.value as DashboardView)} className="h-10 min-w-48 rounded-md border bg-background px-3 text-sm">
+          {availableDashboards.map(view => <option key={view.id} value={view.id}>{view.label}</option>)}
+        </select>
+      </div>}
       {dashboardError && <p role="alert" className="text-sm text-amber-700">{dashboardError}</p>}
       {!Object.values(dashboardAccess).some(Boolean) && !hasPermission('canViewCustomer') && !hasPermission('canViewPayable') && !hasPermission('canViewPurchase') && !hasPermission('canViewTax') && !canViewProperty && !canViewRestaurant && !canViewHR && (
         <p className="rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-600">Your dashboard is ready. Ask your business admin to grant the module viewing permissions for the insights you need.</p>
@@ -350,7 +382,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals) && <section className="space-y-4" aria-label="Module overview">
+      {showOperations && (moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals) && <section className="space-y-4" aria-label="Operations dashboard">
         {moduleSnapshots.property && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">{hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property portfolio'}</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, landlord clients, and managed-unit health.</p></div>
@@ -369,7 +401,6 @@ export default function DashboardPage() {
         {moduleSnapshots.restaurant && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">Restaurant &amp; bar</h2><p className="text-sm text-muted-foreground">Today&apos;s service activity and live queues.</p></div>
-            <Link to="/tenant/restaurant/orders" className="text-sm font-medium text-primary hover:underline">Open service operations</Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ModuleMetric label="Orders today" value={moduleSnapshots.restaurant.ordersToday} />
@@ -383,7 +414,6 @@ export default function DashboardPage() {
         {moduleSnapshots.hr && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">People &amp; payroll</h2><p className="text-sm text-muted-foreground">Workforce, attendance, and payroll items needing attention.</p></div>
-            <Link to="/tenant/hr/employees" className="text-sm font-medium text-primary hover:underline">Open HR Management</Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ModuleMetric label="Active employees" value={moduleSnapshots.hr.stats?.activeEmployees} />
@@ -396,7 +426,6 @@ export default function DashboardPage() {
         {moduleSnapshots.rentals && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">Rental operations</h2><p className="text-sm text-muted-foreground">Reusable assets currently out, return deadlines, collections, and deposits held.</p></div>
-            <Link to="/tenant/rentals/bookings" className="text-sm font-medium text-primary hover:underline">Open rentals</Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ModuleMetric label="Items checked out" value={moduleSnapshots.rentals.itemsOut ?? 0} detail={`${Number(moduleSnapshots.rentals.activeCount || 0).toLocaleString()} active hires`} />
@@ -410,8 +439,8 @@ export default function DashboardPage() {
       </section>}
 
       {/* KPI Cards Row 1 — only show for enabled features */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {hasFeature('sales') && canViewSalesDashboard && (
+      {(showOverview || showSales || showFinance) && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {hasFeature('sales') && canViewSalesDashboard && (showOverview || showSales) && (
         <Card className="border-l-4 border-l-blue-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Revenue</CardTitle>
@@ -429,7 +458,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('accounting') && canViewFinancialDashboard && (
+        {hasFeature('accounting') && canViewFinancialDashboard && (showOverview || showFinance) && (
         <Card className="border-l-4 border-l-green-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
@@ -442,7 +471,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('sales') && canViewSalesDashboard && (
+        {hasFeature('sales') && canViewSalesDashboard && (showOverview || showSales) && (
         <Card className="border-l-4 border-l-purple-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Sales</CardTitle>
@@ -455,7 +484,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('settings.taxes') && hasPermission('canViewTax') && (
+        {hasFeature('settings.taxes') && hasPermission('canViewTax') && (showOverview || showFinance) && (
         <Card className="border-l-4 border-l-orange-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tax Collected</CardTitle>
@@ -467,11 +496,11 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         )}
-      </div>
+      </div>}
 
       {/* KPI Cards Row 2 — only show for enabled features */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {hasFeature('accounting') && canViewFinancialDashboard && (
+      {(showFinance || showInventory || showSales) && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {hasFeature('accounting') && canViewFinancialDashboard && showFinance && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
@@ -484,7 +513,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('accounting') && canViewFinancialDashboard && (
+        {hasFeature('accounting') && canViewFinancialDashboard && showFinance && (
         <Card className="border-l-4 border-l-amber-500">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Cost of Sales (COGS)</CardTitle>
@@ -497,7 +526,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('expenses') && hasPermission('canViewExpense') && (
+        {hasFeature('expenses') && hasPermission('canViewExpense') && showFinance && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Operating Expenses</CardTitle>
@@ -510,7 +539,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('receivables') && hasPermission('canViewReceivable') && (
+        {hasFeature('receivables') && hasPermission('canViewReceivable') && (showSales || showFinance) && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Receivables</CardTitle>
@@ -523,7 +552,7 @@ export default function DashboardPage() {
         </Card>
         )}
 
-        {hasFeature('customers') && hasPermission('canViewCustomer') && (
+        {hasFeature('customers') && hasPermission('canViewCustomer') && (showSales || showInventory) && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Customers</CardTitle>
@@ -535,28 +564,10 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         )}
-      </div>
-
-      {(hasDailyInsights || hasTrendInsights || hasMixInsights) && <div className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">Business insights</h2>
-          <p className="text-sm text-muted-foreground">Choose a view to focus on the numbers you need.</p>
-        </div>
-        <div className="flex max-w-full gap-1 overflow-x-auto rounded-md border bg-muted/40 p-1" role="tablist" aria-label="Dashboard insights">
-          {(hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && (
-            <button type="button" role="tab" aria-selected={dashboardView === 'daily'} onClick={() => setDashboardView('daily')} className={`shrink-0 rounded px-3 py-2 text-sm font-medium ${dashboardView === 'daily' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Daily</button>
-          )}
-          {(hasFeature('sales') && (canViewSalesDashboard || hasPermission('canViewExpense')) || hasFeature('accounting') && canViewFinancialDashboard) && (
-            <button type="button" role="tab" aria-selected={dashboardView === 'trends'} onClick={() => setDashboardView('trends')} className={`shrink-0 rounded px-3 py-2 text-sm font-medium ${dashboardView === 'trends' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Trends</button>
-          )}
-          {(hasFeature('inventory') && hasPermission('canViewProduct') && canViewSalesDashboard || hasFeature('sales') && hasPermission('canViewSale')) && (
-            <button type="button" role="tab" aria-selected={dashboardView === 'mix'} onClick={() => setDashboardView('mix')} className={`shrink-0 rounded px-3 py-2 text-sm font-medium ${dashboardView === 'mix' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Products &amp; payments</button>
-          )}
-        </div>
       </div>}
 
       {/* Daily Performance Chart */}
-      {dashboardView === 'daily' && (hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && dailyPerf && (
+      {(showOverview || showSales) && (hasFeature('sales') && canViewSalesDashboard || hasFeature('accounting') && canViewFinancialDashboard) && dailyPerf && (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -611,7 +622,7 @@ export default function DashboardPage() {
       )}
 
       {/* Charts Row — only show for enabled features */}
-      {dashboardView === 'trends' && <div className="grid gap-6 lg:grid-cols-2">
+      {(showSales || showFinance) && <div className="grid gap-6 lg:grid-cols-2">
         {/* Revenue vs Operating Expenses Chart */}
         {hasFeature('sales') && (canViewSalesDashboard || hasPermission('canViewExpense')) && (
         <Card>
@@ -658,7 +669,7 @@ export default function DashboardPage() {
       </div>}
 
       {/* Bottom Row — only show for enabled features */}
-      {dashboardView === 'mix' && <div className="grid gap-6 lg:grid-cols-2">
+      {(showInventory || showSales) && <div className="grid gap-6 lg:grid-cols-2">
         {/* Top Products */}
         {hasFeature('inventory') && hasPermission('canViewProduct') && canViewSalesDashboard && (
         <Card>

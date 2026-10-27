@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Bell, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles, Lightbulb, Store } from 'lucide-react'
+import { Bell, BellRing, BellOff, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles, Lightbulb, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '@/lib/api'
@@ -84,12 +84,9 @@ export function NotificationBell() {
   const startedAtRef = useRef(Date.now())
   const loadedRef = useRef(false)
   const userIdRef = useRef(user?.id)
-  const permissionPromptedRef = useRef(false)
-  const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
-  const canUseBrowserNotifications = hasFeature('communication.notifications')
 
-  // FCM push notifications
-  const { permission: pushPermission, registerToken } = usePushNotifications()
+  // Browser push notifications
+  const { permission: pushPermission, registered: pushRegistered, registerToken, unregisterToken, isDisabledOnDevice } = usePushNotifications()
 
   useEffect(() => {
     userIdRef.current = user?.id
@@ -120,12 +117,12 @@ export function NotificationBell() {
     })
   }, [hasPermission, navigate])
 
-  // Auto-register FCM token when user is present and permission is granted
+  // Refresh the signed-in user's existing Web Push subscription without prompting.
   useEffect(() => {
-    if (user && pushPermission === 'granted') {
+    if (user && pushPermission === 'granted' && !isDisabledOnDevice()) {
       registerToken()
     }
-  }, [user, pushPermission, registerToken])
+  }, [user, pushPermission, registerToken, isDisabledOnDevice])
 
   // Fetch API notifications
   const fetchApiNotifications = useCallback(async (): Promise<NotificationItem[]> => {
@@ -439,13 +436,26 @@ export function NotificationBell() {
     } catch {}
   }, [])
 
-  const requestBrowserPermission = useCallback(() => {
-    if (!isOwner || !canUseBrowserNotifications || permissionPromptedRef.current) return
-    if (typeof window === 'undefined' || !('Notification' in window)) return
-    if (Notification.permission === 'granted' || Notification.permission === 'denied') return
-    permissionPromptedRef.current = true
-    window.Notification.requestPermission().catch(() => {})
-  }, [canUseBrowserNotifications, isOwner])
+  const togglePushDelivery = useCallback(async () => {
+    if (pushRegistered) {
+      await unregisterToken()
+      toast({ title: 'Push notifications turned off', description: 'This device will no longer receive JibuSales push alerts.' })
+      return
+    }
+    const success = await registerToken(true)
+    if (success) {
+      toast({ title: 'Push notifications enabled', description: 'This device can receive JibuSales alerts when you are signed out.' })
+      return
+    }
+    const description = pushPermission === 'denied'
+      ? 'Notifications are blocked by your browser. Allow them in site settings, then try again.'
+      : pushPermission === 'unsupported'
+        ? 'This browser or device does not support background notifications.'
+        : pushPermission === 'not-configured'
+          ? 'Push delivery is not configured for this deployment yet.'
+          : 'Could not enable push on this device. Check browser permission and try again.'
+    toast({ title: 'Push notifications not enabled', description, variant: 'destructive' })
+  }, [pushPermission, pushRegistered, registerToken, unregisterToken])
 
   // Close on outside click
   useEffect(() => {
@@ -562,7 +572,6 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => {
-          requestBrowserPermission()
           setOpen(!open)
         }}
         className="relative p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
@@ -592,6 +601,14 @@ export function NotificationBell() {
               )}
             </div>
             <div className="flex items-center gap-1">
+              {user && pushPermission !== 'unsupported' && pushPermission !== 'not-configured' && (
+                <button type="button" onClick={() => void togglePushDelivery()} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-medium text-foreground hover:bg-muted" title={pushRegistered ? 'Turn off push on this device' : 'Enable notifications on this device'}>
+                  {pushRegistered ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+                  <span>{pushRegistered ? 'Push on' : 'Enable push'}</span>
+                </button>
+              )}
+              {user && pushPermission === 'not-configured' && <span className="px-2 text-[11px] text-muted-foreground" title="Push delivery needs Web Push VAPID keys on the app and server">Push unavailable</span>}
+              {user && pushPermission === 'unsupported' && <span className="px-2 text-[11px] text-muted-foreground">Push unsupported</span>}
               {unreadCount > 0 && (
                 <button
                   type="button"

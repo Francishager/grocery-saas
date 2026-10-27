@@ -1,5 +1,5 @@
 import prisma from '../db.js';
-import { sendNotificationToUser } from '../services/fcm.js';
+import { sendNotificationToUser } from '../services/webPush.js';
 
 export function formatCurrency(value, currency = 'UGX') {
   const normalizedCurrency = /^[A-Z]{3}$/.test(String(currency || '').trim().toUpperCase())
@@ -36,16 +36,13 @@ export async function createTenantNotification({ prismaClient = prisma, sendPush
       metadata,
     },
   });
-  // Also send FCM push to the user (if they have registered devices)
+  // Keep lock-screen content generic; detailed data stays in the authenticated notification center.
   if (userId) {
-    const pushMetadata = Object.fromEntries(Object.entries(metadata && typeof metadata === 'object' ? metadata : {})
-      .filter(([, value]) => value != null)
-      .map(([key, value]) => [key, typeof value === 'string' ? value : JSON.stringify(value)]));
     sendPush(userId, {
-      title,
-      body: message,
-      data: { url: '/tenant/dashboard', ...pushMetadata, notificationId: notif.id, type },
-    }).catch((err) => console.error('FCM push failed for notification:', err));
+      title: 'JibuSales update',
+      body: 'You have a new business notification. Open JibuSales to view it.',
+      data: { url: '/tenant/dashboard', notificationId: notif.id, type },
+    }).catch((err) => console.error('Web Push failed for notification:', err));
   }
   return notif;
 }

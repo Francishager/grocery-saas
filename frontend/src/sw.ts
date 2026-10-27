@@ -28,37 +28,21 @@ registerRoute(
   })
 )
 
-// Firebase Messaging background handler — displays notifications when app is closed/screen locked
-import { initializeApp } from 'firebase/app'
-import { getMessaging, onBackgroundMessage } from 'firebase/messaging/sw'
-
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
-}
-
-initializeApp(firebaseConfig)
-const messaging = getMessaging()
-
-// Handle background messages (when app is closed or screen locked)
-onBackgroundMessage(messaging, (payload) => {
-  const { title, body, icon, badge, tag, data } = payload.notification || {}
-  const notificationTitle = sanitizeNotificationText(title || payload.data?.title, 'JibuSales')
-  const cleanNotificationBody = sanitizeNotificationText(body || payload.data?.body)
-  const notificationOptions: NotificationOptions = {
-    body: cleanNotificationBody,
-    icon: icon || '/img/jibusales_logo.png',
-    badge: badge || '/img/jibusales_logo.png',
-    tag: tag || 'jibusales-notification',
-    data: { ...(data || {}), ...(payload.data || {}) },
+// Standard Web Push is handled by the service worker without a third-party messaging SDK.
+self.addEventListener('push', (event) => {
+  let payload: Record<string, any> = {}
+  try { payload = event.data?.json() || {} } catch { payload = {} }
+  const title = sanitizeNotificationText(payload.title, 'JibuSales update')
+  const body = sanitizeNotificationText(payload.body, 'Open JibuSales to view your update.')
+  const data = payload.data && typeof payload.data === 'object' ? payload.data : {}
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    icon: '/img/jibusales_logo.png',
+    badge: '/img/jibusales_logo.png',
+    tag: sanitizeNotificationText(payload.tag, 'jibusales-update'),
+    data,
     requireInteraction: false,
-  }
-
-  self.registration.showNotification(notificationTitle, notificationOptions)
+  }))
 })
 
 // Handle notification click — open/focus the app

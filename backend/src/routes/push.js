@@ -1,49 +1,51 @@
 import { Router } from 'express'
 import prisma from '../db.js'
-import { authenticateToken, loadUserPermissions } from '../../middleware/auth.js'
-import { sendNotificationToUser, sendNotificationToTenant, sendNotificationToPlatformAdmins } from '../services/fcm.js'
-import { filterPropertyManagementNotifications } from '../utils/propertyFeatureAccess.js'
+import { authenticateToken, loadUserPermissions, requirePermission } from '../../middleware/auth.js'
+import { requireFeature } from '../../middleware/featureCheck.js'
+import { isWebPushConfigured, sendNotificationToUser, sendNotificationToTenant, sendNotificationToPlatformAdmins } from '../services/webPush.js'
 
 const router = Router()
 
 /**
  * POST /api/push/register
  * Register or update a device token for the authenticated user.
- * Body: { token, platform?, tenantId? }
+ * Body: { subscription }
  */
-router.post('/register', authenticateToken, loadUserPermissions, async (req, res) => {
+router.post('/register', authenticateToken, async (req, res) => {
   try {
-    const { token, platform = 'web', tenantId } = req.body
-    if (!token) return res.status(400).json({ error: 'Token is required' })
-
-    const userId = req.user.id
-    const userTenantId = tenantId || req.user.tenantId || req.user.tenant_id || null
-
-    const pushToken = await prisma.pushToken.upsert({
-      where: { token },
-      update: { userId, tenantId: userTenantId, platform, isActive: true },
-      create: { token, userId, tenantId: userTenantId, platform, isActive: true },
-    })
-
-    // Push all unread notifications to this user's devices (screen lock / background)
-    const unreadNotifs = await prisma.notification.findMany({
-      where: {
-        OR: [{ userId }, { userId: null, tenantId: userTenantId }],
-        isRead: false,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-    })
-    const visibleUnreadNotifs = await filterPropertyManagementNotifications(userTenantId, unreadNotifs, req.user, req.userPermissions)
-    for (const n of visibleUnreadNotifs) {
-      sendNotificationToUser(userId, {
-        title: n.title,
-        body: n.message,
-        data: { url: '/notifications', notificationId: n.id },
-      }).catch(() => {})
+    const subscription = req.body?.subscription
+    if (!subscription || typeof subscription.endpoint !== 'string' || !subscription.keys?.p256dh || !subscription.keys?.auth) {
+      return res.status(400).json({ error: 'A valid Web Push subscription is required' })
+    }
+    let endpoint
+    try { endpoint = new URL(subscription.endpoint) } catch { return res.status(400).json({ error: 'Invalid push endpoint' }) }
+    const approvedHost = ['.googleapis.com', '.mozilla.com', '.apple.com', '.windows.com'].some(suffix => endpoint.hostname.endsWith(suffix))
+    if (endpoint.protocol !== 'https:' || !approvedHost || endpoint.username || endpoint.password) {
+      return res.status(400).json({ error: 'Unsupported push service endpoint' })
+    }
+    if (!isWebPushConfigured()) {
+      return res.status(503).json({ code: 'PUSH_NOT_CONFIGURED', error: 'Push delivery is not configured on the server.' })
     }
 
-    res.json({ message: 'Token registered', pushToken, unreadPushed: visibleUnreadNotifs.length })
+    const userId = req.user.id
+    const userTenantId = req.user.tenantId || req.user.tenant_id || null
+
+    const token = JSON.stringify({ endpoint: endpoint.toString(), keys: subscription.keys })
+    if (token.length > 8192) return res.status(400).json({ error: 'Push subscription is too large' })
+    const activeSubscriptions = await prisma.pushToken.findMany({ where: { platform: 'web', isActive: true, token: { contains: endpoint.toString() } }, select: { token: true } })
+    const staleEndpointTokens = activeSubscriptions.filter(row => {
+      try { return JSON.parse(row.token)?.endpoint === endpoint.toString() && row.token !== token } catch { return false }
+    }).map(row => row.token)
+    if (staleEndpointTokens.length) {
+      await prisma.pushToken.updateMany({ where: { token: { in: staleEndpointTokens } }, data: { isActive: false } })
+    }
+    const pushToken = await prisma.pushToken.upsert({
+      where: { token },
+      update: { userId, tenantId: userTenantId, platform: 'web', isActive: true },
+      create: { token, userId, tenantId: userTenantId, platform: 'web', isActive: true },
+    })
+
+    res.json({ message: 'Token registered', registered: Boolean(pushToken.isActive) })
   } catch (error) {
     console.error('Register push token error:', error)
     res.status(500).json({ error: 'Failed to register token' })
@@ -53,17 +55,19 @@ router.post('/register', authenticateToken, loadUserPermissions, async (req, res
 /**
  * DELETE /api/push/unregister
  * Unregister a device token.
- * Body: { token }
+ * Body: { endpoint }
  */
 router.delete('/unregister', authenticateToken, async (req, res) => {
   try {
-    const { token } = req.body
-    if (!token) return res.status(400).json({ error: 'Token is required' })
-
-    await prisma.pushToken.updateMany({
-      where: { token, userId: req.user.id },
-      data: { isActive: false },
-    })
+    const endpoint = req.body?.endpoint
+    if (typeof endpoint !== 'string') return res.status(400).json({ error: 'Subscription endpoint is required' })
+    const subscriptions = await prisma.pushToken.findMany({ where: { userId: req.user.id, platform: 'web', isActive: true }, select: { token: true } })
+    const matchingTokens = subscriptions.filter(row => {
+      try { return JSON.parse(row.token)?.endpoint === endpoint } catch { return false }
+    }).map(row => row.token)
+    if (matchingTokens.length) {
+      await prisma.pushToken.updateMany({ where: { token: { in: matchingTokens }, userId: req.user.id }, data: { isActive: false } })
+    }
 
     res.json({ message: 'Token unregistered' })
   } catch (error) {
@@ -77,12 +81,17 @@ router.delete('/unregister', authenticateToken, async (req, res) => {
  * Send a push notification to a specific user (admin/manager only).
  * Body: { userId, title, body, data? }
  */
-router.post('/send', authenticateToken, async (req, res) => {
+router.post('/send', authenticateToken, loadUserPermissions, requirePermission('canCreateCommunication'), requireFeature('communication'), async (req, res) => {
   try {
     const { userId, title, body, data } = req.body
     if (!userId || !title || !body) {
       return res.status(400).json({ error: 'userId, title, and body are required' })
     }
+
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    if (!tenantId) return res.status(403).json({ error: 'Tenant access required' })
+    const recipient = await prisma.user.findFirst({ where: { id: userId, tenantId }, select: { id: true } })
+    if (!recipient) return res.status(404).json({ error: 'Recipient not found in this business' })
 
     const result = await sendNotificationToUser(userId, { title, body, data })
     res.json({ message: 'Notification sent', ...result })
@@ -97,15 +106,20 @@ router.post('/send', authenticateToken, async (req, res) => {
  * Send a push notification to all users in a tenant (owner/admin only).
  * Body: { tenantId, title, body, data? }
  */
-router.post('/send-tenant', authenticateToken, async (req, res) => {
+router.post('/send-tenant', authenticateToken, loadUserPermissions, async (req, res) => {
   try {
     const { tenantId, title, body, data } = req.body
     if (!title || !body) {
       return res.status(400).json({ error: 'title and body are required' })
     }
 
-    const targetTenantId = tenantId || req.user.tenantId || req.user.tenant_id
-    if (!targetTenantId) {
+    const ownTenantId = req.user.tenantId || req.user.tenant_id
+    const isPlatformAdmin = ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user.role)
+    if (!isPlatformAdmin && (!req.userPermissions?.canCreateCommunication || !ownTenantId)) {
+      return res.status(403).json({ error: 'Communication permission is required' })
+    }
+    const targetTenantId = isPlatformAdmin ? (tenantId || ownTenantId) : ownTenantId
+    if (!targetTenantId || (!isPlatformAdmin && tenantId && tenantId !== ownTenantId)) {
       return res.status(400).json({ error: 'tenantId is required' })
     }
 
@@ -144,13 +158,13 @@ router.post('/send-platform', authenticateToken, async (req, res) => {
 
 /**
  * GET /api/push/tokens
- * Get all push tokens for the authenticated user.
+ * Get registered Web Push devices for the authenticated user.
  */
 router.get('/tokens', authenticateToken, async (req, res) => {
   try {
     const tokens = await prisma.pushToken.findMany({
-      where: { userId: req.user.id },
-      select: { id: true, token: true, platform: true, isActive: true, createdAt: true, updatedAt: true },
+      where: { userId: req.user.id, platform: 'web' },
+      select: { id: true, platform: true, isActive: true, createdAt: true, updatedAt: true },
       orderBy: { createdAt: 'desc' },
     })
     res.json({ tokens })

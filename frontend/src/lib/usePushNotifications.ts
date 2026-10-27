@@ -1,8 +1,5 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { apiFetch } from './api'
-import { requestNotificationPermission, getFCMToken, onForegroundMessage, isFirebaseConfigured } from './firebase'
-import { sanitizeNotificationText } from './notificationDisplay'
-import { getAuthToken } from './api'
+import { useEffect, useState, useCallback } from 'react'
+import { apiFetch, getAuthToken } from './api'
 
 export type PushPermissionState = 'default' | 'granted' | 'denied' | 'unsupported' | 'not-configured'
 
@@ -14,127 +11,142 @@ export interface PushNotification {
   timestamp: number
 }
 
+const PUSH_DISABLED_KEY = 'jibusales_push_disabled'
+
+function decodeVapidKey(key: string) {
+  const padding = '='.repeat((4 - key.length % 4) % 4)
+  const base64 = (key + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = window.atob(base64)
+  return Uint8Array.from(raw, char => char.charCodeAt(0))
+}
+
+function subscriptionUsesKey(subscription: PushSubscription, expectedKey: Uint8Array) {
+  const currentKey = subscription.options.applicationServerKey
+  if (!currentKey) return false
+  const bytes = new Uint8Array(currentKey)
+  return bytes.length === expectedKey.length && bytes.every((value, index) => value === expectedKey[index])
+}
+
 export function usePushNotifications() {
   const [permission, setPermission] = useState<PushPermissionState>('default')
   const [token, setToken] = useState<string | null>(null)
   const [registered, setRegistered] = useState(false)
-  const [foregroundNotifications, setForegroundNotifications] = useState<PushNotification[]>([])
-  const unregisterRef = useRef<(() => void) | null>(null)
+  const vapidPublicKey = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY || ''
 
-  // Check initial state
   useEffect(() => {
-    if (!isFirebaseConfigured()) {
-      setPermission('not-configured')
-      return
-    }
-    if (!('Notification' in window)) {
+    if (!('Notification' in window) || !('PushManager' in window) || !('serviceWorker' in navigator) || !window.isSecureContext) {
       setPermission('unsupported')
       return
     }
+    if (!vapidPublicKey) {
+      setPermission('not-configured')
+      return
+    }
     setPermission(Notification.permission as PushPermissionState)
+  }, [vapidPublicKey])
+
+  const getRegistration = useCallback(async () => {
+    if (!('serviceWorker' in navigator)) throw new Error('Service workers are not supported in this browser')
+    return navigator.serviceWorker.ready
   }, [])
 
-  // Listen for foreground messages
-  useEffect(() => {
-    if (permission !== 'granted') return
-    const unsub = onForegroundMessage((payload) => {
-      const notif: PushNotification = {
-        id: payload.data?.notificationId || payload.messageId || `${Date.now()}-${Math.random()}`,
-        title: sanitizeNotificationText(payload.notification?.title || payload.data?.title, 'Notification'),
-        body: sanitizeNotificationText(payload.notification?.body || payload.data?.body),
-        data: payload.data,
-        timestamp: Date.now(),
-      }
-      setForegroundNotifications((prev) => [notif, ...prev].slice(0, 20))
-      window.dispatchEvent(new CustomEvent('jibusales:notification', {
-        detail: {
-          id: notif.id, title: notif.title, message: notif.body,
-          type: payload.data?.type || 'info', metadata: payload.data,
-          link: payload.data?.link || payload.data?.url,
-        },
-      }))
-    })
-    unregisterRef.current = unsub
-    return () => {
-      if (unregisterRef.current) unregisterRef.current()
-    }
-  }, [permission])
-
   const requestPermission = useCallback(async () => {
-    if (!isFirebaseConfigured()) {
+    if (!vapidPublicKey) {
       setPermission('not-configured')
       return null
     }
-    const result = await requestNotificationPermission()
+    if (!('Notification' in window) || !('PushManager' in window) || !window.isSecureContext) {
+      setPermission('unsupported')
+      return null
+    }
+    const result = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
     setPermission(result as PushPermissionState)
     if (result !== 'granted') return null
 
-    const fcmToken = await getFCMToken()
-    if (!fcmToken) return null
-    setToken(fcmToken)
-    return fcmToken
-  }, [])
+    const registration = await getRegistration()
+    let subscription = await registration.pushManager.getSubscription()
+    const applicationServerKey = decodeVapidKey(vapidPublicKey)
+    if (subscription && !subscriptionUsesKey(subscription, applicationServerKey)) {
+      await subscription.unsubscribe()
+      subscription = null
+    }
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey,
+      })
+    }
+    setToken(subscription.endpoint)
+    return subscription
+  }, [vapidPublicKey, getRegistration])
 
-  const registerToken = useCallback(async () => {
+  const registerToken = useCallback(async (userInitiated = false) => {
     const authToken = getAuthToken()
     if (!authToken) return false
 
-    let fcmToken = token
-    if (!fcmToken) {
-      const result = await requestPermission()
-      if (!result) return false
-      fcmToken = result
-    }
-
     try {
+      if (Notification.permission !== 'granted') {
+        if (!userInitiated) return false
+        const result = await requestPermission()
+        if (!result) return false
+      }
+      const registration = await getRegistration()
+      let subscription = await registration.pushManager.getSubscription()
+      if (!subscription || !subscriptionUsesKey(subscription, decodeVapidKey(vapidPublicKey))) {
+        if (!userInitiated && Notification.permission !== 'granted') return false
+        subscription = await requestPermission()
+        if (!subscription) return false
+      }
+      const subscriptionJson = subscription.toJSON()
       const res = await apiFetch('/api/push/register', {
         method: 'POST',
-        body: JSON.stringify({ token: fcmToken, platform: 'web' }),
+        body: JSON.stringify({ subscription: subscriptionJson }),
       })
       if (res.ok) {
+        localStorage.removeItem(PUSH_DISABLED_KEY)
         setRegistered(true)
-        setToken(fcmToken)
+        setToken(subscription.endpoint)
         return true
       }
+      if (res.status === 503) setPermission('not-configured')
       console.warn('Push token registration failed:', res.status)
       return false
     } catch (err) {
       // Silent fail — push not critical
       return false
     }
-  }, [token, requestPermission])
+  }, [requestPermission, getRegistration])
 
   const unregisterToken = useCallback(async () => {
-    if (!token) return
+    localStorage.setItem(PUSH_DISABLED_KEY, '1')
     try {
-      await apiFetch('/api/push/unregister', {
-        method: 'DELETE',
-        body: JSON.stringify({ token }),
-      })
+      const registration = await getRegistration()
+      const subscription = await registration.pushManager.getSubscription()
+      if (subscription) {
+        await apiFetch('/api/push/unregister', {
+          method: 'DELETE',
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        })
+        await subscription.unsubscribe()
+      }
+    } catch {
+      // Device-local opt-out still prevents automatic re-registration.
+    } finally {
       setRegistered(false)
       setToken(null)
-    } catch (err) {
-      // Silent fail
     }
-  }, [token])
+  }, [getRegistration])
 
-  const dismissNotification = useCallback((id: string) => {
-    setForegroundNotifications((prev) => prev.filter((n) => n.id !== id))
-  }, [])
-
-  const clearNotifications = useCallback(() => {
-    setForegroundNotifications([])
-  }, [])
+  const isDisabledOnDevice = useCallback(() => localStorage.getItem(PUSH_DISABLED_KEY) === '1', [])
 
   return {
     permission,
     token,
     registered,
-    foregroundNotifications,
+    foregroundNotifications: [] as PushNotification[],
     requestPermission,
     registerToken,
     unregisterToken,
-    dismissNotification,
-    clearNotifications,
+    isDisabledOnDevice,
   }
 }
