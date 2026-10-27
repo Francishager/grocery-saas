@@ -510,6 +510,11 @@ export const rentalsApi = {
     api.put<any>(`/api/rentals/${id}/contract-draft`, { body: { contractDraft } }),
 }
 
+export const plannerApi = {
+  list: () => api.get<any>('/api/widgets/planner'),
+  save: (items: any[]) => api.put<any>('/api/widgets/planner', { body: { items } }),
+}
+
 // Sales endpoints
 export const salesApi = {
   list: async (params?: { start?: string; end?: string }) => {

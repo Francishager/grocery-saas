@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
 import { NotificationBell } from '@/components/NotificationBell'
 import { WidgetLauncher } from '@/components/widgets/WidgetLauncher'
+import { PlannerReminderWatcher } from '@/components/PlannerReminderWatcher'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch } from '@/lib/api'
 import OnboardingGuideCard from '@/components/OnboardingGuideCard'
@@ -1181,6 +1182,7 @@ export function TenantLayout() {
         onComplete={completeOnboarding}
       />}
       {!waiterMode && <SubscriptionBillingReminder />}
+      {!waiterMode && !loading && canAccessFeature('rentals') && hasPermission('canViewRental') && <PlannerReminderWatcher />}
     </div>
   )
 }

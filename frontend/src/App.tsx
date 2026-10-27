@@ -40,6 +40,7 @@ import RentalsPage from '@/pages/RentalsPage'
 import RentalItemsPage from '@/pages/RentalItemsPage'
 import RentalPaymentsPage from '@/pages/RentalPaymentsPage'
 import RentalCRMPage from '@/pages/RentalCRMPage'
+import RentalPlannerPage from '@/pages/RentalPlannerPage'
 import PropertyManagementPage from '@/pages/PropertyManagementPage'
 import ReturnsPage from '@/pages/ReturnsPage'
 import AccountingPage from '@/pages/accounting/AccountingPage'
@@ -206,7 +207,7 @@ function App() {
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="rentals" element={<Navigate to="/tenant/rentals/bookings" replace />} />
           <Route path="rentals/bookings" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalsPage section="bookings" /></FeatureGuard>} />
-          <Route path="rentals/planner" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalCRMPage mode="planner" /></FeatureGuard>} />
+          <Route path="rentals/planner" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalPlannerPage /></FeatureGuard>} />
           <Route path="rentals/crm" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalCRMPage /></FeatureGuard>} />
           <Route path="rentals/returns" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalsPage section="returns" /></FeatureGuard>} />
           <Route path="rentals/items" element={<Navigate to="/tenant/inventory/rentals" replace />} />

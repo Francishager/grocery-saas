@@ -51,7 +51,7 @@ const apiDate = (date: Date, end = false) => {
 }
 const displayDate = (value?: string | null) => value ? new Intl.DateTimeFormat(undefined, { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value)) : '—'
 
-export default function RentalCRMPage({ mode = 'crm' }: { mode?: 'crm' | 'planner' }) {
+export default function RentalCRMPage() {
   const { toast } = useToast()
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   const [selectedDay, setSelectedDay] = useState(() => dayKey(new Date()))
@@ -136,8 +136,8 @@ export default function RentalCRMPage({ mode = 'crm' }: { mode?: 'crm' | 'planne
       <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
         <div>
           <p className="text-sm font-medium text-muted-foreground">Rentals</p>
-          <h1 className="text-2xl font-semibold tracking-tight">{mode === 'planner' ? 'Rental Planner' : 'Renter CRM'}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{mode === 'planner' ? 'Plan booking starts, pickups, returns, and payment activity.' : 'Bookings, renter relationships, balances, and follow-ups in one place.'}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Renter CRM</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Bookings, renter relationships, balances, and follow-ups in one place.</p>
         </div>
         <Button asChild><Link to="/tenant/rentals/bookings"><CalendarDays className="mr-2 h-4 w-4" />Open bookings</Link></Button>
       </header>
@@ -152,7 +152,7 @@ export default function RentalCRMPage({ mode = 'crm' }: { mode?: 'crm' | 'planne
       <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.8fr)]">
         <Card className="min-w-0 overflow-hidden">
           <div className="flex flex-col justify-between gap-3 border-b p-4 sm:flex-row sm:items-center">
-            <div><h2 className="font-semibold">{mode === 'planner' ? 'Rental schedule' : 'Booking calendar'}</h2><p className="text-sm text-muted-foreground">Synced directly from rental bookings and posted receipts.</p></div>
+            <div><h2 className="font-semibold">Booking calendar</h2><p className="text-sm text-muted-foreground">Synced directly from rental bookings and posted receipts.</p></div>
             <div className="flex items-center gap-1">
               <Button variant="outline" size="icon" title="Previous month" aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft className="h-4 w-4" /></Button>
               <div className="min-w-36 text-center text-sm font-medium">{new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(month)}</div>
@@ -192,7 +192,7 @@ export default function RentalCRMPage({ mode = 'crm' }: { mode?: 'crm' | 'planne
         </Card>
       </section>
 
-      {mode === 'crm' && <section className="overflow-hidden rounded-lg border bg-background">
+      <section className="overflow-hidden rounded-lg border bg-background">
         <div className="flex flex-col justify-between gap-3 border-b p-4 sm:flex-row sm:items-center">
           <div><h2 className="font-semibold">Renter relationships</h2><p className="text-sm text-muted-foreground">Rental history, current exposure, and next follow-up.</p></div>
           <div className="relative w-full sm:max-w-xs"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" placeholder="Search renters" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} /></div>
@@ -213,7 +213,7 @@ export default function RentalCRMPage({ mode = 'crm' }: { mode?: 'crm' | 'planne
           </table>
           {pagination.total > pagination.limit && <Pagination currentPage={pagination.page} totalPages={pagination.pages} totalItems={pagination.total} pageSize={pagination.limit} onPageChange={setPage} />}
         </div>
-      </section>}
+      </section>
     </div>
   )
 }
