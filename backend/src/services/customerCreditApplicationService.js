@@ -6,12 +6,46 @@ export function customerCreditOffset(amountDue, availableCredit) {
   return money(Math.min(Math.max(0, money(amountDue)), Math.max(0, money(availableCredit))))
 }
 
+export function validateCustomerCreditSaleLimit(customer, amountDue) {
+  const projectedBalance = money(customer?.balance) + money(amountDue)
+  if (projectedBalance <= 0) return { valid: true }
+  const creditLimit = money(customer?.creditLimit)
+  if (creditLimit <= 0) {
+    return {
+      valid: false,
+      statusCode: 400,
+      code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED',
+      message: `Set a credit limit for ${customer?.name || 'this customer'} before making a credit sale.`,
+    }
+  }
+  if (projectedBalance > creditLimit) {
+    return {
+      valid: false,
+      statusCode: 400,
+      code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED',
+      message: `Credit limit exceeded. Available credit is ${Math.max(0, creditLimit - money(customer?.balance)).toFixed(2)}.`,
+    }
+  }
+  return { valid: true }
+}
+
 export function availableAdvanceFromReceipt({ amount, allocatedToCustomer, alreadyApplied, balanceBefore }) {
   const receiptAmount = money(amount)
   const allocationCap = Math.min(receiptAmount, Math.max(0, money(allocatedToCustomer)))
   const receivableSettled = Math.min(receiptAmount, Math.max(0, money(balanceBefore)))
   const advancesRecognizable = money(receiptAmount - receivableSettled)
   return money(Math.max(0, Math.min(allocationCap, advancesRecognizable) - money(alreadyApplied)))
+}
+
+export function customerAdvanceAllocation(payment, allocations = []) {
+  const receiptAmount = money(payment?.amount)
+  const paymentAllocations = allocations.filter((allocation) => allocation.paymentId === payment?.id)
+  const allocatedTotal = money(paymentAllocations.reduce((sum, allocation) => sum + money(allocation.amount), 0))
+  const allocatedToCustomer = money(paymentAllocations
+    .filter((allocation) => allocation.targetType === 'customer_account')
+    .reduce((sum, allocation) => sum + money(allocation.amount), 0))
+  const unallocatedRemainder = money(Math.max(0, receiptAmount - allocatedTotal))
+  return money(Math.min(receiptAmount, allocatedToCustomer + unallocatedRemainder))
 }
 
 export async function applyAvailableCustomerCredit(client, { scope, customerId, saleId, amountDue, availableCredit, userId, branchId }) {
@@ -51,33 +85,26 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
     const key = `${app.sourceType}:${app.sourceId}`
     previouslyApplied.set(key, money((previouslyApplied.get(key) || 0) + money(app.amount)))
   }
-  const allocationsByPayment = new Map()
-  for (const allocation of allocations) {
-    allocationsByPayment.set(allocation.paymentId, money((allocationsByPayment.get(allocation.paymentId) || 0) + money(allocation.amount)))
-  }
-  const accountAllocationByPayment = new Map()
-  for (const allocation of allocations.filter((row) => row.targetType === 'customer_account')) {
-    accountAllocationByPayment.set(allocation.paymentId, money((accountAllocationByPayment.get(allocation.paymentId) || 0) + money(allocation.amount)))
-  }
-
   const sources = []
   for (const payment of payments) {
     const alreadyUsed = previouslyApplied.get(`payment:${payment.id}`) || 0
-    if (payment.saleId) continue
-    const accountAllocation = payment.allocationMode === 'explicit'
-      ? accountAllocationByPayment.get(payment.id) || 0
-      : money(Number(payment.amount) - (allocationsByPayment.get(payment.id) || 0))
+    const accountAllocation = customerAdvanceAllocation(payment, allocations)
     if (accountAllocation <= 0) continue
-    const beforeReceipt = await calculateCustomerReceivableBalanceBefore(
-      client, scope, customerId, payment.createdAt,
-    )
-    if (!beforeReceipt) continue
-    const available = availableAdvanceFromReceipt({
-      amount: payment.amount,
-      allocatedToCustomer: accountAllocation,
-      alreadyApplied: alreadyUsed,
-      balanceBefore: beforeReceipt.balance,
-    })
+    let available
+    if (payment.allocationMode === 'explicit') {
+      available = money(Math.max(0, accountAllocation - alreadyUsed))
+    } else {
+      const beforeReceipt = await calculateCustomerReceivableBalanceBefore(
+        client, scope, customerId, payment.createdAt,
+      )
+      if (!beforeReceipt) continue
+      available = availableAdvanceFromReceipt({
+        amount: payment.amount,
+        allocatedToCustomer: accountAllocation,
+        alreadyApplied: alreadyUsed,
+        balanceBefore: beforeReceipt.balance,
+      })
+    }
     if (available > 0.009) sources.push({ sourceType: 'payment', sourceId: payment.id, amount: available, createdAt: payment.createdAt })
   }
 

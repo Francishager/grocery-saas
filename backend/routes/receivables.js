@@ -17,7 +17,7 @@ import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRow
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
-import { applyAvailableCustomerCredit, customerCreditOffset } from '../src/services/customerCreditApplicationService.js'
+import { applyAvailableCustomerCredit, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -207,29 +207,6 @@ const validateCreditLimitRequired = (creditLimit) => {
     }
   }
   return { valid: true, amount: creditLimitAmount }
-}
-
-const validateCreditSaleLimit = (customer, balance) => {
-  if (balance <= 0) return { valid: true }
-  const creditLimitAmount = toMoney(customer.creditLimit)
-  if (creditLimitAmount <= 0) {
-    return {
-      valid: false,
-      statusCode: 400,
-      code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED',
-      message: `Set a credit limit for ${customer.name || 'this customer'} before making a credit sale.`
-    }
-  }
-  const newBalance = toMoney(customer.balance) + balance
-  if (newBalance > creditLimitAmount) {
-    return {
-      valid: false,
-      statusCode: 400,
-      code: 'CUSTOMER_CREDIT_LIMIT_EXCEEDED',
-      message: `Credit limit exceeded. Available credit is ${Math.max(0, creditLimitAmount - toMoney(customer.balance)).toFixed(2)}.`
-    }
-  }
-  return { valid: true }
 }
 
 const userSelect = { select: { id: true, fname: true, lname: true } }
@@ -1719,9 +1696,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     if (balance > 0) {
       const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, customerId)
       const customerForCreditLimit = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance }
-      const availableCustomerCredit = Math.max(0, -toMoney(customerForCreditLimit.balance))
-      const newReceivable = Math.max(0, toMoney(balance) - customerCreditOffset(balance, availableCustomerCredit))
-      const creditLimitCheck = validateCreditSaleLimit(customerForCreditLimit, newReceivable)
+      const creditLimitCheck = validateCustomerCreditSaleLimit(customerForCreditLimit, balance)
       if (!creditLimitCheck.valid) {
         return res.status(creditLimitCheck.statusCode || 400).json({
           error: creditLimitCheck.message,
@@ -1734,8 +1709,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
       const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
       const availableCustomerCredit = Math.max(0, -toMoney(customerBalanceBefore?.balance))
-      const newReceivable = Math.max(0, toMoney(balance) - customerCreditOffset(balance, availableCustomerCredit))
-      const creditCheck = validateCreditSaleLimit({ ...customer, balance: customerBalanceBefore?.balance ?? customer.balance }, newReceivable)
+      const creditCheck = validateCustomerCreditSaleLimit({ ...customer, balance: customerBalanceBefore?.balance ?? customer.balance }, balance)
       if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
         const createdSale = await tx.saleRecord.create({
           data: {

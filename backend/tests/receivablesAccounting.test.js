@@ -11,7 +11,7 @@ import {
   saleRecognitionLines,
   validateReceivablesAccountingConfig,
 } from '../src/services/receivablesAccountingService.js'
-import { availableAdvanceFromReceipt, customerCreditOffset } from '../src/services/customerCreditApplicationService.js'
+import { availableAdvanceFromReceipt, customerAdvanceAllocation, customerCreditOffset, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
 
 const config = {
   receivableAccountId: 'ar',
@@ -89,6 +89,27 @@ test('existing customer funds offset a credit sale before the remaining balance 
   assert.equal(100 - customerCreditOffset(100, 30), 70)
   assert.equal(customerCreditOffset(100, 150), 100)
   assert.equal(customerCreditOffset(100, 0), 0)
+})
+
+test('customer advance tracing includes a linked receipt surplus and unallocated explicit receipts only', () => {
+  const allocations = [
+    { paymentId: 'linked', targetType: 'sale', amount: 80 },
+    { paymentId: 'account', targetType: 'customer_account', amount: 25 },
+    { paymentId: 'account', targetType: 'sale', amount: 25 },
+  ]
+  assert.equal(customerAdvanceAllocation({ id: 'linked', amount: 100, saleId: 'sale-1' }, allocations), 20)
+  assert.equal(customerAdvanceAllocation({ id: 'account', amount: 50, saleId: 'sale-2' }, allocations), 25)
+  assert.equal(customerAdvanceAllocation({ id: 'unallocated', amount: 40, allocationMode: 'explicit' }, allocations), 40)
+  assert.equal(customerAdvanceAllocation({ id: 'fully-allocated', amount: 40 }, [
+    { paymentId: 'fully-allocated', targetType: 'sale', amount: 40 },
+  ]), 0)
+})
+
+test('credit limit is checked against the balance remaining after customer funds are applied', () => {
+  assert.deepEqual(validateCustomerCreditSaleLimit({ balance: -100, creditLimit: 0, name: 'Amina' }, 100), { valid: true })
+  assert.equal(validateCustomerCreditSaleLimit({ balance: -40, creditLimit: 0, name: 'Amina' }, 100).code, 'CUSTOMER_CREDIT_LIMIT_REQUIRED')
+  assert.equal(validateCustomerCreditSaleLimit({ balance: -100, creditLimit: 50 }, 151).code, 'CUSTOMER_CREDIT_LIMIT_EXCEEDED')
+  assert.deepEqual(validateCustomerCreditSaleLimit({ balance: -100, creditLimit: 50 }, 150), { valid: true })
 })
 
 test('customer advance availability is checked with a database-side sum of prior posted applications', async () => {

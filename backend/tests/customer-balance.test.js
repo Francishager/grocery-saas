@@ -170,7 +170,7 @@ test('tenants without Property Management do not query plot-sale data in custome
   assert.equal(result.components.propertySalePayments, 0);
 });
 
-test('explicit receipt allocations, not receipt totals, reduce invoice receivables', async () => {
+test('explicit receipt allocations reduce invoice receivables and receipt surplus remains a customer advance', async () => {
   const data = makeClient({
     customer,
     sales: [sale({ legacyPaidAmountAtCutover: 0 })],
@@ -180,13 +180,14 @@ test('explicit receipt allocations, not receipt totals, reduce invoice receivabl
 
   const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
 
-  assert.equal(result.balance, 60);
+  assert.equal(result.balance, 40);
   assert.equal(result.components.salePayments, 40);
   assert.equal(result.components.unappliedCustomerReceipts, 20);
+  assert.equal(result.components.customerPayments, 20);
   assert.deepEqual(result.components.paymentReconciliationIssues, []);
 });
 
-test('unapplied explicit receipts remain separate from invoice receivables', async () => {
+test('unapplied explicit receipts reduce net customer balance without being counted as invoice payment', async () => {
   const data = makeClient({
     customer,
     sales: [sale({ legacyPaidAmountAtCutover: 0 })],
@@ -195,9 +196,29 @@ test('unapplied explicit receipts remain separate from invoice receivables', asy
 
   const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
 
-  assert.equal(result.balance, 100);
+  assert.equal(result.balance, 0);
   assert.equal(result.components.salePayments, 0);
   assert.equal(result.components.unappliedCustomerReceipts, 100);
+  assert.equal(result.components.customerPayments, 100);
+});
+
+test('applying a linked receipt surplus to a later sale consumes that customer advance once', async () => {
+  const data = makeClient({
+    customer,
+    sales: [
+      sale({ id: 'old-sale', amountPaid: 40, legacyPaidAmountAtCutover: 0 }),
+      sale({ id: 'new-sale', total: 30, subtotal: 30, amountPaid: 20, legacyPaidAmountAtCutover: 0 }),
+    ],
+    payments: [{ id: 'surplus-payment', customerId: customer.id, saleId: 'old-sale', amount: 60, allocationMode: 'explicit' }],
+    allocations: [{ id: 'old-sale-allocation', paymentId: 'surplus-payment', customerId: customer.id, saleId: 'old-sale', amount: 40 }],
+    creditApplications: [{ customerId: customer.id, saleId: 'new-sale', sourceType: 'payment', sourceId: 'surplus-payment', amount: 20 }],
+  });
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
+
+  assert.equal(result.balance, 70);
+  assert.equal(result.components.unappliedCustomerReceipts, 0);
+  assert.equal(result.components.customerPayments, 0);
 });
 
 test('explicit customer-account allocation reduces the customer account separately from invoice allocations', async () => {

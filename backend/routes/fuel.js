@@ -110,8 +110,9 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
       const amount = Math.round(litres * unitPrice * 100) / 100;
       const balanceSnapshot = await calculateCustomerReceivableBalance(tx, scope, customerId);
       const currentBalance = Number(balanceSnapshot?.balance ?? customer.balance ?? 0);
-      if (!(Number(customer.creditLimit) > 0)) throw Object.assign(new Error('Set a credit limit for this customer before recording a fuel credit sale.'), { statusCode: 400 });
-      if (currentBalance + amount > Number(customer.creditLimit) + 0.01) throw Object.assign(new Error(`This sale exceeds the customer's available credit limit of ${(Number(customer.creditLimit) - currentBalance).toLocaleString()}.`), { statusCode: 400 });
+      const projectedBalance = Math.round((currentBalance + amount) * 100) / 100;
+      if (projectedBalance > 0.01 && !(Number(customer.creditLimit) > 0)) throw Object.assign(new Error('Set a credit limit for this customer before recording a fuel credit sale.'), { statusCode: 400 });
+      if (projectedBalance > Number(customer.creditLimit || 0) + 0.01) throw Object.assign(new Error(`This sale exceeds the customer's available credit limit of ${(Number(customer.creditLimit || 0) - currentBalance).toLocaleString()}.`), { statusCode: 400 });
       const arConfig = await getReceivablesAccountingConfig(tx, tenantId);
       const arValidation = await validateReceivablesAccountingConfig(tx, tenantId, arConfig, { requireEnabled: true });
       if (!arValidation.valid) throw Object.assign(new Error('Enable and complete Receivables accounting mappings before posting fuel credit invoices.'), { statusCode: 409 });

@@ -150,7 +150,9 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
   const unappliedCustomerReceiptsByCustomer = new Map();
   for (const payment of payments) {
     if (payment.allocationMode !== 'explicit' || payment.saleId) continue;
-    const amount = Math.max(0, toMoney(payment.amount) - toMoney(allocationsByPayment.get(payment.id)) - toMoney(appliedByPayment.get(payment.id)));
+    const amount = Math.max(0, toMoney(payment.amount)
+      - toMoney(allocationsByPayment.get(payment.id))
+      - toMoney(appliedByPayment.get(payment.id)));
     if (amount > 0) unappliedCustomerReceiptsByCustomer.set(payment.customerId,
       roundMoney(toMoney(unappliedCustomerReceiptsByCustomer.get(payment.customerId)) + amount));
   }
@@ -166,7 +168,10 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
     const paidOnce = explicitMode
       ? Math.max(0, toMoney(sale.legacyPaidAmountAtCutover) + allocatedPaid)
       : Math.max(recordedPaid, linkedLegacyPaid);
-    const unappliedForSale = explicitMode ? Math.max(0, explicitReceiptTotal - allocatedPaid) : 0;
+    const applicationsFromLinkedReceipts = payments
+      .filter((payment) => payment.saleId === sale.id)
+      .reduce((sum, payment) => roundMoney(sum + toMoney(appliedByPayment.get(payment.id))), 0)
+    const unappliedForSale = explicitMode ? Math.max(0, explicitReceiptTotal - allocatedPaid - applicationsFromLinkedReceipts) : 0;
 
     if (unappliedForSale > 0) {
       unappliedCustomerReceiptsByCustomer.set(customerId,
@@ -298,7 +303,8 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
     const salePayments = salePaymentsByCustomer.get(customer.id) || 0;
     const unappliedCustomerReceipts = unappliedCustomerReceiptsByCustomer.get(customer.id) || 0;
     const customerAccountAllocations = customerAccountAllocationsByCustomer.get(customer.id) || 0;
-    const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customer.id) || 0) + customerAccountAllocations);
+    const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customer.id) || 0)
+      + customerAccountAllocations + unappliedCustomerReceipts);
     const customerWithdrawals = withdrawalsMap.get(customer.id) || 0;
     const creditNoteTotal = creditNotesMap.get(customer.id) || 0;
     const creditReturnTotal = creditReturnsMap.get(customer.id) || 0;
@@ -383,7 +389,8 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const salePayments = salePaymentsByCustomer.get(customerId) || 0;
   const unappliedCustomerReceipts = unappliedCustomerReceiptsByCustomer.get(customerId) || 0;
   const customerAccountAllocations = customerAccountAllocationsByCustomer.get(customerId) || 0;
-  const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0) + customerAccountAllocations);
+  const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0)
+    + customerAccountAllocations + unappliedCustomerReceipts);
   const customerWithdrawals = toMoney(withdrawals._sum.amount);
   const creditNoteTotal = toMoney(creditNotes.get(customerId));
   const appliedByReturn = creditApplications.filter((application) => application.sourceType === 'sale_return')
@@ -459,7 +466,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
   ])
   if (!customer) return null
 
-  const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer } =
+  const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer } =
     summarizeSaleAndCustomerPayments(sales, payments, allocations, applications)
   const appliedByNote = new Map()
   applications.filter((row) => row.sourceType === 'credit_note').forEach((row) => {
@@ -472,7 +479,9 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
   const creditReturns = roundMoney(returns.reduce((sum, row) => sum + toMoney(row.total), 0) - appliedByReturn)
   const openingBalanceDate = customer.openingBalanceDate || customer.createdAt
   const openingBalance = openingBalanceDate && new Date(openingBalanceDate) < cutoff ? Math.max(0, toMoney(customer.openingBalance)) : 0
-  const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0) + (customerAccountAllocationsByCustomer.get(customerId) || 0))
+  const customerPayments = roundMoney((unlinkedPaymentsByCustomer.get(customerId) || 0)
+    + (customerAccountAllocationsByCustomer.get(customerId) || 0)
+    + (unappliedCustomerReceiptsByCustomer.get(customerId) || 0))
   const propertySaleReceivables = roundMoney(propertySales.reduce((sum, sale) => sum + toMoney(sale.salePrice), 0))
   const propertySalePaymentsTotal = roundMoney(propertySalePayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
 
