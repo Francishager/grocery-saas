@@ -245,6 +245,7 @@ export const permissions: Permission[] = [
   { id: 'canEditRental', name: 'Edit Rentals', description: 'Edit existing rental records', category: 'rentals', accessesBusinessData: true },
   { id: 'canDeleteRental', name: 'Cancel Rentals', description: 'Cancel rental bookings', category: 'rentals', accessesBusinessData: true },
   { id: 'canProcessRentalReturn', name: 'Process Returns', description: 'Process return of hired items', category: 'rentals', accessesBusinessData: true },
+  { id: 'canGenerateRentalContract', name: 'Generate rental contract drafts', description: 'Use AI to draft and save rental agreements for review', category: 'rentals', accessesBusinessData: true },
   { id: 'canViewPropertyManagement', name: 'Property Management (Legacy)', description: 'Legacy portfolio access; collections and statements require their dedicated permissions', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyPortfolio', name: 'View Property Portfolio', description: 'View owners, properties, units, tenancy details, occupancy, and portfolio summaries', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyCollections', name: 'View Property Collections', description: 'View rent/deposit payment history and reprint receipts', category: 'property_management', accessesBusinessData: true },

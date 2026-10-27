@@ -459,6 +459,26 @@ export const rentalsApi = {
   create: (data: any) =>
     api.post<any>('/api/rentals', { body: data }),
 
+  paymentAccounts: async (paymentMethod = 'cash', branchId?: string) => {
+    const data = await api.get<any>('/api/rentals/payment-accounts', { params: { paymentMethod, branchId } })
+    return Array.isArray(data?.accounts) ? data.accounts : []
+  },
+
+  recordPayment: (id: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
+    api.post<any>(`/api/rentals/${id}/payments`, { body: data }),
+
+  refundDeposit: (id: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
+    api.post<any>(`/api/rentals/${id}/deposit-refunds`, { body: data }),
+
+  refundAdvance: (id: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
+    api.post<any>(`/api/rentals/${id}/advance-refunds`, { body: data }),
+
+  forfeitDeposit: (id: string, reason: string) =>
+    api.post<any>(`/api/rentals/${id}/deposit-forfeitures`, { body: { reason, idempotencyKey: crypto.randomUUID() } }),
+
+  receipt: (id: string, paymentId: string) =>
+    api.get<any>(`/api/rentals/${id}/payments/${paymentId}/receipt`),
+
   return: (id: string, data: { items?: any[]; depositStatus?: string; damageFees?: Record<string, number> }) =>
     api.post<any>(`/api/rentals/${id}/return`, { body: data }),
 
@@ -470,6 +490,18 @@ export const rentalsApi = {
 
   summary: () =>
     api.get<any>('/api/rentals/report/summary'),
+
+  availability: (productIds: string[], startDate: string, endDate: string, branchId?: string) =>
+    api.get<any>('/api/rentals/availability', { params: { productIds: productIds.join(','), startDate, endDate, branchId } }),
+
+  checkout: (id: string, branchId?: string) =>
+    api.post<any>(`/api/rentals/${id}/checkout`, { body: { branchId } }),
+
+  generateContract: (id: string) =>
+    api.post<any>(`/api/rentals/${id}/contract-draft`, { body: {} }),
+
+  saveContractDraft: (id: string, contractDraft: string) =>
+    api.put<any>(`/api/rentals/${id}/contract-draft`, { body: { contractDraft } }),
 }
 
 // Sales endpoints

@@ -206,6 +206,7 @@ const PERMISSION_TO_FEATURES = {
   canEditRental: ['rentals', 'inventory.rentals'],
   canDeleteRental: ['rentals', 'inventory.rentals'],
   canProcessRentalReturn: ['rentals', 'inventory.rentals'],
+  canGenerateRentalContract: ['rentals', 'inventory.rentals'],
   canViewPropertyManagement: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyPortfolio: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyCollections: ['property_management.landlord', 'property_management.agent'],
@@ -362,7 +363,7 @@ export const ALL_PERMISSION_KEYS = [
   "canManageServiceCategory",
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
-  "canProcessRentalReturn",
+  "canProcessRentalReturn", "canGenerateRentalContract",
   "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
   "canCreateTenancies", "canEndTenancies", "canManageTenancies", "canRecordRentPayment", "canRecordTenantDeposit",
@@ -943,6 +944,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canProcessRentalReturn: {
     name: 'Process rental returns',
     description: 'Receive returned rental items, update availability, and record charges or balances.',
+  },
+  canGenerateRentalContract: {
+    name: 'Generate rental contract drafts',
+    description: 'Create and save AI-assisted rental contract drafts for human review.',
   },
   canViewPropertyManagement: { name: 'Property Management (Legacy)', description: 'Legacy access to property portfolio pages. Payment collections and tenancy statements require their dedicated permissions.' },
   canViewPropertyPortfolio: { name: 'View property portfolio', description: 'View landlords, properties, units, tenancy details, occupancy, and portfolio summaries.' },

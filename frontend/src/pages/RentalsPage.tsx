@@ -1,6 +1,6 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X } from 'lucide-react'
+import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Sparkles, CalendarCheck, Printer } from 'lucide-react'
 import { rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +34,8 @@ interface Rental {
   id: string
   rentalNo: string
   customer?: { id: string; name: string; phone?: string } | null
+  customerName?: string | null
+  customerPhone?: string | null
   branch?: { id: string; name: string } | null
   user?: { id: string; fname?: string; lname?: string } | null
   hireDate: string
@@ -46,10 +48,20 @@ interface Rental {
   balance: number
   paymentStatus: string
   paymentMethod?: string
+  depositPaid?: number
+  depositRefunded?: number
+  payments?: { id: string; receiptNo: string; kind: string; amount: number; balanceAfter: number; paymentMethod?: string | null; paymentDate: string; transactionRef?: string | null; notes?: string | null; cashAccount?: { name: string; type: string } | null }[]
   status: string
+  bookingState?: string
+  bookingPurpose?: string | null
+  contractDraft?: string | null
+  contractGeneratedAt?: string | null
   notes?: string | null
   items: RentalItem[]
+  chargeLines?: { id: string; label: string; category: string; quantity: number; unitPrice: number; totalAmount: number }[]
 }
+
+interface RentalChargeDraft { label: string; category: string; quantity: number; unitPrice: number }
 
 export default function RentalsPage() {
   const [rentals, setRentals] = useState<Rental[]>([])
@@ -57,6 +69,7 @@ export default function RentalsPage() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [bookingMode, setBookingMode] = useState<'reserve' | 'checkout'>('checkout')
   const [showForm, setShowForm] = useState(false)
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returningRental, setReturningRental] = useState<Rental | null>(null)
@@ -74,6 +87,13 @@ export default function RentalsPage() {
   const [depositAmount, setDepositAmount] = useState(0)
   const [amountPaid, setAmountPaid] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentAccounts, setPaymentAccounts] = useState<{ id: string; name: string; type: string; balance: number; currency: string }[]>([])
+  const [cashAccountId, setCashAccountId] = useState('')
+  const [paymentAmount, setPaymentAmount] = useState(0)
+  const [depositRefundAmount, setDepositRefundAmount] = useState(0)
+  const [advanceRefundAmount, setAdvanceRefundAmount] = useState(0)
+  const [forfeitureReason, setForfeitureReason] = useState('')
+  const [savingRentalPayment, setSavingRentalPayment] = useState(false)
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [transactionId, setTransactionId] = useState('')
@@ -85,12 +105,18 @@ export default function RentalsPage() {
   const [notes, setNotes] = useState('')
   const [branchId, setBranchId] = useState('')
   const [selectedItems, setSelectedItems] = useState<{ productId: string; quantity: number; unitHirePrice: number; rentalPeriod: string; periods: number; conditionOut: string }[]>([])
+  const [additionalCharges, setAdditionalCharges] = useState<RentalChargeDraft[]>([])
+  const [bookingPurpose, setBookingPurpose] = useState('')
+  const [availabilityByProduct, setAvailabilityByProduct] = useState<Record<string, number>>({})
+  const [generatingContract, setGeneratingContract] = useState(false)
+  const [contractDraftValue, setContractDraftValue] = useState('')
+  const [savingContract, setSavingContract] = useState(false)
   const formRef = useRef<HTMLDivElement>(null)
 
   // Return form state
   const [returnConditions, setReturnConditions] = useState<Record<string, string>>({})
   const [returnDamageFees, setReturnDamageFees] = useState<Record<string, number>>({})
-  const [returnDepositStatus, setReturnDepositStatus] = useState('refunded')
+  const [returnDepositStatus, setReturnDepositStatus] = useState('held')
 
   const { toast } = useToast()
   const { hasPermission, user } = useJWTAuth()
@@ -99,6 +125,7 @@ export default function RentalsPage() {
   const canProcessReturn = hasPermission('canProcessRentalReturn')
   const canDeleteRental = hasPermission('canDeleteRental')
   const canViewReport = hasPermission('canViewReportRentalsSummary')
+  const canGenerateContract = hasPermission('canGenerateRentalContract')
 
   useEffect(() => {
     loadRentals()
@@ -188,6 +215,8 @@ export default function RentalsPage() {
     setDepositAmount(0)
     setAmountPaid(0)
     setPaymentMethod('cash')
+    setCashAccountId('')
+    setPaymentAccounts([])
     setMobileProvider('')
     setPhoneNumber('')
     setTransactionId('')
@@ -197,11 +226,46 @@ export default function RentalsPage() {
     setCustomerNin('')
     setNotes('')
     setSelectedItems([])
+    setAdditionalCharges([])
+    setBookingMode('checkout')
+    setBookingPurpose('')
     loadRentalItems()
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 100)
   }
+
+  useEffect(() => {
+    if (!showForm || !selectedItems.length || !hireDate || !expectedReturnDate) {
+      setAvailabilityByProduct({})
+      return
+    }
+    let cancelled = false
+    rentalsApi.availability(selectedItems.map(item => item.productId), hireDate, expectedReturnDate, branchId || undefined)
+      .then(result => {
+        if (!cancelled) setAvailabilityByProduct(Object.fromEntries((result.availability || []).map((row: any) => [row.productId, Number(row.available)])))
+      })
+      .catch(() => { if (!cancelled) setAvailabilityByProduct({}) })
+    return () => { cancelled = true }
+  }, [showForm, selectedItems, hireDate, expectedReturnDate, branchId])
+
+  useEffect(() => {
+    if ((!showForm && !selectedRental) || !online || (showForm && amountPaid <= 0 && depositAmount <= 0) || (!showForm && paymentAmount <= 0 && depositRefundAmount <= 0 && advanceRefundAmount <= 0)) {
+      if (!showForm && !selectedRental) { setPaymentAccounts([]); setCashAccountId('') }
+      return
+    }
+    let cancelled = false
+    rentalsApi.paymentAccounts(paymentMethod, branchId || undefined).then(accounts => {
+      if (cancelled) return
+      setPaymentAccounts(accounts)
+      setCashAccountId(current => accounts.some((account: any) => account.id === current) ? current : accounts.length === 1 ? accounts[0].id : '')
+    }).catch(() => { if (!cancelled) { setPaymentAccounts([]); setCashAccountId('') } })
+    return () => { cancelled = true }
+  }, [showForm, selectedRental?.id, online, paymentMethod, amountPaid, depositAmount, paymentAmount, depositRefundAmount, advanceRefundAmount, branchId])
+
+  useEffect(() => {
+    setContractDraftValue(selectedRental?.contractDraft || '')
+  }, [selectedRental?.id, selectedRental?.contractDraft])
 
   const openReturnForm = (rental: Rental) => {
     setReturningRental(rental)
@@ -214,7 +278,7 @@ export default function RentalsPage() {
     })
     setReturnConditions(conditions)
     setReturnDamageFees(fees)
-    setReturnDepositStatus('refunded')
+    setReturnDepositStatus('held')
   }
 
   const addItemToRental = (item: InventoryItem) => {
@@ -246,15 +310,17 @@ export default function RentalsPage() {
     setSelectedItems(selectedItems.filter((si) => si.productId !== productId))
   }
 
-  const subtotal = selectedItems.reduce((sum, si) => sum + si.unitHirePrice * si.quantity * si.periods, 0)
+  const hireSubtotal = selectedItems.reduce((sum, si) => sum + si.unitHirePrice * si.quantity * si.periods, 0)
+  const chargesSubtotal = additionalCharges.reduce((sum, charge) => sum + charge.quantity * charge.unitPrice, 0)
+  const subtotal = hireSubtotal + chargesSubtotal
   const taxableAmount = Math.max(0, subtotal - discount)
   const taxAmount = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
   const totalAmount = Math.max(0, taxableAmount + taxAmount)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (selectedItems.length === 0) {
-      toast({ title: 'Error', description: 'Add at least one rental item', variant: 'destructive' })
+    if (selectedItems.length === 0 && additionalCharges.length === 0) {
+      toast({ title: 'Error', description: 'Add rental equipment or a service/venue charge.', variant: 'destructive' })
       return
     }
     if (!expectedReturnDate) {
@@ -263,16 +329,19 @@ export default function RentalsPage() {
     }
 
     try {
-      await rentalsApi.create({
+      const created = await rentalsApi.create({
         customerId: customerId || undefined,
         customerName: customerName || undefined,
         customerPhone: customerPhone || undefined,
         items: selectedItems,
+        additionalCharges,
         hireDate,
         expectedReturnDate,
         depositAmount,
         amountPaid,
+        idempotencyKey: crypto.randomUUID(),
         paymentMethod,
+        cashAccountId: (amountPaid > 0 || depositAmount > 0) ? cashAccountId : undefined,
         mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
         phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
         transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
@@ -280,16 +349,144 @@ export default function RentalsPage() {
         guarantorName: guarantorName || undefined,
         guarantorPhone: guarantorPhone || undefined,
         customerNin: customerNin || undefined,
+        bookingMode,
+        bookingPurpose: bookingPurpose || undefined,
         notes,
         branchId: branchId || undefined,
       })
-      toast({ title: 'Success', description: 'Rental created successfully' })
+      toast({ title: bookingMode === 'reserve' ? 'Reserved' : 'Checked out', description: bookingMode === 'reserve' ? 'The rental dates are reserved; stock remains on hand until check-out.' : 'Rental created and items checked out.' })
       setShowForm(false)
+      setSelectedRental(created)
       loadRentals()
       if (canViewReport) loadSummary()
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to create rental', variant: 'destructive' })
     }
+  }
+
+  const refreshSelectedRental = async () => {
+    if (!selectedRental) return
+    const updated = await rentalsApi.get(selectedRental.id)
+    setSelectedRental(updated)
+    setRentals(current => current.map(row => row.id === updated.id ? updated : row))
+    if (canViewReport) loadSummary()
+  }
+
+  const handleRecordRentalPayment = async () => {
+    if (!selectedRental || !cashAccountId) return
+    setSavingRentalPayment(true)
+    try {
+      await rentalsApi.recordPayment(selectedRental.id, { amount: paymentAmount, paymentMethod, cashAccountId, idempotencyKey: crypto.randomUUID(), transactionRef: transactionId || undefined, mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined, phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined, notes: 'Rental balance collection' })
+      setPaymentAmount(0)
+      await refreshSelectedRental()
+      toast({ title: 'Payment recorded', description: 'Cash movement and general-ledger entry posted. Receipt is ready to print.' })
+    } catch (err: any) { toast({ title: 'Payment failed', description: err.message || 'Could not record payment.', variant: 'destructive' }) }
+    finally { setSavingRentalPayment(false) }
+  }
+
+  const handleRefundRentalDeposit = async () => {
+    if (!selectedRental || !cashAccountId) return
+    setSavingRentalPayment(true)
+    try {
+      await rentalsApi.refundDeposit(selectedRental.id, { amount: depositRefundAmount, paymentMethod, cashAccountId, idempotencyKey: crypto.randomUUID(), transactionRef: transactionId || undefined, mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined, phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined, notes: 'Security deposit refund' })
+      setDepositRefundAmount(0)
+      await refreshSelectedRental()
+      toast({ title: 'Deposit refunded', description: 'Cash account, deposit liability, and receipt have been updated.' })
+    } catch (err: any) { toast({ title: 'Refund failed', description: err.message || 'Could not refund deposit.', variant: 'destructive' }) }
+    finally { setSavingRentalPayment(false) }
+  }
+
+  const handleRefundRentalAdvance = async () => {
+    if (!selectedRental || !cashAccountId) return
+    setSavingRentalPayment(true)
+    try {
+      await rentalsApi.refundAdvance(selectedRental.id, { amount: advanceRefundAmount, paymentMethod, cashAccountId, idempotencyKey: crypto.randomUUID(), transactionRef: transactionId || undefined, mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined, phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined, notes: 'Reservation advance refund' })
+      setAdvanceRefundAmount(0)
+      await refreshSelectedRental()
+      toast({ title: 'Advance refunded', description: 'Refund, cash movement, ledger posting, and receipt are recorded.' })
+    } catch (err: any) { toast({ title: 'Refund failed', description: err.message || 'Could not refund the reservation advance.', variant: 'destructive' }) }
+    finally { setSavingRentalPayment(false) }
+  }
+
+  const handleForfeitRentalDeposit = async () => {
+    if (!selectedRental || forfeitureReason.trim().length < 5) return
+    if (!(await appConfirm('Forfeit the remaining rental deposit and recognize it as income? This posts an auditable journal entry.'))) return
+    setSavingRentalPayment(true)
+    try {
+      await rentalsApi.forfeitDeposit(selectedRental.id, forfeitureReason.trim())
+      setForfeitureReason('')
+      await refreshSelectedRental()
+      toast({ title: 'Deposit forfeiture recorded', description: 'The liability was released to rental income and the record is retained.' })
+    } catch (err: any) { toast({ title: 'Could not forfeit deposit', description: err.message || 'Review the deposit balance.', variant: 'destructive' }) }
+    finally { setSavingRentalPayment(false) }
+  }
+
+  const printRentalReceipt = async (paymentId: string) => {
+    if (!selectedRental) return
+    try {
+      const { payment } = await rentalsApi.receipt(selectedRental.id, paymentId)
+      const rental = payment.rental
+      const business = payment.tenant
+      const safe = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character))
+      const itemRows = (rental.items || []).map((item: any) => `<tr><td>${safe(item.product?.name)}</td><td>${item.quantity}</td><td>${safe(formatCurrency(item.totalAmount))}</td></tr>`).join('')
+      const popup = window.open('', '_blank')
+      if (!popup) return toast({ title: 'Print blocked', description: 'Allow pop-ups to print rental receipts.', variant: 'destructive' })
+      popup.opener = null
+      popup.document.write(`<html><head><title>Rental receipt ${safe(payment.receiptNo)}</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}header{text-align:center;border-bottom:1px solid #bbb;padding-bottom:14px}h1{font-size:20px;margin:4px}table{width:100%;border-collapse:collapse;margin:20px 0}td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}.amount{text-align:right;font-size:18px;font-weight:bold}</style></head><body><header><h1>${safe(business?.name || 'Business')}</h1><div>${safe(business?.address || '')}</div><div>${safe(business?.phone || '')} ${safe(business?.email || '')}</div><h2>Rental payment receipt</h2></header><p><b>Receipt:</b> ${safe(payment.receiptNo)}<br><b>Date:</b> ${safe(new Date(payment.paymentDate).toLocaleString())}<br><b>Renter:</b> ${safe(rental.customer?.name || rental.customerName || 'Renter')}<br><b>Rental:</b> ${safe(rental.rentalNo)}<br><b>Payment type:</b> ${safe(payment.kind.replaceAll('_', ' '))}<br><b>Method/account:</b> ${safe(payment.paymentMethod || 'Non-cash settlement')} / ${safe(payment.cashAccount?.name || 'N/A')}<br><b>Mobile provider:</b> ${safe(payment.mobileProvider || '—')}<br><b>Payment phone:</b> ${safe(payment.phoneNumber || '—')}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Rental value</th></tr></thead><tbody>${itemRows}</tbody></table><p class="amount">${safe(formatCurrency(payment.amount))}</p><p>Rental total: ${safe(formatCurrency(rental.totalAmount))}<br>Outstanding after receipt: ${safe(formatCurrency(payment.balanceAfter))}<br>Reference: ${safe(payment.transactionRef || '—')}<br>Note: ${safe(payment.notes || '—')}</p><footer>Printed from JibuSales</footer><script>window.onload=()=>window.print()</script></body></html>`)
+      popup.document.close()
+    } catch (err: any) { toast({ title: 'Receipt unavailable', description: err.message || 'Could not load receipt.', variant: 'destructive' }) }
+  }
+
+  const handleCheckout = async (rental: Rental) => {
+    try {
+      const updated = await rentalsApi.checkout(rental.id, branchId || undefined)
+      setRentals(current => current.map(row => row.id === updated.id ? updated : row))
+      toast({ title: 'Checked out', description: 'Availability was confirmed and stock has been issued.' })
+      loadRentals()
+    } catch (err: any) {
+      toast({ title: 'Could not check out', description: err.message || 'Availability may have changed.', variant: 'destructive' })
+    }
+  }
+
+  const handleGenerateContract = async () => {
+    if (!selectedRental) return
+    setGeneratingContract(true)
+    try {
+      const result = await rentalsApi.generateContract(selectedRental.id)
+      setContractDraftValue(result.contractDraft || '')
+      setSelectedRental(current => current ? { ...current, contractDraft: result.contractDraft, contractGeneratedAt: result.contractGeneratedAt } : current)
+      toast({ title: 'Draft ready', description: 'Review and complete every bracketed legal/business term before signing.' })
+    } catch (err: any) {
+      toast({ title: 'Could not generate draft', description: err.message || 'Try again later.', variant: 'destructive' })
+    } finally {
+      setGeneratingContract(false)
+    }
+  }
+
+  const handleSaveContractDraft = async () => {
+    if (!selectedRental) return
+    setSavingContract(true)
+    try {
+      const result = await rentalsApi.saveContractDraft(selectedRental.id, contractDraftValue)
+      setSelectedRental(current => current ? { ...current, contractDraft: result.contractDraft } : current)
+      toast({ title: 'Draft saved', description: 'The contract draft is saved for review.' })
+    } catch (err: any) {
+      toast({ title: 'Could not save draft', description: err.message || 'Try again.', variant: 'destructive' })
+    } finally {
+      setSavingContract(false)
+    }
+  }
+
+  const printContractDraft = () => {
+    if (!selectedRental?.contractDraft) return
+    const popup = window.open('', '_blank')
+    if (!popup) return toast({ title: 'Print blocked', description: 'Allow pop-ups to print the contract draft.', variant: 'destructive' })
+    popup.opener = null
+    const escaped = selectedRental.contractDraft.replace(/[&<>]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[character] || character))
+    popup.document.write(`<html><head><title>Rental Agreement ${selectedRental.rentalNo}</title><style>body{font:14px/1.55 Arial,sans-serif;color:#111;margin:24mm;white-space:pre-wrap}h1{font-size:20px}</style></head><body>${escaped}</body></html>`)
+    popup.document.close()
+    popup.focus()
+    popup.print()
   }
 
   const handleReturn = async () => {
@@ -316,7 +513,7 @@ export default function RentalsPage() {
   }
 
   const handleCancel = async (id: string) => {
-    if (!(await appConfirm('Cancel this rental? Stock will be restored.'))) return
+    if (!(await appConfirm('Cancel this reservation? Reserved dates will be released; checked-out rentals must be returned instead.'))) return
     try {
       await rentalsApi.cancel(id)
       toast({ title: 'Success', description: 'Rental cancelled' })
@@ -355,14 +552,16 @@ export default function RentalsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              <div><span className="font-medium">Customer:</span> {selectedRental.customer?.name || 'Walk-in'}</div>
-              <div><span className="font-medium">Phone:</span> {selectedRental.customer?.phone || '-'}</div>
+              <div><span className="font-medium">Customer:</span> {selectedRental.customer?.name || selectedRental.customerName || 'Walk-in'}</div>
+              <div><span className="font-medium">Phone:</span> {selectedRental.customer?.phone || selectedRental.customerPhone || '-'}</div>
               <div><span className="font-medium">Hire Date:</span> {new Date(selectedRental.hireDate).toLocaleDateString()}</div>
               <div><span className="font-medium">Expected Return:</span> {new Date(selectedRental.expectedReturnDate).toLocaleDateString()}</div>
               {selectedRental.actualReturnDate && (
                 <div><span className="font-medium">Actual Return:</span> {new Date(selectedRental.actualReturnDate).toLocaleDateString()}</div>
               )}
               <div><span className="font-medium">Status:</span> <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-medium", statusBadge(selectedRental.status))}>{selectedRental.status}</span></div>
+              <div><span className="font-medium">Booking:</span> <span className="capitalize">{selectedRental.bookingState?.replace('_', ' ') || 'checked out'}</span></div>
+              {selectedRental.bookingPurpose && <div><span className="font-medium">Purpose:</span> {selectedRental.bookingPurpose}</div>}
               <div><span className="font-medium">Total:</span> {formatCurrency(selectedRental.totalAmount)}</div>
               <div><span className="font-medium">Deposit:</span> {formatCurrency(selectedRental.depositAmount)} ({selectedRental.depositStatus})</div>
               <div><span className="font-medium">Paid:</span> {formatCurrency(selectedRental.amountPaid)}</div>
@@ -386,6 +585,56 @@ export default function RentalsPage() {
             {selectedRental.notes && (
               <div className="text-sm"><span className="font-medium">Notes:</span> {selectedRental.notes}</div>
             )}
+            <section className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Payments and receipts</h3><p className="text-sm text-muted-foreground">Collections and deposit movements are linked to cash accounts and the general ledger.</p></div></div>
+              {selectedRental.payments?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Receipt</th><th>Date</th><th>Type</th><th>Account</th><th className="text-right">Amount</th><th></th></tr></thead><tbody>{selectedRental.payments.map(payment => <tr key={payment.id} className="border-b last:border-0"><td className="py-2 font-medium">{payment.receiptNo}</td><td>{new Date(payment.paymentDate).toLocaleDateString()}</td><td className="capitalize">{payment.kind.replaceAll('_', ' ')}</td><td>{payment.cashAccount?.name || 'Non-cash settlement'}</td><td className="text-right">{formatCurrency(payment.amount)}</td><td className="text-right"><Button size="sm" variant="outline" onClick={() => printRentalReceipt(payment.id)}><Printer className="mr-2 h-4 w-4" />Receipt</Button></td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No posted payment records yet. Existing legacy totals remain visible until a new payment is recorded.</p>}
+              {canCreateRental && Number(selectedRental.balance) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1"><Label htmlFor="rental-payment-amount">Receive rent payment</Label><Input id="rental-payment-amount" type="number" min="0.01" max={selectedRental.balance} step="any" value={paymentAmount || ''} onChange={event => setPaymentAmount(Number(event.target.value) || 0)} /></div>
+                <div className="space-y-1"><Label htmlFor="rental-payment-method">Payment method</Label><select id="rental-payment-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
+                <div className="space-y-1"><Label htmlFor="rental-payment-account">Receiving account</Label><select id="rental-payment-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>
+                {paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label htmlFor="rental-payment-provider">Provider</Label><Input id="rental-payment-provider" value={mobileProvider} onChange={event => setMobileProvider(event.target.value)} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label htmlFor="rental-payment-phone">Phone</Label><Input id="rental-payment-phone" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} type="tel" /></div></>}
+                {!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-payment-reference">Transaction reference</Label><Input id="rental-payment-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}
+                <div className="flex items-end"><Button className="w-full" onClick={handleRecordRentalPayment} disabled={savingRentalPayment || paymentAmount <= 0 || paymentAmount > Number(selectedRental.balance) || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Record payment'}</Button></div>
+              </div>}
+              {canDeleteRental && selectedRental.bookingState !== 'checked_out' && selectedRental.status === 'active' && Number(selectedRental.amountPaid) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1"><Label htmlFor="rental-advance-refund">Refund reservation advance</Label><Input id="rental-advance-refund" type="number" min="0.01" max={selectedRental.amountPaid} step="any" value={advanceRefundAmount || ''} onChange={event => setAdvanceRefundAmount(Number(event.target.value) || 0)} /></div>
+                <div className="space-y-1"><Label htmlFor="rental-advance-refund-method">Refund method</Label><select id="rental-advance-refund-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
+                <div className="space-y-1"><Label htmlFor="rental-advance-refund-account">Refund account</Label><select id="rental-advance-refund-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>
+                {paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label htmlFor="rental-advance-provider">Provider</Label><Input id="rental-advance-provider" value={mobileProvider} onChange={event => setMobileProvider(event.target.value)} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label htmlFor="rental-advance-phone">Phone</Label><Input id="rental-advance-phone" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} type="tel" /></div></>}
+                {!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-advance-reference">Transaction reference</Label><Input id="rental-advance-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}
+                <div className="flex items-end"><Button variant="outline" className="w-full" onClick={handleRefundRentalAdvance} disabled={savingRentalPayment || advanceRefundAmount <= 0 || advanceRefundAmount > Number(selectedRental.amountPaid) || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Refund advance'}</Button></div>
+              </div>}
+              {canProcessReturn && (selectedRental.status === 'returned' || (selectedRental.status === 'active' && selectedRental.bookingState !== 'checked_out')) && Number(selectedRental.depositPaid || selectedRental.depositAmount) - Number(selectedRental.depositRefunded || 0) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1"><Label htmlFor="rental-deposit-refund">Refund held deposit</Label><Input id="rental-deposit-refund" type="number" min="0.01" max={Math.max(0, Number(selectedRental.depositPaid || selectedRental.depositAmount) - Number(selectedRental.depositRefunded || 0))} step="any" value={depositRefundAmount || ''} onChange={event => setDepositRefundAmount(Number(event.target.value) || 0)} /></div>
+                <div className="space-y-1"><Label htmlFor="rental-refund-method">Refund from method</Label><select id="rental-refund-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
+                <div className="space-y-1"><Label htmlFor="rental-refund-account">Refund account</Label><select id="rental-refund-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>
+                {paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label htmlFor="rental-refund-provider">Provider</Label><Input id="rental-refund-provider" value={mobileProvider} onChange={event => setMobileProvider(event.target.value)} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label htmlFor="rental-refund-phone">Phone</Label><Input id="rental-refund-phone" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} type="tel" /></div></>}
+                {!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-refund-reference">Transaction reference</Label><Input id="rental-refund-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}
+                <div className="flex items-end"><Button variant="outline" className="w-full" onClick={handleRefundRentalDeposit} disabled={savingRentalPayment || depositRefundAmount <= 0 || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Record refund'}</Button></div>
+              </div>}
+              {canProcessReturn && selectedRental.status === 'returned' && Number(selectedRental.depositPaid || selectedRental.depositAmount) - Number(selectedRental.depositRefunded || 0) > 0 && <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <Input aria-label="Deposit forfeiture reason" placeholder="Reason for forfeiting deposit" value={forfeitureReason} onChange={event => setForfeitureReason(event.target.value)} maxLength={500} />
+                <Button variant="destructive" onClick={handleForfeitRentalDeposit} disabled={savingRentalPayment || forfeitureReason.trim().length < 5}>Forfeit remaining deposit</Button>
+              </div>}
+            </section>
+            <section className="space-y-3 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold">Rental agreement</h3>
+                  <p className="text-sm text-muted-foreground">AI-assisted draft, saved with this rental. Review and complete terms before signing.</p>
+                </div>
+                <div className="flex gap-2">
+                  {canGenerateContract && <Button variant="outline" onClick={handleGenerateContract} disabled={generatingContract}>
+                    <Sparkles className="mr-2 h-4 w-4" />{generatingContract ? 'Drafting…' : selectedRental.contractDraft ? 'Regenerate draft' : 'Draft contract'}
+                  </Button>}
+                  {selectedRental.contractDraft && <Button variant="outline" onClick={printContractDraft}><Printer className="mr-2 h-4 w-4" />Print</Button>}
+                </div>
+              </div>
+              {selectedRental.contractDraft && <>
+                <textarea aria-label="Rental contract draft" readOnly={!hasPermission('canEditRental')} value={contractDraftValue || selectedRental.contractDraft} onChange={event => setContractDraftValue(event.target.value)} className="min-h-[420px] w-full rounded-md border border-input bg-background p-4 font-mono text-sm leading-6" />
+                {hasPermission('canEditRental') && <div className="flex justify-end"><Button variant="outline" onClick={handleSaveContractDraft} disabled={savingContract || contractDraftValue === selectedRental.contractDraft}>{savingContract ? 'Saving…' : 'Save edits'}</Button></div>}
+              </>}
+            </section>
             <div>
               <h4 className="font-medium mb-2">Items</h4>
               <div className="overflow-x-auto">
@@ -421,6 +670,10 @@ export default function RentalsPage() {
                 </table>
               </div>
             </div>
+            {!!selectedRental.chargeLines?.length && <div>
+              <h4 className="mb-2 font-medium">Services and other charges</h4>
+              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="pb-2">Description</th><th className="pb-2">Type</th><th className="pb-2 text-right">Qty</th><th className="pb-2 text-right">Rate</th><th className="pb-2 text-right">Total</th></tr></thead><tbody>{selectedRental.chargeLines.map(line => <tr key={line.id} className="border-b last:border-0"><td className="py-2">{line.label}</td><td className="py-2 capitalize">{line.category}</td><td className="py-2 text-right">{line.quantity}</td><td className="py-2 text-right">{formatCurrency(line.unitPrice)}</td><td className="py-2 text-right">{formatCurrency(line.totalAmount)}</td></tr>)}</tbody></table></div>
+            </div>}
           </CardContent>
         </Card>
       </div>
@@ -445,11 +698,17 @@ export default function RentalsPage() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid gap-4 sm:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card>
             <CardContent className="pt-6">
               <div className="text-2xl font-bold">{summary.activeRentals}</div>
               <p className="text-xs text-muted-foreground">Active Rentals</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-2xl font-bold">{summary.reservedRentals || 0}</div>
+              <p className="text-xs text-muted-foreground">Reservations</p>
             </CardContent>
           </Card>
           <Card>
@@ -562,12 +821,17 @@ export default function RentalsPage() {
                       <td className="py-3 text-right">{formatCurrency(rental.depositAmount)}</td>
                       <td className="py-3">
                         <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-medium", statusBadge(rental.status))}>
-                          {rental.status}
+                          {rental.bookingState && rental.bookingState !== 'checked_out' ? rental.bookingState.replace('_', ' ') : rental.status}
                         </span>
                       </td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-1">
-                          {canProcessReturn && rental.status === 'active' && (
+                          {rental.status === 'active' && rental.bookingState && rental.bookingState !== 'checked_out' && hasPermission('canEditRental') && (
+                            <Button variant="outline" size="sm" onClick={() => handleCheckout(rental)}>
+                              <CalendarCheck className="mr-1 h-3.5 w-3.5" />Check out
+                            </Button>
+                          )}
+                          {canProcessReturn && rental.status === 'active' && (!rental.bookingState || rental.bookingState === 'checked_out') && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -577,7 +841,7 @@ export default function RentalsPage() {
                               Return
                             </Button>
                           )}
-                          {canDeleteRental && rental.status === 'active' && (
+                          {canDeleteRental && rental.status === 'active' && rental.bookingState !== 'checked_out' && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -608,10 +872,18 @@ export default function RentalsPage() {
       {showForm && (
         <Card ref={formRef}>
           <CardHeader>
-            <CardTitle>New Hire — Hire Out Items</CardTitle>
+            <CardTitle>New rental booking</CardTitle>
+            <p className="text-sm text-muted-foreground">Reserve equipment for a date range or check it out immediately. Availability is checked before saving.</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Booking action</Label>
+                <div className="inline-flex rounded-md border p-1">
+                  <button type="button" onClick={() => setBookingMode('reserve')} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'reserve' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Reserve dates</button>
+                  <button type="button" onClick={() => setBookingMode('checkout')} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'checkout' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Check out now</button>
+                </div>
+              </div>
               {/* Customer info */}
               <div className="grid gap-4 sm:grid-cols-5">
                 <div className="space-y-2">
@@ -667,6 +939,11 @@ export default function RentalsPage() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="bookingPurpose">Purpose or event</Label>
+                <Input id="bookingPurpose" value={bookingPurpose} maxLength={500} onChange={event => setBookingPurpose(event.target.value)} placeholder="Optional: wedding, conference, production, site work…" />
+              </div>
+
               {/* Branch */}
               {branches.length > 0 && (
                 <div className="space-y-2">
@@ -705,7 +982,7 @@ export default function RentalsPage() {
                             <Package className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm font-medium">{item.product_name}</span>
                             <span className="text-xs text-muted-foreground">
-                              {item.quantity} available
+                              {availabilityByProduct[item.id] ?? item.quantity} available for dates
                             </span>
                           </div>
                           <span className="text-sm">
@@ -797,6 +1074,20 @@ export default function RentalsPage() {
                 </div>
               )}
 
+              <section className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div><Label>Services and event charges</Label><p className="text-xs text-muted-foreground">Optional, non-stock lines such as delivery, setup, staff, venue or cleaning.</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { label: '', category: 'service', quantity: 1, unitPrice: 0 }])}><Plus className="mr-1 h-4 w-4" />Add line</Button>
+                </div>
+                {additionalCharges.map((charge, index) => <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                  <Input className="col-span-12 sm:col-span-4" value={charge.label} maxLength={120} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, label: event.target.value } : row))} placeholder="Description" />
+                  <select aria-label="Charge type" className="col-span-6 sm:col-span-3 h-10 rounded-md border bg-background px-2 text-sm" value={charge.category} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, category: event.target.value } : row))}><option value="service">Service</option><option value="delivery">Delivery</option><option value="setup">Setup</option><option value="staffing">Staffing</option><option value="venue">Venue</option><option value="cleaning">Cleaning</option><option value="other">Other</option></select>
+                  <Input className="col-span-2 sm:col-span-1" type="number" min="0.01" step="any" value={charge.quantity} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, quantity: Number(event.target.value) || 1 } : row))} aria-label="Quantity" />
+                  <Input className="col-span-3 sm:col-span-3" type="number" min="0" step="any" value={charge.unitPrice} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, unitPrice: Number(event.target.value) || 0 } : row))} aria-label="Unit charge" placeholder="Rate" />
+                  <Button className="col-span-1" type="button" variant="ghost" size="icon" aria-label="Remove charge" onClick={() => setAdditionalCharges(rows => rows.filter((_, i) => i !== index))}><X className="h-4 w-4 text-destructive" /></Button>
+                </div>)}
+              </section>
+
               {/* Discount & Payment */}
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-2">
@@ -845,11 +1136,21 @@ export default function RentalsPage() {
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 >
                   <option value="cash">Cash</option>
+                  <option value="safe">Safe</option>
                   <option value="mobile_money">Mobile Money</option>
                   <option value="card">Card</option>
                   <option value="bank_transfer">Bank Transfer</option>
                 </select>
               </div>
+
+              {(amountPaid > 0 || depositAmount > 0) && <div className="space-y-2">
+                <Label htmlFor="rental-cash-account">Transaction Account *</Label>
+                <select id="rental-cash-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} required className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                  <option value="">Select permitted account</option>
+                  {paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} ({account.type}) · {formatCurrency(account.balance)}</option>)}
+                </select>
+                {!paymentAccounts.length && <p className="text-xs text-destructive">No permitted account is available for this method. Ask an administrator to grant access or configure an account.</p>}
+              </div>}
 
               {/* Mobile Money fields */}
               {paymentMethod === 'mobile_money' && (
@@ -953,14 +1254,16 @@ export default function RentalsPage() {
                     !customerNin.trim() ||
                     !hireDate ||
                     !expectedReturnDate ||
-                    selectedItems.length === 0 ||
+                    (selectedItems.length === 0 && additionalCharges.length === 0) ||
+                    additionalCharges.some(charge => !charge.label.trim()) ||
+                    ((amountPaid > 0 || depositAmount > 0) && !cashAccountId) ||
                     (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
                      paymentMethod === 'card' ? !transactionId.trim() :
                      false)
                   }
                 >
                   <Clock className="mr-2 h-4 w-4" />
-                  Hire Out Items
+                  {bookingMode === 'reserve' ? 'Reserve items' : 'Check out items'}
                 </Button>
               </div>
             </form>
@@ -1027,9 +1330,7 @@ export default function RentalsPage() {
                 onChange={(e) => setReturnDepositStatus(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="refunded">Refund Deposit</option>
-                <option value="forfeited">Forfeit Deposit</option>
-                <option value="collected">Keep Collected</option>
+                <option value="held">Keep held pending financial settlement</option>
               </select>
             </div>
 

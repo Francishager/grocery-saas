@@ -164,6 +164,8 @@ model Tenant {
   expenses                        Expense[]
   cashTransactions                CashTransaction[]
   rentals                         Rental[]
+  rentalPayments                  RentalPayment[]
+  rentalAccountingConfig          RentalAccountingConfig?
   propertyOwners                  PropertyOwner[]
   managedProperties               ManagedProperty[]
   propertyTenancies               PropertyTenancy[]
@@ -529,6 +531,7 @@ model User {
   expenses                  Expense[]
   cashTransactions          CashTransaction[]
   rentals                   Rental[]
+  rentalPayments            RentalPayment[]
   saleReturns               SaleReturn[]
   journalEntries            JournalEntry[]
   stockTransfers            StockTransfer[]
@@ -936,6 +939,7 @@ model UserPermission {
   canDeleteRental                   Boolean  @default(false)
   canProcessRentalReturn            Boolean  @default(false)
   canViewRentalReport               Boolean  @default(false)
+  canGenerateRentalContract         Boolean  @default(false)
   // Property Management
   canViewPropertyManagement         Boolean  @default(false)
   canViewPropertyPortfolio          Boolean  @default(false)
@@ -2441,6 +2445,7 @@ model CashAccount {
   withdrawals     CustomerWithdrawal[]
   AssignedUsers   User[]               @relation("UserCashAccount")
   propertyRentPayments PropertyRentPayment[]
+  rentalPayments      RentalPayment[]
   propertySalePayments PropertySalePayment[]
   propertyLandPurchasePayments PropertyLandPurchasePayment[]
   propertyOwnerPayouts PropertyOwnerPayout[]
@@ -2555,6 +2560,8 @@ model Rental {
   branch             Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId         String?
   customer           Customer?    @relation(fields: [customerId], references: [id])
+  customerName       String?
+  customerPhone      String?
   userId             String
   User               User         @relation(fields: [userId], references: [id])
   hireDate           DateTime     @default(now()) // When items go out
@@ -2577,8 +2584,16 @@ model Rental {
   guarantorPhone     String?
   customerNin        String?
   status             RentalStatus @default(active)
+  bookingState       String       @default("checked_out") // reserved, confirmed, checked_out
+  bookingPurpose     String?
+  contractDraft      String?      @db.Text
+  contractGeneratedAt DateTime?
   notes              String?
   items              RentalItem[]
+  chargeLines        RentalChargeLine[]
+  payments           RentalPayment[]
+  depositRefunded    Float        @default(0)
+  depositPaid        Float        @default(0)
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
   Tenant             Tenant       @relation(fields: [tenantId], references: [id])
@@ -2608,6 +2623,78 @@ model RentalItem {
   @@index([rentalId])
   @@index([productId])
   @@map("rental_items")
+}
+
+model RentalChargeLine {
+  id          String   @id @default(cuid())
+  rentalId    String
+  rental      Rental   @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  label       String
+  category    String   @default("service") // service, delivery, setup, staffing, venue, cleaning, other
+  quantity    Float    @default(1)
+  unitPrice   Float    @default(0)
+  totalAmount Float    @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([rentalId])
+  @@map("rental_charge_lines")
+}
+
+model RentalAccountingConfig {
+  id                        String   @id @default(cuid())
+  tenantId                  String   @unique
+  tenant                    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivableAccountId       String
+  receivableAccount         Account  @relation("RentalReceivableAccount", fields: [receivableAccountId], references: [id])
+  revenueAccountId          String
+  revenueAccount            Account  @relation("RentalRevenueAccount", fields: [revenueAccountId], references: [id])
+  deferredRevenueAccountId  String
+  deferredRevenueAccount    Account  @relation("RentalDeferredRevenueAccount", fields: [deferredRevenueAccountId], references: [id])
+  depositLiabilityAccountId String
+  depositLiabilityAccount   Account  @relation("RentalDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id])
+  taxPayableAccountId       String
+  taxPayableAccount         Account  @relation("RentalTaxPayableAccount", fields: [taxPayableAccountId], references: [id])
+  openingEquityAccountId    String
+  openingEquityAccount      Account  @relation("RentalOpeningEquityAccount", fields: [openingEquityAccountId], references: [id])
+  isEnabled                 Boolean  @default(true)
+  isSystemManaged           Boolean  @default(true)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@map("rental_accounting_configs")
+}
+
+model RentalPayment {
+  id             String      @id @default(cuid())
+  tenantId       String
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rentalId       String
+  rental         Rental      @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  cashAccountId  String?
+  cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  userId         String
+  user           User        @relation(fields: [userId], references: [id])
+  kind           String      @default("rental_payment") // rental_payment, rental_advance, deposit, deposit_refund, deposit_forfeiture
+  receiptNo      String
+  idempotencyKey String
+  amount         Float
+  balanceAfter   Float       @default(0)
+  paymentMethod  String?
+  mobileProvider String?
+  phoneNumber    String?
+  paymentDate    DateTime    @default(now())
+  transactionRef String?
+  notes          String?
+  status         String      @default("posted") // posted, void
+  voidReason     String?
+  voidedAt       DateTime?
+  createdAt      DateTime    @default(now())
+
+  @@unique([tenantId, receiptNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([rentalId, paymentDate])
+  @@index([cashAccountId, paymentDate])
+  @@map("rental_payments")
 }
 
 // Property management is distinct from equipment hire (Rental / RentalItem).
@@ -3242,6 +3329,12 @@ model Account {
   propertySaleOwnerPayableConfigs          PropertyAccountingConfig[]    @relation("PropertySaleOwnerPayableAccount")
   propertySaleCustomerAdvanceConfigs       PropertyAccountingConfig[]    @relation("PropertySaleCustomerAdvanceAccount")
   propertyLandInventoryOpeningEquityConfigs PropertyAccountingConfig[]   @relation("PropertyLandInventoryOpeningEquityAccount")
+  rentalReceivableConfigs                  RentalAccountingConfig[]      @relation("RentalReceivableAccount")
+  rentalRevenueConfigs                     RentalAccountingConfig[]      @relation("RentalRevenueAccount")
+  rentalDeferredRevenueConfigs             RentalAccountingConfig[]      @relation("RentalDeferredRevenueAccount")
+  rentalDepositLiabilityConfigs            RentalAccountingConfig[]      @relation("RentalDepositLiabilityAccount")
+  rentalTaxPayableConfigs                  RentalAccountingConfig[]      @relation("RentalTaxPayableAccount")
+  rentalOpeningEquityConfigs               RentalAccountingConfig[]      @relation("RentalOpeningEquityAccount")
   createdAt                               DateTime                      @default(now())
   updatedAt                               DateTime                      @updatedAt
 
