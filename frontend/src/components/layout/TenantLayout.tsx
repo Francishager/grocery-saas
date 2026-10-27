@@ -30,6 +30,13 @@ const inventorySubItems = [
   { to: '/tenant/inventory/convenience', label: 'Convenience Shop', icon: ShoppingBag, permission: 'canViewProduct', feature: 'fuel_station.convenience' },
 ]
 
+const rentalSubItems = [
+  { to: '/tenant/rentals/bookings', label: 'Bookings & Check-out', icon: Calendar, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/returns', label: 'Returns', icon: RotateCcw, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/payments', label: 'Payments & Receipts', icon: Receipt, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/reports?report=rentalsSummary', label: 'Rental Reports', icon: BarChart3, permission: 'canViewRentalReport', feature: 'reports.rentals' },
+]
+
 const fuelStationSubItems = [
   { to: '/tenant/fuel-station/tanks', label: 'Tanks & Pumps', icon: Gauge, permission: 'canViewFuelStation', feature: 'fuel_station.pumps' },
   { to: '/tenant/fuel-station/deliveries', label: 'Fuel Deliveries', icon: Truck, permission: 'canViewFuelStation', feature: 'fuel_station.deliveries' },
@@ -99,7 +106,7 @@ const navItems = [
   { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable', isReceivables: true },
   { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
   { to: '/tenant/procurement', label: 'Procurement Network', icon: Truck, permission: 'canViewProcurement', isProcurement: true },
-  { to: '/tenant/rentals', label: 'Rental Bookings', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/bookings', label: 'Rentals', icon: Clock, permission: 'canViewRental', feature: 'rentals', isRentals: true },
   { to: '/tenant/property-management/portfolio', label: 'Property Management', icon: Building2, isPropertyManagement: true },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
@@ -359,6 +366,7 @@ export function TenantLayout() {
   const [reportsExpanded, setReportsExpanded] = useState(false)
   const [settingsExpanded, setSettingsExpanded] = useState(false)
   const [inventoryExpanded, setInventoryExpanded] = useState(false)
+  const [rentalsExpanded, setRentalsExpanded] = useState(false)
   const [accountingExpanded, setAccountingExpanded] = useState(false)
   const [fuelStationExpanded, setFuelStationExpanded] = useState(false)
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
@@ -538,6 +546,10 @@ export function TenantLayout() {
     setInventoryExpanded(prev => !prev)
     if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
   }
+  const toggleRentals = () => {
+    setRentalsExpanded(prev => !prev)
+    if (!rentalsExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false); setRestaurantExpanded(false); setHRExpanded(false) }
+  }
   const toggleAccounting = () => {
     setAccountingExpanded(prev => !prev)
     if (!accountingExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
@@ -574,6 +586,7 @@ export function TenantLayout() {
   // Auto-expand when on relevant pages
   useEffect(() => {
     if (location.pathname.startsWith('/tenant/inventory')) setInventoryExpanded(true)
+    if (location.pathname.startsWith('/tenant/rentals')) setRentalsExpanded(true)
     if (location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers') setAccountingExpanded(true)
     if (location.pathname.startsWith('/tenant/fuel-station')) setFuelStationExpanded(true)
     if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
@@ -607,6 +620,7 @@ export function TenantLayout() {
     .map((item: any) => item.children ? { ...item, children: item.children.filter(subItemVisible) } : item)
     .filter((item: any) => item.children ? item.children.length > 0 && subItemVisible(item) : subItemVisible(item))
   const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
+  const visibleRentalSubItems = rentalSubItems.filter(subItemVisible)
   const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
@@ -649,6 +663,8 @@ export function TenantLayout() {
     if (waiterMode) return item.isRestaurant && visibleRestaurantSubItems.length > 0
     if (item.feature === 'dashboard') return canAccessFeature('dashboard')
     if (item.isPropertyManagement) return visiblePropertyManagementSubItems.length > 0
+    if (item.isRentals) return visibleRentalSubItems.length > 0
+    if (item.isInventory) return visibleInventorySubItems.length > 0
     if (item.isProcurement) return visibleProcurementBuyerItems.length > 0 || visibleProcurementSellerItems.length > 0
     // Special handling for Communication: only show if the exact 'communication' feature is enabled
     // (not when only sub-features like 'communication.notifications' are enabled)
@@ -776,6 +792,20 @@ export function TenantLayout() {
                   </button>
                   {propertyManagementExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
                     {visiblePropertyManagementSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                      <sub.icon className="h-4 w-4" />{t(sub.label)}
+                    </NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isRentals ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={rentalsExpanded} onClick={toggleRentals}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', rentalsExpanded || location.pathname.startsWith('/tenant/rentals') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{t(item.label)}</span>
+                    {rentalsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {rentalsExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleRentalSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
                       <sub.icon className="h-4 w-4" />{t(sub.label)}
                     </NavLink>)}
                   </div>}

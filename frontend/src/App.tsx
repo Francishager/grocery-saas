@@ -37,6 +37,8 @@ import CustomerProfilePage from '@/pages/receivables/CustomerProfilePage'
 import ReceivableReconciliationPage from '@/pages/receivables/ReceivableReconciliationPage'
 import PayablesPage from '@/pages/receivables/PayablesPage'
 import RentalsPage from '@/pages/RentalsPage'
+import RentalItemsPage from '@/pages/RentalItemsPage'
+import RentalPaymentsPage from '@/pages/RentalPaymentsPage'
 import PropertyManagementPage from '@/pages/PropertyManagementPage'
 import ReturnsPage from '@/pages/ReturnsPage'
 import AccountingPage from '@/pages/accounting/AccountingPage'
@@ -178,6 +180,7 @@ function App() {
           <Route path="ai-advisor" element={<FeatureGuard feature="dashboard" permission="canUseBusinessAI"><BusinessAdvisorPage /></FeatureGuard>} />
           <Route path="sales" element={<FeatureGuard feature="sales"><SalesPage /></FeatureGuard>} />
           <Route path="inventory" element={<Navigate to="/tenant/inventory/products" replace />} />
+          <Route path="inventory/rentals" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalItemsPage /></FeatureGuard>} />
           <Route path="inventory/:tab" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />
           <Route path="purchases" element={<Navigate to="/tenant/payables" replace />} />
           <Route path="receivables" element={<Navigate to="/tenant/receivables/customers" replace />} />
@@ -200,7 +203,11 @@ function App() {
           <Route path="procurement/selling/profile" element={<FeatureGuard feature="procurement.seller" permission="canViewProcurement"><ProcurementNetworkPage mode="seller" section="profile" /></FeatureGuard>} />
           <Route path="credit-debit-notes" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
           <Route path="credit-debit-notes/:tab" element={<FeatureGuard feature="accounting" permission={['canViewReceivable', 'canViewPayable', 'canViewAccounting']}><CreditDebitNotesPage /></FeatureGuard>} />
-          <Route path="rentals" element={<FeatureGuard feature="rentals"><RentalsPage /></FeatureGuard>} />
+          <Route path="rentals" element={<Navigate to="/tenant/rentals/bookings" replace />} />
+          <Route path="rentals/bookings" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalsPage section="bookings" /></FeatureGuard>} />
+          <Route path="rentals/returns" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalsPage section="returns" /></FeatureGuard>} />
+          <Route path="rentals/items" element={<Navigate to="/tenant/inventory/rentals" replace />} />
+          <Route path="rentals/payments" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalPaymentsPage /></FeatureGuard>} />
           <Route path="property-management" element={<Navigate replace to="/tenant/property-management/portfolio" />} />
           <Route path="property-management/:tab" element={<FeatureGuard feature={['property_management.landlord', 'property_management.agent']} permission={['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyCollections', 'canViewPropertyReports', 'canViewPropertyStatements', 'canManageTenancies', 'canViewPropertySales', 'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment']}><PropertyManagementPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />

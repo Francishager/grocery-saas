@@ -491,6 +491,9 @@ export const rentalsApi = {
   summary: () =>
     api.get<any>('/api/rentals/report/summary'),
 
+  dashboardSummary: () =>
+    api.get<any>('/api/rentals/dashboard/summary'),
+
   availability: (productIds: string[], startDate: string, endDate: string, branchId?: string) =>
     api.get<any>('/api/rentals/availability', { params: { productIds: productIds.join(','), startDate, endDate, branchId } }),
 

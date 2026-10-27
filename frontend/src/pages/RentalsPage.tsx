@@ -63,9 +63,8 @@ interface Rental {
 
 interface RentalChargeDraft { label: string; category: string; quantity: number; unitPrice: number }
 
-export default function RentalsPage() {
+export default function RentalsPage({ section = 'bookings' }: { section?: 'bookings' | 'returns' }) {
   const [rentals, setRentals] = useState<Rental[]>([])
-  const { paginatedItems: paginatedRentals, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(rentals, 10)
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -126,6 +125,13 @@ export default function RentalsPage() {
   const canDeleteRental = hasPermission('canDeleteRental')
   const canViewReport = hasPermission('canViewReportRentalsSummary')
   const canGenerateContract = hasPermission('canGenerateRentalContract')
+
+  useEffect(() => {
+    setStatusFilter(section === 'returns' ? 'active' : 'all')
+    setSelectedRental(null)
+    setShowForm(false)
+    setShowReturnForm(false)
+  }, [section])
 
   useEffect(() => {
     loadRentals()
@@ -539,6 +545,17 @@ export default function RentalsPage() {
     return rental.status === 'active' && new Date(rental.expectedReturnDate) < new Date()
   }
 
+  const visibleRentals = rentals.filter(rental => {
+    const isReturnable = rental.status === 'active' && (!rental.bookingState || rental.bookingState === 'checked_out')
+    if (section === 'returns' && !isReturnable) return false
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return true
+    return [rental.rentalNo, rental.customer?.name, rental.customerName, rental.customerPhone, rental.branch?.name,
+      ...rental.items.map(item => item.product?.name)]
+      .some(value => String(value || '').toLowerCase().includes(query))
+  })
+  const { paginatedItems: paginatedRentals, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(visibleRentals, 10)
+
   if (selectedRental) {
     return (
       <div className="space-y-6 p-6">
@@ -685,10 +702,10 @@ export default function RentalsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Rentals</h1>
-          <p className="text-muted-foreground">Hire out items and track returns</p>
+          <h1 className="text-3xl font-bold tracking-tight">{section === 'returns' ? 'Rental Returns' : 'Bookings & Check-out'}</h1>
+          <p className="text-muted-foreground">{section === 'returns' ? 'Review checked-out assets due back and complete their return.' : 'Reserve hire assets, check them out, and follow each booking.'}</p>
         </div>
-        {canCreateRental && (
+        {section === 'bookings' && canCreateRental && (
           <Button onClick={openNewForm}>
             <Plus className="mr-2 h-4 w-4" />
             New Hire
@@ -697,7 +714,7 @@ export default function RentalsPage() {
       </div>
 
       {/* Summary Cards */}
-      {summary && (
+      {section === 'bookings' && summary && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Card>
             <CardContent className="pt-6">
@@ -743,7 +760,7 @@ export default function RentalsPage() {
             className="pl-9"
           />
         </div>
-        <div className="flex gap-1">
+        {section === 'bookings' && <div className="flex flex-wrap gap-1">
           {['all', 'active', 'overdue', 'returned', 'cancelled'].map((s) => (
             <button
               key={s}
@@ -759,23 +776,23 @@ export default function RentalsPage() {
               {s}
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
       {/* Rentals Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Rentals ({rentals.length})</CardTitle>
+          <CardTitle>{section === 'returns' ? `Items currently out (${visibleRentals.length})` : `Bookings (${visibleRentals.length})`}</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="flex items-center justify-center h-32">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
             </div>
-          ) : rentals.length === 0 ? (
+          ) : visibleRentals.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-muted-foreground mb-4">No rentals found</p>
-              {canCreateRental && (
+              <p className="text-muted-foreground mb-4">{section === 'returns' ? 'No checked-out rentals are awaiting return.' : 'No bookings match this search.'}</p>
+              {section === 'bookings' && canCreateRental && (
                 <Button onClick={openNewForm}>
                   <Plus className="mr-2 h-4 w-4" />
                   Create First Hire

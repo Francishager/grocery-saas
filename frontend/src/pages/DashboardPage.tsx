@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
   const [dashboardView, setDashboardView] = useState<'daily' | 'trends' | 'mix'>('daily')
-  const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any }>({ property: null, restaurant: null, hr: null })
+  const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any; rentals: any }>({ property: null, restaurant: null, hr: null, rentals: null })
   const { toast } = useToast()
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
@@ -59,12 +59,13 @@ export default function DashboardPage() {
   const canViewProperty = hasAnyFeature(['property_management.landlord', 'property_management.agent']) && hasPermission('canViewPropertyPortfolio')
   const canViewRestaurant = hasFeature('restaurant') && hasPermission('canViewRestaurant')
   const canViewHR = hasFeature('hr') && hasPermission('canViewHR')
-  const dashboardModules = [canViewProperty && (hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord' : 'Property Management'), canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management'].filter(Boolean) as string[]
+  const canViewRentals = hasFeature('rentals') && hasPermission('canViewRental')
+  const dashboardModules = [canViewProperty && (hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord' : 'Property Management'), canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management', canViewRentals && 'Rentals'].filter(Boolean) as string[]
 
   useEffect(() => {
     let active = true
-    setModuleSnapshots({ property: null, restaurant: null, hr: null })
-    const loadSnapshot = async (key: 'property' | 'restaurant' | 'hr', path: string, enabled: boolean) => {
+    setModuleSnapshots({ property: null, restaurant: null, hr: null, rentals: null })
+    const loadSnapshot = async (key: 'property' | 'restaurant' | 'hr' | 'rentals', path: string, enabled: boolean) => {
       if (!enabled) return
       try {
         const response = await apiFetch(path)
@@ -76,9 +77,10 @@ export default function DashboardPage() {
       loadSnapshot('property', '/api/property-management/overview', canViewProperty),
       loadSnapshot('restaurant', '/api/restaurant/dashboard', canViewRestaurant),
       loadSnapshot('hr', '/api/hr/dashboard', canViewHR),
+      loadSnapshot('rentals', '/api/rentals/dashboard/summary', canViewRentals),
     ])
     return () => { active = false }
-  }, [canViewProperty, canViewRestaurant, canViewHR, scopeKey])
+  }, [canViewProperty, canViewRestaurant, canViewHR, canViewRentals, scopeKey])
 
   useEffect(() => {
     if (!hasDailyInsights && !hasTrendInsights && !hasMixInsights) return
@@ -348,7 +350,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr) && <section className="space-y-4" aria-label="Module overview">
+      {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals) && <section className="space-y-4" aria-label="Module overview">
         {moduleSnapshots.property && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">{hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property portfolio'}</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, landlord clients, and managed-unit health.</p></div>
@@ -388,6 +390,21 @@ export default function DashboardPage() {
             <ModuleMetric label="Present today" value={moduleSnapshots.hr.stats?.employeesPresentToday} detail={`${Number(moduleSnapshots.hr.stats?.employeesAbsentToday || 0).toLocaleString()} absent`} />
             <ModuleMetric label="Salary payable" value={formatCurrency(moduleSnapshots.hr.stats?.salaryPayable || 0)} />
             <ModuleMetric label="Pending approvals" value={Number(moduleSnapshots.hr.stats?.payrollAwaitingApproval || 0) + Number(moduleSnapshots.hr.stats?.leaveRequestsAwaitingApproval || 0)} detail="Payroll and leave" />
+          </div>
+        </div>}
+
+        {moduleSnapshots.rentals && <div className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div><h2 className="text-lg font-semibold">Rental operations</h2><p className="text-sm text-muted-foreground">Reusable assets currently out, return deadlines, collections, and deposits held.</p></div>
+            <Link to="/tenant/rentals" className="text-sm font-medium text-primary hover:underline">Open rentals</Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ModuleMetric label="Items checked out" value={moduleSnapshots.rentals.itemsOut ?? 0} detail={`${Number(moduleSnapshots.rentals.activeCount || 0).toLocaleString()} active hires`} />
+            <ModuleMetric label="Due back today" value={moduleSnapshots.rentals.dueTodayCount ?? 0} detail={`${Number(moduleSnapshots.rentals.reservationCount || 0).toLocaleString()} upcoming reservations`} />
+            <ModuleMetric label="Overdue rentals" value={moduleSnapshots.rentals.overdueCount ?? 0} detail={`Outstanding ${formatCurrency(moduleSnapshots.rentals.overdueBalance || 0)}`} />
+            <ModuleMetric label="Rental balance due" value={formatCurrency(moduleSnapshots.rentals.outstandingBalance || 0)} detail={`${formatCurrency(moduleSnapshots.rentals.depositsHeld || 0)} deposits held`} />
+            <ModuleMetric label="Collections this month" value={formatCurrency(moduleSnapshots.rentals.collectionsThisMonth || 0)} detail={`${Number(moduleSnapshots.rentals.receiptsThisMonth || 0).toLocaleString()} receipts`} />
+            <ModuleMetric label="Returns today" value={moduleSnapshots.rentals.returnsToday ?? 0} />
           </div>
         </div>}
       </section>}

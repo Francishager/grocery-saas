@@ -45,7 +45,6 @@ const MODULES = [
       { name: 'inventory', displayName: 'Inventory Management' },
       { name: 'inventory.products', displayName: 'Products' },
       { name: 'inventory.services', displayName: 'Services' },
-      { name: 'inventory.rentals', displayName: 'Rental Items' },
       { name: 'inventory.categories', displayName: 'Categories' },
       { name: 'inventory.brands', displayName: 'Brands' },
       { name: 'inventory.adjustments', displayName: 'Stock Adjustments' },
@@ -161,8 +160,8 @@ const MODULES = [
     ]
   },
   {
-    id: 'rentals', name: 'Rental Bookings', features: [
-      { name: 'rentals', displayName: 'Rental Bookings' },
+    id: 'rentals', name: 'Rentals', features: [
+      { name: 'rentals', displayName: 'Rentals (Bookings & Hire Assets)' },
     ]
   },
   {
@@ -266,17 +265,6 @@ const MODULES = [
     ]
   },
   {
-    id: 'production', name: 'Production Engine', features: [
-      { name: 'production', displayName: 'Production Engine' },
-      { name: 'production.recipes', displayName: 'Recipes' },
-      { name: 'production.bom', displayName: 'Bill of Materials (BOM)' },
-      { name: 'production.orders', displayName: 'Production Orders' },
-      { name: 'production.finished_goods', displayName: 'Finished Goods' },
-      { name: 'production.waste_tracking', displayName: 'Waste Tracking' },
-      { name: 'production.costing', displayName: 'Production Costing' },
-    ]
-  },
-  {
     id: 'assets', name: 'Asset & Resource Engine', features: [
       { name: 'assets', displayName: 'Asset & Resource Management' },
       { name: 'assets.restaurant_tables', displayName: 'Restaurant Tables' },
@@ -315,6 +303,7 @@ export const PlansPage: React.FC = () => {
   const [form, setForm] = useState(emptyForm)
   const [features, setFeatures] = useState<Feature[]>([])
   const [featuresLoading, setFeaturesLoading] = useState(false)
+  const [featuresError, setFeaturesError] = useState('')
 
   const fetchPlans = async () => {
     setLoading(true)
@@ -324,14 +313,15 @@ export const PlansPage: React.FC = () => {
 
   const fetchFeatures = async () => {
     setFeaturesLoading(true)
+    setFeaturesError('')
     try {
       const r = await apiFetch('/api/platform/features')
       if (r.ok) {
         const data = await r.json()
         const list = Array.isArray(data) ? data : data.features || []
         setFeatures(list)
-      }
-    } catch {}
+      } else setFeaturesError('Could not load the current module and feature catalog.')
+    } catch { setFeaturesError('Could not load the current module and feature catalog.') }
     setFeaturesLoading(false)
   }
 
@@ -389,14 +379,17 @@ export const PlansPage: React.FC = () => {
       moduleDisplayNames[f.name] = f.displayName
     }
   }
+  moduleDisplayNames['inventory.rentals'] = 'Legacy Rental Items entitlement'
+  const isLegacyFeature = (name: string) => name === 'inventory.rentals' || name === 'production' || name.startsWith('production.')
+  moduleGroupLabels.legacy = 'Legacy entitlements (existing plans only)'
 
   // Use API features as primary source; fall back to catalog if API hasn't loaded
   const apiFeatures: Feature[] = features.map(f => ({
     id: f.id,
     name: f.name,
-    displayName: moduleDisplayNames[f.name] || f.displayName || f.name,
-    category: f.module || f.category || f.name.split('.')[0] || 'other',
-    module: f.module || f.category || f.name.split('.')[0] || 'other',
+    displayName: isLegacyFeature(f.name) ? `Legacy · ${moduleDisplayNames[f.name] || f.displayName || f.name}` : moduleDisplayNames[f.name] || f.displayName || f.name,
+    category: isLegacyFeature(f.name) ? 'legacy' : f.module || f.category || f.name.split('.')[0] || 'other',
+    module: isLegacyFeature(f.name) ? 'legacy' : f.module || f.category || f.name.split('.')[0] || 'other',
     isActive: f.isActive !== false,
   }))
   const catalogFeatures: Feature[] = MODULES.flatMap(mod => mod.features.map(feature => ({
@@ -426,6 +419,16 @@ export const PlansPage: React.FC = () => {
       if (checked) current.add(name)
       else current.delete(name)
       return { ...p, features: Array.from(current).join(', ') }
+    })
+  }
+  const toggleModule = (group: Feature[], checked: boolean) => {
+    setForm(current => {
+      const selected = new Set(current.features.split(',').map((name: string) => name.trim()).filter(Boolean))
+      for (const feature of group) {
+        if (checked) selected.add(feature.name)
+        else selected.delete(feature.name)
+      }
+      return { ...current, features: Array.from(selected).join(', ') }
     })
   }
 
@@ -509,17 +512,23 @@ export const PlansPage: React.FC = () => {
                   <label className="block text-sm font-medium mb-1">Features</label>
                   <div className="max-h-60 space-y-3 overflow-y-auto rounded-lg border p-3">
                     {featuresLoading && (
-                      <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin text-blue-600" /> Loading custom features...</div>
+                      <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin text-blue-600" /> Loading modules and features...</div>
                     )}
+                    {featuresError && <div className="flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><span>{featuresError}</span><button type="button" className="shrink-0 underline" onClick={() => void fetchFeatures()}>Retry</button></div>}
                     {Object.entries(featureGroups).map(([category, group]) => (
                       <div key={category} className="space-y-2">
-                        <p className="text-xs font-semibold uppercase text-gray-500">{(moduleGroupLabels[category] || category).replace(/_/g, ' ')}</p>
+                        <label className="flex items-center gap-2 text-xs font-semibold uppercase text-gray-700">
+                          <input type="checkbox" checked={group.every(feature => selectedFeatureNames.includes(feature.name))} onChange={event => toggleModule(group, event.target.checked)} />
+                          <span>{(moduleGroupLabels[category] || category).replace(/_/g, ' ')}</span>
+                          <span className="font-normal normal-case text-gray-500">{group.filter(feature => selectedFeatureNames.includes(feature.name)).length}/{group.length}</span>
+                        </label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {group.map(feature => (
                             <label key={feature.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
                               <input
                                 type="checkbox"
                                 checked={selectedFeatureNames.includes(feature.name)}
+                                disabled={isLegacyFeature(feature.name) && (!editingId || !selectedFeatureNames.includes(feature.name))}
                                 onChange={e => toggleFeature(feature.name, e.target.checked)}
                               />
                               <span>{feature.displayName || feature.name}</span>

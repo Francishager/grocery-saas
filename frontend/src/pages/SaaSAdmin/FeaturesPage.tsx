@@ -1,7 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Boxes, Database, Code, Gift, Store, Search } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Database, Code, Gift, Store, Search } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 
@@ -29,7 +29,7 @@ const MODULES = [
       { name: 'inventory', displayName: 'Inventory Management' },
       { name: 'inventory.products', displayName: 'Products' },
       { name: 'inventory.services', displayName: 'Services' },
-      { name: 'inventory.rentals', displayName: 'Rental Items' },
+      { name: 'inventory.rentals', displayName: 'Legacy Rental Items entitlement' },
       { name: 'inventory.categories', displayName: 'Categories' },
       { name: 'inventory.brands', displayName: 'Brands' },
       { name: 'inventory.adjustments', displayName: 'Stock Adjustments' },
@@ -141,8 +141,8 @@ const MODULES = [
     ]
   },
   {
-    id: 'rentals', name: 'Rental Bookings', icon: Clock, color: 'text-violet-600 bg-violet-100', features: [
-      { name: 'rentals', displayName: 'Rental Bookings' },
+    id: 'rentals', name: 'Rentals', icon: Clock, color: 'text-violet-600 bg-violet-100', features: [
+      { name: 'rentals', displayName: 'Rentals (Bookings & Hire Assets)' },
     ]
   },
   {
@@ -251,17 +251,6 @@ const MODULES = [
     ]
   },
   {
-    id: 'production', name: 'Production Engine', icon: Boxes, color: 'text-amber-700 bg-amber-100', features: [
-      { name: 'production', displayName: 'Production Engine' },
-      { name: 'production.recipes', displayName: 'Recipes' },
-      { name: 'production.bom', displayName: 'Bill of Materials (BOM)' },
-      { name: 'production.orders', displayName: 'Production Orders' },
-      { name: 'production.finished_goods', displayName: 'Finished Goods' },
-      { name: 'production.waste_tracking', displayName: 'Waste Tracking' },
-      { name: 'production.costing', displayName: 'Production Costing' },
-    ]
-  },
-  {
     id: 'assets', name: 'Asset & Resource Engine', icon: Database, color: 'text-cyan-700 bg-cyan-100', features: [
       { name: 'assets', displayName: 'Asset & Resource Management' },
       { name: 'assets.restaurant_tables', displayName: 'Restaurant Tables' },
@@ -290,7 +279,7 @@ const MODULES = [
 
 const FEATURE_SECTIONS = [
   { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
-  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for property, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets'] },
+  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for property, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
   { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, integrations, administration, security and developer tools.', modules: ['hr', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
 ]
 
@@ -444,6 +433,11 @@ export const FeaturesPage: React.FC = () => {
     .filter(feature => !MODULES.some(module => module.features.some(item => item.name === feature.name)))
     .filter(feature => !searchTerm || `${feature.displayName} ${feature.name} ${feature.category}`.toLowerCase().includes(searchTerm))
     .sort((a, b) => `${a.category}:${a.displayName || a.name}`.localeCompare(`${b.category}:${b.displayName || b.name}`))
+  const displayFeatureName = (feature: Feature) => {
+    if (feature.name === 'inventory.rentals') return 'Legacy rental entitlement · existing plans only'
+    if (feature.name === 'production' || feature.name.startsWith('production.')) return `Legacy production engine · ${feature.displayName || feature.name}`
+    return feature.displayName || feature.name
+  }
 
   return (
     <div className="space-y-6">
@@ -530,7 +524,7 @@ export const FeaturesPage: React.FC = () => {
 
           {ungroupedFeatures.length > 0 && (
             <div className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
-              <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other Features</h2></div>
+              <div className="p-4 border-b border-slate-800"><h2 className="font-semibold text-white">Other &amp; Legacy Features</h2><p className="mt-1 text-xs text-slate-400">Older feature keys remain visible for existing tenant assignments; new production access is managed under Manufacturing.</p></div>
               <div className="divide-y divide-slate-800">
                 {ungroupedFeatures.map(f => {
                   const state = getTenantFeatureState(f.name)
@@ -539,7 +533,7 @@ export const FeaturesPage: React.FC = () => {
                   return (
                     <div key={f.id} className={`flex items-center justify-between p-4 ${isOverride ? 'bg-slate-800/50' : ''}`}>
                       <div>
-                        <p className="font-medium text-sm text-slate-200">{f.displayName || f.name}</p>
+                        <p className="font-medium text-sm text-slate-200">{displayFeatureName(f)}</p>
                         <p className="text-xs text-slate-400">{f.category}{isOverride && ' · custom override'}</p>
                       </div>
                       <div className="flex items-center gap-2">

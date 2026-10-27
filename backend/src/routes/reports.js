@@ -1,5 +1,5 @@
 import { SERVICE_REPORT_PERMISSIONS } from '../utils/servicePermissions.js';
-import { requireFeature as requireServiceFeature } from '../../middleware/featureCheck.js';
+import { requireFeature, requireFeature as requireServiceFeature } from '../../middleware/featureCheck.js';
 import { Router } from "express";
 import prisma from "../db.js";
 import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
@@ -132,6 +132,7 @@ function requireReportPermission(req, res, next) {
 
 // Apply granular report permission check to all routes
 router.use(authenticateToken, requireReportPermission);
+router.use('/rentals', requireFeature('reports.rentals'));
 
 function df(req, field = "createdAt") {
   const { from, to } = req.query;

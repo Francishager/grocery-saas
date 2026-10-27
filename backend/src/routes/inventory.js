@@ -18,6 +18,10 @@ import { categoryNameKey, categorySlug } from "../utils/categoryCatalog.js";
 
 const router = Router();
 
+async function hasRentalFeature(tenantId) {
+  return hasFeatureAccess(await getTenantFeatures(tenantId), 'rentals');
+}
+
 // Check the correct permission based on itemType in the request body
 function requireItemTypePermission(action) {
   const permMap = {
@@ -34,6 +38,7 @@ function requireItemTypePermission(action) {
     if (!userPerms.includes(perm) && !userPerms.includes('*')) {
       return res.status(403).json({ error: `Permission denied: ${perm} required` });
     }
+    if (itemType === 'rental') return requireFeature('rentals')(req, res, next);
     next();
   };
 }
@@ -773,8 +778,13 @@ router.get("/", authenticateToken, async (req, res) => {
       };
     };
 
-    // Filter by itemType if provided
-    if (itemType) where.itemType = String(itemType);
+    // Keep rental assets out of the ordinary catalog unless this tenant has Rentals enabled.
+    if (itemType === 'rental') {
+      if (!(await hasRentalFeature(tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
+      where.itemType = 'rental';
+    } else if (!(await hasRentalFeature(tenantId))) {
+      where.itemType = itemType ? String(itemType) : { not: 'rental' };
+    } else if (itemType) where.itemType = String(itemType);
     if (category) where.categoryId = category;
     if (lowStock === "true") where.quantity = { lte: 10 };
 
@@ -864,10 +874,12 @@ router.get("/categories", authenticateToken, async (req, res) => {
     if (type && !['product', 'service', 'rental'].includes(type)) {
       return res.status(400).json({ error: "Invalid category type" });
     }
+    if (type === 'rental' && !(await hasRentalFeature(tenantId))) return res.status(403).json({ error: 'Rental categories are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
     await ensureTenantCategories(tenantId);
     const sharing = await categorySharingScope(tenantId);
     const where = sharing.where;
     if (type) where.categoryType = String(type);
+    else if (!(await hasRentalFeature(tenantId))) where.categoryType = { not: 'rental' };
     const categories = await prisma.category.findMany({ where, orderBy: { name: "asc" } });
     categories.sort((a, b) => Number(b.tenantId === tenantId) - Number(a.tenantId === tenantId));
     const uniqueCategories = [...new Map(categories.map(category => [
@@ -885,7 +897,7 @@ router.post("/categories", authenticateToken, (req, res, next) => {
   const categoryType = req.body?.categoryType || 'product';
   const permissions = { product: 'canCreateProduct', service: 'canCreateService', rental: 'canCreateRental' };
   if (typeof categoryType !== 'string' || !Object.hasOwn(permissions, categoryType)) return res.status(400).json({ error: "Invalid category type" });
-  return requirePermission(permissions[categoryType])(req, res, next);
+  return requirePermission(permissions[categoryType])(req, res, () => categoryType === 'rental' ? requireFeature('rentals')(req, res, next) : next());
 }, async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
@@ -924,6 +936,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
       include: { category: true, branch: true },
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.itemType === 'rental' && !(await hasRentalFeature(scope.tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
     res.json(product);
   } catch (err) {
     handleBranchError(res, err);
@@ -936,9 +949,10 @@ router.get("/:id/price-history", authenticateToken, requirePermission("canViewPr
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({
       where: scopedWhere(scope, { id: req.params.id }),
-      select: { id: true },
+      select: { id: true, itemType: true },
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.itemType === 'rental' && !(await hasRentalFeature(scope.tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
 
     const history = await prisma.productPriceHistory.findMany({
       where: { tenantId: scope.tenantId, productId: product.id, ...(scope.branchId ? { branchId: scope.branchId } : {}) },
@@ -1119,6 +1133,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
     // Check permission based on the existing item's type
     await assertOutsideTrash('product', scope.tenantId, existing.id);
     const existingType = existing.itemType || 'product';
+    if (existingType === 'rental' && !(await hasRentalFeature(scope.tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
     const editPermMap = { product: 'canEditProduct', service: 'canEditService', rental: 'canEditRental' };
     const requiredPerm = editPermMap[existingType] || 'canEditProduct';
     const userPerms = req.user?.permissions || [];
@@ -1319,6 +1334,7 @@ router.post("/:id/stock-adjust", authenticateToken, requirePermission("canAdjust
       include: { category: true, branch: true },
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.itemType === 'rental' && !(await hasRentalFeature(scope.tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
     if (product.itemType === "service") {
       return res.status(400).json({ error: "Services do not track stock quantity" });
     }
@@ -1403,6 +1419,7 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
     if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.itemType === 'rental' && !(await hasRentalFeature(scope.tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
 
     // Check permission based on the item's type
     const itemType = product.itemType || 'product';

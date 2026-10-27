@@ -94,7 +94,7 @@ async function getRentalAvailability(client, scope, productIds, startDate, endDa
   });
 }
 
-router.get("/payment-accounts", authenticateToken, requireTenant, async (req, res) => {
+router.get("/payment-accounts", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const method = String(req.query.paymentMethod || "cash").toLowerCase();
     if (!rentalMethodTypes[method]) return res.status(400).json({ error: "Unsupported rental payment method." });
@@ -107,7 +107,44 @@ router.get("/payment-accounts", authenticateToken, requireTenant, async (req, re
   }
 });
 
-router.get("/availability", authenticateToken, requirePermission("canViewRental"), requireTenant, async (req, res) => {
+router.get("/dashboard/summary", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const openRentals = await prisma.rental.findMany({
+      where: scopedWhere(scope, { status: "active", bookingState: "checked_out" }),
+      select: { expectedReturnDate: true, balance: true, items: { select: { quantity: true } } },
+    });
+    const [activeCount, reservations, overdueCount, openBalance, heldDeposits, collections, returnedToday] = await Promise.all([
+      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: "checked_out" }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: { in: ["reserved", "confirmed"] } }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: "checked_out", expectedReturnDate: { lt: now } }) }),
+      prisma.rental.aggregate({ where: scopedWhere(scope, { status: { notIn: ["cancelled"] }, balance: { gt: 0 } }), _sum: { balance: true } }),
+      prisma.rental.findMany({ where: scopedWhere(scope, { status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositPaid: true, depositAmount: true, depositRefunded: true } }),
+      prisma.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, status: "posted", kind: { in: ["rental_payment", "rental_advance"] }, paymentDate: { gte: monthStart }, ...(scope.branchId ? { rental: { branchId: scope.branchId } } : {}) }, _sum: { amount: true }, _count: true }),
+      prisma.rental.count({ where: scopedWhere(scope, { status: "returned", actualReturnDate: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }) }),
+    ]);
+    const overdue = openRentals.filter(rental => rental.expectedReturnDate < now);
+    res.json({
+      activeCount,
+      reservationCount: reservations,
+      overdueCount,
+      dueTodayCount: openRentals.filter(rental => rental.expectedReturnDate >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) && rental.expectedReturnDate < new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)).length,
+      itemsOut: openRentals.reduce((sum, rental) => sum + rental.items.reduce((itemSum, item) => itemSum + Number(item.quantity || 0), 0), 0),
+      overdueBalance: overdue.reduce((sum, rental) => sum + Math.max(0, Number(rental.balance || 0)), 0),
+      outstandingBalance: Number(openBalance._sum.balance || 0),
+      depositsHeld: heldDeposits.reduce((sum, rental) => sum + Math.max(0, Number(rental.depositPaid || rental.depositAmount || 0) - Number(rental.depositRefunded || 0)), 0),
+      collectionsThisMonth: Number(collections._sum.amount || 0),
+      receiptsThisMonth: Number(collections._count || 0),
+      returnsToday: returnedToday,
+    });
+  } catch (err) {
+    handleBranchError(res, err, "Failed to load rental dashboard summary.");
+  }
+});
+
+router.get("/availability", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const productIds = String(req.query.productIds || "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 100);
@@ -121,7 +158,7 @@ router.get("/availability", authenticateToken, requirePermission("canViewRental"
 });
 
 // List rentals with filters
-router.get("/", authenticateToken, requirePermission("canViewRental"), requireTenant, async (req, res) => {
+router.get("/", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { page = 1, limit = 50, status, customerId, startDate, endDate } = req.query;
@@ -237,7 +274,7 @@ router.put("/:id/contract-draft", authenticateToken, requirePermission("canEditR
 });
 
 // Get single rental
-router.get("/:id", authenticateToken, requirePermission("canViewRental"), requireTenant, async (req, res) => {
+router.get("/:id", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const rental = await prisma.rental.findFirst({
@@ -259,7 +296,7 @@ router.get("/:id", authenticateToken, requirePermission("canViewRental"), requir
   }
 });
 
-router.post("/:id/payments", authenticateToken, requirePermission("canCreateRental"), requireTenant, async (req, res) => {
+router.post("/:id/payments", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
@@ -285,7 +322,7 @@ router.post("/:id/payments", authenticateToken, requirePermission("canCreateRent
   }
 });
 
-router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, async (req, res) => {
+router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
@@ -324,7 +361,7 @@ router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canPro
   }
 });
 
-router.post("/:id/advance-refunds", authenticateToken, requirePermission("canDeleteRental"), requireTenant, async (req, res) => {
+router.post("/:id/advance-refunds", authenticateToken, requirePermission("canDeleteRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
@@ -365,7 +402,7 @@ router.post("/:id/advance-refunds", authenticateToken, requirePermission("canDel
   }
 });
 
-router.post("/:id/deposit-forfeitures", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, async (req, res) => {
+router.post("/:id/deposit-forfeitures", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const reason = String(req.body.reason || "").trim();
@@ -395,7 +432,7 @@ router.post("/:id/deposit-forfeitures", authenticateToken, requirePermission("ca
   }
 });
 
-router.get("/:id/payments/:paymentId/receipt", authenticateToken, requirePermission("canViewRental"), requireTenant, async (req, res) => {
+router.get("/:id/payments/:paymentId/receipt", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const payment = await prisma.rentalPayment.findFirst({ where: { tenantId: scope.tenantId, rentalId: req.params.id, id: req.params.paymentId, status: "posted" }, include: { rental: { include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true, sku: true } } } }, chargeLines: true } }, cashAccount: { select: { name: true, type: true } }, tenant: { select: { name: true, address: true, phone: true, email: true, logo: true, currency: true } } } });
@@ -407,7 +444,7 @@ router.get("/:id/payments/:paymentId/receipt", authenticateToken, requirePermiss
 });
 
 // Create new rental (hire out items)
-router.post("/", authenticateToken, requirePermission("canCreateRental"), requireTenant, async (req, res) => {
+router.post("/", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", requireBranch: true, allowOwnerAll: false });
     const {
@@ -598,7 +635,7 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
   }
 });
 
-router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental"), requireTenant, async (req, res) => {
+router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true } });
@@ -629,7 +666,7 @@ router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental
 });
 
 // Process return of rental items
-router.post("/:id/return", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, async (req, res) => {
+router.post("/:id/return", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { id } = req.params;
@@ -725,7 +762,7 @@ router.post("/:id/return", authenticateToken, requirePermission("canProcessRenta
 });
 
 // Update rental (before items go out)
-router.put("/:id", authenticateToken, requirePermission("canEditRental"), requireTenant, async (req, res) => {
+router.put("/:id", authenticateToken, requirePermission("canEditRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { id } = req.params;
@@ -757,7 +794,7 @@ router.put("/:id", authenticateToken, requirePermission("canEditRental"), requir
 });
 
 // Cancel reservations only. Checked-out items must pass through the return flow.
-router.delete("/:id", authenticateToken, requirePermission("canDeleteRental"), requireTenant, async (req, res) => {
+router.delete("/:id", authenticateToken, requirePermission("canDeleteRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { id } = req.params;
@@ -782,7 +819,7 @@ router.delete("/:id", authenticateToken, requirePermission("canDeleteRental"), r
 });
 
 // Rentals summary/report
-router.get("/report/summary", authenticateToken, requirePermission("canViewReportRentalsSummary"), requireTenant, async (req, res) => {
+router.get("/report/summary", authenticateToken, requirePermission("canViewReportRentalsSummary"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
 
