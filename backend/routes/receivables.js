@@ -248,7 +248,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
-          { phone: { contains: search, mode: 'insensitive' } },
+          ...(req.userPermissions?.canViewCustomerPhone === true || req.user?.permissions?.includes('canViewCustomerPhone') ? [{ phone: { contains: search, mode: 'insensitive' } }] : []),
           { email: { contains: search, mode: 'insensitive' } }
         ]
       })

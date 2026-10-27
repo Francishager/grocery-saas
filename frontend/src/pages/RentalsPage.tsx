@@ -1,7 +1,8 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useRef, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Sparkles, CalendarCheck, Printer } from 'lucide-react'
-import { rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
+import { apiFetch, rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,6 +15,8 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalRentals, getLocalBranches, getLocalProducts, getLocalSettings } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+
+const localDateInput = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
 interface RentalItem {
   id: string
@@ -64,6 +67,9 @@ interface Rental {
 interface RentalChargeDraft { label: string; category: string; quantity: number; unitPrice: number }
 
 export default function RentalsPage({ section = 'bookings' }: { section?: 'bookings' | 'returns' }) {
+  const location = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const customerFilter = searchParams.get('customerId') || ''
   const [rentals, setRentals] = useState<Rental[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -81,7 +87,11 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [customerId, setCustomerId] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
-  const [hireDate, setHireDate] = useState(new Date().toISOString().split('T')[0])
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerOptions, setCustomerOptions] = useState<any[]>([])
+  const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const [manualRenter, setManualRenter] = useState(false)
+  const [hireDate, setHireDate] = useState(localDateInput())
   const [expectedReturnDate, setExpectedReturnDate] = useState('')
   const [depositAmount, setDepositAmount] = useState(0)
   const [amountPaid, setAmountPaid] = useState(0)
@@ -125,6 +135,32 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const canDeleteRental = hasPermission('canDeleteRental')
   const canViewReport = hasPermission('canViewReportRentalsSummary')
   const canGenerateContract = hasPermission('canGenerateRentalContract')
+  const canSelectExistingCustomer = hasPermission('canViewCustomer')
+  const canSearchCustomerPhone = hasPermission('canViewCustomerPhone')
+
+  useEffect(() => {
+    if (!showForm || !canSelectExistingCustomer || manualRenter || customerId || !customerSearch.trim()) {
+      setCustomerOptions([])
+      setSearchingCustomers(false)
+      return
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setSearchingCustomers(true)
+      try {
+        const params = new URLSearchParams({ page: '1', limit: '20', search: customerSearch.trim(), status: 'active' })
+        const response = await apiFetch(`/api/receivables/customers?${params}`, { signal: controller.signal })
+        if (!response.ok) throw new Error('Could not search customers')
+        const data = await response.json()
+        if (!controller.signal.aborted) setCustomerOptions(data?.customers || [])
+      } catch (error: any) {
+        if (!controller.signal.aborted) setCustomerOptions([])
+      } finally {
+        if (!controller.signal.aborted) setSearchingCustomers(false)
+      }
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [showForm, canSelectExistingCustomer, manualRenter, customerId, customerSearch])
 
   useEffect(() => {
     setStatusFilter(section === 'returns' ? 'active' : 'all')
@@ -134,11 +170,19 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   }, [section])
 
   useEffect(() => {
+    const openRentalId = (location.state as any)?.openRentalId
+    if (!openRentalId) return
+    rentalsApi.get(openRentalId).then((data: any) => setSelectedRental(data?.rental || data)).catch((error: any) => {
+      toast({ title: 'Could not open booking', description: error?.message || 'The booking may no longer be available.', variant: 'destructive' })
+    })
+  }, [location.key])
+
+  useEffect(() => {
     loadRentals()
     loadBranches()
     loadTaxConfig()
     if (canViewReport) loadSummary()
-  }, [statusFilter])
+  }, [statusFilter, customerFilter])
 
   const loadTaxConfig = async () => {
     try {
@@ -156,16 +200,16 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setLoading(true)
     try {
       if (online) {
-        const data = await rentalsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined })
+        const data = await rentalsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined, customerId: customerFilter || undefined })
         setRentals(data?.rentals || [])
       } else {
         const local = await getLocalRentals(statusFilter)
-        setRentals(local as any)
+        setRentals((local as any[]).filter(rental => !customerFilter || rental.customerId === customerFilter))
       }
     } catch (err: any) {
       try {
         const local = await getLocalRentals(statusFilter)
-        setRentals(local as any)
+        setRentals((local as any[]).filter(rental => !customerFilter || rental.customerId === customerFilter))
       } catch {
         toast({ title: 'Error', description: err.message || 'Failed to load rentals', variant: 'destructive' })
       }
@@ -216,7 +260,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setCustomerId('')
     setCustomerName('')
     setCustomerPhone('')
-    setHireDate(new Date().toISOString().split('T')[0])
+    setHireDate(localDateInput())
     setExpectedReturnDate('')
     setDepositAmount(0)
     setAmountPaid(0)
@@ -234,6 +278,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setSelectedItems([])
     setAdditionalCharges([])
     setBookingMode('checkout')
+    setCustomerSearch('')
+    setCustomerOptions([])
+    setManualRenter(false)
     setBookingPurpose('')
     loadRentalItems()
     setTimeout(() => {
@@ -247,13 +294,14 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       return
     }
     let cancelled = false
-    rentalsApi.availability(selectedItems.map(item => item.productId), hireDate, expectedReturnDate, branchId || undefined)
+    const availabilityStart = bookingMode === 'checkout' ? new Date().toISOString() : hireDate
+    rentalsApi.availability(selectedItems.map(item => item.productId), availabilityStart, expectedReturnDate, branchId || undefined)
       .then(result => {
         if (!cancelled) setAvailabilityByProduct(Object.fromEntries((result.availability || []).map((row: any) => [row.productId, Number(row.available)])))
       })
       .catch(() => { if (!cancelled) setAvailabilityByProduct({}) })
     return () => { cancelled = true }
-  }, [showForm, selectedItems, hireDate, expectedReturnDate, branchId])
+  }, [showForm, selectedItems, hireDate, expectedReturnDate, branchId, bookingMode])
 
   useEffect(() => {
     if ((!showForm && !selectedRental) || !online || (showForm && amountPaid <= 0 && depositAmount <= 0) || (!showForm && paymentAmount <= 0 && depositRefundAmount <= 0 && advanceRefundAmount <= 0)) {
@@ -341,7 +389,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
         customerPhone: customerPhone || undefined,
         items: selectedItems,
         additionalCharges,
-        hireDate,
+        hireDate: bookingMode === 'checkout' ? new Date().toISOString() : hireDate,
         expectedReturnDate,
         depositAmount,
         amountPaid,
@@ -712,6 +760,10 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
           </Button>
         )}
       </div>
+      {section === 'bookings' && customerFilter && <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        <span>Showing bookings for the selected renter.</span>
+        <Button variant="ghost" size="sm" onClick={() => setSearchParams({})}>Clear renter filter</Button>
+      </div>}
 
       {/* Summary Cards */}
       {section === 'bookings' && summary && (
@@ -890,7 +942,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
         <Card ref={formRef}>
           <CardHeader>
             <CardTitle>New rental booking</CardTitle>
-            <p className="text-sm text-muted-foreground">Reserve equipment for a date range or check it out immediately. Availability is checked before saving.</p>
+            <p className="text-sm text-muted-foreground">Choose a renter, add items, then reserve a future date or check them out immediately. Availability is checked before saving.</p>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -898,62 +950,36 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 <Label>Booking action</Label>
                 <div className="inline-flex rounded-md border p-1">
                   <button type="button" onClick={() => setBookingMode('reserve')} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'reserve' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Reserve dates</button>
-                  <button type="button" onClick={() => setBookingMode('checkout')} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'checkout' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Check out now</button>
+                  <button type="button" onClick={() => { setBookingMode('checkout'); setHireDate(localDateInput()) }} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'checkout' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Check out now</button>
                 </div>
               </div>
               {/* Customer info */}
-              <div className="grid gap-4 sm:grid-cols-5">
-                <div className="space-y-2">
-                  <Label htmlFor="customerName">Customer Name *</Label>
-                  <Input
-                    id="customerName"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Customer full name"
-                    required
-                  />
+              {canSelectExistingCustomer && !manualRenter ? <div className="space-y-2">
+                <Label htmlFor="rental-customer-search">Renter *</Label>
+                {customerId ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
+                  <div><p className="font-medium">{customerName}</p>{customerPhone && <p className="text-sm text-muted-foreground">{customerPhone}</p>}<p className="text-xs text-muted-foreground">Existing customer linked to this rental</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => { setCustomerId(''); setCustomerName(''); setCustomerPhone(''); setCustomerSearch('') }}>Change renter</Button>
+                </div> : <>
+                  <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="rental-customer-search" value={customerSearch} onChange={event => setCustomerSearch(event.target.value)} placeholder={canSearchCustomerPhone ? 'Search customer name or phone' : 'Search customer name'} className="pl-9" autoComplete="off" /></div>
+                  {searchingCustomers && <p className="text-xs text-muted-foreground">Searching customers…</p>}
+                  {customerOptions.length > 0 && <div className="max-h-52 overflow-y-auto rounded-md border">
+                    {customerOptions.map(customer => <button key={customer.id} type="button" onClick={() => { setCustomerId(customer.id); setCustomerName(customer.name || ''); setCustomerPhone(customer.phone || ''); setCustomerNin(''); setCustomerOptions([]) }} className="flex w-full items-center justify-between gap-3 border-b p-3 text-left last:border-0 hover:bg-muted/50"><span className="font-medium">{customer.name}</span><span className="text-sm text-muted-foreground">{customer.phone || customer.maskedPhone || ''}</span></button>)}
+                  </div>}
+                  {customerSearch.trim() && !searchingCustomers && customerOptions.length === 0 && <p className="text-sm text-muted-foreground">No matching customer found.</p>}
+                  <Button type="button" variant="link" className="h-auto px-0" onClick={() => { setManualRenter(true); setCustomerId(''); setCustomerName(customerSearch.trim()); setCustomerSearch(''); setCustomerOptions([]) }}>Enter a new renter instead</Button>
+                </>}
+              </div> : <div className="space-y-2">
+                {canSelectExistingCustomer && <div className="flex items-center justify-between gap-2"><Label>New renter details</Label><Button type="button" variant="link" className="h-auto px-0" onClick={() => { setManualRenter(false); setCustomerName(''); setCustomerPhone(''); setCustomerNin('') }}>Choose existing customer</Button></div>}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-2"><Label htmlFor="customerName">Renter Name *</Label><Input id="customerName" value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="Full name" required={!customerId} /></div>
+                  <div className="space-y-2"><Label htmlFor="customerPhone">Renter Phone *</Label><Input id="customerPhone" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="Phone number" required={!customerId} /></div>
+                  <div className="space-y-2"><Label htmlFor="customerNin">National ID No. (NIN) *</Label><Input id="customerNin" value={customerNin} onChange={event => setCustomerNin(event.target.value)} placeholder="e.g. CF9802001234567" maxLength={20} required={!customerId} /></div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="customerPhone">Customer Phone *</Label>
-                  <Input
-                    id="customerPhone"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="Phone number"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="customerNin">National ID No. (NIN) *</Label>
-                  <Input
-                    id="customerNin"
-                    value={customerNin}
-                    onChange={(e) => setCustomerNin(e.target.value)}
-                    placeholder="e.g. CF9802001234567"
-                    maxLength={20}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="hireDate">Hire Date *</Label>
-                  <Input
-                    id="hireDate"
-                    type="date"
-                    value={hireDate}
-                    onChange={(e) => setHireDate(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="expectedReturnDate">Expected Return Date *</Label>
-                  <Input
-                    id="expectedReturnDate"
-                    type="date"
-                    value={expectedReturnDate}
-                    onChange={(e) => setExpectedReturnDate(e.target.value)}
-                    required
-                  />
-                </div>
+              </div>}
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {bookingMode === 'reserve' ? <div className="space-y-2"><Label htmlFor="hireDate">Reservation Start Date *</Label><Input id="hireDate" type="date" value={hireDate} min={localDateInput()} onChange={event => setHireDate(event.target.value)} required /></div> : <div className="space-y-2"><Label>Check-out time</Label><div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm">Now · {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date())}</div><p className="text-xs text-muted-foreground">The system records the actual checkout time automatically.</p></div>}
+                <div className="space-y-2"><Label htmlFor="expectedReturnDate">Expected Return Date *</Label><Input id="expectedReturnDate" type="date" value={expectedReturnDate} min={bookingMode === 'checkout' ? localDateInput() : hireDate || localDateInput()} onChange={event => setExpectedReturnDate(event.target.value)} required /></div>
               </div>
 
               <div className="space-y-2">
@@ -1266,10 +1292,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 <Button
                   type="submit"
                   disabled={
-                    !customerName.trim() ||
-                    !customerPhone.trim() ||
-                    !customerNin.trim() ||
-                    !hireDate ||
+                    (!customerId && (!customerName.trim() || !customerPhone.trim() || !customerNin.trim())) ||
+                    (bookingMode === 'reserve' && !hireDate) ||
                     !expectedReturnDate ||
                     (selectedItems.length === 0 && additionalCharges.length === 0) ||
                     additionalCharges.some(charge => !charge.label.trim()) ||

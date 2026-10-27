@@ -396,7 +396,7 @@ export default function DashboardPage() {
         {moduleSnapshots.rentals && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">Rental operations</h2><p className="text-sm text-muted-foreground">Reusable assets currently out, return deadlines, collections, and deposits held.</p></div>
-            <Link to="/tenant/rentals" className="text-sm font-medium text-primary hover:underline">Open rentals</Link>
+            <Link to="/tenant/rentals/bookings" className="text-sm font-medium text-primary hover:underline">Open rentals</Link>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ModuleMetric label="Items checked out" value={moduleSnapshots.rentals.itemsOut ?? 0} detail={`${Number(moduleSnapshots.rentals.activeCount || 0).toLocaleString()} active hires`} />

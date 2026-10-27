@@ -446,6 +446,9 @@ function mapProductToInventory(p: any): InventoryItem {
 
 // Rentals endpoints
 export const rentalsApi = {
+  crmOverview: async (params: { from: string; to: string; page?: number; limit?: number; search?: string }) =>
+    api.get<any>('/api/rentals/crm/overview', { params }),
+
   list: async (params?: { status?: string; customerId?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
     const data = await api.get<any>('/api/rentals', { params })
     return data

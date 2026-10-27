@@ -232,7 +232,7 @@ export function NotificationBell() {
               type: 'overdue_rental',
               isRead: false,
               createdAt: new Date().toISOString(),
-              link: '/tenant/rentals',
+              link: '/tenant/rentals/returns',
               source: 'local',
             })
           }

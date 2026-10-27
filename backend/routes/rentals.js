@@ -150,6 +150,7 @@ router.get("/availability", authenticateToken, requirePermission("canViewRental"
     const productIds = String(req.query.productIds || "").split(",").map((id) => id.trim()).filter(Boolean).slice(0, 100);
     const startDate = new Date(String(req.query.startDate || ""));
     const endDate = new Date(String(req.query.endDate || ""));
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.endDate || ""))) endDate.setUTCHours(23, 59, 59, 999);
     if (!productIds.length || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) return res.status(400).json({ error: "Select rental items and a valid date range." });
     res.json({ availability: await getRentalAvailability(prisma, scope, productIds, startDate, endDate) });
   } catch (err) {
@@ -197,6 +198,115 @@ router.get("/", authenticateToken, requirePermission("canViewRental"), requireTe
   } catch (err) {
     console.error("Rentals list error:", err);
     handleBranchError(res, err, "Failed to fetch rentals");
+  }
+});
+
+router.get("/crm/overview", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const from = new Date(String(req.query.from || ""));
+    const to = new Date(String(req.query.to || ""));
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to < from || to - from > 62 * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: "Choose a calendar range of up to 62 days." });
+    }
+
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "25"), 10) || 25));
+    const search = String(req.query.search || "").trim().slice(0, 120);
+    const canViewCustomerPhone = req.userPermissions?.canViewCustomerPhone === true || req.user?.permissions?.includes("canViewCustomerPhone");
+    const relationshipWhere = scopedWhere(scope, { status: { not: "cancelled" } });
+    const customerWhere = {
+      tenantId: scope.tenantId,
+      rentals: { some: relationshipWhere },
+      ...(search ? { OR: [
+        { name: { contains: search, mode: "insensitive" } },
+        ...(canViewCustomerPhone ? [{ phone: { contains: search } }] : []),
+      ] } : {}),
+    };
+
+    const calendarWhere = scopedWhere(scope, {
+      status: { not: "cancelled" },
+      OR: [
+        { hireDate: { gte: from, lte: to } },
+        { status: { in: ["active", "overdue"] }, hireDate: { lte: to }, expectedReturnDate: { gte: from } },
+        { actualReturnDate: { gte: from, lte: to } },
+        { payments: { some: { status: "posted", paymentDate: { gte: from, lte: to } } } },
+      ],
+    });
+
+    const [customers, customerTotal, rentals, calendarTotal] = await Promise.all([
+      prisma.customer.findMany({
+        where: customerWhere,
+        orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: { id: true, name: true, ...(canViewCustomerPhone ? { phone: true } : {}), updatedAt: true },
+      }),
+      prisma.customer.count({ where: customerWhere }),
+      prisma.rental.findMany({
+        where: calendarWhere,
+        take: 500,
+        orderBy: [{ hireDate: "asc" }, { expectedReturnDate: "asc" }],
+        select: {
+          id: true, rentalNo: true, customerId: true, customerName: true, customerPhone: canViewCustomerPhone,
+          hireDate: true, expectedReturnDate: true, actualReturnDate: true, status: true, bookingState: true,
+          totalAmount: true, balance: true, paymentStatus: true, bookingPurpose: true,
+          branch: { select: { name: true } },
+          items: { select: { quantity: true, product: { select: { name: true } } } },
+          payments: { where: { status: "posted", paymentDate: { gte: from, lte: to } }, select: { id: true, paymentDate: true, amount: true, kind: true, receiptNo: true } },
+        },
+      }),
+      prisma.rental.count({ where: calendarWhere }),
+    ]);
+
+    const customerIds = customers.map((customer) => customer.id);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const [totals, activeCounts, overdueCounts, upcomingReturns] = customerIds.length ? await Promise.all([
+      prisma.rental.groupBy({
+        by: ["customerId"], where: scopedWhere(scope, { customerId: { in: customerIds }, status: { not: "cancelled" } }),
+        _count: { _all: true }, _sum: { totalAmount: true, balance: true }, _max: { hireDate: true },
+      }),
+      prisma.rental.groupBy({
+        by: ["customerId"], where: scopedWhere(scope, { customerId: { in: customerIds }, status: "active" }),
+        _count: { _all: true },
+      }),
+      prisma.rental.groupBy({
+        by: ["customerId"], where: scopedWhere(scope, { customerId: { in: customerIds }, status: { in: ["active", "overdue"] }, expectedReturnDate: { lt: new Date() }, balance: { gt: 0 } }),
+        _count: { _all: true },
+      }),
+      prisma.rental.groupBy({
+        by: ["customerId"], where: scopedWhere(scope, { customerId: { in: customerIds }, status: "active", expectedReturnDate: { gte: today } }),
+        _min: { expectedReturnDate: true },
+      }),
+    ]) : [[], [], [], []];
+    const totalByCustomer = new Map(totals.map((row) => [row.customerId, row]));
+    const activeByCustomer = new Map(activeCounts.map((row) => [row.customerId, row._count._all]));
+    const overdueByCustomer = new Map(overdueCounts.map((row) => [row.customerId, row._count._all]));
+    const nextReturnByCustomer = new Map(upcomingReturns.map((row) => [row.customerId, row._min.expectedReturnDate]));
+
+    res.json({
+      customers: customers.map((customer) => {
+        const total = totalByCustomer.get(customer.id);
+        return {
+          ...customer,
+          rentalCount: total?._count._all || 0,
+          activeRentalCount: activeByCustomer.get(customer.id) || 0,
+          overdueRentalCount: overdueByCustomer.get(customer.id) || 0,
+          lifetimeRentalValue: Number(total?._sum.totalAmount || 0),
+          outstandingBalance: Number(total?._sum.balance || 0),
+          lastHireDate: total?._max.hireDate || null,
+          nextReturnDate: nextReturnByCustomer.get(customer.id) || null,
+        };
+      }),
+      customerPagination: { page, limit, total: customerTotal, pages: Math.ceil(customerTotal / limit) },
+      calendarRentals: rentals,
+      calendarPagination: { total: calendarTotal, limit: 500, truncated: calendarTotal > rentals.length },
+      range: { from, to },
+    });
+  } catch (err) {
+    console.error("Rental CRM overview error:", err);
+    handleBranchError(res, err, "Could not load rental CRM data.");
   }
 });
 
@@ -475,8 +585,9 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
     if (!Array.isArray(additionalCharges) || additionalCharges.length > 50) return res.status(400).json({ error: "Enter no more than 50 additional service or fee lines." });
     if (items.length === 0 && additionalCharges.length === 0) return res.status(400).json({ error: "Add a rental asset or at least one service/venue charge." });
     if (!expectedReturnDate) return res.status(400).json({ error: "Expected return date is required" });
-    const startDate = hireDate ? new Date(hireDate) : new Date();
+    const startDate = bookingMode === "checkout" ? new Date() : hireDate ? new Date(hireDate) : new Date();
     const endDate = new Date(expectedReturnDate);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(expectedReturnDate))) endDate.setUTCHours(23, 59, 59, 999);
     if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) {
       return res.status(400).json({ error: "Expected return date must be after hire date" });
     }
