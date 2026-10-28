@@ -309,6 +309,7 @@ export default function RentalItemsPage() {
                 setImageFile(file)
               }} />
               <p className="text-xs text-muted-foreground">JPEG, PNG, or WebP · maximum 2 MB</p>
+              {imageFile && <p role="status" className="text-xs font-medium text-primary">Image preview ready; it will be uploaded when you save.</p>}
               {editing?.image && !imageFile && <Button type="button" size="sm" variant="outline" onClick={() => void removeImage()}>Remove image</Button>}
             </div>
           </div>

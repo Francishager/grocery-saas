@@ -17,6 +17,7 @@ import { checkUsageLimit } from "../utils/usageLimits.js";
 import { ensureTenantCategoryCatalog } from "../utils/categoryDefaults.js";
 import { categoryNameKey, categorySlug } from "../utils/categoryCatalog.js";
 import { deleteCloudinaryAsset, safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js';
+import { canUploadRentalItemImage } from '../utils/rentalImageAccess.js';
 
 const router = Router();
 const rentalImageUpload = multer({
@@ -969,16 +970,23 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/:id/image', authenticateToken, requirePermission('canEditRental'), requireFeature('rentals'), parseRentalImage, async (req, res) => {
+router.post('/:id/image', authenticateToken, requireFeature('rentals'), (req, res, next) => {
+  const permissions = req.user?.permissions || [];
+  if (permissions.includes('*') || permissions.includes('canEditRental') || permissions.includes('canCreateRental')) return next();
+  return res.status(403).json({ error: 'Permission denied: canCreateRental or canEditRental required' });
+}, parseRentalImage, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Choose a rental item image to upload.' });
     if (!isSupportedRentalImage(req.file.buffer)) return res.status(400).json({ error: 'The selected file is not a valid JPEG, PNG, or WebP image.' });
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
     const product = await prisma.product.findFirst({
       where: scopedWhere(scope, { id: req.params.id, itemType: 'rental' }),
-      select: { id: true, tenantId: true, imagePublicId: true },
+      select: { id: true, tenantId: true, image: true, imagePublicId: true, createdByUserId: true },
     });
     if (!product) return res.status(404).json({ error: 'Rental item not found.' });
+    if (!canUploadRentalItemImage(req.user, product)) {
+      return res.status(403).json({ error: 'Only the item creator can upload its first image; edit permission is required to replace an existing image.' });
+    }
     const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
       resourceType: 'image',
       folder: `jibusales/rental-items/${scope.tenantId}`,
@@ -1157,7 +1165,7 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
 
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
-        data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId },
+        data: { ...body, categoryId: categoryId || null, tenantId: scope.tenantId, branchId: scope.branchId, createdByUserId: req.user.id },
         include: { category: true, branch: true, units: true },
       });
       await saveProductServiceLinks(tx, created, linkedItemIds);
@@ -1212,7 +1220,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `Permission denied: ${requiredPerm} required` });
     }
 
-    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, quantity, linkedItemIds, ...body } = req.body;
+    const { tenantId: _tenantId, branchId, id: _id, categoryId, itemType, quantity, linkedItemIds, createdByUserId: _createdByUserId, image: _image, imagePublicId: _imagePublicId, ...body } = req.body;
     if (linkedItemIds !== undefined && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) return res.status(403).json({ error: 'Job Cards is not available on this business subscription' });
     const data = { ...body };
 

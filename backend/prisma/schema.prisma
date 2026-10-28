@@ -1167,6 +1167,7 @@ model Product {
   tenantId         String
   branchId         String?
   branch           Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdByUserId  String?
   isActive         Boolean       @default(true)
   image            String?
   imagePublicId    String?
