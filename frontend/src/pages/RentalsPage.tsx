@@ -1,5 +1,5 @@
 import { appConfirm } from '@/lib/appFeedback'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Sparkles, CalendarCheck, Printer } from 'lucide-react'
 import { apiFetch, rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
@@ -16,6 +16,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalRentals, getLocalBranches, getLocalProducts, getLocalSettings } from '@/db/hybrid'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const localDateInput = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
@@ -122,7 +123,6 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [generatingContract, setGeneratingContract] = useState(false)
   const [contractDraftValue, setContractDraftValue] = useState('')
   const [savingContract, setSavingContract] = useState(false)
-  const formRef = useRef<HTMLDivElement>(null)
 
   // Return form state
   const [returnConditions, setReturnConditions] = useState<Record<string, string>>({})
@@ -285,9 +285,6 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setManualRenter(false)
     setBookingPurpose('')
     loadRentalItems()
-    setTimeout(() => {
-      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 100)
   }
 
   useEffect(() => {
@@ -980,12 +977,10 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       </Card>
 
       {/* New Rental Form */}
-      {showForm && (
-        <Card ref={formRef}>
-          <CardHeader>
-            <CardTitle>New rental booking</CardTitle>
-            <p className="text-sm text-muted-foreground">Choose a renter, add items, then reserve a future date or check them out immediately. Availability is checked before saving.</p>
-          </CardHeader>
+      <Dialog open={showForm} onOpenChange={open => { if (!open) setShowForm(false) }}>
+        {showForm && <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader><DialogTitle>New rental booking</DialogTitle><DialogDescription>Choose a renter, add items, then reserve a future date or check them out immediately. Availability is checked before saving.</DialogDescription></DialogHeader>
+        <Card className="border-0 p-0 shadow-none">
           <CardContent>
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div className="space-y-2">
@@ -1330,7 +1325,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 <Label htmlFor="notes">Notes</Label>
                 <Textarea
                   id="notes"
-                  aiWritingField
+                  aiWritingField="rental booking notes"
                   className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
@@ -1350,14 +1345,14 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             </form>
           </CardContent>
         </Card>
-      )}
+        </DialogContent>}
+      </Dialog>
 
       {/* Return Form */}
-      {showReturnForm && returningRental && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Process Return — {returningRental.rentalNo}</CardTitle>
-          </CardHeader>
+      <Dialog open={showReturnForm && Boolean(returningRental)} onOpenChange={open => { if (!open) setShowReturnForm(false) }}>
+        {showReturnForm && returningRental && <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader><DialogTitle>Process return · {returningRental.rentalNo}</DialogTitle><DialogDescription>Inspect each item and record its returned condition.</DialogDescription></DialogHeader>
+        <Card className="border-0 p-0 shadow-none">
           <CardContent className="space-y-4">
             <div className="text-sm text-muted-foreground">
               Customer: {returningRental.customer?.name || 'Walk-in'} | 
@@ -1426,7 +1421,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             </div>
           </CardContent>
         </Card>
-      )}
+        </DialogContent>}
+      </Dialog>
     </div>
   )
 }

@@ -227,6 +227,7 @@ const PERMISSION_TO_FEATURES = {
   canCreateTenancies: ['property_management.landlord', 'property_management.agent'],
   canEndTenancies: ['property_management.landlord', 'property_management.agent'],
   canManageTenancies: ['property_management.landlord', 'property_management.agent'],
+  canEditRentPeriods: ['property_management.landlord', 'property_management.agent'],
   canRecordRentPayment: ['property_management.landlord', 'property_management.agent'],
   canRecordTenantDeposit: ['property_management.landlord', 'property_management.agent'],
   canRefundTenantDeposit: ['property_management.landlord', 'property_management.agent'],
@@ -376,7 +377,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewPlanner", "canManagePlanner", "canViewCRM", "canCreateCRM", "canEditCRM", "canDeleteCRM",
   "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
-  "canCreateTenancies", "canEndTenancies", "canManageTenancies", "canRecordRentPayment", "canRecordTenantDeposit",
+  "canCreateTenancies", "canEndTenancies", "canManageTenancies", "canEditRentPeriods", "canRecordRentPayment", "canRecordTenantDeposit",
   "canRefundTenantDeposit", "canVoidRentPayment", "canManageRentPayment", "canViewRentPaymentPlans", "canManageRentPaymentPlans",
   "canViewPropertyReports", "canRecordOwnerPayout", "canViewPropertySales", "canCreatePropertySale",
   "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
@@ -985,6 +986,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canCreateTenancies: { name: 'Create tenancies', description: 'Create tenancy agreements and assign tenants to vacant units.' },
   canEndTenancies: { name: 'End tenancies', description: 'End an active tenancy after reviewing any outstanding rent.' },
   canManageTenancies: { name: 'Manage tenancies (legacy)', description: 'Legacy combined permission for creating and ending tenancy agreements.' },
+  canEditRentPeriods: { name: 'Correct rent periods', description: 'Correct an existing rent charge period and its accounting date while preserving receipts and payment allocations.' },
   canRecordRentPayment: { name: 'Record rent payments', description: 'Record tenant rent receipts and allocate them against outstanding rent periods.' },
   canRecordTenantDeposit: { name: 'Record tenant deposits', description: 'Collect security deposits and post them to the tenant-deposit liability account.' },
   canRefundTenantDeposit: { name: 'Refund tenant deposits', description: 'Refund held security deposits with permission-checked cash movements and a reason.' },
@@ -1221,7 +1223,7 @@ function permissionCategoryForKey(key) {
     'canCreateWithdrawal',
   ].includes(key)) return 'transactions';
   if (key.startsWith('canUse')) return 'payment_methods';
-  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('TenantPersonalDetails') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('TenantPersonalDetails') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Report') || key === 'canExportReport') return 'reports';
   if (key.includes('Receipt')) return 'receipts';
   if (key.includes('Sale') || key === 'canGiveDiscount') return 'sales';
@@ -1251,7 +1253,7 @@ function permissionCategoryForKey(key) {
   if (key.includes('Rental')) return 'rentals';
   if (key.includes('Planner')) return 'planner';
   if (key.includes('CRM')) return 'crm';
-  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Restaurant')) return 'restaurant';
   if (key.includes('FuelStation')) return 'fuel_station';
   if (key.includes('Manufacturing')) return 'manufacturing';

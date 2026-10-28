@@ -4,7 +4,7 @@ import multer from 'multer'
 import prisma from '../db.js'
 import { authenticateToken, requirePermission, requireAnyPermission, loadUserPermissions, canUseTransactionAccountForPayment } from '../../middleware/auth.js'
 import { requireAnyFeature, getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js'
-import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, propertyRentPlanReclassificationLines, propertyRentPlanReceiptLines, propertyRentPlanCancellationLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines, propertyLandPurchaseLines, propertyLandPurchasePaymentLines } from '../services/propertyAccountingService.js'
+import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordPropertyCashMovement, postPropertyJournal, reversePropertyJournal, propertyRentChargeLines, propertyRentReceiptLines, rentAdvanceApplicationLines, propertyRentPlanReclassificationLines, propertyRentPlanReceiptLines, propertyRentPlanCancellationLines, propertyDepositReceiptLines, propertyOwnerPayoutLines, propertySaleOwnerPayoutLines, propertyDepositRefundLines, propertyOpeningDepositLines, propertySaleRecognitionLines, propertySalePaymentLines, propertyLandAcquisitionLines, propertyLandPurchaseLines, propertyLandPurchasePaymentLines } from '../services/propertyAccountingService.js'
 import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '../services/payablesAccountingService.js'
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
@@ -18,6 +18,62 @@ const dueDateFor = (period, dueDay) => {
   const [year, month] = period.split('-').map(Number)
   const day = Math.min(Math.max(Number(dueDay) || 1, 1), new Date(Date.UTC(year, month, 0)).getUTCDate())
   return new Date(Date.UTC(year, month - 1, day, 12))
+}
+
+async function applyRentAdvancesToCharge(tx, { tenantId, userId, charge }) {
+  await tx.$queryRaw`SELECT "id" FROM "rent_charges" WHERE "id" = ${charge.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+  charge = await tx.rentCharge.findFirst({ where: { id: charge.id, tenantId } })
+  if (!charge) return null
+  const planned = await tx.rentPaymentPlanChargeAllocation.findFirst({ where: { chargeId: charge.id, plan: { status: 'active' } }, select: { id: true } })
+  if (planned) return charge
+  let remaining = money(Math.max(0, Number(charge.amount) - Number(charge.amountPaid)))
+  if (!remaining) return charge
+  const payments = await tx.propertyRentPayment.findMany({
+    where: { tenantId, tenancyId: charge.tenancyId, status: 'posted', paymentType: 'rent', advanceAmount: { gt: 0 } },
+    orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+  })
+  for (const payment of payments) {
+    if (remaining <= 0.001) break
+    const applied = money(Math.min(remaining, Number(payment.advanceAmount || 0)))
+    if (!applied) continue
+    const updatedPayment = await tx.propertyRentPayment.updateMany({
+      where: { id: payment.id, tenantId, status: 'posted', advanceAmount: { gte: applied } },
+      data: { advanceAmount: { decrement: applied } },
+    })
+    if (updatedPayment.count !== 1) continue
+    await tx.rentPaymentAllocation.create({ data: { paymentId: payment.id, chargeId: charge.id, amount: applied, advanceAppliedAmount: applied } })
+    const nextPaid = money(Number(charge.amountPaid || 0) + applied)
+    charge = await tx.rentCharge.update({
+      where: { id: charge.id },
+      data: { amountPaid: nextPaid, status: nextPaid + 0.001 >= Number(charge.amount) ? 'paid' : 'partial' },
+    })
+    const config = await ensurePropertyAccounting(tx, tenantId)
+    const reference = `${charge.period}-${payment.receiptNo}`
+    await postPropertyJournal(tx, {
+      tenantId, userId, sourceType: 'PROPERTY_RENT_ADVANCE_APPLICATION', sourceId: `${payment.id}-${charge.id}`,
+      date: charge.dueDate, reference, description: `Apply advance rent payment ${payment.receiptNo} to ${charge.period}`,
+      lines: rentAdvanceApplicationLines(config, { amount: applied, reference }),
+    })
+    remaining = money(remaining - applied)
+  }
+  return charge
+}
+async function ensureRentChargeForPeriod(tx, { tenancy, period, userId }) {
+  const dueDate = dueDateFor(period, tenancy.dueDay)
+  if (new Date(tenancy.startDate) > dueDate || (tenancy.endDate && new Date(tenancy.endDate) < dueDate)) return null
+  const charge = await tx.rentCharge.upsert({
+    where: { tenancyId_period: { tenancyId: tenancy.id, period } },
+    update: {},
+    create: { tenantId: tenancy.tenantId, tenancyId: tenancy.id, period, dueDate, amount: tenancy.rentAmount, status: dueDate < new Date() ? 'overdue' : 'unpaid', description: `Rent for ${period}` },
+  })
+  const config = await ensurePropertyAccounting(tx, tenancy.tenantId)
+  await postPropertyJournal(tx, {
+    tenantId: tenancy.tenantId, userId, sourceType: 'PROPERTY_RENT_CHARGE', sourceId: charge.id,
+    date: charge.dueDate, reference: `RENT-${tenancy.id}-${period}`,
+    description: `Rent charge for ${tenancy.tenantName}, ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`,
+    lines: propertyRentChargeLines(config, { amount: charge.amount, managed: Boolean(tenancy.unit.property.ownerId), description: `Rent ${period}` }),
+  })
+  return applyRentAdvancesToCharge(tx, { tenantId: tenancy.tenantId, userId, charge })
 }
 const planDueDate = (startDate, sequence, frequency) => {
   const date = new Date(startDate)
@@ -327,14 +383,16 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
   } catch (error) { console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
 })
 
-router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies']), async (req, res) => {
+router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies', 'canEditRentPeriods']), async (req, res) => {
   try {
     const where = { tenantId: tenantIdOf(req), ...(req.query.status && req.query.status !== 'all' ? { status: String(req.query.status) } : {}), ...(req.query.ownerId ? { unit: { property: { ownerId: String(req.query.ownerId) } } } : {}) }
-    const rows = await prisma.propertyTenancy.findMany({ where, take: pageSize(req.query.limit), orderBy: [{ status: 'asc' }, { tenantName: 'asc' }], include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, orderBy: { dueDate: 'asc' } } } })
+    const rows = await prisma.propertyTenancy.findMany({ where, take: pageSize(req.query.limit), orderBy: [{ status: 'asc' }, { tenantName: 'asc' }], include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } }, orderBy: { dueDate: 'asc' } }, payments: { where: { status: 'posted', paymentType: 'rent' }, select: { advanceAmount: true } } } })
     res.json(rows.map(row => {
       const { nationalId, maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin, ...details } = row
       const aging = calculateRentAging(row.charges)
-      return { ...details, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), ...(canViewTenantPersonalDetails(req) ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance: money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)), overdueBalance: aging.overdueTotal, arrearsAging: aging }
+      const currentRentBalance = money(row.charges.filter(charge => charge.period === monthKey(new Date())).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
+      const balance = money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
+      return { ...details, payments: undefined, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), ...(canViewTenantPersonalDetails(req) ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance, currentRentBalance, arrearsBalance: money(Math.max(0, balance - currentRentBalance)), rentAdvanceBalance: money(row.payments.reduce((sum, payment) => sum + Number(payment.advanceAmount || 0), 0)), overdueBalance: aging.overdueTotal, arrearsAging: aging }
     }))
   } catch (error) { console.error('List property tenancies failed:', error); res.status(500).json({ error: 'Could not load tenancies.' }) }
 })
@@ -489,7 +547,7 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
     const allCharges = tenancies.flatMap(row => row.charges)
     const entries = tenancies.flatMap(tenancy => [
       ...tenancy.charges.map(charge => ({ id: charge.id, tenancyId: tenancy.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: `${charge.description} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: charge.amount, credit: 0, status: charge.status })),
-      ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: payment.paymentType === 'rent_plan' ? 'rent_plan_payment' : 'rent_payment', reference: payment.receiptNo, description: `${payment.paymentType === 'rent_plan' ? 'Rent payment plan receipt' : 'Rent payment'} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, currency: tenancy.currency, planNo: payment.rentPaymentPlan?.planNo, cashAccountName: payment.cashAccount?.name, transactionRef: payment.transactionRef, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
+      ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: payment.paymentType === 'rent_plan' ? 'rent_plan_payment' : 'rent_payment', reference: payment.receiptNo, description: `${payment.paymentType === 'rent_plan' ? 'Rent payment plan receipt' : `Rent payment${payment.rentMonths ? ` · ${payment.rentMonths} month(s)` : ''}${payment.arrearsMonths ? ` · ${payment.arrearsMonths} arrears month(s)` : ''}`} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, currency: tenancy.currency, rentMonths: payment.rentMonths, arrearsMonths: payment.arrearsMonths, planNo: payment.rentPaymentPlan?.planNo, cashAccountName: payment.cashAccount?.name, transactionRef: payment.transactionRef, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
     ]).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     let balance = 0
     for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
@@ -498,7 +556,7 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
       customer: { id: customer.id, name: customer.name, ...(includeIdentity ? { profilePhotoUrl: identity?.profilePhotoUrl, nationalId: customer.nin, nationalIdFrontUrl: identity?.nationalIdFrontUrl, nationalIdBackUrl: identity?.nationalIdBackUrl } : {}) },
       tenancies: tenancies.map(({ charges, payments, identity: _identity, ...tenancy }) => {
         const { nationalId, maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin, ...details } = tenancy
-        return { ...details, ...(includeIdentity ? { nationalId } : {}), ...(includePersonalDetails ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance: money(charges.reduce((sum, charge) => sum + charge.amount - charge.amountPaid, 0)), arrearsAging: calculateRentAging(charges) }
+        return { ...details, ...(includeIdentity ? { nationalId } : {}), ...(includePersonalDetails ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance: money(charges.reduce((sum, charge) => sum + charge.amount - charge.amountPaid, 0)), rentAdvanceBalance: money(payments.filter(payment => payment.paymentType === 'rent').reduce((sum, payment) => sum + Number(payment.advanceAmount || 0), 0)), arrearsAging: calculateRentAging(charges) }
       }),
       entries,
       closingBalance: balance,
@@ -740,6 +798,106 @@ router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canM
   } catch (error) { console.error('End tenancy failed:', error); res.status(500).json({ error: 'Could not end tenancy.' }) }
 })
 
+router.get('/tenancies/:id/rent-periods', requirePermission('canEditRentPeriods'), async (req, res) => {
+  try {
+    const tenancy = await prisma.propertyTenancy.findFirst({
+      where: { id: req.params.id, tenantId: tenantIdOf(req) },
+      select: {
+        id: true, tenantName: true, currency: true,
+        unit: { select: { unitCode: true, property: { select: { name: true } } } },
+        charges: {
+          orderBy: [{ dueDate: 'asc' }, { period: 'asc' }],
+          include: { planAllocations: { include: { plan: { select: { status: true } } } } },
+        },
+      },
+    })
+    if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
+    res.json({
+      tenancy: { id: tenancy.id, tenantName: tenancy.tenantName, currency: tenancy.currency, unit: tenancy.unit },
+      periods: tenancy.charges.map(({ planAllocations, ...charge }) => ({
+        ...charge,
+        lockedByActivePlan: planAllocations.some(allocation => allocation.plan.status === 'active'),
+      })),
+    })
+  } catch (error) { console.error('Rent period list failed:', error); res.status(500).json({ error: 'Could not load rent periods.' }) }
+})
+
+router.put('/rent-charges/:id/period', requirePermission('canEditRentPeriods'), async (req, res) => {
+  const period = String(req.body?.period || '').trim()
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) return badRequest(res, 'Choose a valid rent month.')
+  try {
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "rent_charges" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantIdOf(req)} FOR UPDATE`
+      const charge = await tx.rentCharge.findFirst({
+        where: { id: req.params.id, tenantId: tenantIdOf(req) },
+        include: {
+          tenancy: { include: { unit: { include: { property: { select: { name: true, ownerId: true } } } } } },
+          planAllocations: { include: { plan: { select: { status: true } } } },
+        },
+      })
+      if (!charge) throw Object.assign(new Error('Rent period not found.'), { statusCode: 404 })
+      if (charge.planAllocations.some(allocation => allocation.plan.status === 'active')) {
+        throw Object.assign(new Error('This rent period is part of an active repayment plan. Update or complete that plan before correcting the period.'), { statusCode: 409 })
+      }
+      if (charge.period === period) return charge
+      const dueDate = dueDateFor(period, charge.tenancy.dueDay)
+      const dayStamp = value => {
+        const date = new Date(value)
+        return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+      }
+      if (dayStamp(dueDate) < dayStamp(charge.tenancy.startDate) || (charge.tenancy.endDate && dayStamp(dueDate) > dayStamp(charge.tenancy.endDate))) {
+        throw Object.assign(new Error('The corrected rent month must fall within the tenancy dates.'), { statusCode: 400 })
+      }
+      const duplicate = await tx.rentCharge.findFirst({ where: { tenantId: tenantIdOf(req), tenancyId: charge.tenancyId, period, NOT: { id: charge.id } }, select: { id: true } })
+      if (duplicate) throw Object.assign(new Error('A rent charge already exists for that month. Choose another period.'), { statusCode: 409 })
+
+      const journalCandidates = await tx.journalEntry.findMany({
+        where: {
+          tenantId: tenantIdOf(req), status: 'posted', reversalJournalId: null,
+          OR: [
+            { sourceType: 'PROPERTY_RENT_CHARGE', sourceId: charge.id },
+            { sourceType: 'PROPERTY_RENT_CHARGE_PERIOD_CORRECTION', sourceId: { startsWith: `${charge.id}-` } },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { sourceType: true, sourceId: true },
+      })
+      for (const journal of journalCandidates) {
+        await reversePropertyJournal(tx, {
+          tenantId: tenantIdOf(req), sourceType: journal.sourceType, sourceId: journal.sourceId,
+          userId: req.user.id, reason: `Rent period corrected from ${charge.period} to ${period}`,
+        })
+      }
+
+      const updated = await tx.rentCharge.update({
+        where: { id: charge.id },
+        data: {
+          period, dueDate, description: `Rent for ${period}`,
+          status: Number(charge.amountPaid) + 0.001 >= Number(charge.amount) ? 'paid'
+            : Number(charge.amountPaid) > 0 ? 'partial'
+              : dueDate < new Date() ? 'overdue' : 'unpaid',
+        },
+      })
+      const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
+      await postPropertyJournal(tx, {
+        tenantId: tenantIdOf(req), userId: req.user.id,
+        sourceType: 'PROPERTY_RENT_CHARGE_PERIOD_CORRECTION', sourceId: `${charge.id}-${randomUUID()}`,
+        date: dueDate, reference: `RENT-${charge.tenancyId}-${period}`,
+        description: `Corrected rent charge for ${charge.tenancy.tenantName}, ${charge.tenancy.unit.property.name} / ${charge.tenancy.unit.unitCode}`,
+        lines: propertyRentChargeLines(config, {
+          amount: charge.amount, managed: Boolean(charge.tenancy.unit.property.ownerId), description: `Rent ${period}`,
+        }),
+      })
+      return updated
+    }, { maxWait: 10000, timeout: 30000 })
+    res.json(result)
+  } catch (error) {
+    const status = error.statusCode || (error.code === 'P2002' ? 409 : 500)
+    if (status === 500) console.error('Rent period correction failed:', error)
+    res.status(status).json({ error: status === 500 ? 'Could not correct rent period.' : error.message })
+  }
+})
+
 router.get('/tenancies/:id/statement', requirePermission('canViewPropertyStatements'), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { select: { name: true, owner: { select: { name: true } } } } } }, charges: { orderBy: { dueDate: 'asc' }, include: { allocations: { include: { payment: true } } } }, payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan'] } }, orderBy: { paymentDate: 'asc' }, include: { allocations: { include: { charge: true } } } } } })
@@ -768,6 +926,10 @@ router.get('/reports/tenancies', requirePermission('canViewPropertyStatements'),
 
 router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment'), async (req, res) => {
   const amount = money(req.body?.amount)
+  const rentMonths = req.body?.rentMonths == null || req.body?.rentMonths === '' ? null : Number(req.body.rentMonths)
+  const arrearsMonths = req.body?.arrearsMonths == null || req.body?.arrearsMonths === '' ? 0 : Number(req.body.arrearsMonths)
+  if (rentMonths !== null && (!Number.isInteger(rentMonths) || rentMonths < 1 || rentMonths > 36)) return badRequest(res, 'Choose between 1 and 36 months of rent.')
+  if (!Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120) return badRequest(res, 'Choose between 0 and 120 missing prior rent months.')
   if (!Number.isFinite(amount) || amount <= 0) return badRequest(res, 'Enter a payment amount greater than zero.')
   const allowedMethods = new Set(['cash', 'safe', 'mobile_money', 'bank_transfer', 'bank', 'card', 'cheque'])
   const method = String(req.body?.paymentMethod || 'cash').toLowerCase()
@@ -788,19 +950,44 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
       const prior = await tx.propertyRentPayment.findFirst({ where: { tenantId, idempotencyKey }, include: { tenancy: { include: { unit: { include: { property: true } } } }, allocations: { include: { charge: true } } } })
       if (prior) return prior
       await tx.$queryRaw`SELECT "id" FROM "property_tenancies" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
-      const tenancy = await tx.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId, status: { in: ['active', 'ended'] } }, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } }, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }] } } })
+      const tenancy = await tx.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId, status: { in: ['active', 'ended'] } }, include: { unit: { include: { property: { select: { name: true, ownerId: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } }, orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }] } } })
       if (!tenancy) throw Object.assign(new Error('Tenancy not found.'), { statusCode: 404 })
-      const open = tenancy.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
-      if (amount - open > 0.01) throw Object.assign(new Error(`Payment exceeds outstanding rent of ${tenancy.currency} ${money(open).toLocaleString()}.`), { statusCode: 400 })
+      const now = new Date()
+      const currentPeriod = monthKey(now)
+      const existingPeriods = new Set((await tx.rentCharge.findMany({ where: { tenantId, tenancyId: tenancy.id }, select: { period: true } })).map(charge => charge.period))
+      const arrearsPeriods = []
+      for (let offset = 1; offset <= 1200 && arrearsPeriods.length < arrearsMonths; offset++) {
+        const periodDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1))
+        const priorPeriod = monthKey(periodDate)
+        const priorDueDate = dueDateFor(priorPeriod, tenancy.dueDay)
+        if (new Date(tenancy.startDate) > priorDueDate) break
+        if (tenancy.endDate && new Date(tenancy.endDate) < priorDueDate) continue
+        if (!existingPeriods.has(priorPeriod)) arrearsPeriods.push(priorPeriod)
+      }
+      if (arrearsPeriods.length < arrearsMonths) throw Object.assign(new Error('There are not enough missing rent months within this tenancy to add the selected arrears.'), { statusCode: 400 })
+      for (const priorPeriod of arrearsPeriods.reverse()) await ensureRentChargeForPeriod(tx, { tenancy, period: priorPeriod, userId: req.user.id })
+      if (tenancy.status === 'active') await ensureRentChargeForPeriod(tx, { tenancy, period: currentPeriod, userId: req.user.id })
+      const charges = await tx.rentCharge.findMany({
+        where: { tenantId, tenancyId: tenancy.id, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
+        orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
+      })
+      const open = charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
+      const currentOpen = charges.filter(charge => charge.period === currentPeriod).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
+      if (rentMonths === null && amount - open > 0.01) throw Object.assign(new Error(`Payment exceeds outstanding rent of ${tenancy.currency} ${money(open).toLocaleString()}. Choose a rent period in months to record rent paid ahead.`), { statusCode: 400 })
+      const additionalMonths = rentMonths === null || tenancy.status !== 'active' ? 0 : Math.max(0, rentMonths - (currentOpen > 0.01 ? 1 : 0))
+      const maximumPeriodAmount = money(open + Number(tenancy.rentAmount) * additionalMonths)
+      if (rentMonths !== null && amount - maximumPeriodAmount > 0.01) throw Object.assign(new Error(`The amount exceeds recorded arrears/current rent plus the selected ${rentMonths} month(s) at the agreed rate.`), { statusCode: 400 })
+      const appliedAtReceipt = money(Math.min(amount, open))
+      const advanceAmount = money(amount - appliedAtReceipt)
       const receiptNo = `RENT-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       const account = await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
       if (!account || account.type !== expectedType) throw Object.assign(new Error('Selected transaction account is no longer available; reload and retry.'), { statusCode: 409 })
-      const record = await tx.propertyRentPayment.create({ data: { tenantId, tenancyId: tenancy.id, cashAccountId: account.id, receiptNo, idempotencyKey, amount, paymentDate, paymentMethod: method, transactionRef: req.body.transactionRef?.trim() || null, notes: req.body.notes?.trim() || null, paymentType: 'rent' } })
+      const record = await tx.propertyRentPayment.create({ data: { tenantId, tenancyId: tenancy.id, cashAccountId: account.id, receiptNo, idempotencyKey, amount, advanceAmount, rentMonths, arrearsMonths, paymentDate, paymentMethod: method, transactionRef: req.body.transactionRef?.trim() || null, notes: req.body.notes?.trim() || null, paymentType: 'rent' } })
       const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: account, amount, direction: 'receipt', reference: receiptNo, description: `Property rent received from ${tenancy.tenantName}` })
       const config = await ensurePropertyAccounting(tx, tenantId)
-      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PAYMENT', sourceId: record.id, date: paymentDate, reference: receiptNo, description: `Rent payment received from ${tenancy.tenantName}`, lines: propertyRentReceiptLines(config, { amount, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo }) })
+      await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PAYMENT', sourceId: record.id, date: paymentDate, reference: receiptNo, description: `Rent payment received from ${tenancy.tenantName}`, lines: propertyRentReceiptLines(config, { amount, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo, appliedAmount: appliedAtReceipt, advanceAmount }) })
       let remaining = amount
-      for (const charge of tenancy.charges) {
+      for (const charge of charges) {
         if (remaining <= 0.001) break
         const due = money(Math.max(0, charge.amount - charge.amountPaid))
         const applied = money(Math.min(remaining, due))
@@ -856,6 +1043,11 @@ router.post('/payments/:id/void', requireAnyPermission(['canVoidRentPayment', 'c
       const reversalRef = `VOID-${payment.receiptNo}`
       const isDepositRefund = payment.paymentType === 'deposit_refund'
       await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: payment.cashAccount, amount: payment.amount, direction: isDepositRefund ? 'receipt' : 'expense', reference: reversalRef, description: `Void property receipt ${payment.receiptNo}` })
+      for (const allocation of payment.allocations) {
+        if (Number(allocation.advanceAppliedAmount || 0) > 0) {
+          await reversePropertyJournal(tx, { tenantId, sourceType: 'PROPERTY_RENT_ADVANCE_APPLICATION', sourceId: `${payment.id}-${allocation.chargeId}`, userId: req.user.id, reason })
+        }
+      }
       const journalSource = payment.rentPaymentPlanId ? 'PROPERTY_RENT_PLAN_PAYMENT' : payment.paymentType === 'deposit' ? 'PROPERTY_DEPOSIT_RECEIPT' : isDepositRefund ? 'PROPERTY_DEPOSIT_REFUND' : 'PROPERTY_RENT_PAYMENT'
       await reversePropertyJournal(tx, { tenantId, sourceType: journalSource, sourceId: payment.id, userId: req.user.id, reason })
       if (payment.paymentType === 'deposit' || isDepositRefund) {
@@ -1026,6 +1218,7 @@ export async function runPropertyRentAutomation(now = new Date()) {
         if (!user) throw new Error(`Cannot post property rent charge for tenant ${tenancy.tenantId}: no active user is available for the system journal.`)
         const config = await ensurePropertyAccounting(tx, tenancy.tenantId)
         await postPropertyJournal(tx, { tenantId: tenancy.tenantId, userId: user.id, sourceType: 'PROPERTY_RENT_CHARGE', sourceId: charge.id, date: dueDate, reference: `RENT-${tenancy.id}-${period}`, description: `Rent charge for ${tenancy.tenantName}, ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, lines: propertyRentChargeLines(config, { amount: charge.amount, managed: Boolean(tenancy.unit.property.ownerId), description: `Rent ${period}` }) })
+        await applyRentAdvancesToCharge(tx, { tenantId: tenancy.tenantId, userId: user.id, charge })
       })
     }
   }
@@ -1119,12 +1312,15 @@ router.post('/owners/:id/payouts', requirePermission('canRecordOwnerPayout'), as
       await tx.$queryRaw`SELECT "id" FROM "property_owners" WHERE "id" = ${req.params.id} AND "tenantId" = ${tenantId} FOR UPDATE`
       const owner = await tx.propertyOwner.findFirst({ where: { id: req.params.id, tenantId } })
       if (!owner) throw Object.assign(new Error('Property owner not found.'), { statusCode: 404 })
-      const [received, paid, config] = await Promise.all([
+      const [received, accrued, paid, config] = await Promise.all([
         tx.propertyRentPayment.aggregate({ where: { tenantId, status: 'posted', paymentType: 'rent', tenancy: { unit: { property: { ownerId: owner.id } } } }, _sum: { amount: true } }),
+        tx.rentCharge.aggregate({ where: { tenantId, tenancy: { unit: { property: { ownerId: owner.id } } } }, _sum: { amount: true } }),
         tx.propertyOwnerPayout.aggregate({ where: { tenantId, ownerId: owner.id, payoutType: 'rent', status: 'posted' }, _sum: { amount: true } }),
         ensurePropertyAccounting(tx, tenantId),
       ])
-      const available = money(Number(received._sum.amount || 0) - Number(paid._sum.amount || 0))
+      const collected = Number(received._sum.amount || 0)
+      const accruedRent = Number(accrued._sum.amount || 0)
+      const available = money(Math.max(0, Math.min(collected, accruedRent) - Number(paid._sum.amount || 0)))
       if (amount - available > 0.01) throw Object.assign(new Error(`Payout exceeds collected, unpaid owner funds of ${available.toLocaleString()}.`), { statusCode: 409 })
       const ref = `OWN-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       const record = await tx.propertyOwnerPayout.create({ data: { tenantId, ownerId: owner.id, cashAccountId: account.id, amount, payoutDate, reference: req.body.reference?.trim() || ref, notes: req.body.notes?.trim() || null, idempotencyKey, createdById: req.user.id } })

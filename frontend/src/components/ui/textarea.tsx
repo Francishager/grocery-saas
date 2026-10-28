@@ -3,7 +3,7 @@ import * as React from "react"
 import { cn } from "@/lib/utils"
 import { AIWritingAssist } from "@/components/AIWritingAssist"
 
-type TextareaProps = React.ComponentProps<"textarea"> & { aiWritingField?: boolean }
+type TextareaProps = React.ComponentProps<"textarea"> & { aiWritingField?: boolean | string }
 
 function Textarea({ className, aiWritingField = false, ...props }: TextareaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
@@ -29,7 +29,7 @@ function Textarea({ className, aiWritingField = false, ...props }: TextareaProps
     element.dispatchEvent(new Event('input', { bubbles: true }))
   }
 
-  return <div className="space-y-1.5"><div className="flex justify-end empty:hidden"><AIWritingAssist module="general" field="business text" onUse={applyDraft} /></div>{textarea}</div>
+  return <div className="space-y-1.5"><div className="flex justify-end empty:hidden"><AIWritingAssist module="general" field={typeof aiWritingField === 'string' ? aiWritingField : 'business text'} onUse={applyDraft} /></div>{textarea}</div>
 }
 
 export { Textarea }

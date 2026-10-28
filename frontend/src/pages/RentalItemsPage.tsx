@@ -13,6 +13,7 @@ import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
 import { formatCurrency } from '@/lib/utils'
 import { useOnlineStatus } from '@/db/hooks'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 type RentalPeriod = 'hourly' | 'daily' | 'weekly' | 'weekend' | 'monthly' | 'custom'
 type RentalAssetForm = {
@@ -291,9 +292,10 @@ export default function RentalItemsPage() {
       {canCreate && <Button onClick={beginCreate}><Plus className="mr-2 h-4 w-4" />Add rental item</Button>}
     </header>
 
-    {showForm && <Card>
-      <CardHeader><CardTitle>{editing ? 'Edit rental item' : 'New rental item'}</CardTitle></CardHeader>
-      <CardContent><form onSubmit={submit} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <Dialog open={showForm} onOpenChange={open => { if (!open) setShowForm(false) }}>
+      <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-4xl">
+      <DialogHeader><DialogTitle>{editing ? 'Edit rental item' : 'New rental item'}</DialogTitle><DialogDescription>Update the hire asset details, rate, availability, and description.</DialogDescription></DialogHeader>
+      <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="space-y-2 sm:col-span-2 xl:col-span-3">
           <Label htmlFor="rental-item-image">Item image</Label>
           <div className="flex flex-wrap items-center gap-4">
@@ -339,11 +341,12 @@ export default function RentalItemsPage() {
         <div className="space-y-1"><Label htmlFor="rental-item-replacement">Replacement value</Label><Input id="rental-item-replacement" type="number" min="0" step="any" value={form.replacementValue} onChange={event => setForm(v => ({ ...v, replacementValue: event.target.value }))} /></div>
         <div className="space-y-1"><Label htmlFor="rental-item-cost">Acquisition cost *</Label><Input id="rental-item-cost" type="number" min="0" step="any" value={form.cost_price} onChange={event => setForm(v => ({ ...v, cost_price: event.target.value }))} required /></div>
         {!editing && <div className="space-y-1"><Label htmlFor="rental-item-branch">Owning branch *</Label><select id="rental-item-branch" value={form.branchId} onChange={event => setForm(v => ({ ...v, branchId: event.target.value }))} className="h-10 w-full rounded-md border bg-background px-3 text-sm" required><option value="">Select branch</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>}
-        <div className="space-y-1 sm:col-span-2 xl:col-span-3"><Label htmlFor="rental-item-description">Description / identifying details</Label><Textarea id="rental-item-description" aiWritingField value={form.description} onChange={event => setForm(v => ({ ...v, description: event.target.value }))} maxLength={2000} /></div>
+        <div className="space-y-1 sm:col-span-2 xl:col-span-3"><Label htmlFor="rental-item-description">Description / identifying details</Label><Textarea id="rental-item-description" aiWritingField="rental item description" value={form.description} onChange={event => setForm(v => ({ ...v, description: event.target.value }))} maxLength={2000} /></div>
         {editing && <p className="sm:col-span-2 xl:col-span-3 text-xs text-muted-foreground">Owned quantity is changed through controlled stock movements so availability and asset records remain traceable.</p>}
         <div className="flex justify-end gap-2 sm:col-span-2 xl:col-span-3"><Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Add item'}</Button></div>
-      </form></CardContent>
-    </Card>}
+      </form>
+      </DialogContent>
+    </Dialog>
 
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Rental item register</CardTitle><p className="text-sm text-muted-foreground">Items available for hire, with branch and rate details.</p></div>

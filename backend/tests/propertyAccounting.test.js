@@ -7,6 +7,7 @@ import {
   propertyOwnerPayoutLines,
   propertyRentChargeLines,
   propertyRentReceiptLines,
+  rentAdvanceApplicationLines,
   propertyRentPlanReclassificationLines,
   propertyRentPlanReceiptLines,
   propertyRentPlanCancellationLines,
@@ -93,6 +94,19 @@ test('rent receipts and landlord payouts settle their respective control account
   balanced(receipt); balanced(payout)
 })
 
+test('multi-month rent receipt separates due rent from unearned tenant advance', () => {
+  const rentConfig = { ...config, rentAdvanceAccountId: 'rent-advance' }
+  const receipt = propertyRentReceiptLines(rentConfig, { amount: 1500000, appliedAmount: 500000, advanceAmount: 1000000, cashAccountLedgerId: 'cash', reference: 'R-3M' })
+  const application = rentAdvanceApplicationLines(rentConfig, { amount: 500000, reference: 'R-3M-2026-11' })
+  assert.deepEqual(receipt.map(line => [line.accountId, line.debit, line.credit]), [
+    ['cash', 1500000, 0], ['rent-ar', 0, 500000], ['rent-advance', 0, 1000000],
+  ])
+  assert.deepEqual(application.map(line => [line.accountId, line.debit, line.credit]), [
+    ['rent-advance', 500000, 0], ['rent-ar', 0, 500000],
+  ])
+  balanced(receipt); balanced(application)
+})
+
 test('rent payment plans reclass existing arrears without creating income and settle through the plan receivable', () => {
   const reclass = propertyRentPlanReclassificationLines(config, { amount: 240000, reference: 'RPL-1' })
   const receipt = propertyRentPlanReceiptLines(config, { amount: 80000, cashAccountLedgerId: 'cash', reference: 'RPL-RCPT-1' })
@@ -116,7 +130,7 @@ test('tenant deposits remain liabilities on receipt, opening migration, and refu
 
 test('property permissions are exposed under the Property Management category', () => {
   const keys = [
-    'canViewPropertyPortfolio', 'canViewPropertyCollections', 'canViewPropertyStatements', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails', 'canViewRentPaymentPlans', 'canManageRentPaymentPlans',
+    'canViewPropertyPortfolio', 'canViewPropertyCollections', 'canViewPropertyStatements', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails', 'canViewRentPaymentPlans', 'canManageRentPaymentPlans', 'canEditRentPeriods',
     'canManagePropertyOwners', 'canManageProperties', 'canManagePropertyUnits',
     'canCreateTenancies', 'canEndTenancies', 'canRecordRentPayment', 'canRecordTenantDeposit',
     'canRefundTenantDeposit', 'canVoidRentPayment', 'canViewPropertyReports', 'canRecordOwnerPayout',
@@ -137,6 +151,9 @@ test('legacy property view grants portfolio access without granting financial hi
 test('property permissions require an explicit landlord or property-agent feature', () => {
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management.landlord'])), true)
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management.agent'])), true)
+  assert.equal(permissionAllowedForTenant('canEditRentPeriods', new Set(['property_management.landlord'])), true)
+  assert.equal(permissionAllowedForTenant('canEditRentPeriods', new Set(['property_management.agent'])), true)
+  assert.equal(permissionAllowedForTenant('canEditRentPeriods', new Set(['property_management'])), false)
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management'])), false)
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set()), false)
 })

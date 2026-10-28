@@ -2917,6 +2917,9 @@ model PropertyRentPayment {
   receiptNo        String
   idempotencyKey   String?
   amount           Float
+  advanceAmount    Float                  @default(0)
+  rentMonths       Int?
+  arrearsMonths    Int?
   paymentDate      DateTime               @default(now())
   paymentMethod    String                 @default("cash")
   transactionRef   String?
@@ -3087,6 +3090,7 @@ model RentPaymentAllocation {
   chargeId       String
   charge         RentCharge          @relation(fields: [chargeId], references: [id], onDelete: Restrict)
   amount         Float
+  advanceAppliedAmount Float             @default(0)
   createdAt      DateTime            @default(now())
 
   @@unique([paymentId, chargeId])

@@ -48,12 +48,14 @@ export async function ensurePropertyAccounting(tx, tenantId) {
   }
   const distinct = new Set(Object.values(values))
   if (distinct.size !== roles.length) throw Object.assign(new Error('Property Management system accounts must be distinct.'), { statusCode: 409 })
-  return tx.propertyAccountingConfig.upsert({
+  const rentAdvance = await ensureAccount(tx, tenantId, 'rentAdvance', 'Tenant Rent Advances', 'PM-2265', 'liability', 'current_liability', accounts)
+  const config = await tx.propertyAccountingConfig.upsert({
     where: { tenantId },
     create: { tenantId, ...values, isEnabled: true, isSystemManaged: true },
     update: { ...values, isEnabled: true, isSystemManaged: true },
     include: { rentReceivableAccount: true, rentPlanReceivableAccount: true, rentIncomeAccount: true, ownerPayableAccount: true, depositLiabilityAccount: true },
   })
+  return { ...config, rentAdvanceAccountId: rentAdvance.id }
 }
 
 export async function ensurePropertyCashLedgerAccount(tx, tenantId, cashAccount) {
@@ -151,11 +153,26 @@ export function propertyRentChargeLines(config, { amount, managed, description }
   ]
 }
 
-export function propertyRentReceiptLines(config, { amount, cashAccountLedgerId, reference }) {
+export function propertyRentReceiptLines(config, { amount, cashAccountLedgerId, reference, appliedAmount = amount, advanceAmount = 0 }) {
   const value = money(amount)
+  const applied = money(appliedAmount)
+  const advance = money(advanceAmount)
+  if (Math.abs(value - applied - advance) > 0.01 || (advance > 0 && !config.rentAdvanceAccountId)) {
+    throw Object.assign(new Error('Rent receipt allocation is invalid; applied rent and unapplied advance must equal the receipt.'), { statusCode: 400 })
+  }
   return [
     { accountId: cashAccountLedgerId, debit: value, credit: 0, description: `Rent receipt ${reference}` },
-    { accountId: config.rentReceivableAccountId, debit: 0, credit: value, description: `Tenant rent receivable settled ${reference}` },
+    ...(applied > 0 ? [{ accountId: config.rentReceivableAccountId, debit: 0, credit: applied, description: `Tenant rent receivable settled ${reference}` }] : []),
+    ...(advance > 0 ? [{ accountId: config.rentAdvanceAccountId, debit: 0, credit: advance, description: `Tenant rent paid in advance ${reference}` }] : []),
+  ]
+}
+
+export function rentAdvanceApplicationLines(config, { amount, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !config.rentAdvanceAccountId) throw Object.assign(new Error('Rent advance application is invalid.'), { statusCode: 400 })
+  return [
+    { accountId: config.rentAdvanceAccountId, debit: value, credit: 0, description: `Apply tenant rent advance ${reference}` },
+    { accountId: config.rentReceivableAccountId, debit: 0, credit: value, description: `Settle rent receivable from advance ${reference}` },
   ]
 }
 
