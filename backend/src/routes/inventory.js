@@ -878,7 +878,8 @@ router.get("/categories", authenticateToken, async (req, res) => {
     await ensureTenantCategories(tenantId);
     const sharing = await categorySharingScope(tenantId);
     const where = sharing.where;
-    if (type) where.categoryType = String(type);
+    if (type === 'rental') where.categoryType = { in: ['product', 'rental'] };
+    else if (type) where.categoryType = String(type);
     else if (!(await hasRentalFeature(tenantId))) where.categoryType = { not: 'rental' };
     const categories = await prisma.category.findMany({ where, orderBy: { name: "asc" } });
     categories.sort((a, b) => Number(b.tenantId === tenantId) - Number(a.tenantId === tenantId));
@@ -1045,7 +1046,7 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
       if (!categoryForSku) {
         return res.status(400).json({ error: "Category not found" });
       }
-      if (categoryForSku.categoryType !== itemTypeValue) {
+      if (categoryForSku.categoryType !== itemTypeValue && !(itemTypeValue === 'rental' && categoryForSku.categoryType === 'product')) {
         return res.status(400).json({ error: `Choose a ${itemTypeValue} category for this item` });
       }
     }
@@ -1242,7 +1243,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
           select: { id: true, categoryType: true },
         });
         if (!category) return res.status(400).json({ error: "Category not found" });
-        if (category.categoryType !== itemType) {
+        if (category.categoryType !== itemType && !(itemType === 'rental' && category.categoryType === 'product')) {
           return res.status(400).json({ error: `Choose a ${itemType} category for this item` });
         }
       }

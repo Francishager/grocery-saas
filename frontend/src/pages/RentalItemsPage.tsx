@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Archive, Clock, Edit2, Plus, Search, Trash2 } from 'lucide-react'
+import { Archive, Check, ChevronsUpDown, Clock, Edit2, Plus, Search, Trash2 } from 'lucide-react'
 import { appConfirm } from '@/lib/appFeedback'
 import { branchesApi, categoriesApi, inventoryApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
 import { formatCurrency } from '@/lib/utils'
+import { useOnlineStatus } from '@/db/hooks'
 
 type RentalPeriod = 'hourly' | 'daily' | 'weekly' | 'weekend' | 'monthly' | 'custom'
 type RentalAssetForm = {
@@ -39,14 +40,22 @@ export default function RentalItemsPage() {
   const { toast } = useToast()
   const [items, setItems] = useState<InventoryItem[]>([])
   const [branches, setBranches] = useState<BranchOption[]>([])
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [categories, setCategories] = useState<{ id: string; name: string; categoryType?: string }[]>([])
+  const [categoryQuery, setCategoryQuery] = useState('')
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categoriesLoading, setCategoriesLoading] = useState(false)
+  const [categorySaving, setCategorySaving] = useState(false)
+  const [categoriesError, setCategoriesError] = useState('')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<InventoryItem | null>(null)
   const [form, setForm] = useState<RentalAssetForm>(emptyForm)
   const [showForm, setShowForm] = useState(false)
+  const categoryPickerRef = useRef<HTMLDivElement | null>(null)
+  const online = useOnlineStatus()
   const canCreate = hasPermission('canCreateRental')
+  const canCreateCategory = canCreate
   const canEdit = hasPermission('canEditRental')
   const canDelete = hasPermission('canDeleteRental')
 
@@ -69,6 +78,51 @@ export default function RentalItemsPage() {
   }, [search, toast])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(event.target as Node)) setCategoryOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [])
+
+  const selectedCategory = categories.find(category => category.id === form.categoryId)
+  const filteredCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLocaleLowerCase()
+    return query ? categories.filter(category => category.name.toLocaleLowerCase().includes(query)) : categories
+  }, [categories, categoryQuery])
+
+  const loadCategories = async () => {
+    setCategoriesLoading(true)
+    setCategoriesError('')
+    try {
+      const rows = await categoriesApi.list('rental')
+      setCategories(Array.isArray(rows) ? rows : [])
+    } catch (error: any) {
+      setCategoriesError(error?.message || 'Unable to load categories')
+    } finally {
+      setCategoriesLoading(false)
+    }
+  }
+
+  const createCategory = async () => {
+    const name = categoryQuery.normalize('NFKC').trim().replace(/\s+/g, ' ')
+    if (!name || !canCreateCategory || categorySaving || !online) return
+    setCategorySaving(true)
+    try {
+      const { category } = await categoriesApi.create({ name, categoryType: 'rental' })
+      setCategories(current => [...current.filter(row => row.id !== category.id), category].sort((a, b) => a.name.localeCompare(b.name)))
+      setForm(current => ({ ...current, categoryId: category.id }))
+      setCategoryQuery('')
+      setCategoryOpen(false)
+      toast({ title: 'Category saved' })
+    } catch (error: any) {
+      toast({ title: 'Unable to create category', description: error?.message || 'Try again.', variant: 'destructive' })
+    } finally {
+      setCategorySaving(false)
+    }
+  }
 
   const beginCreate = () => {
     setEditing(null)
@@ -96,6 +150,10 @@ export default function RentalItemsPage() {
     const quantity = Number(form.quantity)
     if (!form.product_name.trim() || !(rate > 0) || cost < 0 || (!editing && (!Number.isInteger(quantity) || quantity < 0))) {
       toast({ title: 'Check the rental item details', description: 'Enter a name, a positive hire rate, a valid cost, and a whole owned quantity.', variant: 'destructive' })
+      return
+    }
+    if (!form.categoryId) {
+      toast({ title: 'Category is required', description: 'Choose a category for this rental item.', variant: 'destructive' })
       return
     }
     if (!editing && !form.branchId) {
@@ -152,7 +210,22 @@ export default function RentalItemsPage() {
       <CardContent><form onSubmit={submit} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="space-y-1"><Label htmlFor="rental-item-name">Asset name *</Label><Input id="rental-item-name" value={form.product_name} onChange={event => setForm(v => ({ ...v, product_name: event.target.value }))} required /></div>
         <div className="space-y-1"><Label htmlFor="rental-item-code">Asset code / SKU</Label><Input id="rental-item-code" value={form.sku} onChange={event => setForm(v => ({ ...v, sku: event.target.value }))} /></div>
-        <div className="space-y-1"><Label htmlFor="rental-item-category">Category</Label><select id="rental-item-category" value={form.categoryId} onChange={event => setForm(v => ({ ...v, categoryId: event.target.value }))} className="h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Uncategorized</option>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div>
+        <div className="space-y-1">
+          <Label>Category <span className="text-red-500">*</span></Label>
+          <div className="relative" ref={categoryPickerRef}>
+            <Button type="button" variant="outline" role="combobox" aria-label="Category" aria-expanded={categoryOpen} className="h-auto min-h-10 w-full justify-between whitespace-normal" onClick={() => { setCategoryOpen(value => !value); if (categories.length === 0 && !categoriesLoading) void loadCategories() }}>
+              <span className={`min-w-0 break-words text-left ${selectedCategory ? '' : 'text-muted-foreground'}`}>{selectedCategory?.name || 'Select category'}</span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+            {categoryOpen && <div className="absolute left-0 right-0 z-50 mt-1 rounded-md border bg-popover p-2 text-popover-foreground shadow-lg">
+              <div className="relative mb-2"><Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus aria-label="Search categories" maxLength={160} value={categoryQuery} onChange={event => setCategoryQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault() }} placeholder="Search categories..." className="pl-8" /></div>
+              <div className="max-h-60 overflow-y-auto pr-1">
+                {categoriesLoading ? <p role="status" className="px-2 py-4 text-sm text-muted-foreground">Loading categories...</p> : categoriesError ? <div role="alert" className="space-y-2 p-2 text-sm"><p>{categoriesError}</p><Button type="button" variant="outline" onClick={() => void loadCategories()}>Retry</Button></div> : filteredCategories.length === 0 ? <p className="px-2 py-5 text-center text-sm text-muted-foreground">{categories.length ? 'No category found' : 'No categories available'}</p> : filteredCategories.map(category => <button key={category.id} type="button" className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted ${form.categoryId === category.id ? 'bg-muted font-medium' : ''}`} onClick={() => { setForm(value => ({ ...value, categoryId: category.id })); setCategoryQuery(''); setCategoryOpen(false) }}><Check className={`h-4 w-4 ${form.categoryId === category.id ? 'opacity-100' : 'opacity-0'}`} /><span className="min-w-0 flex-1 break-words">{category.name}</span></button>)}
+              </div>
+              {canCreateCategory && categoryQuery.trim() && !categoriesLoading && !categoriesError && !categories.some(category => category.name.toLocaleLowerCase() === categoryQuery.trim().replace(/\s+/g, ' ').toLocaleLowerCase()) && <Button type="button" variant="outline" disabled={categorySaving || !online} className="mt-2 h-auto min-h-10 w-full justify-start whitespace-normal text-left" onClick={() => void createCategory()}><Plus className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">{categorySaving ? 'Saving category...' : `Create rental category: ${categoryQuery.trim()}`}</span></Button>}
+            </div>}
+          </div>
+        </div>
         {!editing && <div className="space-y-1"><Label htmlFor="rental-item-quantity">Owned quantity *</Label><Input id="rental-item-quantity" type="number" min="0" step="1" value={form.quantity} onChange={event => setForm(v => ({ ...v, quantity: event.target.value }))} required /></div>}
         <div className="space-y-1"><Label htmlFor="rental-item-rate">Hire rate per period *</Label><Input id="rental-item-rate" type="number" min="0.01" step="any" value={form.rentalPrice} onChange={event => setForm(v => ({ ...v, rentalPrice: event.target.value }))} required /></div>
         <div className="space-y-1"><Label htmlFor="rental-item-period">Rate period</Label><select id="rental-item-period" value={form.rentalPeriod} onChange={event => setForm(v => ({ ...v, rentalPeriod: event.target.value as RentalPeriod }))} className="h-10 w-full rounded-md border bg-background px-3 text-sm">{periods.map(period => <option key={period} value={period}>{period[0].toUpperCase() + period.slice(1)}</option>)}</select></div>

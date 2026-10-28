@@ -7,9 +7,11 @@ import { getAllDefaultCategoryDefinitions, getDefaultCategoryDefinitionsForBusin
 
 let rows = [];
 let writes = 0;
-const db = { category: {
+const db = { tenant: { findUnique: async () => null }, category: {
   findMany: async ({ where, select } = {}) => rows.filter(row => (!where?.tenantId || row.tenantId === where.tenantId) &&
-    (!where?.categoryType || row.categoryType === where.categoryType))
+    (!where?.categoryType || (typeof where.categoryType === 'object'
+      ? where.categoryType.in?.includes(row.categoryType)
+      : row.categoryType === where.categoryType)))
     .map(row => select ? Object.fromEntries(Object.keys(select).map(key => [key, row[key]])) : { ...row }),
   createMany: async ({ data }) => {
     writes++;
@@ -40,6 +42,8 @@ const fixtures = {
   'branchAccess.js': dataUrl(`export const tenantIdFromUser=user=>user.tenantId;
     export const resolveBranchScope=()=>{},scopedWhere=()=>{},salesUserWhere=()=>{},handleBranchError=()=>{};`),
   'usageLimits.js': dataUrl('export const checkUsageLimit=()=>{};'),
+  'featureCheck.js': dataUrl(`export const getTenantFeatures=async()=>({rentals:true});
+    export const hasFeatureAccess=()=>true;`),
 };
 const sourceUrl = new URL('../src/routes/inventory.js', import.meta.url);
 const source = (await readFile(sourceUrl, 'utf8')).replace(/(from\s+)(["'])([^"']+)\2/g, (_, prefix, quote, specifier) => {
@@ -97,6 +101,19 @@ test('category listing returns all matching categories and validates the type', 
   assert(products.body.length > 500);
   assert(products.body.every(row => row.categoryType === 'product'));
   assert.equal((await request('get', { query: { type: 'invalid' } })).status, 400);
+});
+
+test('rental item category listing includes the shared product catalogue and rental-specific categories', async () => {
+  const rentalCategory = await request('post', {
+    body: { name: 'Event Equipment', categoryType: 'rental' },
+    permissions: ['canCreateRental'],
+  });
+  assert.equal(rentalCategory.status, 201);
+
+  const response = await request('get', { query: { type: 'rental' } });
+  assert.equal(response.status, 200);
+  assert(response.body.some(row => row.categoryType === 'product'));
+  assert(response.body.some(row => row.id === rentalCategory.body.category.id && row.categoryType === 'rental'));
 });
 
 test('legacy service defaults are repaired without relinking items or changing physical-product categories', async () => {
