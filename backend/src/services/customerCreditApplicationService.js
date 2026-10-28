@@ -6,6 +6,12 @@ export function customerCreditOffset(amountDue, availableCredit) {
   return money(Math.min(Math.max(0, money(amountDue)), Math.max(0, money(availableCredit))))
 }
 
+export function traceableCustomerCreditTarget(amountDue, availableCredit, sources = []) {
+  const requested = customerCreditOffset(amountDue, availableCredit)
+  const traceable = money(sources.reduce((sum, source) => sum + Math.max(0, money(source.amount)), 0))
+  return money(Math.min(requested, traceable))
+}
+
 export function validateCustomerCreditSaleLimit(customer, amountDue) {
   const projectedBalance = money(customer?.balance) + money(amountDue)
   if (projectedBalance <= 0) return { valid: true }
@@ -90,21 +96,16 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
     const alreadyUsed = previouslyApplied.get(`payment:${payment.id}`) || 0
     const accountAllocation = customerAdvanceAllocation(payment, allocations)
     if (accountAllocation <= 0) continue
-    let available
-    if (payment.allocationMode === 'explicit') {
-      available = money(Math.max(0, accountAllocation - alreadyUsed))
-    } else {
-      const beforeReceipt = await calculateCustomerReceivableBalanceBefore(
-        client, scope, customerId, payment.createdAt,
-      )
-      if (!beforeReceipt) continue
-      available = availableAdvanceFromReceipt({
-        amount: payment.amount,
-        allocatedToCustomer: accountAllocation,
-        alreadyApplied: alreadyUsed,
-        balanceBefore: beforeReceipt.balance,
-      })
-    }
+    const beforeReceipt = await calculateCustomerReceivableBalanceBefore(
+      client, scope, customerId, payment.createdAt,
+    )
+    if (!beforeReceipt) continue
+    const available = availableAdvanceFromReceipt({
+      amount: payment.amount,
+      allocatedToCustomer: accountAllocation,
+      alreadyApplied: alreadyUsed,
+      balanceBefore: beforeReceipt.balance,
+    })
     if (available > 0.009) sources.push({ sourceType: 'payment', sourceId: payment.id, amount: available, createdAt: payment.createdAt })
   }
 
@@ -120,7 +121,8 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
 
   sources.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt) || a.sourceType.localeCompare(b.sourceType))
   const applications = []
-  let remaining = target
+  const traceableTarget = traceableCustomerCreditTarget(amountDue, creditAvailable, sources)
+  let remaining = traceableTarget
   for (const source of sources) {
     if (remaining <= 0.009) break
     if (source.sourceType === 'credit_note') {
@@ -138,8 +140,10 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
     remaining = money(remaining - amount)
   }
 
-  const applied = money(target - remaining)
-  if (remaining > 0.01) throw Object.assign(new Error('The customer has a credit balance that cannot be fully traced to available receipts, credit notes, or credit returns. Review the customer ledger before recording this sale.'), { statusCode: 409, code: 'CUSTOMER_CREDIT_SOURCE_UNRESOLVED' })
+  const applied = money(traceableTarget - remaining)
+  if (remaining > 0.01) {
+    throw Object.assign(new Error('Verified customer credit changed while this sale was being recorded. Refresh the customer ledger and try again.'), { statusCode: 409, code: 'CUSTOMER_CREDIT_SOURCE_CHANGED' })
+  }
   if (applied > 0) {
     const sale = await client.saleRecord.findFirst({ where: { id: saleId, tenantId: scope.tenantId, customerId } })
     if (!sale) throw Object.assign(new Error('Sale not found while applying customer credit.'), { statusCode: 409 })

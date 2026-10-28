@@ -102,6 +102,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [depositRefundAmount, setDepositRefundAmount] = useState(0)
   const [advanceRefundAmount, setAdvanceRefundAmount] = useState(0)
   const [forfeitureReason, setForfeitureReason] = useState('')
+  const [savingRental, setSavingRental] = useState(false)
   const [savingRentalPayment, setSavingRentalPayment] = useState(false)
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -373,15 +374,55 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (savingRental) return
+    if (!customerId && (!customerName.trim() || !customerPhone.trim() || !customerNin.trim())) {
+      toast({ title: 'Renter details required', description: 'Enter the renter’s name, phone number, and National ID, or select an existing customer.', variant: 'destructive' })
+      return
+    }
+    if (bookingMode === 'reserve' && !hireDate) {
+      toast({ title: 'Reservation date required', description: 'Choose the date the reservation starts.', variant: 'destructive' })
+      return
+    }
+    const rentalStart = bookingMode === 'reserve' ? hireDate : localDateInput()
+    if (!expectedReturnDate || expectedReturnDate < rentalStart) {
+      toast({ title: 'Return date required', description: 'Choose an expected return date on or after the rental start date.', variant: 'destructive' })
+      return
+    }
     if (selectedItems.length === 0 && additionalCharges.length === 0) {
       toast({ title: 'Error', description: 'Add rental equipment or a service/venue charge.', variant: 'destructive' })
       return
     }
-    if (!expectedReturnDate) {
-      toast({ title: 'Error', description: 'Expected return date is required', variant: 'destructive' })
+    if (additionalCharges.some(charge => !charge.label.trim())) {
+      toast({ title: 'Charge description required', description: 'Add a description for each extra service or charge.', variant: 'destructive' })
+      return
+    }
+    if ((amountPaid > 0 || depositAmount > 0) && !cashAccountId) {
+      toast({ title: 'Payment account required', description: 'Select an account for the amount paid or deposit, or set both amounts to zero.', variant: 'destructive' })
+      return
+    }
+    if (amountPaid > 0 || depositAmount > 0) {
+      const missingPaymentDetails = paymentMethod === 'mobile_money'
+        ? !mobileProvider || !phoneNumber.trim() || !transactionId.trim()
+        : ['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim()
+      if (missingPaymentDetails) {
+        toast({ title: 'Payment details required', description: 'Complete the required payment provider, phone, and transaction reference details.', variant: 'destructive' })
+        return
+      }
+    }
+    if (bookingMode === 'reserve' && hireDate < localDateInput()) {
+      toast({ title: 'Invalid reservation date', description: 'Reservation dates cannot start in the past.', variant: 'destructive' })
+      return
+    }
+    if (branches.length > 0 && !branchId) {
+      toast({ title: 'Branch required', description: 'Select the branch that will fulfil this reservation or check-out.', variant: 'destructive' })
+      return
+    }
+    if (amountPaid > totalAmount) {
+      toast({ title: 'Amount exceeds rental total', description: 'Reduce the amount paid to the rental total. Record any extra customer advance separately.', variant: 'destructive' })
       return
     }
 
+    setSavingRental(true)
     try {
       const created = await rentalsApi.create({
         customerId: customerId || undefined,
@@ -398,7 +439,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
         cashAccountId: (amountPaid > 0 || depositAmount > 0) ? cashAccountId : undefined,
         mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
         phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
-        transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
+        transactionId: ['mobile_money', 'card', 'bank_transfer'].includes(paymentMethod) ? transactionId : undefined,
         discount,
         guarantorName: guarantorName || undefined,
         guarantorPhone: guarantorPhone || undefined,
@@ -415,7 +456,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       if (canViewReport) loadSummary()
     } catch (err: any) {
       toast({ title: 'Error', description: err.message || 'Failed to create rental', variant: 'destructive' })
-    }
+    } finally { setSavingRental(false) }
   }
 
   const refreshSelectedRental = async () => {
@@ -945,7 +986,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             <p className="text-sm text-muted-foreground">Choose a renter, add items, then reserve a future date or check them out immediately. Availability is checked before saving.</p>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} noValidate className="space-y-4">
               <div className="space-y-2">
                 <Label>Booking action</Label>
                 <div className="inline-flex rounded-md border p-1">
@@ -1252,6 +1293,16 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 </div>
               )}
 
+              {paymentMethod === 'bank_transfer' && (
+                <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Bank Transfer Details</p>
+                  <div>
+                    <Label className="text-sm font-medium">Transfer reference *</Label>
+                    <Input value={transactionId} onChange={event => setTransactionId(event.target.value)} placeholder="Bank transaction reference" />
+                  </div>
+                </div>
+              )}
+
               {/* Guarantor (optional) */}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -1289,22 +1340,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  disabled={
-                    (!customerId && (!customerName.trim() || !customerPhone.trim() || !customerNin.trim())) ||
-                    (bookingMode === 'reserve' && !hireDate) ||
-                    !expectedReturnDate ||
-                    (selectedItems.length === 0 && additionalCharges.length === 0) ||
-                    additionalCharges.some(charge => !charge.label.trim()) ||
-                    ((amountPaid > 0 || depositAmount > 0) && !cashAccountId) ||
-                    (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
-                     paymentMethod === 'card' ? !transactionId.trim() :
-                     false)
-                  }
-                >
+                <Button type="submit" disabled={savingRental}>
                   <Clock className="mr-2 h-4 w-4" />
-                  {bookingMode === 'reserve' ? 'Reserve items' : 'Check out items'}
+                  {savingRental ? 'Saving booking…' : bookingMode === 'reserve' ? 'Reserve items' : 'Check out items'}
                 </Button>
               </div>
             </form>

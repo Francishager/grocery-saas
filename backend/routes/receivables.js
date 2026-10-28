@@ -1693,24 +1693,10 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     // Generate receipt number
     const receiptNo = `SALE-${Date.now()}`
 
-    if (balance > 0) {
-      const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, customerId)
-      const customerForCreditLimit = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance }
-      const creditLimitCheck = validateCustomerCreditSaleLimit(customerForCreditLimit, balance)
-      if (!creditLimitCheck.valid) {
-        return res.status(creditLimitCheck.statusCode || 400).json({
-          error: creditLimitCheck.message,
-          code: creditLimitCheck.code
-        })
-      }
-    }
-
     const sale = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
       const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
       const availableCustomerCredit = Math.max(0, -toMoney(customerBalanceBefore?.balance))
-      const creditCheck = validateCustomerCreditSaleLimit({ ...customer, balance: customerBalanceBefore?.balance ?? customer.balance }, balance)
-      if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
         const createdSale = await tx.saleRecord.create({
           data: {
           receiptNo,
@@ -1866,6 +1852,13 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           }
         }
       }
+
+      const remainingOnCredit = Math.max(0, toMoney(balance) - toMoney(creditApplied))
+      const creditCheck = validateCustomerCreditSaleLimit({
+        ...customer,
+        balance: Math.max(0, toMoney(customerBalanceBefore?.balance)),
+      }, remainingOnCredit)
+      if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
 
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
       return { ...createdSale, creditApplied }

@@ -30,7 +30,7 @@ function respondWithDraft(moduleName) {
       const result = await requestBusinessAdvice({
         messages: [{ role: 'user', content: JSON.stringify({ field, instruction: instruction.trim() }) }],
         context: {}, signal: AbortSignal.timeout(25000), maxTokens: 700,
-        systemPrompt: 'You are a concise professional writing assistant. Draft content only for the named generic field, following only the user instruction. The request contains no business record context. Do not ask for or invent names, contact details, amounts, dates, credentials, or other factual claims. Use placeholders where facts are needed. Return only the draft text, without Markdown fences.',
+        systemPrompt: 'You are a concise professional writing assistant. Draft content only for the named generic field, following only the user instruction. The request contains no business record context. Do not ask for or invent names, contact details, amounts, dates, credentials, or other factual claims. Use placeholders where facts are needed. Use Markdown **bold** for headings or brief emphasis when appropriate, especially when requested; do not wrap entire paragraphs in bold. Return only the draft text without Markdown fences or raw HTML.',
       });
       res.json({ text: result.reply });
     } catch (error) {

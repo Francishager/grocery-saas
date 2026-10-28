@@ -870,6 +870,9 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
     if (paymentMethod === "card" && !transactionId) {
       return res.status(400).json({ error: "Card payment requires a transaction ID" });
     }
+    if (paymentMethod === "bank_transfer" && (toMoney(amountPaid) > 0 || toMoney(depositAmount) > 0) && !transactionId) {
+      return res.status(400).json({ error: "Bank transfers require a transfer reference." });
+    }
 
     // Verify customer if provided
     let customer = null;

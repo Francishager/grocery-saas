@@ -11,7 +11,7 @@ import {
   saleRecognitionLines,
   validateReceivablesAccountingConfig,
 } from '../src/services/receivablesAccountingService.js'
-import { availableAdvanceFromReceipt, customerAdvanceAllocation, customerCreditOffset, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
+import { availableAdvanceFromReceipt, customerAdvanceAllocation, customerCreditOffset, traceableCustomerCreditTarget, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
 
 const config = {
   receivableAccountId: 'ar',
@@ -84,11 +84,25 @@ test('legacy customer receipts expose only the amount left after settling receiv
   assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 150, alreadyApplied: 0, balanceBefore: 0 }), 150)
 })
 
+test('explicit receipt allocations are capped by the verified advance and prior use', () => {
+  assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 500, alreadyApplied: 0, balanceBefore: 300 }), 200)
+  assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 500, alreadyApplied: 150, balanceBefore: 300 }), 50)
+  assert.equal(availableAdvanceFromReceipt({ amount: 500, allocatedToCustomer: 100, alreadyApplied: 0, balanceBefore: 300 }), 100)
+})
+
 test('existing customer funds offset a credit sale before the remaining balance is checked', () => {
   assert.equal(customerCreditOffset(100, 30), 30)
   assert.equal(100 - customerCreditOffset(100, 30), 70)
   assert.equal(customerCreditOffset(100, 150), 100)
   assert.equal(customerCreditOffset(100, 0), 0)
+})
+
+test('unverified customer balance does not block the sale and only traceable credit reduces the amount on account', () => {
+  const traceable = traceableCustomerCreditTarget(100, 100, [{ amount: 35 }])
+  assert.equal(traceable, 35)
+  assert.equal(100 - traceable, 65)
+  assert.deepEqual(validateCustomerCreditSaleLimit({ balance: 0, creditLimit: 100 }, 100 - traceable), { valid: true })
+  assert.equal(validateCustomerCreditSaleLimit({ balance: 0, creditLimit: 50 }, 100 - traceable).code, 'CUSTOMER_CREDIT_LIMIT_EXCEEDED')
 })
 
 test('customer advance tracing includes a linked receipt surplus and unallocated explicit receipts only', () => {

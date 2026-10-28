@@ -14,7 +14,7 @@ router.get('/planner', authenticateToken, requireTenant, requireAnyFeature(['pla
   try {
     const stored = await prisma.stickyNote.findFirst({ where: { id: plannerStorageId(req.user.id), userId: req.user.id } })
     const items = stored?.lines && !Array.isArray(stored.lines) && Array.isArray(stored.lines.items) ? stored.lines.items : []
-    res.json({ items })
+    res.json({ items: items.map(({ reminderDeliveredFor, ...item }) => item) })
   } catch (error) {
     console.error('Get planner entries error:', error)
     res.status(500).json({ error: 'Failed to load planner entries.' })
@@ -33,10 +33,17 @@ router.put('/planner', authenticateToken, requireTenant, requireAnyFeature(['pla
       if (Number.isNaN(date.getTime())) throw new Error('Planner dates must be valid date values.')
       return date.toISOString()
     }
+    const id = plannerStorageId(req.user.id)
+    const existing = await prisma.stickyNote.findUnique({ where: { id }, select: { id: true, userId: true, lines: true } })
+    if (existing && existing.userId !== req.user.id) return res.status(409).json({ error: 'Planner storage is unavailable.' })
+    const previousItems = Array.isArray(existing?.lines?.items) ? existing.lines.items : []
+    const previousById = new Map(previousItems.map((item) => [String(item.id), item]))
     const items = req.body.items.map((item) => {
       const kind = String(item?.kind || '')
       const title = String(item?.title || '').trim()
       if (!allowedKinds.has(kind) || !title || title.length > 160) throw new Error('Each planner entry needs a valid type and a title up to 160 characters.')
+      const reminderAt = validDate(item.reminderAt)
+      const previous = previousById.get(String(item.id || ''))
       return {
         id: String(item.id || '').slice(0, 100) || `planner_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         kind,
@@ -45,7 +52,8 @@ router.put('/planner', authenticateToken, requireTenant, requireAnyFeature(['pla
         startAt: validDate(item.startAt),
         endAt: validDate(item.endAt),
         dueAt: validDate(item.dueAt),
-        reminderAt: validDate(item.reminderAt),
+        reminderAt,
+        ...(previous?.reminderAt === reminderAt && previous?.reminderDeliveredFor === reminderAt ? { reminderDeliveredFor: reminderAt } : {}),
         goalId: item.goalId ? String(item.goalId).slice(0, 100) : null,
         priority: allowedPriorities.has(item.priority) ? item.priority : 'normal',
         color: allowedColors.has(item.color) ? item.color : 'yellow',
@@ -55,9 +63,6 @@ router.put('/planner', authenticateToken, requireTenant, requireAnyFeature(['pla
       }
     })
 
-    const id = plannerStorageId(req.user.id)
-    const existing = await prisma.stickyNote.findUnique({ where: { id }, select: { id: true, userId: true } })
-    if (existing && existing.userId !== req.user.id) return res.status(409).json({ error: 'Planner storage is unavailable.' })
     await prisma.stickyNote.upsert({
       where: { id },
       create: { id, userId: req.user.id, tenantId: req.user.tenantId || req.user.tenant_id || null, title: '__JIBUSALES_PLANNER_DATA__', lines: { version: 1, items }, color: 'yellow' },

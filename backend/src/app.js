@@ -11,6 +11,7 @@ import salesRoutes from "./routes/sales.js";
 import inventoryRoutes from "./routes/inventory.js";
 import trashRoutes from "./routes/trash.js";
 import { expireTrash } from "./services/trashService.js";
+import { deliverDuePlannerReminders } from "./services/plannerReminders.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import businessAdvisorRoutes from "./routes/businessAdvisor.js";
 import aiWritingAssistRoutes from "./routes/aiWritingAssist.js";
@@ -216,6 +217,11 @@ const propertyRentAutomationTimer = setInterval(() => {
 }, 6 * 60 * 60 * 1000);
 propertyRentAutomationTimer.unref();
 setTimeout(() => runPropertyRentAutomation().catch(error => console.error('Initial property rent automation failed:', error.code || error.message)), 30_000).unref();
+const plannerReminderTimer = setInterval(() => {
+  deliverDuePlannerReminders().catch(error => console.error('Planner reminder check failed:', error.code || error.message));
+}, 60_000);
+plannerReminderTimer.unref();
+setTimeout(() => deliverDuePlannerReminders().catch(error => console.error('Initial planner reminder check failed:', error.code || error.message)), 20_000).unref();
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/ai", businessAdvisorRoutes);
 app.use("/api/ai-writing", aiWritingAssistRoutes);
