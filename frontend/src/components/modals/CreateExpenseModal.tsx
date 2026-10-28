@@ -16,6 +16,8 @@ import { useToast } from '@/hooks/use-toast'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
+import { getTenantCurrency } from '@/lib/utils'
 
 interface CashAccount {
   id: string
@@ -173,6 +175,10 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
   })
   
   const [loading, setLoading] = useState(false)
+  const baseCurrency = getTenantCurrency()
+  const [transactionCurrency, setTransactionCurrency] = useState(baseCurrency)
+  const [exchangeRateToBase, setExchangeRateToBase] = useState<number | null>(1)
+  const [unitsPerBase, setUnitsPerBase] = useState<number | null>(1)
   const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
   const [myCashAccount, setMyCashAccount] = useState<CashAccount | null>(null)
   const [paymentPerms, setPaymentPerms] = useState<PaymentMethodPermissions>({ canUseCash: false, canUseMobileMoney: false, canUseBank: false, canUseCard: false })
@@ -284,6 +290,10 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
       toast({ variant: 'destructive', title: 'Amount must be greater than 0' })
       return
     }
+    if (transactionCurrency !== baseCurrency && (!exchangeRateToBase || !unitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
     if (!formData.paymentMethod || !hasPaymentMethodPermission(paymentPerms, formData.paymentMethod)) {
       toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
       return
@@ -314,6 +324,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
           ...formData,
           cashAccountId: formData.cashAccountId || undefined,
           amount: parseFloat(formData.amount),
+          ...(!initialData?.id ? { currency: transactionCurrency, unitsPerBase } : {}),
           date: new Date(formData.date).toISOString()
         })
       })
@@ -346,6 +357,9 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
         phoneNumber: '',
         transactionId: ''
       })
+      setTransactionCurrency(baseCurrency)
+      setExchangeRateToBase(1)
+      setUnitsPerBase(1)
     } catch (error) {
       toast({
         title: 'Error',
@@ -376,6 +390,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
     }))
   }
 
+  const requiredBaseAmount = Number(formData.amount || 0) * (transactionCurrency === baseCurrency ? 1 : Number(exchangeRateToBase || 0))
   if (!isFeatureEnabled('expenses')) {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -442,8 +457,10 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
                 placeholder="0.00"
                 required
               />
+              {transactionCurrency !== baseCurrency && exchangeRateToBase && <p className="text-xs text-muted-foreground">Base-currency posting: {(Number(formData.amount || 0) * exchangeRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {baseCurrency}</p>}
             </div>
           </div>
+          {!initialData?.id && <TransactionCurrencyControl baseCurrency={baseCurrency} currency={transactionCurrency} enabled={isFeatureEnabled('settings.currencies')} amount={Number(formData.amount || 0)} onCurrencyChange={setTransactionCurrency} onRateChange={(rate, units) => { setExchangeRateToBase(rate); setUnitsPerBase(units) }} />}
 
           <div className="space-y-2">
             <Label htmlFor="description">Description *</Label>
@@ -475,7 +492,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
                           <span>{acc.name} {acc.id === myCashAccount?.id && <span className="text-xs text-blue-600">(My Account)</span>}</span>
                           <span className="text-xs text-muted-foreground">{acc.type.replace(/_/g, ' ')}{acc.accountNumber ? ` - ${acc.accountNumber}` : ''}{acc.bankName ? ` - ${acc.bankName}` : ''}</span>
                         </div>
-                        <span className={`text-xs font-semibold ${parseFloat(formData.amount) > acc.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
+                        <span className={`text-xs font-semibold ${requiredBaseAmount > acc.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
                           {acc.currency} {acc.balance.toFixed(2)}
                         </span>
                       </div>
@@ -491,7 +508,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
                           <span>{myCashAccount.name} <span className="text-xs text-blue-600">(My Account)</span></span>
                           <span className="text-xs text-muted-foreground">{myCashAccount.type.replace(/_/g, ' ')}{myCashAccount.accountNumber ? ` • ${myCashAccount.accountNumber}` : ''}</span>
                         </div>
-                        <span className={`text-xs font-semibold ${parseFloat(formData.amount) > myCashAccount.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
+                        <span className={`text-xs font-semibold ${requiredBaseAmount > myCashAccount.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
                           {myCashAccount.currency} {myCashAccount.balance.toFixed(2)}
                         </span>
                       </div>
@@ -514,7 +531,7 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
                             <span>{acc.name}</span>
                             <span className="text-xs text-muted-foreground">{acc.type.replace(/_/g, ' ')}{acc.accountNumber ? ` • ${acc.accountNumber}` : ''}{acc.bankName ? ` • ${acc.bankName}` : ''}</span>
                           </div>
-                          <span className={`text-xs font-semibold ${parseFloat(formData.amount) > acc.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
+                          <span className={`text-xs font-semibold ${requiredBaseAmount > acc.balance ? 'text-red-600' : 'text-muted-foreground'}`}>
                             {acc.currency} {acc.balance.toFixed(2)}
                           </span>
                         </div>
@@ -525,8 +542,8 @@ export default function CreateExpenseModal({ isOpen, onClose, onSuccess, initial
               {/* Show selected account balance warning */}
               {(() => {
                 const selected = selectableCashAccounts.find(a => a.id === formData.cashAccountId)
-                if (selected && parseFloat(formData.amount) > selected.balance) {
-                  return <p className="text-xs text-red-600 font-medium">Insufficient funds: Balance is {selected.currency} {selected.balance.toFixed(2)} but amount is {parseFloat(formData.amount).toFixed(2)}</p>
+                if (selected && requiredBaseAmount > selected.balance) {
+                  return <p className="text-xs text-red-600 font-medium">Insufficient funds: Balance is {selected.currency} {selected.balance.toFixed(2)} but base equivalent is {requiredBaseAmount.toFixed(2)} {baseCurrency}</p>
                 }
                 if (selected) {
                   return <p className="text-xs text-muted-foreground">Available balance: {selected.currency} {selected.balance.toFixed(2)}</p>

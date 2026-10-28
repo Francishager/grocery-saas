@@ -132,6 +132,26 @@ function requireReportPermission(req, res, next) {
 
 // Apply granular report permission check to all routes
 router.use(authenticateToken, requireReportPermission);
+router.use((req, res, next) => {
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  const permissionRecord = req.userPermissions || {};
+  const canViewCreditLimit = req.user?.role === 'owner' || req.user?.role === 'saas_admin' ||
+    permissions.includes('*') || permissions.includes('canViewCustomerCreditLimit') ||
+    permissions.includes('canManageCustomerCreditLimit') || permissionRecord.canViewCustomerCreditLimit === true ||
+    permissionRecord.canManageCustomerCreditLimit === true;
+  if (canViewCreditLimit) return next();
+
+  const originalJson = res.json.bind(res);
+  const removeCreditLimitFields = (value) => {
+    if (Array.isArray(value)) return value.map(removeCreditLimitFields);
+    if (!value || typeof value !== 'object' || value instanceof Date) return value;
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !['creditLimit', 'customerCreditLimit', 'availableLimit', 'availableCredit', 'utilizationPercent'].includes(key))
+      .map(([key, item]) => [key, removeCreditLimitFields(item)]));
+  };
+  res.json = (body) => originalJson(removeCreditLimitFields(body));
+  next();
+});
 router.use('/rentals', requireFeature('reports.rentals'));
 
 function df(req, field = "createdAt") {

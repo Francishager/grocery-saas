@@ -9,6 +9,12 @@ export interface ReceiptPreviewFallback {
   customerName?: string
   paymentMethod?: string
   createdAt?: string
+  baseCurrency?: string
+  transactionCurrency?: string
+  foreignTotal?: number
+  exchangeRateToBase?: number
+  exchangeRateAsOf?: string | null
+  exchangeRateSource?: string | null
   subtotal?: number
   discount?: number
   tax?: number
@@ -37,12 +43,19 @@ export function buildReceiptPreviewFromData(data: ReceiptPreviewFallback): Recei
       logo: data.business?.logo ?? null,
       receiptHeader: data.business?.receiptHeader ?? null,
       receiptFooter: data.business?.receiptFooter ?? null,
+      currency: data.business?.currency,
     },
     branch: data.branch ?? null,
     cashier: data.cashier || '-',
     customerName: data.customerName ?? null,
     paymentMethod: data.paymentMethod || 'cash',
     createdAt: data.createdAt || new Date().toISOString(),
+    baseCurrency: data.baseCurrency || data.business?.currency || 'UGX',
+    transactionCurrency: data.transactionCurrency || data.baseCurrency || data.business?.currency || 'UGX',
+    foreignTotal: data.foreignTotal ?? data.total ?? 0,
+    exchangeRateToBase: data.exchangeRateToBase || 1,
+    exchangeRateAsOf: data.exchangeRateAsOf ?? null,
+    exchangeRateSource: data.exchangeRateSource ?? null,
     subtotal: data.subtotal ?? 0,
     discount: data.discount ?? 0,
     tax: data.tax ?? 0,

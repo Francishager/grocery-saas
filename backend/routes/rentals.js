@@ -385,9 +385,12 @@ router.post("/crm/leads/:id/convert", authenticateToken, requireTenant, requireA
         if (!customer) throw Object.assign(new Error("Select a customer from this business and branch."), { statusCode: 404 });
       } else {
         const name = String(req.body?.customerName || lead.prospectName || lead.contactName || lead.title || "").trim();
-        const creditLimit = Number(req.body?.creditLimit);
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, "creditLimit") && !crmCanView(req, "canManageCustomerCreditLimit")) {
+          throw Object.assign(new Error("You do not have permission to set customer credit limits."), { statusCode: 403, code: "CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED" });
+        }
+        const creditLimit = Number(req.body?.creditLimit ?? 0);
         if (!name) throw Object.assign(new Error("A prospect or business name is required."), { statusCode: 400 });
-        if (!Number.isFinite(creditLimit) || creditLimit <= 0) throw Object.assign(new Error("Set a credit limit greater than zero before converting this prospect."), { statusCode: 400 });
+        if (!Number.isFinite(creditLimit) || creditLimit < 0) throw Object.assign(new Error("Customer credit limit cannot be negative."), { statusCode: 400 });
         const email = crmCanView(req, "canViewCustomerEmail") ? String(lead.contactEmail || "").trim() || null : null;
         const phone = crmCanView(req, "canViewCustomerPhone") ? String(lead.contactPhone || "").trim() || null : null;
         const identityConflict = await findCustomerIdentityConflict(tx, { tenantId: scope.tenantId, identity: { name, email, phone } });

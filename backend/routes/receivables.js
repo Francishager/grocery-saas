@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
+import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireFeature, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
@@ -18,6 +18,7 @@ import { customerPaymentDisplayReference, customerPaymentReceiptReference } from
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
 import { applyAvailableCustomerCredit, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
+import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -197,17 +198,21 @@ const paymentStatusFor = (total, amountPaid) => {
   return 'unpaid'
 }
 
-const validateCreditLimitRequired = (creditLimit) => {
-  const creditLimitAmount = toMoney(creditLimit)
-  if (creditLimitAmount <= 0) {
-    return {
-      valid: false,
-      amount: creditLimitAmount,
-      message: 'Customer credit limit is required. Set a credit limit greater than zero before saving this customer.'
-    }
+const validateOptionalCustomerCreditLimit = (creditLimit) => {
+  const rawAmount = creditLimit === undefined || creditLimit === null || creditLimit === '' ? 0 : Number(creditLimit)
+  const amount = toMoney(rawAmount, 0)
+  if (!Number.isFinite(rawAmount) || amount < 0) {
+    return { valid: false, amount, message: 'Customer credit limit cannot be negative.' }
   }
-  return { valid: true, amount: creditLimitAmount }
+  return { valid: true, amount }
 }
+
+const canManageCustomerCreditLimit = (req) =>
+  req.user?.role === 'owner' ||
+  req.user?.role === 'saas_admin' ||
+  req.user?.permissions?.includes('*') ||
+  req.user?.permissions?.includes('canManageCustomerCreditLimit') ||
+  req.userPermissions?.canManageCustomerCreditLimit === true
 
 const userSelect = { select: { id: true, fname: true, lname: true } }
 
@@ -474,9 +479,9 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
     res.json({
       customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
       summary: {
+        ...(access.creditLimit && { creditLimit: toMoney(customer.creditLimit) }),
         ...(access.balance && {
           balance: toMoney(reconciledCustomer.balance),
-          creditLimit: toMoney(customer.creditLimit),
           trustScore,
           openingBalance: toMoney(customer.openingBalance),
         }),
@@ -1216,6 +1221,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         email: access.email,
         address: access.address,
         balance: access.balance,
+        creditLimit: access.creditLimit,
         sales: access.sales,
         payments: access.payments,
         returns: access.returns,
@@ -1239,8 +1245,8 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           openingBalance: toMoney(customer.openingBalance),
           openingBalanceDate: customer.openingBalanceDate,
           openingBalanceNote: customer.openingBalanceNote,
-          availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance),
         }),
+        ...(access.balance && access.creditLimit && { availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance) }),
         ...(access.withdraw && { availableForWithdrawal: Math.max(0, -toMoney(reconciledCustomer.balance)) }),
         lastTransactionDate: transactions[0]?.date || null
       },
@@ -1250,11 +1256,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           currentBalance: toMoney(reconciledCustomer.balance),
           receivableExposure: Math.max(0, toMoney(reconciledCustomer.balance)),
           customerFunds: Math.max(0, -toMoney(reconciledCustomer.balance)),
-          creditLimit: toMoney(customer.creditLimit),
-          availableLimit: Math.max(0, toMoney(customer.creditLimit) - Math.max(0, toMoney(reconciledCustomer.balance))),
-          utilizationPercent: toMoney(customer.creditLimit) > 0
-            ? Math.round((Math.max(0, toMoney(reconciledCustomer.balance)) / toMoney(customer.creditLimit)) * 10000) / 100
-            : null,
+          ...(access.creditLimit && {
+            creditLimit: toMoney(customer.creditLimit),
+            availableLimit: Math.max(0, toMoney(customer.creditLimit) - Math.max(0, toMoney(reconciledCustomer.balance))),
+            utilizationPercent: toMoney(customer.creditLimit) > 0
+              ? Math.round((Math.max(0, toMoney(reconciledCustomer.balance)) / toMoney(customer.creditLimit)) * 10000) / 100
+              : null,
+          }),
           aging,
           openSales: access.sales ? [...openCreditSales.map((sale) => ({
             id: sale.id,
@@ -1290,14 +1298,17 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       allowOwnerAll: true
     })
     console.log('POST /customers - Scope resolved:', scope)
-    const { name, email, phone, address, creditLimit = 0, notes, openingBalanceNote } = req.body
+    const { name, email, phone, address, creditLimit, notes, openingBalanceNote } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })
     }
 
-    const creditLimitCheck = validateCreditLimitRequired(creditLimit)
+    if (creditLimit !== undefined && !canManageCustomerCreditLimit(req)) {
+      return res.status(403).json({ error: 'You do not have permission to set customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+    }
+    const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit)
     if (!creditLimitCheck.valid) {
-      return res.status(400).json({ error: creditLimitCheck.message, code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+      return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
     }
 
     const openingBalance = toMoney(req.body.openingBalance, 0)
@@ -1370,7 +1381,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       console.error('Error attaching repayment trust scores:', err)
       return [customerRaw]
     })
-    res.status(201).json(customer)
+    res.status(201).json(customerProfilePayload(customer, customerProfileAccess(req.user?.permissions)))
   } catch (error) {
     if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
     console.error('Create customer error:', error)
@@ -1392,6 +1403,10 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
 
     if (!existingCustomer) {
       return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    if (creditLimit !== undefined && !canManageCustomerCreditLimit(req)) {
+      return res.status(403).json({ error: 'You do not have permission to set or change customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
     }
 
     if (hasOpeningBalanceInput(req.body) && !canManageOpeningBalance(req)) {
@@ -1442,10 +1457,9 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
       openingBalanceData.openingBalanceNote = openingBalanceNote
     }
 
-    const nextCreditLimit = creditLimit !== undefined ? creditLimit : existingCustomer.creditLimit
-    const creditLimitCheck = validateCreditLimitRequired(nextCreditLimit)
+    const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit === undefined ? existingCustomer.creditLimit : creditLimit)
     if (!creditLimitCheck.valid) {
-      return res.status(400).json({ error: creditLimitCheck.message, code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+      return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
     }
 
     const data = {
@@ -1518,7 +1532,7 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
 
     const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
     const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
-    res.json(customer)
+    res.json(customerProfilePayload(customer, customerProfileAccess(req.user?.permissions)))
   } catch (error) {
     if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
       return res.status(409).json({ error: error.message, code: error.code, duplicateField: error.conflictField })
@@ -1587,7 +1601,7 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
 })
 
 // Create new sale (credit or cash)
-router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, loadUserPermissions, async (req, res) => {
+router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'), requireFeature('receivables'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
@@ -1605,8 +1619,11 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       cashAccountId,
       mobileProvider,
       phoneNumber,
-      transactionId
+      transactionId,
+      currency,
+      unitsPerBase
     } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
 
     if (!customerId) return res.status(400).json({ error: 'Customer is required' })
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one sale item is required' })
@@ -1674,7 +1691,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     const itemTaxAmounts = allocateSaleTaxToItems(saleItems, computedTax)
     saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index] })
     const computedTotal = Math.max(0, computedSubtotal + computedTax - computedDiscount)
-    const paid = Math.min(toMoney(amountPaid), computedTotal)
+    const foreignPaidAmount = toMoney(amountPaid)
+    const paid = Math.min(toBaseCurrency(foreignPaidAmount, fx.rateToBase), computedTotal)
     const balance = Math.max(0, computedTotal - paid)
     const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
     const resolvedPaymentMethod = paymentMethod || (paid > 0 ? 'cash' : 'credit')
@@ -1708,6 +1726,11 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           tax: computedTax,
           discount: computedDiscount,
           total: computedTotal,
+          currency: fx.currency,
+          foreignTotal: toTransactionCurrency(computedTotal, fx.rateToBase),
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
             amountPaid: paid,
             legacyPaidAmountAtCutover: 0,
           balance,
@@ -1776,6 +1799,11 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
             customerId,
             saleId: createdSale.id,
             amount: paid,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
             allocationMode: 'explicit',
             paymentMethod: resolvedPaymentMethod,
             mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
@@ -1811,6 +1839,11 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
             type: 'receipt',
             amount: paid,
             balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
             reference: receiptNo || payment.id,
             description: `Customer sale payment: ${customer.name || customer.email}`,
             userId: req.user.id
@@ -2217,8 +2250,10 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
-    const paidAmount = toMoney(amount)
+    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+    const foreignAmount = toMoney(amount)
+    const paidAmount = toBaseCurrency(foreignAmount, fx.rateToBase)
     if (!customerId) return res.status(400).json({ error: 'Customer is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
 
@@ -2340,6 +2375,11 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           customerId,
           saleId,
           amount: paidAmount,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           allocationMode: 'explicit',
           paymentMethod: resolvedPaymentMethod,
           mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
@@ -2377,6 +2417,9 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
       }
 
       const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'payments')
+      if (String(accountToUse.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+        throw Object.assign(new Error(`This receipt posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.`), { statusCode: 409 })
+      }
       const updatedAccount = await tx.cashAccount.update({
         where: { id: accountToUse.id },
         data: { balance: { increment: paidAmount } }
@@ -2389,6 +2432,11 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           type: 'receipt',
           amount: paidAmount,
           balanceAfter: updatedAccount.balance,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           reference: paymentReference || createdPayment.id,
           description: `Customer payment: ${customer.name || customer.email}`,
           userId: req.user.id
@@ -2444,7 +2492,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
       throw transactionError
     }
 
-    res.status(201).json({ ...payment, reference: customerPaymentDisplayReference(payment) })
+    res.status(201).json({ ...payment, reference: customerPaymentDisplayReference(payment), baseCurrency: fx.baseCurrency })
   } catch (error) {
     console.error('Record payment error:', error)
     handleBranchError(res, error, 'Failed to record payment')
@@ -2715,7 +2763,7 @@ router.delete('/fuel-cards/:id', authenticateToken, requirePermission('canEditRe
 
 // === CREDIT ACCOUNTS (customers with credit limit > 0) ===
 
-router.get('/credit-accounts', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+router.get('/credit-accounts', authenticateToken, requirePermission('canViewReceivable'), requireFeature('receivables'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { search, status } = req.query
@@ -2738,8 +2786,9 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
     })
     const balancedAccounts = await attachCustomerReceivableBalances(prisma, scope, accountsRaw)
     const accounts = await attachRepaymentTrustScores(prisma, scope, balancedAccounts)
+    const access = customerProfileAccess(req.user?.permissions)
 
-    res.json({ accounts })
+    res.json({ accounts: access.creditLimit ? accounts : accounts.map(({ creditLimit: _creditLimit, ...account }) => account) })
   } catch (error) {
     console.error('Get credit accounts error:', error)
     handleBranchError(res, error, 'Failed to fetch credit accounts')
@@ -2747,7 +2796,7 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
 })
 
 // Update credit terms. Trust score is calculated from repayment history.
-router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+router.put('/credit-accounts/:id', authenticateToken, requirePermission('canManageCustomerCreditLimit'), requireFeature('receivables'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
@@ -2758,9 +2807,9 @@ router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEdit
 
     let creditLimitAmount
     if (creditLimit !== undefined) {
-      const creditLimitCheck = validateCreditLimitRequired(creditLimit)
+      const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit)
       if (!creditLimitCheck.valid) {
-        return res.status(400).json({ error: creditLimitCheck.message, code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+        return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
       }
       creditLimitAmount = creditLimitCheck.amount
     }

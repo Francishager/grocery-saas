@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
 import { featureAccessService } from '@/services/featureAccessService'
 import { isLoginTransportError } from '@/lib/authNetworkError'
-import { clearTenantData } from '@/db/index'
 import { getApiAuthEndpoint } from '@/lib/apiConfig'
 
 export interface User {
@@ -346,7 +345,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       // Reset feature access service on logout
       featureAccessService.reset()
       // Clear IndexedDB to prevent cross-tenant data leakage
-      clearTenantData().catch(() => {})
+      void import('@/db/index').then(({ clearTenantData }) => clearTenantData()).catch(() => {})
       setLoading(false)
       onLogout?.()
     }

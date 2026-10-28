@@ -2,7 +2,7 @@
 import { precacheAndRoute } from 'workbox-precaching'
 import { clientsClaim } from 'workbox-core'
 import { registerRoute } from 'workbox-routing'
-import { CacheFirst } from 'workbox-strategies'
+import { CacheFirst, StaleWhileRevalidate } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 import { sanitizeNotificationText, notificationLink } from './lib/notificationDisplay'
@@ -11,6 +11,28 @@ declare let self: ServiceWorkerGlobalScope
 
 clientsClaim()
 precacheAndRoute(self.__WB_MANIFEST || [])
+
+registerRoute(
+  ({ request, url }) => request.destination === 'script' && url.origin === self.location.origin && url.pathname.startsWith('/assets/'),
+  new CacheFirst({
+    cacheName: 'app-code',
+    plugins: [
+      new ExpirationPlugin({ maxEntries: 160, maxAgeSeconds: 60 * 60 * 24 * 30 }),
+      new CacheableResponsePlugin({ statuses: [200] }),
+    ],
+  })
+)
+
+registerRoute(
+  ({ request, url }) => request.destination === 'image' && url.origin === self.location.origin,
+  new StaleWhileRevalidate({
+    cacheName: 'app-images',
+    plugins: [
+      new ExpirationPlugin({ maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 * 30 }),
+      new CacheableResponsePlugin({ statuses: [200] }),
+    ],
+  })
+)
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') event.waitUntil(self.skipWaiting())

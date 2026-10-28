@@ -14,6 +14,7 @@ import { getLocalExpenses, getLocalCashAccounts, getLocalCashTransactions } from
 import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
 import TransactionReceiptButton from '@/components/TransactionReceiptButton'
+import { getTenantCurrency } from '@/lib/utils'
 import { 
   Wallet, 
   TrendingUp, 
@@ -34,6 +35,9 @@ interface Expense {
   category: string
   description: string
   amount: number
+  currency?: string | null
+  foreignAmount?: number | null
+  exchangeRateToBase?: number | null
   paymentMethod: string
   cashAccountId?: string | null
   cashAccount?: { id: string; name: string; type: string } | null
@@ -383,6 +387,7 @@ export default function ExpensesPage() {
                       <div className="text-2xl font-bold text-red-600">
                         -{expense.amount.toFixed(2)}
                       </div>
+                      {expense.currency && expense.currency !== getTenantCurrency() && expense.foreignAmount != null && <p className="text-xs text-muted-foreground">{expense.foreignAmount.toLocaleString()} {expense.currency} → {expense.amount.toLocaleString()} {getTenantCurrency()}</p>}
                       {expense.reference && (
                         <p className="text-sm text-muted-foreground">
                           Ref: {expense.reference}

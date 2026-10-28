@@ -215,6 +215,8 @@ export const api = {
 export const aiWritingApi = {
   draft: (module: 'crm' | 'planner', field: string, instruction: string) =>
     api.post<{ text: string }>(`/api/ai-writing/${module}`, { body: { field, instruction } }),
+  draftGeneral: (instruction: string) =>
+    api.post<{ text: string }>('/api/ai-writing/general', { body: { field: 'business text', instruction } }),
 }
 
 // Auth endpoints
@@ -354,6 +356,17 @@ export const inventoryApi = {
       replacementValue: data.replacementValue || null,
     } }),
 
+  uploadRentalImage: async (id: string, file: File) => {
+    const formData = new FormData()
+    formData.append('image', file)
+    const response = await apiFetch(`/api/inventory/${id}/image`, { method: 'POST', body: formData })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) throw new ApiError(data?.error || `HTTP ${response.status}`, response.status, data)
+    return data as { id: string; image: string }
+  },
+
+  deleteRentalImage: (id: string) => api.delete<{ message: string }>(`/api/inventory/${id}/image`),
+
   update: (id: string, data: any) =>
     api.put<InventoryItem>(`/api/inventory/${id}`, { body: {
       linkedItemIds: data.linkedItemIds,
@@ -441,6 +454,7 @@ function mapProductToInventory(p: any): InventoryItem {
     estimatedHours: p.estimatedHours || null,
     duration: p.duration || null,
     description: p.description || null,
+    image: p.image || null,
     rentalPrice: p.rentalPrice || null,
     rentalPeriod: p.rentalPeriod || null,
     depositAmount: p.depositAmount || null,
@@ -544,27 +558,29 @@ export const salesApi = {
   create: (data: Partial<Sale>) =>
     api.post<Sale>('/api/sales', { body: data }),
 
-  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number, paymentDetails?: { mobileProvider?: string; phoneNumber?: string; transactionId?: string; customerName?: string; amountPaid?: number; changeGiven?: number }) =>
-    api.post<{ message: string; count: number; total: number; sale: any }>('/api/sales/checkout', {
+  checkout: (cart: CartItem[], payment_mode: string, cashDiscount?: number, paymentDetails?: { mobileProvider?: string; phoneNumber?: string; transactionId?: string; customerName?: string; amountPaid?: number; changeGiven?: number; currency?: string; unitsPerBase?: number }) =>
+    api.post<{ message: string; count: number; total: number; foreignTotal?: number; baseCurrency?: string; exchangeRateToBase?: number; sale: any }>('/api/sales/checkout', {
       body: {
         cart: cart.map(c => ({
           serviceJobs: c.serviceJobs,
           productId: c.productId || c.id,
           qty: c.qty,
-          price: c.selling_price,
-          discount: c.discount || 0,
-          cashDiscount: c.cashDiscount || 0,
+          price: c.selling_price * (paymentDetails?.unitsPerBase || 1),
+          discount: (c.discount || 0) * (paymentDetails?.unitsPerBase || 1),
+          cashDiscount: (c.cashDiscount || 0) * (paymentDetails?.unitsPerBase || 1),
           unitName: c.unitName || null,
           conversionFactor: c.conversionFactor ?? null,
         })),
         paymentMethod: payment_mode,
-        cashDiscount: cashDiscount || 0,
+        cashDiscount: (cashDiscount || 0) * (paymentDetails?.unitsPerBase || 1),
         mobileProvider: paymentDetails?.mobileProvider,
         phoneNumber: paymentDetails?.phoneNumber,
         transactionId: paymentDetails?.transactionId,
         customerName: paymentDetails?.customerName,
         amountPaid: paymentDetails?.amountPaid,
         changeGiven: paymentDetails?.changeGiven,
+        currency: paymentDetails?.currency,
+        unitsPerBase: paymentDetails?.unitsPerBase,
       },
     }),
 }
@@ -1007,6 +1023,21 @@ export const settingsApi = {
   },
 }
 
+export interface LiveCurrencyRates {
+  baseCurrency: string
+  rates: Record<string, number>
+  provider: string
+  attributionUrl: string
+  rateDate: string | null
+  nextUpdateAt: string | null
+  cacheStatus: 'fresh' | 'stale'
+  warning?: string
+}
+
+export const currencyApi = {
+  rates: (base?: string) => api.get<LiveCurrencyRates>('/api/currencies/rates', { params: { base } }),
+}
+
 export const subscriptionBillingApi = {
   get: () => api.get<any>('/api/tenants/me/billing-reminder'),
   startPayment: (data: { periodCount: number; paymentMethod: 'mobile_money' | 'card'; phoneNumber?: string; email?: string }) =>
@@ -1192,6 +1223,7 @@ export interface InventoryItem {
   estimatedHours?: number | null
   duration?: string | null
   description?: string | null
+  image?: string | null
   rentalPrice?: number | null
   rentalPeriod?: string | null
   depositAmount?: number | null
@@ -1278,6 +1310,7 @@ export interface ReceiptPreview {
     logo?: string | null
     receiptHeader?: string | null
     receiptFooter?: string | null
+    currency?: string
   }
   branch?: BranchOption | null
   cashier?: string
@@ -1285,10 +1318,23 @@ export interface ReceiptPreview {
   customerName?: string | null
   paymentMethod: string
   createdAt: string
+  baseCurrency?: string
+  transactionCurrency?: string
+  foreignTotal?: number
+  exchangeRateToBase?: number
+  exchangeRateAsOf?: string | null
+  exchangeRateSource?: string | null
   subtotal: number
   discount: number
   tax: number
   total: number
+  baseCurrency?: string
+  transactionCurrency?: string
+  foreignTotal?: number
+  baseTotal?: number
+  exchangeRateToBase?: number
+  exchangeRateAsOf?: string | null
+  exchangeRateSource?: string | null
   amountPaid?: number | null
   changeGiven?: number | null
   items: Array<{

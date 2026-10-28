@@ -1,100 +1,94 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { AppFeedback } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { initSync } from '@/db/sync'
-import { SaaSAdminLayout } from '@/components/layout/SaaSAdminLayout'
-import { TenantLayout } from '@/components/layout/TenantLayout'
 import { RoleRoute } from '@/guard/RoleRoute'
 import { FeatureGuard } from '@/components/FeatureGuard'
 import { PwaRefreshControl } from '@/components/PwaRefreshControl'
  
-// Auth Pages
-import LoginPage from '@/pages/auth/LoginPage'
-import SaaSAdminLoginPage from '@/pages/auth/SaaSAdminLoginPage'
-import RegisterPage from '@/pages/auth/RegisterPage'
-import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage'
-import AcceptInvitation from '@/pages/auth/AcceptInvitation'
-import UnauthorizedPage from '@/pages/auth/UnauthorizedPage'
- 
-// Tenant (Business) Pages
-import DashboardPage from '@/pages/DashboardPage'
-import ReportsPage from '@/pages/ReportsPage'
-import SalesPage from '@/pages/SalesPage'
-import InventoryPage from '@/pages/InventoryPage'
-import BusinessAdvisorPage from '@/pages/BusinessAdvisorPage'
-import AuditLogPage from '@/pages/AuditLogPage'
-import BranchesPage from '@/pages/BranchesPage'
-import TrashPage from '@/pages/TrashPage'
-import StaffPage from '@/pages/StaffPage'
-import BusinessSettingsPage from '@/pages/BusinessSettingsPage'
-import RolesPermissionsPage from '@/pages/RolesPermissionsPage'
-import TaxManagementPage from '@/pages/TaxManagementPage'
-import ReceiptSettingsPage from '@/pages/ReceiptSettingsPage'
-import ReceivablesPage from '@/pages/receivables/ReceivablesPage'
-import CustomerProfilePage from '@/pages/receivables/CustomerProfilePage'
-import ReceivableReconciliationPage from '@/pages/receivables/ReceivableReconciliationPage'
-import PayablesPage from '@/pages/receivables/PayablesPage'
-import RentalsPage from '@/pages/RentalsPage'
-import RentalItemsPage from '@/pages/RentalItemsPage'
-import RentalPaymentsPage from '@/pages/RentalPaymentsPage'
-import RentalCRMPage from '@/pages/CRMPage'
-import RentalPlannerPage from '@/pages/RentalPlannerPage'
-import PropertyManagementPage from '@/pages/PropertyManagementPage'
-import ReturnsPage from '@/pages/ReturnsPage'
-import AccountingPage from '@/pages/accounting/AccountingPage'
-import TransactionAccountsPage from '@/pages/accounting/TransactionAccountsPage'
-import StaffTillSheetPage from '@/pages/accounting/StaffTillSheetPage'
-import DataImporterPage from '@/pages/inventory/DataImporterPage'
-import HRPage from '@/pages/HRPage'
-import HRAccountingConfigPage from '@/pages/HRAccountingConfigPage'
-import DepartmentManagementPage from '@/pages/hr/DepartmentManagementPage'
-import PositionManagementPage from '@/pages/hr/PositionManagementPage'
-import EmployeeManagementPage from '@/pages/hr/EmployeeManagementPage'
-import ContractManagementPage from '@/pages/hr/ContractManagementPage'
-import DocumentManagementPage from '@/pages/hr/DocumentManagementPage'
-import UnitTeamManagementPage from '@/pages/hr/UnitTeamManagementPage'
-// Phase 2 HR Pages
-import AttendanceListPage from '@/pages/hr/AttendanceListPage'
-import AttendanceCheckPage from '@/pages/hr/AttendanceCheckPage'
-import ShiftManagementPage from '@/pages/hr/ShiftManagementPage'
-import LeaveRequestPage from '@/pages/hr/LeaveRequestPage'
-import LeaveApprovalPage from '@/pages/hr/LeaveApprovalPage'
-import TransfersPage from '@/pages/TransfersPage'
-import CommunicationPage from '@/pages/CommunicationPage'
-import IntegrationsPage from '@/pages/IntegrationsPage'
-import RestaurantPage from '@/pages/RestaurantPage'
-import FuelStationPage from '@/pages/FuelStationPage'
-import ManufacturingPage from '@/pages/ManufacturingPage'
-import AgriculturePage from '@/pages/AgriculturePage'
-import ServiceBusinessPage from '@/pages/ServiceBusinessPage'
-import PublicServiceFeedbackPage from '@/pages/PublicServiceFeedbackPage'
-import UserProfilePage from '@/pages/UserProfilePage'
-import ReferralPage from '@/pages/ReferralPage'
-import ExpensesPage from '@/pages/expenses/ExpensesPage'
-import CreditDebitNotesPage from '@/pages/CreditDebitNotesPage'
-import PaymentPage from '@/pages/PaymentPage'
-import ProcurementNetworkPage from '@/pages/ProcurementNetworkPage'
- 
-// SaaS Admin Pages
-import SaaSAdminDashboard from '@/pages/SaaSAdmin/Dashboard'
-import BusinessesPage from '@/pages/SaaSAdmin/BusinessesPage'
-import ProvisionPage from '@/pages/SaaSAdmin/ProvisionPage'
-import PlansPage from '@/pages/SaaSAdmin/PlansPage'
-import FeaturesPage from '@/pages/SaaSAdmin/FeaturesPage'
-import HRModuleSettingsPage from '@/pages/SaaSAdmin/HRModuleSettingsPage'
-import OwnersPage from '@/pages/SaaSAdmin/OwnersPage'
-import SubscriptionsPage from '@/pages/SaaSAdmin/SubscriptionsPage'
-import InvitationsList from '@/pages/SaaSAdmin/InvitationsList'
-import TenantDetailPage from '@/pages/SaaSAdmin/TenantDetailPage'
-import PlatformAuditPage from '@/pages/SaaSAdmin/PlatformAuditPage'
-import ReferralDashboard from '@/pages/SaaSAdmin/ReferralDashboard'
-import UserGuidePage from '@/pages/SaaSAdmin/UserGuidePage'
-import ManufacturingGuidePage from '@/pages/SaaSAdmin/ManufacturingGuidePage'
-import ProcurementGuidePage from '@/pages/SaaSAdmin/ProcurementGuidePage'
-import FuelStationGuidePage from '@/pages/SaaSAdmin/FuelStationGuidePage'
-import PlatformStaffPage from '@/pages/SaaSAdmin/PlatformStaffPage'
+
+const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
+const SaaSAdminLoginPage = lazy(() => import('@/pages/auth/SaaSAdminLoginPage'))
+const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'))
+const ForgotPasswordPage = lazy(() => import('@/pages/auth/ForgotPasswordPage'))
+const AcceptInvitation = lazy(() => import('@/pages/auth/AcceptInvitation'))
+const UnauthorizedPage = lazy(() => import('@/pages/auth/UnauthorizedPage'))
+const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'))
+const SalesPage = lazy(() => import('@/pages/SalesPage'))
+const InventoryPage = lazy(() => import('@/pages/InventoryPage'))
+const BusinessAdvisorPage = lazy(() => import('@/pages/BusinessAdvisorPage'))
+const AuditLogPage = lazy(() => import('@/pages/AuditLogPage'))
+const BranchesPage = lazy(() => import('@/pages/BranchesPage'))
+const TrashPage = lazy(() => import('@/pages/TrashPage'))
+const StaffPage = lazy(() => import('@/pages/StaffPage'))
+const BusinessSettingsPage = lazy(() => import('@/pages/BusinessSettingsPage'))
+const RolesPermissionsPage = lazy(() => import('@/pages/RolesPermissionsPage'))
+const TaxManagementPage = lazy(() => import('@/pages/TaxManagementPage'))
+const ReceiptSettingsPage = lazy(() => import('@/pages/ReceiptSettingsPage'))
+const ReceivablesPage = lazy(() => import('@/pages/receivables/ReceivablesPage'))
+const CustomerProfilePage = lazy(() => import('@/pages/receivables/CustomerProfilePage'))
+const ReceivableReconciliationPage = lazy(() => import('@/pages/receivables/ReceivableReconciliationPage'))
+const PayablesPage = lazy(() => import('@/pages/receivables/PayablesPage'))
+const RentalsPage = lazy(() => import('@/pages/RentalsPage'))
+const RentalItemsPage = lazy(() => import('@/pages/RentalItemsPage'))
+const RentalPaymentsPage = lazy(() => import('@/pages/RentalPaymentsPage'))
+const RentalCRMPage = lazy(() => import('@/pages/CRMPage'))
+const RentalPlannerPage = lazy(() => import('@/pages/RentalPlannerPage'))
+const PropertyManagementPage = lazy(() => import('@/pages/PropertyManagementPage'))
+const ReturnsPage = lazy(() => import('@/pages/ReturnsPage'))
+const AccountingPage = lazy(() => import('@/pages/accounting/AccountingPage'))
+const TransactionAccountsPage = lazy(() => import('@/pages/accounting/TransactionAccountsPage'))
+const StaffTillSheetPage = lazy(() => import('@/pages/accounting/StaffTillSheetPage'))
+const DataImporterPage = lazy(() => import('@/pages/inventory/DataImporterPage'))
+const HRPage = lazy(() => import('@/pages/HRPage'))
+const HRAccountingConfigPage = lazy(() => import('@/pages/HRAccountingConfigPage'))
+const DepartmentManagementPage = lazy(() => import('@/pages/hr/DepartmentManagementPage'))
+const PositionManagementPage = lazy(() => import('@/pages/hr/PositionManagementPage'))
+const EmployeeManagementPage = lazy(() => import('@/pages/hr/EmployeeManagementPage'))
+const ContractManagementPage = lazy(() => import('@/pages/hr/ContractManagementPage'))
+const DocumentManagementPage = lazy(() => import('@/pages/hr/DocumentManagementPage'))
+const UnitTeamManagementPage = lazy(() => import('@/pages/hr/UnitTeamManagementPage'))
+const AttendanceListPage = lazy(() => import('@/pages/hr/AttendanceListPage'))
+const AttendanceCheckPage = lazy(() => import('@/pages/hr/AttendanceCheckPage'))
+const ShiftManagementPage = lazy(() => import('@/pages/hr/ShiftManagementPage'))
+const LeaveRequestPage = lazy(() => import('@/pages/hr/LeaveRequestPage'))
+const LeaveApprovalPage = lazy(() => import('@/pages/hr/LeaveApprovalPage'))
+const TransfersPage = lazy(() => import('@/pages/TransfersPage'))
+const CommunicationPage = lazy(() => import('@/pages/CommunicationPage'))
+const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'))
+const RestaurantPage = lazy(() => import('@/pages/RestaurantPage'))
+const FuelStationPage = lazy(() => import('@/pages/FuelStationPage'))
+const ManufacturingPage = lazy(() => import('@/pages/ManufacturingPage'))
+const AgriculturePage = lazy(() => import('@/pages/AgriculturePage'))
+const ServiceBusinessPage = lazy(() => import('@/pages/ServiceBusinessPage'))
+const PublicServiceFeedbackPage = lazy(() => import('@/pages/PublicServiceFeedbackPage'))
+const UserProfilePage = lazy(() => import('@/pages/UserProfilePage'))
+const ReferralPage = lazy(() => import('@/pages/ReferralPage'))
+const ExpensesPage = lazy(() => import('@/pages/expenses/ExpensesPage'))
+const CreditDebitNotesPage = lazy(() => import('@/pages/CreditDebitNotesPage'))
+const PaymentPage = lazy(() => import('@/pages/PaymentPage'))
+const ProcurementNetworkPage = lazy(() => import('@/pages/ProcurementNetworkPage'))
+const SaaSAdminDashboard = lazy(() => import('@/pages/SaaSAdmin/Dashboard'))
+const BusinessesPage = lazy(() => import('@/pages/SaaSAdmin/BusinessesPage'))
+const ProvisionPage = lazy(() => import('@/pages/SaaSAdmin/ProvisionPage'))
+const PlansPage = lazy(() => import('@/pages/SaaSAdmin/PlansPage'))
+const FeaturesPage = lazy(() => import('@/pages/SaaSAdmin/FeaturesPage'))
+const HRModuleSettingsPage = lazy(() => import('@/pages/SaaSAdmin/HRModuleSettingsPage'))
+const OwnersPage = lazy(() => import('@/pages/SaaSAdmin/OwnersPage'))
+const SubscriptionsPage = lazy(() => import('@/pages/SaaSAdmin/SubscriptionsPage'))
+const InvitationsList = lazy(() => import('@/pages/SaaSAdmin/InvitationsList'))
+const TenantDetailPage = lazy(() => import('@/pages/SaaSAdmin/TenantDetailPage'))
+const PlatformAuditPage = lazy(() => import('@/pages/SaaSAdmin/PlatformAuditPage'))
+const ReferralDashboard = lazy(() => import('@/pages/SaaSAdmin/ReferralDashboard'))
+const UserGuidePage = lazy(() => import('@/pages/SaaSAdmin/UserGuidePage'))
+const ManufacturingGuidePage = lazy(() => import('@/pages/SaaSAdmin/ManufacturingGuidePage'))
+const ProcurementGuidePage = lazy(() => import('@/pages/SaaSAdmin/ProcurementGuidePage'))
+const FuelStationGuidePage = lazy(() => import('@/pages/SaaSAdmin/FuelStationGuidePage'))
+const PlatformStaffPage = lazy(() => import('@/pages/SaaSAdmin/PlatformStaffPage'))
+const SaaSAdminLayout = lazy(() => import('@/components/layout/SaaSAdminLayout').then(module => ({ default: module.SaaSAdminLayout })))
+const TenantLayout = lazy(() => import('@/components/layout/TenantLayout').then(module => ({ default: module.TenantLayout })))
  
 // Public Route — redirects logged-in users to their dashboard
 function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children: React.ReactNode; redirectTo?: string }) {
@@ -110,10 +104,18 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
 
 function App() {
   const { isAuthenticated, isPlatformUser } = useJWTAuth()
-  useEffect(() => { if (isAuthenticated && !isPlatformUser()) initSync() }, [isAuthenticated, isPlatformUser])
+  useEffect(() => {
+    if (!isAuthenticated || isPlatformUser()) return
+    let cancelled = false
+    void import('@/db/sync').then(({ initSync }) => {
+      if (!cancelled) return initSync()
+    }).catch((error) => console.error('Offline data sync could not start:', error))
+    return () => { cancelled = true }
+  }, [isAuthenticated, isPlatformUser])
 
   return (
     <BrowserRouter>
+      <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center px-4 text-sm text-muted-foreground" role="status">Loading page...</div>}>
       <Routes>
         {/* ========== Public Routes ========== */}
         <Route path="/login" element={
@@ -269,6 +271,7 @@ function App() {
         {/* ========== Catch-all ========== */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
       <PwaRefreshControl />
       <Toaster />
       <AppFeedback />

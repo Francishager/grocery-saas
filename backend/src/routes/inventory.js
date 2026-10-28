@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from 'multer';
 import { moveToTrash, assertOutsideTrash } from '../services/trashService.js';
 import { createHash, randomInt } from "node:crypto";
 import prisma from "../db.js";
@@ -15,8 +16,32 @@ import {
 import { checkUsageLimit } from "../utils/usageLimits.js";
 import { ensureTenantCategoryCatalog } from "../utils/categoryDefaults.js";
 import { categoryNameKey, categorySlug } from "../utils/categoryCatalog.js";
+import { deleteCloudinaryAsset, safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js';
 
 const router = Router();
+const rentalImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)
+    ? callback(null, true)
+    : callback(new Error('UNSUPPORTED_RENTAL_IMAGE')),
+});
+
+function parseRentalImage(req, res, next) {
+  rentalImageUpload.single('image')(req, res, error => {
+    if (!error) return next();
+    const message = error.code === 'LIMIT_FILE_SIZE' ? 'Rental item images must be 2 MB or smaller.'
+      : error.message === 'UNSUPPORTED_RENTAL_IMAGE' ? 'Choose a JPEG, PNG, or WebP image.'
+        : 'The rental item image could not be accepted.';
+    res.status(400).json({ error: message });
+  });
+}
+
+function isSupportedRentalImage(buffer) {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return true;
+  return buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP';
+}
 
 async function hasRentalFeature(tenantId) {
   return hasFeatureAccess(await getTenantFeatures(tenantId), 'rentals');
@@ -941,6 +966,51 @@ router.get("/:id", authenticateToken, async (req, res) => {
     res.json(product);
   } catch (err) {
     handleBranchError(res, err);
+  }
+});
+
+router.post('/:id/image', authenticateToken, requirePermission('canEditRental'), requireFeature('rentals'), parseRentalImage, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Choose a rental item image to upload.' });
+    if (!isSupportedRentalImage(req.file.buffer)) return res.status(400).json({ error: 'The selected file is not a valid JPEG, PNG, or WebP image.' });
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const product = await prisma.product.findFirst({
+      where: scopedWhere(scope, { id: req.params.id, itemType: 'rental' }),
+      select: { id: true, tenantId: true, imagePublicId: true },
+    });
+    if (!product) return res.status(404).json({ error: 'Rental item not found.' });
+    const uploaded = await uploadBufferToCloudinary(req.file.buffer, {
+      resourceType: 'image',
+      folder: `jibusales/rental-items/${scope.tenantId}`,
+      publicId: `${safeCloudinaryId(product.id)}-${Date.now()}`,
+      transformation: [{ width: 1200, height: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
+    });
+    if (!uploaded?.secure_url || !uploaded?.public_id) return res.status(502).json({ error: 'Image storage did not return a usable image.' });
+    const updated = await prisma.product.update({
+      where: { id: product.id },
+      data: { image: uploaded.secure_url, imagePublicId: uploaded.public_id },
+      select: { id: true, image: true },
+    });
+    if (product.imagePublicId) deleteCloudinaryAsset(product.imagePublicId).catch(error => console.error('Old rental image cleanup failed:', error));
+    res.json(updated);
+  } catch (error) {
+    handleBranchError(res, error);
+  }
+});
+
+router.delete('/:id/image', authenticateToken, requirePermission('canEditRental'), requireFeature('rentals'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const product = await prisma.product.findFirst({
+      where: scopedWhere(scope, { id: req.params.id, itemType: 'rental' }),
+      select: { id: true, imagePublicId: true },
+    });
+    if (!product) return res.status(404).json({ error: 'Rental item not found.' });
+    await prisma.product.update({ where: { id: product.id }, data: { image: null, imagePublicId: null } });
+    if (product.imagePublicId) await deleteCloudinaryAsset(product.imagePublicId).catch(error => console.error('Rental image cleanup failed:', error));
+    res.json({ message: 'Rental item image removed.' });
+  } catch (error) {
+    handleBranchError(res, error);
   }
 });
 

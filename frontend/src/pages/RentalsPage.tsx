@@ -5,6 +5,7 @@ import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Spark
 import { apiFetch, rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -1327,8 +1328,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
 
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes</Label>
-                <textarea
+                <Textarea
                   id="notes"
+                  aiWritingField
                   className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}

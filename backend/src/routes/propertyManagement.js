@@ -1168,7 +1168,7 @@ router.post('/owners/:id/sale-payouts', requirePermission('canRecordOwnerPayout'
 const propertySaleInclude = {
   property: { include: { owner: true } },
   unit: true,
-  buyer: { select: { id: true, name: true, phone: true, email: true, balance: true, creditLimit: true } },
+  buyer: { select: { id: true, name: true, phone: true, email: true, balance: true } },
   owner: true,
   installments: { orderBy: { sequence: 'asc' } },
   payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, include: { cashAccount: { select: { id: true, name: true, type: true } }, allocations: true } },
@@ -1376,7 +1376,8 @@ router.get('/land-purchases/payments/:paymentId/receipt', requirePermission('can
 
 router.get('/sale-buyers', requirePermission('canViewPropertySales'), async (req, res) => {
   try {
-    const buyers = await prisma.customer.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, take: 500, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true, balance: true, creditLimit: true } })
+    const canViewCreditLimit = req.user?.role === 'owner' || req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerCreditLimit') || req.user?.permissions?.includes('canManageCustomerCreditLimit')
+    const buyers = await prisma.customer.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, take: 500, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true, balance: true, ...(canViewCreditLimit ? { creditLimit: true } : {}) } })
     res.json(buyers)
   } catch (error) { console.error('Load plot sale buyers failed:', error); res.status(500).json({ error: 'Could not load buyer accounts.' }) }
 })

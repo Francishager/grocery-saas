@@ -65,5 +65,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
 
 # Sync the Prisma schema before accepting requests. Starting the API in parallel
 # can make existing tenants hit database errors while schema updates are pending.
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && ./start.sh"]
+CMD ["sh", "-c", "npx prisma db push && ./start.sh"]
 

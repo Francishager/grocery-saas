@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticateToken, blockPlatformAdmin, requirePermission, requireTenant } from '../../middleware/auth.js';
+import { authenticateToken, blockPlatformAdmin, requireFeature, requirePermission, requireTenant } from '../../middleware/auth.js';
 import { requireAnyFeature } from '../../middleware/featureCheck.js';
 import { createAdvisorLimiter, requestBusinessAdvice, advisorError } from '../services/businessAdvisor.js';
 
@@ -9,6 +9,7 @@ const sensitivePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?\d[\s().-]
 const fields = {
   crm: new Set(['opportunity', 'lead notes', 'interaction notes', 'support case details', 'campaign name', 'email subject', 'campaign content']),
   planner: new Set(['planner title', 'planner notes']),
+  general: new Set(['business text']),
 };
 
 router.use(authenticateToken, blockPlatformAdmin, requireTenant, requirePermission('canUseBusinessAI'));
@@ -43,6 +44,7 @@ function respondWithDraft(moduleName) {
 
 router.post('/crm', requireAnyFeature(['crm', 'rentals']), respondWithDraft('crm'));
 router.post('/planner', requireAnyFeature(['planner', 'rentals']), respondWithDraft('planner'));
+router.post('/general', requireFeature('dashboard'), respondWithDraft('general'));
 
 export { sensitivePattern };
 export default router;

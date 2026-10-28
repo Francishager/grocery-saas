@@ -103,6 +103,8 @@ const PERMISSION_TO_FEATURES = {
   canViewCustomerIdentity: ['customers', 'crm'],
   canViewCustomerAddress: ['customers', 'crm'],
   canViewCustomerBalance: ['customers', 'crm'],
+  canViewCustomerCreditLimit: ['customers', 'crm'],
+  canManageCustomerCreditLimit: ['customers', 'crm'],
   canViewCustomerSalesHistory: ['customers', 'crm'],
   canViewCustomerPaymentsHistory: ['customers', 'crm'],
   canViewCustomerReturnsHistory: ['customers', 'crm'],
@@ -114,7 +116,7 @@ const PERMISSION_TO_FEATURES = {
   canPrintCustomerReceipts: ['customers', 'crm'],
   canEditCustomer: ['customers', 'crm'],
   canDeleteCustomer: ['customers', 'crm'],
-  canCreateReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
+  canCreateReceivable: ['receivables', 'receivables.payments'],
   canViewReceivable: ['receivables', 'receivables.aging', 'receivables.payments', 'customers', 'crm'],
   canEditReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
   canDeleteReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
@@ -323,6 +325,7 @@ export const ALL_PERMISSION_KEYS = [
   // Customers / Receivables
   "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
   "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerIdentity", "canViewCustomerAddress", "canViewCustomerBalance",
+  "canViewCustomerCreditLimit", "canManageCustomerCreditLimit",
   "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
   "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
   "canViewCustomerNotes", "canRecordCustomerPayment", "canPrintCustomerReceipts",
@@ -598,8 +601,16 @@ const PERMISSION_DETAIL_OVERRIDES = {
     description: 'See customer physical addresses in profiles.',
   },
   canViewCustomerBalance: {
-    name: 'View customer balances and credit limits',
-    description: 'See customer opening/current balances, credit limits, trust scores, and balance summaries.',
+    name: 'View customer balances',
+    description: 'See customer opening/current balances, trust scores, and balance summaries. Credit limits have separate access.',
+  },
+  canViewCustomerCreditLimit: {
+    name: 'View customer credit limits',
+    description: 'See a customer’s authorized credit limit and remaining limit.',
+  },
+  canManageCustomerCreditLimit: {
+    name: 'Set and edit customer credit limits',
+    description: 'Set or change the credit limit used to validate unpaid credit sales. This also grants permission to view limits.',
   },
   canViewCustomerSalesHistory: {
     name: 'View customer sales history',
@@ -1392,6 +1403,8 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
   // Preserve the old module-view grant as portfolio access; it does not imply
   // the newer collections, statement, or financial-action permissions.
   if (normalized.canViewPropertyManagement) granted.add('canViewPropertyPortfolio');
+
+  if (normalized.canManageCustomerCreditLimit) granted.add('canViewCustomerCreditLimit');
 
   return [...granted];
 }

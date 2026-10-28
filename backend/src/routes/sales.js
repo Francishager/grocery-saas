@@ -15,6 +15,7 @@ import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
 import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivablesJournal } from '../services/receivablesAccountingService.js';
 import { customerProfileAccess, customerProfilePayload } from '../utils/customerProfileAccess.js';
 import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
+import { getRateToBase, normalizeCurrencyCode } from '../services/currencyRates.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -42,6 +43,40 @@ function normalizeItems(items, idKey = "productId") {
 function userHasEffectivePermission(req, permission) {
   const permissions = req.user?.permissions || [];
   return permissions.includes(permission) || permissions.includes("*");
+}
+
+async function resolveSaleCurrency(tenantId, requestedCurrency, quotedUnitsPerBase) {
+  const baseCurrency = (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { currency: true } }))?.currency || 'UGX';
+  const currency = normalizeCurrencyCode(requestedCurrency || baseCurrency);
+  if (!currency) throw Object.assign(new Error('Select a valid three-letter transaction currency.'), { statusCode: 400 });
+  if (currency !== baseCurrency && !hasFeatureAccess(await getTenantFeatures(tenantId), 'settings.currencies')) {
+    throw Object.assign(new Error('Foreign-currency transactions are not enabled on this business plan.'), { statusCode: 403 });
+  }
+  const fx = await getRateToBase(baseCurrency, currency);
+  if (currency !== baseCurrency && fx.cacheStatus === 'stale') {
+    throw Object.assign(new Error('A fresh exchange rate is required to record this sale. Refresh the rate and try again.'), { statusCode: 503 });
+  }
+  if (currency !== baseCurrency && Number.isFinite(Number(quotedUnitsPerBase)) && Math.abs(Number(quotedUnitsPerBase) - (1 / fx.rateToBase)) / (1 / fx.rateToBase) > 0.001) {
+    throw Object.assign(new Error('The displayed exchange rate changed. Refresh the quote before completing this sale.'), { statusCode: 409 });
+  }
+  return { baseCurrency, currency, ...fx };
+}
+
+async function ensureSaleCashAccountBaseCurrency(cashAccountId, fx) {
+  if (fx.currency === fx.baseCurrency || !cashAccountId) return;
+  const account = await prisma.cashAccount.findFirst({ where: { id: cashAccountId }, select: { currency: true } });
+  if (!account || String(account.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+    throw Object.assign(new Error(`Foreign-currency sales must settle through a transaction account denominated in ${fx.baseCurrency} so the account and general ledger stay reconciled.`), { statusCode: 409 });
+  }
+}
+
+function toBaseSaleItem(item, rateToBase) {
+  return {
+    ...item,
+    price: Number(item.price || 0) * rateToBase,
+    discount: Number(item.discount || 0) * rateToBase,
+    cashDiscount: Number(item.cashDiscount || 0) * rateToBase,
+  };
 }
 
 async function checkDiscountPermission(req, userId, saleItems, cashDiscount = 0) {
@@ -362,9 +397,11 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     if (!discountCheck.allowed) {
       return res.status(403).json({ error: discountCheck.error });
     }
-    const { invoiceCashDiscount } = discountCheck;
+    const fx = await resolveSaleCurrency(scope.tenantId, req.body.currency, req.body.unitsPerBase);
+    await ensureSaleCashAccountBaseCurrency(req.userCashAccountId, fx);
+    const invoiceCashDiscount = discountCheck.invoiceCashDiscount * fx.rateToBase;
 
-    const saleItems = await checkedSaleItems(items, scope);
+    const saleItems = await checkedSaleItems(items.map(item => toBaseSaleItem(item, fx.rateToBase)), scope);
     await validateServiceCheckout(req, scope, saleItems, customerName);
     applySaleServiceRevenueSplit(saleItems);
     const subtotal = saleItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
@@ -392,6 +429,11 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
           tax,
           discount: lineDiscount,
           cashDiscount: invoiceCashDiscount,
+          currency: fx.currency,
+          foreignTotal: total / fx.rateToBase,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           paymentMethod,
           mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
@@ -431,6 +473,10 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
             type: "sale",
             amount: total,
             balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: total / fx.rateToBase,
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
             reference: created.receiptNo,
             description: `Sale: ${created.receiptNo}`,
             userId,
@@ -465,7 +511,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       branchName: sale.branch?.name || null,
     }).catch(err => console.error("Sale notification failed after sale was saved:", err));
 
-    res.status(201).json({ message: "Sale recorded", sale });
+    res.status(201).json({ message: "Sale recorded", sale, baseCurrency: fx.baseCurrency, foreignTotal: sale.foreignTotal, exchangeRateToBase: fx.rateToBase });
   } catch (err) {
     console.error("Sale create error:", err);
     handleBranchError(res, err);
@@ -494,14 +540,16 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     if (!discountCheck.allowed) {
       return res.status(403).json({ error: discountCheck.error });
     }
-    const { invoiceCashDiscount } = discountCheck;
+    const fx = await resolveSaleCurrency(scope.tenantId, req.body.currency, req.body.unitsPerBase);
+    await ensureSaleCashAccountBaseCurrency(req.userCashAccountId, fx);
+    const baseInvoiceCashDiscount = discountCheck.invoiceCashDiscount * fx.rateToBase;
 
-    const saleItems = await checkedSaleItems(cart, scope);
+    const saleItems = await checkedSaleItems(cart.map(item => toBaseSaleItem(item, fx.rateToBase)), scope);
     await validateServiceCheckout(req, scope, saleItems, customerName);
     applySaleServiceRevenueSplit(saleItems);
     const subtotal = saleItems.reduce((sum, c) => sum + c.price * c.quantity, 0);
     const lineDiscount = saleItems.reduce((sum, c) => sum + c.discount + c.cashDiscount, 0);
-    const totalDiscount = lineDiscount + invoiceCashDiscount;
+    const totalDiscount = lineDiscount + baseInvoiceCashDiscount;
 
     // Fetch tenant tax settings
     const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
@@ -523,14 +571,19 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           subtotal,
           tax,
           discount: lineDiscount,
-          cashDiscount: invoiceCashDiscount,
+          cashDiscount: baseInvoiceCashDiscount,
           paymentMethod,
           mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           customerName: customerName?.trim() || null,
-          amountPaid: amountPaid != null ? Number(amountPaid) : null,
-          changeGiven: changeGiven != null ? Number(changeGiven) : null,
+          amountPaid: amountPaid != null ? Number(amountPaid) * fx.rateToBase : null,
+          changeGiven: changeGiven != null ? Number(changeGiven) * fx.rateToBase : null,
+          currency: fx.currency,
+          foreignTotal: total / fx.rateToBase,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           items: { create: saleItems.map(({ baseQty, itemType, productName, jobRequests, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
@@ -564,6 +617,10 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
             type: "sale",
             amount: total,
             balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: total / fx.rateToBase,
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
             reference: created.receiptNo,
             description: `Sale: ${created.receiptNo}`,
             userId,
@@ -598,7 +655,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       branchName: sale.branch?.name || null,
     }).catch(err => console.error("Sale notification failed after checkout was saved:", err));
 
-    res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale });
+    res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale, baseCurrency: fx.baseCurrency, foreignTotal: sale.foreignTotal, exchangeRateToBase: fx.rateToBase });
   } catch (err) {
     console.error("Sales checkout error:", err);
     handleBranchError(res, err);

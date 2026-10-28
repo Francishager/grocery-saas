@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Archive, Check, ChevronsUpDown, Clock, Edit2, Plus, Search, Trash2 } from 'lucide-react'
+import { Archive, Check, ChevronsUpDown, Clock, Edit2, ImagePlus, Plus, Search, Trash2 } from 'lucide-react'
 import { appConfirm } from '@/lib/appFeedback'
 import { branchesApi, categoriesApi, inventoryApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
@@ -51,6 +52,8 @@ export default function RentalItemsPage() {
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<InventoryItem | null>(null)
   const [form, setForm] = useState<RentalAssetForm>(emptyForm)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const online = useOnlineStatus()
@@ -78,6 +81,16 @@ export default function RentalItemsPage() {
   }, [search, toast])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (!imageFile) {
+      setImagePreview(null)
+      return
+    }
+    const objectUrl = URL.createObjectURL(imageFile)
+    setImagePreview(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [imageFile])
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -126,12 +139,14 @@ export default function RentalItemsPage() {
 
   const beginCreate = () => {
     setEditing(null)
+    setImageFile(null)
     setForm({ ...emptyForm, branchId: defaultBranchId(user, branches) || '' })
     setShowForm(true)
   }
 
   const beginEdit = (item: InventoryItem) => {
     setEditing(item)
+    setImageFile(null)
     setForm({
       product_name: item.product_name || '', sku: item.sku || item.product_id || '',
       categoryId: item.categoryId || '', branchId: item.branchId || '', quantity: String(item.quantity ?? 0),
@@ -172,13 +187,41 @@ export default function RentalItemsPage() {
         description: form.description.trim() || null,
         baseUnit: 'Asset', low_stock_alert: 0,
       }
-      if (editing) await inventoryApi.update(String(editing.id), payload)
-      else await inventoryApi.create(payload)
-      toast({ title: editing ? 'Rental item updated' : 'Rental item added', description: 'Rental item details have been saved.' })
+      const savedResponse: any = editing
+        ? await inventoryApi.update(String(editing.id), payload)
+        : await inventoryApi.create(payload)
+      const savedItem = savedResponse?.product || savedResponse
+      const itemId = String(savedItem?.id || editing?.id || '')
+      if (imageFile && itemId) {
+        await inventoryApi.uploadRentalImage(itemId, imageFile)
+      }
+      toast({ title: editing ? 'Rental item updated' : 'Rental item added', description: imageFile ? 'Details and image have been saved.' : 'Rental item details have been saved.' })
+      setImageFile(null)
       setShowForm(false)
       await load()
     } catch (error: any) {
-      toast({ title: 'Could not save rental item', description: error?.message || 'Review the details and try again.', variant: 'destructive' })
+      toast({ title: imageFile ? 'Rental item saved, but image upload failed' : 'Could not save rental item', description: error?.message || 'Review the details and try again.', variant: 'destructive' })
+      if (imageFile) {
+        setImageFile(null)
+        setShowForm(false)
+        await load()
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const removeImage = async () => {
+    if (!editing?.image || saving) return
+    setSaving(true)
+    try {
+      await inventoryApi.deleteRentalImage(String(editing.id))
+      setEditing(current => current ? { ...current, image: null } : current)
+      setImageFile(null)
+      toast({ title: 'Rental item image removed' })
+      await load()
+    } catch (error: any) {
+      toast({ title: 'Could not remove image', description: error?.message || 'Try again.', variant: 'destructive' })
     } finally {
       setSaving(false)
     }
@@ -208,6 +251,25 @@ export default function RentalItemsPage() {
     {showForm && <Card>
       <CardHeader><CardTitle>{editing ? 'Edit rental item' : 'New rental item'}</CardTitle></CardHeader>
       <CardContent><form onSubmit={submit} className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="space-y-2 sm:col-span-2 xl:col-span-3">
+          <Label htmlFor="rental-item-image">Item image</Label>
+          <div className="flex flex-wrap items-center gap-4">
+            {(imagePreview || editing?.image) ? <img src={imagePreview || editing?.image || ''} alt="Rental item preview" className="size-24 rounded-md border object-cover" /> : <div className="grid size-24 place-items-center rounded-md border border-dashed text-muted-foreground"><ImagePlus className="size-6" /></div>}
+            <div className="space-y-2">
+              <Input id="rental-item-image" type="file" accept="image/jpeg,image/png,image/webp" className="max-w-sm" onChange={event => {
+                const file = event.target.files?.[0] || null
+                if (file && file.size > 2 * 1024 * 1024) {
+                  toast({ title: 'Image is too large', description: 'Choose an image no larger than 2 MB.', variant: 'destructive' })
+                  event.target.value = ''
+                  return
+                }
+                setImageFile(file)
+              }} />
+              <p className="text-xs text-muted-foreground">JPEG, PNG, or WebP · maximum 2 MB</p>
+              {editing?.image && !imageFile && <Button type="button" size="sm" variant="outline" onClick={() => void removeImage()}>Remove image</Button>}
+            </div>
+          </div>
+        </div>
         <div className="space-y-1"><Label htmlFor="rental-item-name">Asset name *</Label><Input id="rental-item-name" value={form.product_name} onChange={event => setForm(v => ({ ...v, product_name: event.target.value }))} required /></div>
         <div className="space-y-1"><Label htmlFor="rental-item-code">Asset code / SKU</Label><Input id="rental-item-code" value={form.sku} onChange={event => setForm(v => ({ ...v, sku: event.target.value }))} /></div>
         <div className="space-y-1">
@@ -233,7 +295,7 @@ export default function RentalItemsPage() {
         <div className="space-y-1"><Label htmlFor="rental-item-replacement">Replacement value</Label><Input id="rental-item-replacement" type="number" min="0" step="any" value={form.replacementValue} onChange={event => setForm(v => ({ ...v, replacementValue: event.target.value }))} /></div>
         <div className="space-y-1"><Label htmlFor="rental-item-cost">Acquisition cost *</Label><Input id="rental-item-cost" type="number" min="0" step="any" value={form.cost_price} onChange={event => setForm(v => ({ ...v, cost_price: event.target.value }))} required /></div>
         {!editing && <div className="space-y-1"><Label htmlFor="rental-item-branch">Owning branch *</Label><select id="rental-item-branch" value={form.branchId} onChange={event => setForm(v => ({ ...v, branchId: event.target.value }))} className="h-10 w-full rounded-md border bg-background px-3 text-sm" required><option value="">Select branch</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></div>}
-        <div className="space-y-1 sm:col-span-2 xl:col-span-3"><Label htmlFor="rental-item-description">Description / identifying details</Label><textarea id="rental-item-description" value={form.description} onChange={event => setForm(v => ({ ...v, description: event.target.value }))} maxLength={2000} className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm" /></div>
+        <div className="space-y-1 sm:col-span-2 xl:col-span-3"><Label htmlFor="rental-item-description">Description / identifying details</Label><Textarea id="rental-item-description" aiWritingField value={form.description} onChange={event => setForm(v => ({ ...v, description: event.target.value }))} maxLength={2000} /></div>
         {editing && <p className="sm:col-span-2 xl:col-span-3 text-xs text-muted-foreground">Owned quantity is changed through controlled stock movements so availability and asset records remain traceable.</p>}
         <div className="flex justify-end gap-2 sm:col-span-2 xl:col-span-3"><Button type="button" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Add item'}</Button></div>
       </form></CardContent>
@@ -244,7 +306,7 @@ export default function RentalItemsPage() {
         <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search rental items" placeholder="Search rental items or code" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
       </CardHeader>
       <CardContent>
-        {loading ? <div className="py-12 text-center text-sm text-muted-foreground">Loading rental items…</div> : items.length === 0 ? <div className="py-12 text-center"><Archive className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="font-medium">No rental items yet</p><p className="mt-1 text-sm text-muted-foreground">Add the items your business offers for hire.</p>{canCreate && <Button className="mt-4" onClick={beginCreate}><Plus className="mr-2 h-4 w-4" />Add rental item</Button>}</div> : <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-sm"><thead><tr className="border-b text-left text-muted-foreground"><th className="py-3 pr-3">Rental item</th><th className="py-3 pr-3">Category</th><th className="py-3 pr-3">Branch</th><th className="py-3 pr-3 text-right">Owned</th><th className="py-3 pr-3">Hire rate</th><th className="py-3 pr-3 text-right">Deposit</th><th className="py-3 pr-3 text-right">Replacement</th><th className="py-3 text-right">Actions</th></tr></thead><tbody>{items.map(item => <tr key={item.id} className="border-b last:border-0"><td className="py-3 pr-3"><div className="font-medium">{item.product_name}</div><div className="text-xs text-muted-foreground">{item.sku || item.product_id || 'No item code'}</div></td><td className="py-3 pr-3">{item.categoryName || '—'}</td><td className="py-3 pr-3">{item.branch?.name || '—'}</td><td className="py-3 pr-3 text-right tabular-nums">{Number(item.quantity || 0)}</td><td className="py-3 pr-3"><span className="font-medium">{formatCurrency(item.rentalPrice ?? item.unit_price)}</span><span className="text-muted-foreground"> / {item.rentalPeriod || 'daily'}</span></td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.depositAmount || 0)}</td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.replacementValue || 0)}</td><td className="py-3 text-right"><div className="flex justify-end gap-1">{canEdit && <Button size="icon" variant="ghost" aria-label={`Edit ${item.product_name}`} title="Edit rental item" onClick={() => beginEdit(item)}><Edit2 className="h-4 w-4" /></Button>}{canDelete && <Button size="icon" variant="ghost" aria-label={`Delete ${item.product_name}`} title="Move to Trash" onClick={() => void remove(item)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}</div></td></tr>)}</tbody></table></div>}
+        {loading ? <div className="py-12 text-center text-sm text-muted-foreground">Loading rental items…</div> : items.length === 0 ? <div className="py-12 text-center"><Archive className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="font-medium">No rental items yet</p><p className="mt-1 text-sm text-muted-foreground">Add the items your business offers for hire.</p>{canCreate && <Button className="mt-4" onClick={beginCreate}><Plus className="mr-2 h-4 w-4" />Add item</Button>}</div> : <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead><tr className="border-b text-left text-muted-foreground"><th className="py-3 pr-3">Rental item</th><th className="py-3 pr-3">Category</th><th className="py-3 pr-3">Branch</th><th className="py-3 pr-3 text-right">Owned</th><th className="py-3 pr-3">Hire rate</th><th className="py-3 pr-3 text-right">Deposit</th><th className="py-3 pr-3 text-right">Replacement</th><th className="py-3 text-right">Actions</th></tr></thead><tbody>{items.map(item => <tr key={item.id} className="border-b last:border-0"><td className="py-3 pr-3"><div className="flex items-center gap-3">{item.image ? <img src={item.image} alt="" className="size-11 rounded-md border object-cover" /> : <div className="grid size-11 place-items-center rounded-md border border-dashed text-muted-foreground"><ImagePlus className="size-4" /></div>}<div className="min-w-0"><div className="font-medium">{item.product_name}</div><div className="text-xs text-muted-foreground">{item.sku || item.product_id || 'No item code'}</div></div></div></td><td className="py-3 pr-3">{item.categoryName || '—'}</td><td className="py-3 pr-3">{item.branch?.name || '—'}</td><td className="py-3 pr-3 text-right tabular-nums">{Number(item.quantity || 0)}</td><td className="py-3 pr-3"><span className="font-medium">{formatCurrency(item.rentalPrice ?? item.unit_price)}</span><span className="text-muted-foreground"> / {item.rentalPeriod || 'daily'}</span></td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.depositAmount || 0)}</td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.replacementValue || 0)}</td><td className="py-3 text-right"><div className="flex justify-end gap-1">{canEdit && <Button size="icon" variant="ghost" aria-label={`Edit ${item.product_name}`} title="Edit rental item" onClick={() => beginEdit(item)}><Edit2 className="h-4 w-4" /></Button>}{canDelete && <Button size="icon" variant="ghost" aria-label={`Delete ${item.product_name}`} title="Move to Trash" onClick={() => void remove(item)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}</div></td></tr>)}</tbody></table></div>}
       </CardContent>
     </Card>
     <p className="flex items-center gap-2 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />Bookings and returns update item availability and keep a clear rental history. <Link className="text-primary hover:underline" to="/tenant/rentals/bookings">Go to bookings</Link></p>

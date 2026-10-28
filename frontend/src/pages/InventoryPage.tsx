@@ -6,6 +6,7 @@ import { inventoryApi, categoriesApi, branchesApi, settingsApi, apiFetch, type B
 import BarcodeScanner from '@/components/BarcodeScanner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
@@ -1389,8 +1390,7 @@ export default function InventoryPage() {
                   </div>
                   <div className="space-y-2 sm:col-span-2">
                     <Label htmlFor="service-description">Service Description</Label>
-                    <textarea id="service-description" rows={3}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    <Textarea id="service-description" aiWritingField rows={3}
                       value={formData.description}
                       onChange={event => setFormData(prev => ({ ...prev, description: event.target.value }))} />
                   </div>

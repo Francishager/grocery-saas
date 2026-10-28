@@ -25,9 +25,22 @@ test('customer profile exposes only specifically granted contact and balance fie
   assert.equal(customer.phone, '+256700123456')
   assert.equal(customer.balance, 120000.13)
   assert.equal(customer.trustScore, 82)
+  assert.equal('creditLimit' in customer, false)
   assert.equal('email' in customer, false)
   assert.equal('address' in customer, false)
   assert.equal(customer.maskedEmail, 'x******@*****')
+})
+
+test('customer credit limits require their dedicated view or manage permission', () => {
+  const customer = { id: 'customer-1', name: 'A Customer', status: 'active', creditLimit: 200000, balance: 120000 }
+  const balanceOnly = customerProfilePayload(customer, customerProfileAccess(['canViewCustomerBalance']))
+  const limitViewer = customerProfilePayload(customer, customerProfileAccess(['canViewCustomerCreditLimit']))
+  const limitManager = customerProfilePayload(customer, customerProfileAccess(['canManageCustomerCreditLimit']))
+
+  assert.equal('creditLimit' in balanceOnly, false)
+  assert.equal(limitViewer.creditLimit, 200000)
+  assert.equal(limitManager.creditLimit, 200000)
+  assert.equal('balance' in limitViewer, false)
 })
 
 test('rental balance is omitted unless the feature-aware caller provides it', () => {

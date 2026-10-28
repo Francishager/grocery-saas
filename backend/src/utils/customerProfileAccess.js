@@ -23,6 +23,7 @@ export function customerProfileAccess(permissions = []) {
   const granted = new Set(Array.isArray(permissions) ? permissions : [])
   const has = (permission) => granted.has('*') || granted.has(permission)
   const balance = has('canViewCustomerBalance')
+  const creditLimit = has('canViewCustomerCreditLimit') || has('canManageCustomerCreditLimit')
   const sales = has('canViewCustomerSalesHistory')
   const payments = has('canViewCustomerPaymentsHistory')
   const returns = has('canViewCustomerReturnsHistory')
@@ -32,6 +33,7 @@ export function customerProfileAccess(permissions = []) {
     email: has('canViewCustomerEmail'),
     address: has('canViewCustomerAddress'),
     balance,
+    creditLimit,
     sales,
     payments,
     returns,
@@ -61,8 +63,8 @@ export function customerProfilePayload(customer, access) {
     ...(access.notes && { notes: customer.notes }),
     ...(!access.notes && customer.notes && { maskedNotes: maskText(customer.notes) }),
     status: customer.status,
+    ...(access.creditLimit && { creditLimit: money(customer.creditLimit) }),
     ...(access.balance && {
-      creditLimit: money(customer.creditLimit),
       balance: money(customer.balance),
       openingBalance: money(customer.openingBalance),
       openingBalanceDate: customer.openingBalanceDate,

@@ -13,12 +13,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
-import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
+import { formatCurrency, cn, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
 import { displayReference } from '@/lib/displayReference'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
 import { UsageLimitBanner } from '@/components/UsageLimitBanner'
@@ -182,6 +184,8 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 
 export default function ReceivablesPage() {
   const { user, hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const baseCurrency = getTenantCurrency()
   const { toast } = useToast()
   const online = useOnlineStatus()
   
@@ -229,6 +233,12 @@ export default function ReceivablesPage() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [withdrawalAmount, setWithdrawalAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentCurrency, setPaymentCurrency] = useState(baseCurrency)
+  const [paymentRateToBase, setPaymentRateToBase] = useState<number | null>(1)
+  const [paymentUnitsPerBase, setPaymentUnitsPerBase] = useState<number | null>(1)
+  const [saleCurrency, setSaleCurrency] = useState(baseCurrency)
+  const [saleRateToBase, setSaleRateToBase] = useState<number | null>(1)
+  const [saleUnitsPerBase, setSaleUnitsPerBase] = useState<number | null>(1)
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [transactionId, setTransactionId] = useState('')
@@ -247,6 +257,8 @@ export default function ReceivablesPage() {
   const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
   const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
   const canViewCustomerBalance = hasPermission('canViewCustomerBalance')
+  const canViewCustomerCreditLimit = hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit')
+  const canManageCustomerCreditLimit = hasPermission('canManageCustomerCreditLimit')
   const canRecordCustomerPayment = hasPermission('canRecordCustomerPayment')
   const canEditCustomer = hasPermission('canEditCustomer') || hasPermission('canEditReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
@@ -321,6 +333,9 @@ export default function ReceivablesPage() {
       setSelectedCustomer(customer)
       setSelectedSale(null)
       setPaymentAmount('')
+      setPaymentCurrency(baseCurrency)
+      setPaymentRateToBase(1)
+      setPaymentUnitsPerBase(1)
       setShowPaymentModal(true)
     } else if (request.type === 'withdrawal') {
       setSelectedCustomer(customer)
@@ -592,12 +607,8 @@ export default function ReceivablesPage() {
 
   const saveCreditAccount = async () => {
     if (!editingCreditAccount) return
-    if (Number(creditAccountForm.creditLimit || 0) <= 0) {
-      toast({
-        variant: 'destructive',
-        title: 'Credit limit required',
-        description: 'Set a customer credit limit greater than zero before saving credit terms.'
-      })
+    if (Number(creditAccountForm.creditLimit || 0) < 0 || !Number.isFinite(Number(creditAccountForm.creditLimit || 0))) {
+      toast({ variant: 'destructive', title: 'Invalid credit limit', description: 'A customer credit limit cannot be negative.' })
       return
     }
     try {
@@ -830,9 +841,13 @@ export default function ReceivablesPage() {
       return
     }
 
-    const paidAmount = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
+    if (saleCurrency !== baseCurrency && (!saleRateToBase || !saleUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
+    const paidAmount = Math.min(parseAmount(saleForm.amountPaid) * Number(saleRateToBase || 1), saleTotal)
     const balanceAfterPayment = Math.max(0, saleTotal - paidAmount)
-    if (balanceAfterPayment > 0) {
+    if (balanceAfterPayment > 0 && canViewCustomerCreditLimit) {
       const customerCreditLimit = Number(selectedSaleCustomer?.creditLimit || 0)
       const currentCustomerBalance = Number(selectedSaleCustomer?.balance || 0)
       const projectedCustomerBalance = currentCustomerBalance + balanceAfterPayment
@@ -866,7 +881,9 @@ export default function ReceivablesPage() {
           tax: parseAmount(saleForm.tax),
           discount: parseAmount(saleForm.discount),
           total: saleTotal,
-          amountPaid: paidAmount,
+          amountPaid: parseAmount(saleForm.amountPaid),
+          currency: saleCurrency,
+          unitsPerBase: saleUnitsPerBase,
           notes: saleForm.notes || undefined,
         })
       })
@@ -895,6 +912,9 @@ export default function ReceivablesPage() {
         discount: '0',
         notes: '',
       })
+      setSaleCurrency(baseCurrency)
+      setSaleRateToBase(1)
+      setSaleUnitsPerBase(1)
       setSelectedSaleCustomerOption(null)
       setSaleItems([createEmptySaleItem()])
       setSaleCustomerSearch('')
@@ -935,6 +955,10 @@ export default function ReceivablesPage() {
       toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
       return
     }
+    if (paymentCurrency !== baseCurrency && (!paymentRateToBase || !paymentUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
     if (!selectedCashAccountId) {
       toast({ variant: 'destructive', title: 'Select a cash account to record the payment' })
       return
@@ -964,6 +988,8 @@ export default function ReceivablesPage() {
           customerId: targetCustomer.id,
           saleId: selectedSale?.id,
           amount: parseFloat(paymentAmount),
+          currency: paymentCurrency,
+          unitsPerBase: paymentUnitsPerBase,
           paymentMethod,
           cashAccountId: selectedCashAccountId || undefined,
           idempotencyKey,
@@ -1600,7 +1626,7 @@ export default function ReceivablesPage() {
   const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
   const loadedSaleCustomerCount = saleCustomerOptions.length
   const saleCustomerHasMore = saleCustomerTotal > loadedSaleCustomerCount
-  const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid), saleTotal)
+  const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid) * Number(saleRateToBase || 1), saleTotal)
   const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
   const saleCustomerCreditAvailable = Math.max(0, -Number(selectedSaleCustomer?.balance || 0))
   const saleCreditAppliedPreview = Math.min(saleBalanceAfterPayment, saleCustomerCreditAvailable)
@@ -1612,7 +1638,7 @@ export default function ReceivablesPage() {
   const withdrawalAvailableFunds = availableCustomerFunds(selectedCustomer)
   const withdrawalCustomerFundsAfter = Math.max(0, withdrawalAvailableFunds - withdrawalValue)
   const withdrawalLimit = selectedWithdrawalAccount ? Math.min(withdrawalAvailableFunds, Math.max(0, withdrawalAccountBalance)) : withdrawalAvailableFunds
-  const customerTableMinWidth = 240 + (canViewCustomerPhone ? 150 : 0) + (canViewCustomerEmail ? 220 : 0) + (canViewCustomerBalance ? 710 : 0) + 115
+  const customerTableMinWidth = 240 + (canViewCustomerPhone ? 150 : 0) + (canViewCustomerEmail ? 220 : 0) + (canViewCustomerCreditLimit ? 155 : 0) + (canViewCustomerBalance ? 400 : 0) + (canViewCustomerBalance && canViewCustomerCreditLimit ? 155 : 0) + 115
 
   return (
     <div className="space-y-6">
@@ -1701,13 +1727,13 @@ export default function ReceivablesPage() {
                   <col style={{ width: 240 }} />
                   {canViewCustomerPhone && <col style={{ width: 150 }} />}
                   {canViewCustomerEmail && <col style={{ width: 220 }} />}
+                  {canViewCustomerCreditLimit && <col style={{ width: 155 }} />}
                   {canViewCustomerBalance && <>
-                    <col style={{ width: 155 }} />
-                    <col style={{ width: 155 }} />
                     <col style={{ width: 155 }} />
                     <col style={{ width: 155 }} />
                     <col style={{ width: 90 }} />
                   </>}
+                  {canViewCustomerBalance && canViewCustomerCreditLimit && <col style={{ width: 155 }} />}
                   <col style={{ width: 115 }} />
                 </colgroup>
                 <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
@@ -1715,13 +1741,13 @@ export default function ReceivablesPage() {
                     <th scope="col" className="whitespace-nowrap px-3 py-3">Customer</th>
                     {canViewCustomerPhone && <th scope="col" className="whitespace-nowrap px-3 py-3">Phone</th>}
                     {canViewCustomerEmail && <th scope="col" className="whitespace-nowrap px-3 py-3">Email</th>}
+                    {canViewCustomerCreditLimit && <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Credit limit</th>}
                     {canViewCustomerBalance && <>
-                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Credit limit</th>
                       <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Opening balance</th>
                       <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Balance</th>
-                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Available credit</th>
                       <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Trust</th>
                     </>}
+                    {canViewCustomerBalance && canViewCustomerCreditLimit && <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Available credit</th>}
                     <th scope="col" className="whitespace-nowrap px-3 py-3">Status</th>
                   </tr>
                 </thead>
@@ -1750,13 +1776,13 @@ export default function ReceivablesPage() {
                       </td>
                       {canViewCustomerPhone && <td className="whitespace-nowrap px-3 py-3" title={customer.phone || ''}><span className="block truncate">{customer.phone || '—'}</span></td>}
                       {canViewCustomerEmail && <td className="px-3 py-3" title={customer.email || ''}><span className="block truncate">{customer.email || '—'}</span></td>}
+                      {canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>}
                       {canViewCustomerBalance && <>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.openingBalance || 0)}</td>
                         <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(customer.balance || 0)}{Number(customer.rentalBalance || 0) > 0 && <span className="mt-1 block text-xs font-normal text-amber-700">Rent due: {formatCurrency(Number(customer.rentalBalance))}</span>}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>
                         <td className={`whitespace-nowrap px-3 py-3 text-right font-semibold ${getTrustScoreColor(customer.trustScore || 0)}`}>{customer.trustScore || 0}/100</td>
                       </>}
+                      {canViewCustomerBalance && canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>}
                       <td className="whitespace-nowrap px-3 py-3">{getStatusBadge(customer.status || 'active')}</td>
                     </tr>
                   ))}
@@ -1807,6 +1833,7 @@ export default function ReceivablesPage() {
                     <div>
                       <p className="text-muted-foreground">Total</p>
                       <p className="font-semibold">{Number(sale.total || 0).toFixed(2)}</p>
+                      {sale.currency && sale.currency !== baseCurrency && sale.foreignTotal != null && <p className="text-xs text-muted-foreground">{Number(sale.foreignTotal).toLocaleString()} {sale.currency} · base {Number(sale.total).toLocaleString()} {baseCurrency}</p>}
                     </div>
                     <div>
                       <p className="text-muted-foreground">Paid</p>
@@ -1870,6 +1897,7 @@ export default function ReceivablesPage() {
                       </div>
                       <div>
                         <h3 className="font-semibold">{Number(payment.amount || 0).toFixed(2)}</h3>
+                        {payment.currency && payment.currency !== baseCurrency && payment.foreignAmount != null && <p className="text-xs text-muted-foreground">{Number(payment.foreignAmount).toLocaleString()} {payment.currency} → {Number(payment.amount).toLocaleString()} {baseCurrency}</p>}
                         <p className="text-sm text-muted-foreground">
                           From {renderCustomerNameButton(payment.customer, 'Customer')}
                         </p>
@@ -1924,7 +1952,7 @@ export default function ReceivablesPage() {
                     <th className="p-2 text-left">Customer</th>
                     <th className="p-2 text-left">Type</th>
                     <th className="p-2 text-right">Balance</th>
-                    <th className="p-2 text-right">Credit Limit</th>
+                    {canViewCustomerCreditLimit && <th className="p-2 text-right">Credit Limit</th>}
                     <th className="p-2 text-left">Status</th>
                     <th className="p-2 text-left">Expires</th>
                     <th></th>
@@ -1984,7 +2012,7 @@ export default function ReceivablesPage() {
                     <th className="p-2 text-right">Credit Limit</th>
                     <th className="p-2 text-right">Opening Balance</th>
                     <th className="p-2 text-right">Balance</th>
-                    <th className="p-2 text-right">Available</th>
+                    {canViewCustomerCreditLimit && <th className="p-2 text-right">Available</th>}
                     <th className="p-2 text-left">Trust Score</th>
                     <th className="p-2 text-left">Status</th>
                     <th></th>
@@ -1995,10 +2023,10 @@ export default function ReceivablesPage() {
                     <tr key={acct.id} className="border-t">
                       <td className="p-2">{renderCustomerNameButton(acct, acct.name)}</td>
                       <td className="p-2">{acct.phone || '—'}</td>
-                      <td className="p-2 text-right">{Number(acct.creditLimit).toFixed(2)}</td>
+                      {canViewCustomerCreditLimit && <td className="p-2 text-right">{Number(acct.creditLimit).toFixed(2)}</td>}
                       <td className="p-2 text-right">{formatCurrency(acct.openingBalance || 0)}</td>
                       <td className="p-2 text-right text-red-600 font-semibold">{Number(acct.balance).toFixed(2)}</td>
-                      <td className="p-2 text-right text-green-600">{(Number(acct.creditLimit) - Number(acct.balance)).toFixed(2)}</td>
+                      {canViewCustomerCreditLimit && <td className="p-2 text-right text-green-600">{(Number(acct.creditLimit) - Number(acct.balance)).toFixed(2)}</td>}
                       <td className="p-2">{acct.trustScore}/100</td>
                       <td className="p-2">
                         <Badge variant={acct.status === 'active' ? 'default' : acct.status === 'blocked' ? 'destructive' : 'secondary'}>
@@ -2006,15 +2034,10 @@ export default function ReceivablesPage() {
                         </Badge>
                       </td>
                       <td className="p-2">
-                        <Button size="sm" variant="ghost" onClick={() => {
+                        {canManageCustomerCreditLimit && <Button size="sm" variant="ghost" onClick={() => {
                           setEditingCreditAccount(acct)
-                          setCreditAccountForm({
-                            creditLimit: String(acct.creditLimit),
-                            status: acct.status,
-                            trustScore: String(acct.trustScore),
-                            notes: acct.notes || ''
-                          })
-                        }}><Edit className="h-3 w-3" /></Button>
+                          setCreditAccountForm({ creditLimit: String(acct.creditLimit), status: acct.status, trustScore: String(acct.trustScore), notes: acct.notes || '' })
+                        }}><Edit className="h-3 w-3" /></Button>}
                       </td>
                     </tr>
                   ))}
@@ -2128,14 +2151,14 @@ export default function ReceivablesPage() {
                           <span className="text-xs text-muted-foreground">Current balance</span>
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>
+              {canViewCustomerCreditLimit && <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>}
                       <p className="mt-1 text-xs text-muted-foreground">Opening balance: {formatCurrency(selectedSaleCustomer.openingBalance || 0)}</p>
                       {saleCustomerCreditAvailable > 0 && saleBalanceAfterPayment > 0 && (
                         <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
                           {formatCurrency(saleCreditAppliedPreview)} customer credit will be applied automatically. Remaining on this invoice: {formatCurrency(saleBalanceAfterCredit)}. No cash withdrawal or receipt will be recorded.
                         </p>
                       )}
-                      {Number(selectedSaleCustomer.balance || 0) + saleBalanceAfterPayment > 0.01 && saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
+                      {canViewCustomerCreditLimit && Number(selectedSaleCustomer.balance || 0) + saleBalanceAfterPayment > 0.01 && saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
                         <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
                           Set a credit limit for this customer before recording a credit sale.
                         </p>
@@ -2163,6 +2186,8 @@ export default function ReceivablesPage() {
                   </Select>
                 </div>
               </div>
+
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={saleCurrency} enabled={hasFeature('settings.currencies')} amount={saleRateToBase ? saleTotal / saleRateToBase : 0} onCurrencyChange={setSaleCurrency} onRateChange={(rate, units) => { setSaleRateToBase(rate); setSaleUnitsPerBase(units) }} />
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -2256,13 +2281,13 @@ export default function ReceivablesPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="salePaid">Amount Paid</Label>
+                  <Label htmlFor="salePaid">Amount Paid ({saleCurrency})</Label>
                   <Input
                     id="salePaid"
                     type="number"
                     min="0"
                     step="0.01"
-                    max={saleTotal}
+                    max={saleRateToBase ? saleTotal / saleRateToBase : saleTotal}
                     value={saleForm.amountPaid}
                     onChange={(event) => setSaleForm((prev) => ({ ...prev, amountPaid: event.target.value }))}
                   />
@@ -2273,6 +2298,7 @@ export default function ReceivablesPage() {
                 <Label htmlFor="saleNotes">Notes</Label>
                 <Textarea
                   id="saleNotes"
+                  aiWritingField
                   value={saleForm.notes}
                   onChange={(event) => setSaleForm((prev) => ({ ...prev, notes: event.target.value }))}
                   rows={3}
@@ -2288,6 +2314,7 @@ export default function ReceivablesPage() {
                   <span>Total Due</span>
                   <span className="font-semibold">{formatCurrency(saleTotal)}</span>
                 </div>
+                {saleCurrency !== baseCurrency && saleRateToBase && <div className="flex justify-between text-muted-foreground"><span>Transaction total ({saleCurrency})</span><span>{formatCurrency(saleTotal / saleRateToBase, saleCurrency)}</span></div>}
                 <div className="flex justify-between text-muted-foreground">
                   <span>Balance after payment</span>
                   <span>{formatCurrency(saleBalanceAfterPayment)}</span>
@@ -2346,7 +2373,9 @@ export default function ReceivablesPage() {
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
                 />
+                {paymentCurrency !== baseCurrency && paymentRateToBase && <p className="mt-1 text-xs text-muted-foreground">Receivable/ledger posting: {(Number(paymentAmount || 0) * paymentRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {baseCurrency}</p>}
               </div>
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={paymentCurrency} enabled={hasFeature('settings.currencies')} amount={Number(paymentAmount || 0)} onCurrencyChange={setPaymentCurrency} onRateChange={(rate, units) => { setPaymentRateToBase(rate); setPaymentUnitsPerBase(units) }} />
               
               <div>
                 <Label htmlFor="paymentMethod">Payment Method</Label>
@@ -2805,7 +2834,7 @@ export default function ReceivablesPage() {
             <h3 className="text-lg font-semibold mb-1">Edit Credit Terms</h3>
             <p className="text-sm text-muted-foreground mb-4">{editingCreditAccount.name}</p>
             <div className="space-y-3">
-              <div><Label>Credit Limit *</Label><Input type="number" min="0.01" step="0.01" value={creditAccountForm.creditLimit} onChange={e => setCreditAccountForm({ ...creditAccountForm, creditLimit: e.target.value })} /></div>
+              <div><Label>Credit Limit</Label><Input type="number" min="0" step="0.01" value={creditAccountForm.creditLimit} onChange={e => setCreditAccountForm({ ...creditAccountForm, creditLimit: e.target.value })} /><p className="mt-1 text-xs text-muted-foreground">Set to zero to prevent further credit sales without changing the existing balance.</p></div>
               <div>
                 <Label>Status</Label>
                 <Select value={creditAccountForm.status} onValueChange={v => setCreditAccountForm({ ...creditAccountForm, status: v as any })}>

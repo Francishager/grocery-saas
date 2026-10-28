@@ -125,3 +125,25 @@ test('receivable reconciliation access and review are independently permissioned
   );
   assert.match(PERMISSION_METADATA.canReviewReceivableReconciliation.description, /does not post or change balances/i);
 });
+
+test('customer credit-limit visibility and editing are separate customer permissions', () => {
+  const limitedUser = resolveEffectivePermissions({ role: 'attendant' }, {
+    canViewCustomerBalance: true,
+    canViewCustomerCreditLimit: true,
+  }, [], new Set(['customers', 'receivables']));
+  const manager = resolveEffectivePermissions({ role: 'attendant' }, {
+    canManageCustomerCreditLimit: true,
+  }, [], new Set(['customers', 'receivables']));
+
+  assert.ok(limitedUser.includes('canViewCustomerCreditLimit'));
+  assert.ok(!limitedUser.includes('canManageCustomerCreditLimit'));
+  assert.ok(manager.includes('canManageCustomerCreditLimit'));
+  assert.ok(manager.includes('canViewCustomerCreditLimit'));
+  assert.equal(PERMISSION_METADATA.canViewCustomerCreditLimit.category, 'customers');
+  assert.equal(PERMISSION_METADATA.canManageCustomerCreditLimit.category, 'customers');
+});
+
+test('recording receivables stays unavailable when the SaaS tenant lacks the receivables feature', () => {
+  const permissions = resolveEffectivePermissions({ role: 'attendant' }, { canCreateReceivable: true }, [], new Set(['customers']));
+  assert.ok(!permissions.includes('canCreateReceivable'));
+});

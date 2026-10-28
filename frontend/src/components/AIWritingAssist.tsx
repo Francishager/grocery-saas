@@ -4,13 +4,12 @@ import { aiWritingApi } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const sensitivePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?\d[\s().-]*){8,}\d|\b(?:UGX|KES|TZS|RWF|USD|EUR|GBP)\s*[\d,.]+|[$€£]\s*[\d,.]+|\b(?:password|passcode|pin|bank account|account number|card number|national id|nin|customer balance|salary|credit limit)\b/i
 
 export function AIWritingAssist({ module, field, onUse }: {
-  module: 'crm' | 'planner'
+  module: 'crm' | 'planner' | 'general'
   field: string
   onUse: (text: string) => void
 }) {
@@ -26,9 +25,10 @@ export function AIWritingAssist({ module, field, onUse }: {
     'support case details': 'support case details', 'campaign name': 'campaign name',
     'email subject': 'email subject', 'campaign content': 'campaign content',
     'planner title': 'planner title', 'planner notes': 'planner notes',
+    'business text': 'business text',
   }
 
-  if (!hasPermission('canUseBusinessAI') || !(hasFeature(module) || hasFeature('rentals'))) return null
+  if (!hasPermission('canUseBusinessAI') || !(module === 'general' ? hasFeature('dashboard') : hasFeature(module) || hasFeature('rentals'))) return null
 
   const generate = async () => {
     const prompt = instruction.trim()
@@ -36,7 +36,9 @@ export function AIWritingAssist({ module, field, onUse }: {
     if (sensitivePattern.test(prompt)) { setError('Remove names, contact details, amounts, and account or identity information.'); return }
     setBusy(true); setError('')
     try {
-      const result = await aiWritingApi.draft(module, fieldLabels[field] || field, prompt)
+      const result = module === 'general'
+        ? await aiWritingApi.draftGeneral(prompt)
+        : await aiWritingApi.draft(module, fieldLabels[field] || field, prompt)
       onUse(result.text)
       setInstruction('')
       setPrivacyConfirmed(false)
@@ -55,7 +57,7 @@ export function AIWritingAssist({ module, field, onUse }: {
           <DialogTitle>Draft {fieldLabels[field] || field}</DialogTitle>
           <DialogDescription>Only your instruction and this generic field type are sent. Your current field content and CRM/Planner records are not shared. Do not include names, contact details, amounts, or private business information. Generate inserts the draft into the field, where you can review and edit it.</DialogDescription>
         </DialogHeader>
-        <Textarea autoFocus value={instruction} onChange={event => { setInstruction(event.target.value); setPrivacyConfirmed(false) }} rows={4} maxLength={1200} placeholder="Tell the assistant what to write…" />
+        <textarea autoFocus value={instruction} onChange={event => { setInstruction(event.target.value); setPrivacyConfirmed(false) }} rows={4} maxLength={1200} placeholder="Tell the assistant what to write…" className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" />
         <label className="flex items-start gap-2 text-xs text-muted-foreground"><input type="checkbox" className="mt-0.5" checked={privacyConfirmed} onChange={event => setPrivacyConfirmed(event.target.checked)} /><span>I confirm this instruction contains no customer, employee, or confidential business information.</span></label>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">

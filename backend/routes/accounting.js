@@ -8,6 +8,7 @@ import { resolveBranchScope, scopedWhere, handleBranchError } from "../src/utils
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSetupService.js";
 import { applyTenantAccountingCutover, previewTenantAccountingCutover, resolveTenantAccountingException } from "../src/services/tenantAccountingCutoverService.js";
+import { resolveTenantTransactionCurrency, toBaseCurrency } from "../src/services/currencyRates.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -618,12 +619,19 @@ router.post("/journal/:id/reverse", authenticateToken, requirePermission("canRev
 router.post("/journal", authenticateToken, requirePermission("canCreateAccounting"), requireFeature("accounting"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
-    const { date, description, reference, lines = [], branchId, action, paymentMethod, paymentAccountId } = req.body;
+    const { date, description, reference, lines = [], branchId, action, paymentMethod, paymentAccountId, currency, unitsPerBase } = req.body;
     const scope = await resolveBranchScope(prisma, accountingBranchRequest(req, "body"), { source: "body", allowOwnerAll: true });
     const normalizedAction = normalizeValue(action);
     const requestedPaymentMethod = normalizeValue(paymentMethod);
 
-    const normalizedLines = normalizeJournalLines(lines);
+    const fx = await resolveTenantTransactionCurrency(prisma, tenantId, currency, unitsPerBase);
+    const foreignLines = normalizeJournalLines(lines);
+    const foreignTotal = foreignLines.reduce((sum, line) => sum + line.debit, 0);
+    const normalizedLines = foreignLines.map((line) => ({
+      ...line,
+      debit: toBaseCurrency(line.debit, fx.rateToBase),
+      credit: toBaseCurrency(line.credit, fx.rateToBase),
+    }));
     const uniqueLineAccountIds = new Set(normalizedLines.map((line) => line.accountId));
     if (uniqueLineAccountIds.size !== normalizedLines.length) {
       return res.status(400).json({ error: "Each account can only be selected once in the same journal entry" });
@@ -741,6 +749,11 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
           branchId: scope.branchId || null,
           date: date ? new Date(date) : new Date(),
           description,
+          currency: fx.currency,
+          foreignTotal,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           reference,
           status: "posted",
           userId: req.user.id,
@@ -785,6 +798,11 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
               type: delta >= 0 ? "journal_in" : "journal_out",
               amount: Math.abs(delta),
               balanceAfter: updatedCashAccount.balance,
+              currency: fx.currency,
+              foreignAmount: Math.round((Math.abs(delta) / fx.rateToBase) * 100) / 100,
+              exchangeRateToBase: fx.rateToBase,
+              exchangeRateAsOf: fx.rateDate,
+              exchangeRateSource: fx.provider,
               reference: reference || entryNo,
               description: description || line.description || "Journal entry",
               userId: req.user.id,
@@ -796,7 +814,7 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
       return createdEntry;
     });
 
-    res.status(201).json(entry);
+    res.status(201).json({ ...entry, baseCurrency: fx.baseCurrency });
   } catch (err) {
     console.error("Create journal entry error:", err);
     if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });

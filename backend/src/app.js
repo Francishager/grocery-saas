@@ -54,6 +54,7 @@ import userGuideRoutes from "./routes/user-guide.js";
 import widgetsRouter from "../routes/widgets.js";
 import creditDebitNotesRouter from "../routes/credit-debit-notes.js";
 import procurementRouter from "./routes/procurement.js";
+import currenciesRouter from "./routes/currencies.js";
 
 // Phase 1 HR Core Routes
 import positionRoutes from "./routes/positionRoutes.js";
@@ -285,6 +286,7 @@ app.use("/api/user-guide", userGuideRoutes);
 app.use("/api/widgets", widgetsRouter);
 app.use("/api/credit-debit-notes", creditDebitNotesRouter);
 app.use("/api/procurement", procurementRouter);
+app.use("/api/currencies", currenciesRouter);
 
 // 404
 app.use("/{*path}", (req, res) => {

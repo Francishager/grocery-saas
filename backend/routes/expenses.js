@@ -7,6 +7,7 @@ import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPe
 import { requireAnyFeature, requireFeature } from '../middleware/featureCheck.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
+import { resolveTenantTransactionCurrency, toBaseCurrency } from '../src/services/currencyRates.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -188,10 +189,14 @@ router.post('/expenses', authenticateToken, loadUserPermissions, requirePermissi
       date,
       mobileProvider,
       phoneNumber,
-      transactionId
+      transactionId,
+      currency,
+      unitsPerBase,
     } = req.body
 
-    const amountValue = toMoney(amount)
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+    const foreignAmount = toMoney(amount)
+    const amountValue = toBaseCurrency(foreignAmount, fx.rateToBase)
     const resolvedPaymentMethod = normalizePaymentMethod(paymentMethod || 'mobile_money')
 
     if (!category?.trim()) return res.status(400).json({ error: 'Expense category is required' })
@@ -266,6 +271,9 @@ router.post('/expenses', authenticateToken, loadUserPermissions, requirePermissi
     if (!spendingAccount) {
       return res.status(400).json({ error: 'Cash account not found' })
     }
+    if (String(spendingAccount.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+      return res.status(409).json({ error: `This transaction posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.` })
+    }
     if (!canUseTransactionAccountForPayment(req, spendingAccount, resolvedPaymentMethod)) {
       return res.status(403).json({
         error: `You do not have permission to use ${spendingAccount.name} for ${resolvedPaymentMethod} payments. Please contact your administrator.`,
@@ -287,6 +295,11 @@ router.post('/expenses', authenticateToken, loadUserPermissions, requirePermissi
           category: category.trim(),
           description: description.trim(),
           amount: amountValue,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           paymentMethod: resolvedPaymentMethod,
           cashAccountId: resolvedCashAccountId,
           mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
@@ -322,6 +335,11 @@ router.post('/expenses', authenticateToken, loadUserPermissions, requirePermissi
           type: 'expense',
           amount: amountValue,
           balanceAfter: updatedAccount.balance,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           reference: reference || createdExpense.id,
           description: createdExpense.description,
           userId: req.user.id

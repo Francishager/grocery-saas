@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { Textarea } from '@/components/ui/textarea'
 
 type Section = 'marketplace' | 'rfqs' | 'orders' | 'relationships' | 'profile' | 'seller-profile'
 type LineDraft = { productId: string; productName: string; specification: string; quantity: string; unit: string; acceptableAlternatives: string; custom: boolean }
@@ -109,8 +110,8 @@ function Field({ label, ...props }: InputHTMLAttributes<HTMLInputElement> & { la
   return <label className="grid gap-1.5 text-sm font-medium text-foreground">{label}<input {...props} className={`h-10 min-w-0 rounded-md border border-input bg-background px-3 text-sm font-normal outline-none focus:ring-2 focus:ring-ring ${props.className || ''}`} /></label>
 }
 
-function TextareaField({ label, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string }) {
-  return <label className="grid gap-1.5 text-sm font-medium text-foreground">{label}<textarea {...props} className={`min-h-20 min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-normal outline-none focus:ring-2 focus:ring-ring ${props.className || ''}`} /></label>
+function TextareaField({ label, aiWritingField, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; aiWritingField?: boolean }) {
+  return <div className="grid gap-1.5 text-sm"><div className="font-medium text-foreground">{label}</div><Textarea {...props} aiWritingField={aiWritingField} className={`min-h-20 min-w-0 font-normal ${props.className || ''}`} /></div>
 }
 
 export default function ProcurementNetworkPage({ mode = 'buyer', section = 'marketplace' }: { mode?: 'buyer' | 'seller'; section?: Section }) {
@@ -538,7 +539,7 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
           <div className="grid grid-cols-2 gap-3"><Field label="Category" value={listingForm.category} onChange={(e) => setListingForm({ ...listingForm, category: e.target.value })} required /><Field label="Unit" value={listingForm.unit} onChange={(e) => setListingForm({ ...listingForm, unit: e.target.value })} required /></div>
           <div className="grid grid-cols-2 gap-3"><Field label="Price" type="number" min="0" step="0.01" value={listingForm.price} onChange={(e) => setListingForm({ ...listingForm, price: e.target.value })} required /><Field label="Currency" value={listingForm.currency} onChange={(e) => setListingForm({ ...listingForm, currency: e.target.value.toUpperCase() })} required /></div>
           <div className="grid grid-cols-2 gap-3"><Field label="Minimum order" type="number" min="0.001" step="0.001" value={listingForm.minimumQty} onChange={(e) => setListingForm({ ...listingForm, minimumQty: e.target.value })} required /><Field label="Available quantity" type="number" min="0" step="0.001" value={listingForm.availableQty} onChange={(e) => setListingForm({ ...listingForm, availableQty: e.target.value })} /></div>
-          <TextareaField label="Description" value={listingForm.description} onChange={(e) => setListingForm({ ...listingForm, description: e.target.value })} />
+          <TextareaField label="Description" aiWritingField value={listingForm.description} onChange={(e) => setListingForm({ ...listingForm, description: e.target.value })} />
           <label className="grid gap-1.5 text-sm font-medium">Visibility<select value={listingForm.visibility} onChange={(e) => setListingForm({ ...listingForm, visibility: e.target.value })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="public">Public marketplace</option><option value="private">Approved relationships only</option></select></label>
           <Button type="submit" disabled={busy}><Plus className="mr-2 size-4" />Publish offer</Button>
         </form>}
@@ -562,7 +563,7 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
             <label className="grid gap-1.5 text-sm font-medium">Campaign type<select value={campaignForm.campaignType} onChange={(event) => setCampaignForm({ ...campaignForm, campaignType: event.target.value as 'promotion' | 'ad' })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal">{can('canCreateMarketplacePromotion') && <option value="promotion">Promotion</option>}{can('canRunMarketplaceAds') && <option value="ad">Sponsored offer</option>}</select></label>
             <label className="grid gap-1.5 text-sm font-medium">Marketplace listing<select required value={campaignForm.listingId} onChange={(event) => setCampaignForm({ ...campaignForm, listingId: event.target.value })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="">Choose your offer</option>{myListings.map((listing) => <option key={listing.id} value={listing.id}>{listing.name}</option>)}</select></label>
             <Field label="Campaign headline" maxLength={160} value={campaignForm.title} onChange={(event) => setCampaignForm({ ...campaignForm, title: event.target.value })} required />
-            <TextareaField label="Campaign message" maxLength={1200} value={campaignForm.message} onChange={(event) => setCampaignForm({ ...campaignForm, message: event.target.value })} required />
+            <TextareaField label="Campaign message" aiWritingField maxLength={1200} value={campaignForm.message} onChange={(event) => setCampaignForm({ ...campaignForm, message: event.target.value })} required />
             <Field label="Starts" type="datetime-local" value={campaignForm.startsAt} onChange={(event) => setCampaignForm({ ...campaignForm, startsAt: event.target.value })} required />
             <Field label="Ends (optional)" type="datetime-local" value={campaignForm.endsAt} onChange={(event) => setCampaignForm({ ...campaignForm, endsAt: event.target.value })} />
             <label className="grid gap-1.5 text-sm font-medium">Campaign images ({campaignImages.length}/4)<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple disabled={campaignImages.length >= 4} onChange={(event) => { selectCampaignImages(event.target.files); event.currentTarget.value = '' }} className="min-w-0 rounded-md border bg-background px-3 py-2 text-sm font-normal file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-3 file:py-1.5 disabled:opacity-60" /><span className="text-xs font-normal text-muted-foreground">JPEG, PNG, WebP, HEIC, or HEIF · up to 5 MB each. Add images in multiple selections; buyers see two images at a time.</span></label>
@@ -625,7 +626,7 @@ export default function ProcurementNetworkPage({ mode = 'buyer', section = 'mark
         {requestProducts.length === 0 && <p className="text-xs text-muted-foreground">No inventory item is required for a custom request.</p>}
         <Button type="button" variant="outline" onClick={() => setRfqForm((form) => ({ ...form, lines: [...form.lines, { ...blankLine }] }))}><Plus className="mr-2 size-4" />Add item</Button>
         <Field label="Delivery location" value={rfqForm.deliveryAddress} placeholder={businessAddress || 'Set an address in Business Profile'} onChange={(e) => setRfqForm({ ...rfqForm, deliveryAddress: e.target.value })} />
-        <TextareaField label="Notes and requirements" value={rfqForm.notes} onChange={(e) => setRfqForm({ ...rfqForm, notes: e.target.value })} />
+        <TextareaField label="Notes and requirements" aiWritingField value={rfqForm.notes} onChange={(e) => setRfqForm({ ...rfqForm, notes: e.target.value })} />
         <Button type="submit" disabled={busy || rfqForm.lines.some((line) => !line.quantity || (line.custom ? !line.productName.trim() || !line.unit.trim() : !line.productId))}><Send className="mr-2 size-4" />Publish RFQ</Button>
       </form></>}</aside>
     </section>}

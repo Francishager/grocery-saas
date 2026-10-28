@@ -13,6 +13,8 @@ import { db } from '@/db/index'
 import WorkingHoursEditor, { defaultWorkingHours } from '@/components/WorkingHoursEditor'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { SupportContactLinks } from '@/components/SupportContactLinks'
+import { FeatureGate } from '@/components/FeatureGuard'
+import { CurrencyRatesPanel } from '@/components/CurrencyRatesPanel'
 
 export default function BusinessSettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -299,6 +301,9 @@ export default function BusinessSettingsPage() {
                   <option value="America/New_York">America/New_York</option>
                 </select>
               </div>
+              <FeatureGate feature="settings.currencies">
+                <CurrencyRatesPanel baseCurrency={settings.currency || getTenantCurrency()} />
+              </FeatureGate>
             </div>
             <WorkingHoursEditor value={settings.workingHours || defaultWorkingHours()} timezone={settings.timezone || 'Africa/Kampala'} onChange={(workingHours) => setSettings((previous: any) => ({ ...previous, workingHours }))} disabled={!canManageHours || saving || !online} />
             <p className="text-xs text-muted-foreground">Business owner access remains unrestricted.</p>

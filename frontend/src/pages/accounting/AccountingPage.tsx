@@ -19,6 +19,8 @@ import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
 import { cacheTenantFormattingSettings, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
+import { useFeatureAccess } from '@/services/featureAccessService'
 
 interface Account {
   id: string
@@ -59,6 +61,9 @@ interface JournalEntry {
   paymentMethod?: string
   voucherNo?: string
   currency?: string
+  foreignTotal?: number | null
+  exchangeRateToBase?: number | null
+  exchangeRateAsOf?: string | null
   action?: string
   createdAt?: string
   sourceType?: string
@@ -325,6 +330,7 @@ export default function AccountingPage() {
   const { toast } = useToast()
   const online = useOnlineStatus()
   const { user, hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
   const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
   const canViewAccountingEntries = hasPermission('canViewAccounting')
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
@@ -367,6 +373,8 @@ export default function AccountingPage() {
   const [jeDescription, setJeDescription] = useState('')
   const [jeAmount, setJeAmount] = useState('')
   const [jeCurrency, setJeCurrency] = useState(tenantCurrency)
+  const [jeRateToBase, setJeRateToBase] = useState<number | null>(1)
+  const [jeUnitsPerBase, setJeUnitsPerBase] = useState<number | null>(1)
   const [jeVoucher, setJeVoucher] = useState('')
   const [jePaymentMethod, setJePaymentMethod] = useState('')
   const [jePaymentAccount, setJePaymentAccount] = useState('')
@@ -883,6 +891,7 @@ export default function AccountingPage() {
       })
     }
     if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
+    if (jeCurrency !== tenantCurrency && (!jeRateToBase || !jeUnitsPerBase)) return toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
     if (jeAccount === jePaymentAccount) return toast({ variant: 'destructive', title: 'Choose different debit and credit accounts' })
     if (!journalActionAccountOptions.some(option => option.value === jeAccount)) return toast({ variant: 'destructive', title: 'Choose an account that matches the selected action' })
     if (!jePaymentMethod || !canUsePaymentMethod(jePaymentMethod)) return toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
@@ -913,6 +922,7 @@ export default function AccountingPage() {
           paymentMethod: jePaymentMethod,
           paymentAccountId: jePaymentAccount || undefined,
           currency: jeCurrency,
+          unitsPerBase: jeUnitsPerBase,
           action: jeAction,
           voucherNo: jeVoucher,
           comment: jeComment,
@@ -946,6 +956,7 @@ export default function AccountingPage() {
       })
     }
     const validLines = mjLines.filter(l => l.debitAccount && l.creditAccount && l.amount)
+    if (jeCurrency !== tenantCurrency && (!jeRateToBase || !jeUnitsPerBase)) return toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
     if (!validLines.length) return toast({ variant: 'destructive', title: 'Add at least one valid line' })
     const selectedAccountIds = validLines.flatMap(line => [line.debitAccount, line.creditAccount])
     if (new Set(selectedAccountIds).size !== selectedAccountIds.length) {
@@ -968,6 +979,8 @@ export default function AccountingPage() {
             date: line.date,
             branchId: jeBranch || undefined,
             description: line.description,
+            currency: jeCurrency,
+            unitsPerBase: jeUnitsPerBase,
             lines: [
               { accountId: line.debitAccount, debit: amount, credit: 0 },
               { accountId: line.creditAccount, debit: 0, credit: amount },
@@ -1608,13 +1621,7 @@ export default function AccountingPage() {
                       <Input value={jeDescription} onChange={(e) => setJeDescription(e.target.value)} placeholder="Description" />
                     </div>
                     <div>
-                      <Label>Currency</Label>
-                      <Select value={jeCurrency} onValueChange={setJeCurrency}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      <TransactionCurrencyControl baseCurrency={tenantCurrency} currency={jeCurrency} enabled={hasFeature('settings.currencies')} amount={Number(jeAmount || 0)} onCurrencyChange={setJeCurrency} onRateChange={(rate, units) => { setJeRateToBase(rate); setJeUnitsPerBase(units) }} />
                     </div>
                   </>
                 )}
@@ -1640,6 +1647,7 @@ export default function AccountingPage() {
                   <div>
                     <Label>Entry Amount</Label>
                     <Input type="number" value={jeAmount} onChange={(e) => setJeAmount(e.target.value)} placeholder="0.00" />
+                    {jeCurrency !== tenantCurrency && jeRateToBase && <p className="mt-1 text-xs text-muted-foreground">Base-currency posting: {(Number(jeAmount || 0) * jeRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {tenantCurrency}</p>}
                   </div>
                 )}
                 {jeAction && (
@@ -1696,6 +1704,8 @@ export default function AccountingPage() {
           {/* Multiple General Journal Form */}
           {jeSubForm === 'multiple' && (
             <div className="space-y-3">
+              <TransactionCurrencyControl baseCurrency={tenantCurrency} currency={jeCurrency} enabled={hasFeature('settings.currencies')} amount={mjLines.reduce((total, line) => total + Number(line.amount || 0), 0)} onCurrencyChange={setJeCurrency} onRateChange={(rate, units) => { setJeRateToBase(rate); setJeUnitsPerBase(units) }} />
+              {jeCurrency !== tenantCurrency && jeRateToBase && <p className="text-xs text-muted-foreground">Total base-currency posting: {(mjLines.reduce((total, line) => total + Number(line.amount || 0), 0) * jeRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {tenantCurrency}</p>}
               <div className="max-w-sm space-y-2">
                 <Label>Branch</Label>
                 {canSwitchBranches && branches.length > 1 ? (
@@ -1904,6 +1914,7 @@ export default function AccountingPage() {
                           <td className="py-2 px-2">
                             <div className="flex flex-col gap-1">
                               <span>{line.description || entry.description || '—'}</span>
+                              {entry.currency && entry.currency !== tenantCurrency && entry.foreignTotal != null && <span className="text-xs text-muted-foreground">Journal total: {entry.foreignTotal.toLocaleString()} {entry.currency} → {formatCurrency(entry.foreignTotal * (entry.exchangeRateToBase || 0), tenantCurrency)}</span>}
                               <div className="flex flex-wrap gap-1">
                                 {entry.status === 'reversed' && <Badge variant="destructive" className="w-fit">Reversed</Badge>}
                                 {entry.reversalOfId && <Badge variant="outline" className="w-fit">Reversal</Badge>}

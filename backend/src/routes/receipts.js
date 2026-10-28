@@ -95,8 +95,21 @@ function receiptJson(data) {
     discount: sale.discount || 0,
     tax: sale.tax || 0,
     total: sale.total || 0,
-    amountPaid: sale.amountPaid != null ? Number(sale.amountPaid) : null,
-    changeGiven: sale.changeGiven != null ? Number(sale.changeGiven) : null,
+    amountPaid: sale.amountPaid != null ? Number(sale.amountPaid) / (sale.exchangeRateToBase || 1) : null,
+    changeGiven: sale.changeGiven != null ? Number(sale.changeGiven) / (sale.exchangeRateToBase || 1) : null,
+    baseCurrency: tenant?.currency || "UGX",
+    transactionCurrency: sale.currency || tenant?.currency || "UGX",
+    exchangeRateToBase: sale.exchangeRateToBase || 1,
+    foreignTotal: sale.foreignTotal ?? sale.total ?? 0,
+    baseTotal: sale.total || 0,
+    exchangeRateAsOf: sale.exchangeRateAsOf || null,
+    exchangeRateSource: sale.exchangeRateSource || null,
+    transactionCurrency: sale.currency || tenant?.currency || "UGX",
+    exchangeRateToBase: sale.exchangeRateToBase || 1,
+    foreignTotal: sale.foreignTotal ?? sale.total ?? 0,
+    baseTotal: sale.total || 0,
+    exchangeRateAsOf: sale.exchangeRateAsOf || null,
+    exchangeRateSource: sale.exchangeRateSource || null,
     items: sale.items.map((item) => ({
       id: item.id,
       name: item.product?.name || "Item",
@@ -150,7 +163,10 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
       where: { id: sale.tenantId || scope.tenantId },
       select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
-    const receiptCurrency = tenant?.currency || "UGX";
+    const baseCurrency = tenant?.currency || "UGX";
+    const receiptCurrency = sale.currency || baseCurrency;
+    const receiptRateToBase = sale.exchangeRateToBase || 1;
+    const receiptAmount = (amount) => Number(amount || 0) / receiptRateToBase;
 
     const doc = new PDFDocument({ size: [226.77, 600], margin: 10 }); // 80mm thermal width
     doc.fillColor("black");
@@ -223,8 +239,8 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     for (const item of sale.items) {
       const name = (item.product?.name || "Item").substring(0, 20).padEnd(20);
       const qty = String(item.quantity).padStart(4);
-      const price = formatNum(item.price).padStart(7);
-      const total = formatNum(item.total).padStart(8);
+      const price = formatNum(receiptAmount(item.price)).padStart(7);
+      const total = formatNum(receiptAmount(item.total)).padStart(8);
       doc.fontSize(8.5).text(`${name}${qty}${price}${total}`);
     }
 
@@ -234,14 +250,15 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
 
     // Totals
     doc.fontSize(9).font("Helvetica-Bold");
-    doc.text(`Subtotal:${formatNum(sale.subtotal).padStart(32)}`);
-    if (sale.discount > 0) doc.text(`Discount:${formatNum(sale.discount).padStart(31)}`);
-    if (tenant?.taxEnabled && sale.tax > 0) doc.text(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(28)}`);
+    doc.text(`Subtotal:${formatNum(receiptAmount(sale.subtotal)).padStart(32)}`);
+    if (sale.discount > 0) doc.text(`Discount:${formatNum(receiptAmount(sale.discount)).padStart(31)}`);
+    if (tenant?.taxEnabled && sale.tax > 0) doc.text(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(receiptAmount(sale.tax)).padStart(28)}`);
     else if (!tenant?.taxEnabled) doc.text(`Tax: 0.00`);
-    doc.fontSize(11).font("Helvetica-Bold").text(`TOTAL:${formatNum(sale.total).padStart(33)}`);
+    doc.fontSize(11).font("Helvetica-Bold").text(`TOTAL (${receiptCurrency}):${formatNum(sale.foreignTotal ?? receiptAmount(sale.total)).padStart(24)}`);
+    if (receiptCurrency !== baseCurrency) doc.fontSize(8).font("Helvetica-Bold").text(`Base equivalent (${baseCurrency}): ${formatNum(sale.total)}`);
     if (sale.amountPaid != null) {
-      doc.fontSize(9).font("Helvetica-Bold").text(`Amount Paid:${formatNum(sale.amountPaid).padStart(26)}`);
-      doc.text(`Change:${formatNum(sale.changeGiven || 0).padStart(31)}`);
+      doc.fontSize(9).font("Helvetica-Bold").text(`Amount Paid:${formatNum(receiptAmount(sale.amountPaid)).padStart(26)}`);
+      doc.text(`Change:${formatNum(receiptAmount(sale.changeGiven || 0)).padStart(31)}`);
     }
     doc.moveDown(0.5);
 
@@ -289,7 +306,10 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
       where: { id: sale.tenantId || scope.tenantId },
       select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
     });
-    const receiptCurrency = tenant?.currency || "UGX";
+    const baseCurrency = tenant?.currency || "UGX";
+    const receiptCurrency = sale.currency || baseCurrency;
+    const receiptRateToBase = sale.exchangeRateToBase || 1;
+    const receiptAmount = (amount) => Number(amount || 0) / receiptRateToBase;
 
     // Build ESC/POS command array (hex strings)
     const cmds = [];
@@ -333,22 +353,23 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
     for (const item of sale.items) {
       const name = (item.product?.name || "Item").substring(0, 18).padEnd(18);
       const qty = String(item.quantity).padStart(3);
-      const price = formatNum(item.price).padStart(6);
-      const total = formatNum(item.total).padStart(7);
+      const price = formatNum(receiptAmount(item.price)).padStart(6);
+      const total = formatNum(receiptAmount(item.total)).padStart(7);
       cmds.push(escText(`${name}${qty}${price}${total}`));
     }
 
     cmds.push(escText("--------------------------------"));
 
     // Totals
-    cmds.push(escText(`Subtotal:${formatNum(sale.subtotal).padStart(27)}`));
-    if (sale.discount > 0) cmds.push(escText(`Discount:${formatNum(sale.discount).padStart(26)}`));
-    if (tenant?.taxEnabled && sale.tax > 0) cmds.push(escText(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(sale.tax).padStart(24)}`));
+    cmds.push(escText(`Subtotal:${formatNum(receiptAmount(sale.subtotal)).padStart(27)}`));
+    if (sale.discount > 0) cmds.push(escText(`Discount:${formatNum(receiptAmount(sale.discount)).padStart(26)}`));
+    if (tenant?.taxEnabled && sale.tax > 0) cmds.push(escText(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(receiptAmount(sale.tax)).padStart(24)}`));
     else if (!tenant?.taxEnabled) cmds.push(escText(`Tax: 0.00`));
-    cmds.push(escDoubleText(`TOTAL:${formatNum(sale.total).padStart(28)}`));
+    cmds.push(escDoubleText(`TOTAL ${receiptCurrency}:${formatNum(sale.foreignTotal ?? receiptAmount(sale.total)).padStart(20)}`));
+    if (receiptCurrency !== baseCurrency) cmds.push(escText(`Base equiv. ${baseCurrency}:${formatNum(sale.total).padStart(18)}`));
     if (sale.amountPaid != null) {
-      cmds.push(escText(`Amount Paid:${formatNum(sale.amountPaid).padStart(22)}`));
-      cmds.push(escText(`Change:${formatNum(sale.changeGiven || 0).padStart(27)}`));
+      cmds.push(escText(`Amount Paid:${formatNum(receiptAmount(sale.amountPaid)).padStart(22)}`));
+      cmds.push(escText(`Change:${formatNum(receiptAmount(sale.changeGiven || 0)).padStart(27)}`));
     }
 
     cmds.push(escText(""));

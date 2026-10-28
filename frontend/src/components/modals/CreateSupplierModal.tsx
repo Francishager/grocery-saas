@@ -319,6 +319,7 @@ export default function CreateSupplierModal({ isOpen, onClose, onSuccess, initia
             <Label htmlFor="notes">Notes</Label>
             <Textarea
               id="notes"
+              aiWritingField
               value={formData.notes}
               onChange={(e) => handleInputChange('notes', e.target.value)}
               placeholder="Enter any additional notes"

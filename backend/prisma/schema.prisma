@@ -720,6 +720,8 @@ model UserPermission {
   canViewCustomerEmail               Boolean  @default(false)
   canViewCustomerAddress              Boolean  @default(false)
   canViewCustomerBalance              Boolean  @default(false)
+  canViewCustomerCreditLimit          Boolean  @default(false)
+  canManageCustomerCreditLimit        Boolean  @default(false)
   canViewCustomerSalesHistory         Boolean  @default(false)
   canViewCustomerPaymentsHistory      Boolean  @default(false)
   canViewCustomerReturnsHistory       Boolean  @default(false)
@@ -1376,6 +1378,11 @@ model Sale {
   servedBy        String?
   amountPaid      Float? // Amount customer paid (for cash change calculation)
   changeGiven     Float? // Change given back to customer
+  currency                 String?
+  foreignTotal             Float?
+  exchangeRateToBase       Float?
+  exchangeRateAsOf         String?
+  exchangeRateSource       String?
   status          SaleStatus       @default(completed)
   notes           String?
   items           SaleItem[]
@@ -1533,6 +1540,11 @@ model SaleRecord {
   tax                             Float                                    @default(0)
   discount                        Float                                    @default(0)
   cashDiscount                    Float                                    @default(0) // Invoice-level cash discount
+  currency                        String?
+  foreignTotal                    Float?
+  exchangeRateToBase              Float?
+  exchangeRateAsOf                String?
+  exchangeRateSource              String?
   amountPaid                      Float                                    @default(0)
   legacyPaidAmountAtCutover       Float?
   legacySaleAmountPaidAtCutover   Float?
@@ -1609,6 +1621,11 @@ model CustomerPayment {
   saleId                     String?
   sale                       SaleRecord?                 @relation(fields: [saleId], references: [id])
   amount                     Float
+  currency                   String?
+  foreignAmount              Float?
+  exchangeRateToBase         Float?
+  exchangeRateAsOf           String?
+  exchangeRateSource         String?
   paymentMethod              String // cash, mobile_money, bank_transfer
   mobileProvider             String?
   phoneNumber                String?
@@ -1818,6 +1835,10 @@ model FuelCardTransaction {
   type         String // reload, purchase, adjustment
   amount       Float
   balanceAfter Float
+  currency           String?
+  foreignAmount      Float?
+  exchangeRateToBase Float?
+  exchangeRateAsOf   String?
   reference    String?
   notes        String?
   createdAt    DateTime @default(now())
@@ -1883,6 +1904,11 @@ model SupplierPurchase {
   amountPaid    Float                  @default(0)
   balance       Float                  @default(0)
   paymentStatus PaymentStatus          @default(unpaid)
+  currency      String?
+  foreignTotal  Float?
+  exchangeRateToBase Float?
+  exchangeRateAsOf String?
+  exchangeRateSource String?
   dueDate       DateTime?
   notes         String?
   items         SupplierPurchaseItem[]
@@ -1923,6 +1949,11 @@ model SupplierPayment {
   purchaseId                 String?
   purchase                   SupplierPurchase?           @relation(fields: [purchaseId], references: [id])
   amount                     Float
+  currency                   String?
+  foreignAmount              Float?
+  exchangeRateToBase         Float?
+  exchangeRateAsOf           String?
+  exchangeRateSource         String?
   paymentMethod              String
   mobileProvider             String?
   phoneNumber                String?
@@ -2400,6 +2431,11 @@ model Expense {
   category       String // rent, transport, salaries, utilities, etc.
   description    String
   amount         Float
+  currency       String?
+  foreignAmount  Float?
+  exchangeRateToBase Float?
+  exchangeRateAsOf String?
+  exchangeRateSource String?
   balanceAfter   Float?
   paymentMethod  String
   cashAccountId  String? // Which cash account this expense was paid from
@@ -2464,6 +2500,11 @@ model CashTransaction {
   type         String // income, expense, transfer
   amount       Float
   balanceAfter Float
+  currency     String?
+  foreignAmount Float?
+  exchangeRateToBase Float?
+  exchangeRateAsOf String?
+  exchangeRateSource String?
   reference    String? // Sale ID, Purchase ID, etc.
   description  String?
   userId       String
@@ -3363,6 +3404,11 @@ model JournalEntry {
   branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   date        DateTime @default(now())
   description String?
+  currency    String?
+  foreignTotal Float?
+  exchangeRateToBase Float?
+  exchangeRateAsOf String?
+  exchangeRateSource String?
   reference   String? // e.g. sale receipt no, invoice no
   status      String   @default("posted") // draft, posted, reversed
   userId      String

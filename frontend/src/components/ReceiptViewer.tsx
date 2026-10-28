@@ -43,6 +43,9 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const { toast } = useToast()
   const pdfUrl = receiptsApi.getPdf(saleId)
   const directPrintAvailable = isDirectThermalPrintingAvailable()
+  const baseCurrency = receipt?.baseCurrency || receipt?.business.currency || 'UGX'
+  const transactionCurrency = receipt?.transactionCurrency || baseCurrency
+  const isForeignCurrencyReceipt = Boolean(receipt && transactionCurrency !== baseCurrency)
 
   useEffect(() => {
     if (!showPreview || receipt || loadingReceipt) return
@@ -457,8 +460,8 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                       <div key={item.id}>
                         <p className="break-words font-extrabold">{item.name}</p>
                         <div className="flex justify-between gap-3">
-                          <span>{item.quantity} x {formatCurrency(item.price)}</span>
-                          <span className="font-bold">{formatCurrency(item.total)}</span>
+                          <span>{item.quantity} x {formatCurrency(item.price, baseCurrency)}</span>
+                          <span className="font-bold">{formatCurrency(item.total, baseCurrency)}</span>
                         </div>
                       </div>
                     ))}
@@ -469,33 +472,37 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                   <div className="space-y-1">
                     <div className="flex justify-between gap-3">
                       <span>Subtotal</span>
-                      <span className="font-bold">{formatCurrency(receipt.subtotal)}</span>
+                      <span className="font-bold">{formatCurrency(receipt.subtotal, baseCurrency)}</span>
                     </div>
                     {receipt.discount > 0 && (
                       <div className="flex justify-between gap-3">
                         <span>Discount</span>
-                        <span className="font-bold">{formatCurrency(receipt.discount)}</span>
+                        <span className="font-bold">{formatCurrency(receipt.discount, baseCurrency)}</span>
                       </div>
                     )}
                     {receipt.tax > 0 && (
                       <div className="flex justify-between gap-3">
                         <span>Tax</span>
-                        <span className="font-bold">{formatCurrency(receipt.tax)}</span>
+                        <span className="font-bold">{formatCurrency(receipt.tax, baseCurrency)}</span>
                       </div>
                     )}
                     <div className="flex justify-between gap-3 border-t border-zinc-900 pt-2 text-lg font-extrabold">
-                      <span>Total</span>
-                      <span>{formatCurrency(receipt.total)}</span>
+                      <span>{isForeignCurrencyReceipt ? `Base-currency total (${baseCurrency})` : 'Total'}</span>
+                      <span>{formatCurrency(receipt.total, baseCurrency)}</span>
                     </div>
+                    {isForeignCurrencyReceipt && <div className="flex justify-between gap-3 text-lg font-extrabold text-emerald-800">
+                      <span>Transaction total ({transactionCurrency})</span>
+                      <span>{formatCurrency(receipt.foreignTotal ?? receipt.total, transactionCurrency)}</span>
+                    </div>}
                     {receipt.amountPaid != null && (
                       <>
                         <div className="flex justify-between gap-3 pt-1">
                           <span>Amount Paid</span>
-                          <span className="font-bold">{formatCurrency(receipt.amountPaid)}</span>
+                          <span className="font-bold">{formatCurrency(receipt.amountPaid, transactionCurrency)}</span>
                         </div>
                         <div className="flex justify-between gap-3">
                           <span>Change</span>
-                          <span className="font-bold">{formatCurrency(receipt.changeGiven || 0)}</span>
+                          <span className="font-bold">{formatCurrency(receipt.changeGiven || 0, transactionCurrency)}</span>
                         </div>
                       </>
                     )}

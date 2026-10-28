@@ -10,6 +10,7 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { getPayablesAccountingConfig, getCashAccountLedgerId, postPayablesJournal, supplierOpeningBalanceLines, supplierPaymentLines, supplierPurchaseLines } from '../src/services/payablesAccountingService.js'
 import { registerProcurementSupplierPaymentApproval } from '../src/services/procurementSellerAccountingService.js'
 import { createTenantNotification } from '../src/utils/notifications.js'
+import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
 
 const router = express.Router()
 const prisma = new PrismaClient()
@@ -485,8 +486,11 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
       mobileProvider,
       phoneNumber,
       transactionId,
-      notes
+      notes,
+      currency,
+      unitsPerBase
     } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
 
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one purchase item is required' })
@@ -520,7 +524,8 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
     })
 
     const computedTotal = purchaseItems.reduce((sum, item) => sum + item.total, 0)
-    const paid = Math.min(toMoney(amountPaid), computedTotal)
+    const foreignPaidAmount = toMoney(amountPaid)
+    const paid = Math.min(toBaseCurrency(foreignPaidAmount, fx.rateToBase), computedTotal)
     const balance = Math.max(0, computedTotal - paid)
     const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
     const resolvedPaymentMethod = paymentMethod || 'cash'
@@ -552,6 +557,11 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
           supplierId,
           userId: req.user.id,
           total: computedTotal,
+          currency: fx.currency,
+          foreignTotal: toTransactionCurrency(computedTotal, fx.rateToBase),
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           amountPaid: paid,
           balance,
           paymentStatus: finalPaymentStatus,
@@ -612,6 +622,11 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
             supplierId,
             purchaseId: createdPurchase.id,
             amount: paid,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
             paymentMethod: resolvedPaymentMethod,
             mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
             phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
@@ -622,6 +637,9 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
         })
 
         const paymentAccount = await resolvePaymentCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
+        if (String(paymentAccount.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+          throw Object.assign(new Error(`This payment posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.`), { statusCode: 409 })
+        }
         if (Number(paymentAccount.balance || 0) < paid) {
           throw Object.assign(new Error(`Insufficient funds in ${paymentAccount.name}. Available: ${Number(paymentAccount.balance || 0).toFixed(2)}, Required: ${paid.toFixed(2)}`), { statusCode: 400 })
         }
@@ -638,6 +656,11 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
             type: 'payment',
             amount: paid,
             balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
             reference: purchaseRefNo || payment.id,
             description: `Supplier purchase payment: ${supplier.name}`,
             userId: req.user.id
@@ -663,7 +686,7 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
       return createdPurchase
     })
 
-    res.status(201).json(withUser(purchase))
+    res.status(201).json({ ...withUser(purchase), baseCurrency: fx.baseCurrency })
   } catch (error) {
     console.error('Create purchase error:', error)
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
@@ -727,8 +750,10 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { supplierId, purchaseId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
-    const paidAmount = toMoney(amount)
+    const { supplierId, purchaseId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+    const foreignAmount = toMoney(amount)
+    const paidAmount = toBaseCurrency(foreignAmount, fx.rateToBase)
     if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
     if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
 
@@ -774,6 +799,9 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
     }
 
     const cashAccountUsed = await resolvePaymentCashAccount(prisma, scope, req, resolvedPaymentMethod, cashAccountId)
+    if (String(cashAccountUsed.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+      return res.status(409).json({ error: `This payment posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.` })
+    }
     if (Number(cashAccountUsed.balance || 0) < paidAmount) {
       return res.status(400).json({
         error: `Insufficient funds in ${cashAccountUsed.name}. Available: ${Number(cashAccountUsed.balance || 0).toFixed(2)} ${cashAccountUsed.currency}, Required: ${paidAmount.toFixed(2)}`,
@@ -798,6 +826,11 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
           supplierId,
           purchaseId,
           amount: paidAmount,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           paymentMethod: resolvedPaymentMethod,
           mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
           phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
@@ -819,6 +852,11 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
           type: 'payment',
           amount: paidAmount,
           balanceAfter: updatedAccount.balance,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
           reference: reference || createdPayment.id,
           description: `Supplier payment: ${supplier.name}`,
           userId: req.user.id
@@ -886,7 +924,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
         console.error('Marketplace repayment notification failed:', notificationError)
       }
     }
-    res.status(201).json(payment.payment)
+    res.status(201).json({ ...payment.payment, baseCurrency: fx.baseCurrency })
   } catch (error) {
     console.error('Record supplier payment error:', error)
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })

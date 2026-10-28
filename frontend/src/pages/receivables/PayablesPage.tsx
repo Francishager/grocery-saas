@@ -12,7 +12,8 @@ import { useToast } from '@/hooks/use-toast'
 import { api, apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
-import { formatCurrency, formatDisplayDate } from '@/lib/utils'
+import { formatCurrency, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
 import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalSuppliers, getLocalPurchases, getLocalPayablePayments, getLocalProducts } from '@/db/hybrid'
@@ -65,6 +66,8 @@ interface SupplierPurchase {
     lname: string
   }
   total: number
+  currency?: string | null
+  foreignTotal?: number | null
   amountPaid: number
   balance: number
   paymentStatus: 'paid' | 'partial' | 'unpaid' | 'overdue'
@@ -92,6 +95,8 @@ interface SupplierPurchase {
 interface SupplierPayment {
   id: string
   amount: number
+  currency?: string | null
+  foreignAmount?: number | null
   paymentMethod: string
   reference?: string
   notes?: string
@@ -139,6 +144,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 export default function PayablesPage() {
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
+  const baseCurrency = getTenantCurrency()
   const navigate = useNavigate()
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -164,6 +170,12 @@ export default function PayablesPage() {
   const [selectedSupplierDetail, setSelectedSupplierDetail] = useState<Supplier | null>(null)
   const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState<SupplierPurchase | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentCurrency, setPaymentCurrency] = useState(baseCurrency)
+  const [paymentRateToBase, setPaymentRateToBase] = useState<number | null>(1)
+  const [paymentUnitsPerBase, setPaymentUnitsPerBase] = useState<number | null>(1)
+  const [purchaseCurrency, setPurchaseCurrency] = useState(baseCurrency)
+  const [purchaseRateToBase, setPurchaseRateToBase] = useState<number | null>(1)
+  const [purchaseUnitsPerBase, setPurchaseUnitsPerBase] = useState<number | null>(1)
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -365,6 +377,10 @@ export default function PayablesPage() {
       })
       return
     }
+    if (purchaseCurrency !== baseCurrency && (!purchaseRateToBase || !purchaseUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
 
     setSavingPurchase(true)
     try {
@@ -375,7 +391,9 @@ export default function PayablesPage() {
           refNo: purchaseForm.refNo || undefined,
           items,
           total: purchaseTotal,
-          amountPaid: Math.min(parseAmount(purchaseForm.amountPaid), purchaseTotal),
+          amountPaid: parseAmount(purchaseForm.amountPaid),
+          currency: purchaseCurrency,
+          unitsPerBase: purchaseUnitsPerBase,
           notes: purchaseForm.notes || undefined,
         })
       })
@@ -395,6 +413,9 @@ export default function PayablesPage() {
         amountPaid: '0',
         notes: '',
       })
+      setPurchaseCurrency(baseCurrency)
+      setPurchaseRateToBase(1)
+      setPurchaseUnitsPerBase(1)
       setPurchaseItems([createEmptyPurchaseItem()])
       loadPurchases()
       if (activeTab === 'suppliers') loadSuppliers()
@@ -421,6 +442,10 @@ export default function PayablesPage() {
       toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
       return
     }
+    if (paymentCurrency !== baseCurrency && (!paymentRateToBase || !paymentUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
 
     try {
       const response = await apiFetch('/api/payables/payments', {
@@ -429,6 +454,8 @@ export default function PayablesPage() {
           supplierId: supplier.id,
           ...(selectedPurchase ? { purchaseId: selectedPurchase.id } : {}),
           amount: parseFloat(paymentAmount),
+          currency: paymentCurrency,
+          unitsPerBase: paymentUnitsPerBase,
           paymentMethod,
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
@@ -449,6 +476,9 @@ export default function PayablesPage() {
       setSelectedPurchase(null)
       setSelectedSupplierForPayment(null)
       setPaymentAmount('')
+      setPaymentCurrency(baseCurrency)
+      setPaymentRateToBase(1)
+      setPaymentUnitsPerBase(1)
       setPaymentMethod('cash')
       setMobileProvider('')
       setPhoneNumber('')
@@ -677,6 +707,7 @@ export default function PayablesPage() {
                     <div>
                       <p className="text-muted-foreground">Total Amount</p>
                       <p className="font-semibold">{purchase.total.toFixed(2)}</p>
+                      {purchase.currency && purchase.currency !== baseCurrency && purchase.foreignTotal != null && <p className="text-xs text-muted-foreground">{Number(purchase.foreignTotal).toLocaleString()} {purchase.currency} · base {Number(purchase.total).toLocaleString()} {baseCurrency}</p>}
                     </div>
                     <div>
                       <p className="text-muted-foreground">Amount Paid</p>
@@ -733,6 +764,7 @@ export default function PayablesPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-semibold">{payment.amount.toFixed(2)}</h3>
+                      {payment.currency && payment.currency !== baseCurrency && payment.foreignAmount != null && <p className="text-xs text-muted-foreground">{payment.foreignAmount.toLocaleString()} {payment.currency} → {payment.amount.toLocaleString()} {baseCurrency}</p>}
                       <p className="text-sm text-muted-foreground">
                         To {payment.supplier.name}
                       </p>
@@ -902,15 +934,17 @@ export default function PayablesPage() {
                 })}
               </div>
 
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={purchaseCurrency} enabled={hasFeature('settings.currencies')} amount={purchaseRateToBase ? purchaseTotal / purchaseRateToBase : 0} onCurrencyChange={setPurchaseCurrency} onRateChange={(rate, units) => { setPurchaseRateToBase(rate); setPurchaseUnitsPerBase(units) }} />
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <Label htmlFor="purchasePaid">Amount Paid</Label>
+                  <Label htmlFor="purchasePaid">Amount Paid ({purchaseCurrency})</Label>
                   <Input
                     id="purchasePaid"
                     type="number"
                     min="0"
                     step="0.01"
-                    max={purchaseTotal}
+                    max={purchaseRateToBase ? purchaseTotal / purchaseRateToBase : purchaseTotal}
                     value={purchaseForm.amountPaid}
                     onChange={(event) => setPurchaseForm((prev) => ({ ...prev, amountPaid: event.target.value }))}
                   />
@@ -919,6 +953,7 @@ export default function PayablesPage() {
                   <Label htmlFor="purchaseNotes">Notes</Label>
                   <Textarea
                     id="purchaseNotes"
+                    aiWritingField
                     value={purchaseForm.notes}
                     onChange={(event) => setPurchaseForm((prev) => ({ ...prev, notes: event.target.value }))}
                     rows={2}
@@ -931,9 +966,10 @@ export default function PayablesPage() {
                   <span>Total Cost</span>
                   <span className="font-semibold">{formatCurrency(purchaseTotal)}</span>
                 </div>
+                {purchaseCurrency !== baseCurrency && purchaseRateToBase && <div className="flex justify-between text-muted-foreground"><span>Transaction total ({purchaseCurrency})</span><span>{formatCurrency(purchaseTotal / purchaseRateToBase, purchaseCurrency)}</span></div>}
                 <div className="flex justify-between text-muted-foreground">
                   <span>Balance after payment</span>
-                  <span>{formatCurrency(Math.max(0, purchaseTotal - parseAmount(purchaseForm.amountPaid)))}</span>
+                  <span>{formatCurrency(Math.max(0, purchaseTotal - parseAmount(purchaseForm.amountPaid) * Number(purchaseRateToBase || 1)))}</span>
                 </div>
               </div>
 
@@ -976,9 +1012,11 @@ export default function PayablesPage() {
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="0.00"
-                  max={selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding}
+                  max={(selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding) != null ? (selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding)! / (paymentRateToBase || 1) : undefined}
                 />
+                {paymentCurrency !== baseCurrency && paymentRateToBase && <p className="mt-1 text-xs text-muted-foreground">Supplier payable/cash posting: {(Number(paymentAmount || 0) * paymentRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {baseCurrency}</p>}
               </div>
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={paymentCurrency} enabled={hasFeature('settings.currencies')} amount={Number(paymentAmount || 0)} onCurrencyChange={setPaymentCurrency} onRateChange={(rate, units) => { setPaymentRateToBase(rate); setPaymentUnitsPerBase(units) }} />
               
               <div>
                 <Label htmlFor="paymentMethod">Payment Method</Label>

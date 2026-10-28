@@ -1,6 +1,6 @@
  import { useEffect, useState, useRef, useMemo } from 'react'
 import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown, AlertTriangle } from 'lucide-react'
-import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, apiFetch, type InventoryItem, type CartItem } from '@/lib/api'
+import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, currencyApi, apiFetch, type InventoryItem, type CartItem, type LiveCurrencyRates } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,11 +24,15 @@ import { useNavigate } from 'react-router-dom'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import SaleServiceJobsEditor, { type SaleTechnician } from '@/components/SaleServiceJobsEditor'
 import { ToastAction } from '@/components/ui/toast'
+import { currencies as supportedCurrencies } from '@/components/Currency/Currencies'
 
 interface RecentSale {
   id: string
   receiptNo: string
   total: number
+  currency?: string | null
+  foreignTotal?: number | null
+  exchangeRateToBase?: number | null
   paymentMethod: string
   customerName?: string | null
   createdAt: string
@@ -99,6 +103,7 @@ export default function SalesPage() {
   const { hasFeature } = useFeatureAccess()
   const navigate = useNavigate()
   const canCreateSaleJobs = hasFeature('service.job_cards') && hasPermission('canCreateServiceJobCard')
+  const canViewCustomerCreditLimit = hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit')
   const [saleTechnicians, setSaleTechnicians] = useState<SaleTechnician[]>([])
   const [serviceOptionsError, setServiceOptionsError] = useState('')
   useEffect(() => {
@@ -125,6 +130,9 @@ export default function SalesPage() {
   const [customerName, setCustomerName] = useState('')
   const [invoiceCashDiscount, setInvoiceCashDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState<number | ''>('')
+  const [transactionCurrency, setTransactionCurrency] = useState('UGX')
+  const [liveCurrencyRates, setLiveCurrencyRates] = useState<LiveCurrencyRates | null>(null)
+  const [currencyRatesError, setCurrencyRatesError] = useState('')
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
@@ -161,6 +169,25 @@ export default function SalesPage() {
     loadCustomers()
     branchesApi.active().then(setBranches).catch(() => {})
   }, [])
+
+  const baseCurrency = String(businessSettings?.currency || 'UGX').toUpperCase()
+  const currencyFeatureEnabled = hasFeature('settings.currencies')
+  useEffect(() => {
+    if (businessSettings?.currency) setTransactionCurrency(String(businessSettings.currency).toUpperCase())
+  }, [businessSettings?.currency])
+  useEffect(() => {
+    if (!currencyFeatureEnabled || !online) {
+      setLiveCurrencyRates(null)
+      setCurrencyRatesError('')
+      return
+    }
+    let active = true
+    setCurrencyRatesError('')
+    currencyApi.rates(baseCurrency)
+      .then(rates => { if (active) setLiveCurrencyRates(rates) })
+      .catch(error => { if (active) setCurrencyRatesError(error?.message || 'Exchange rates could not be loaded.') })
+    return () => { active = false }
+  }, [baseCurrency, currencyFeatureEnabled, online])
 
   const filteredCategories = useMemo(() => {
     const query = categoryQuery.trim().toLowerCase()
@@ -352,7 +379,11 @@ export default function SalesPage() {
   const taxableAmount = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount)
   const cartTax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
   const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
-  const changeDue = amountPaid !== '' && amountPaid >= cartTotal ? amountPaid - cartTotal : 0
+  const unitsPerBase = transactionCurrency === baseCurrency ? 1 : Number(liveCurrencyRates?.rates?.[transactionCurrency] || 0)
+  const rateToBase = unitsPerBase > 0 ? 1 / unitsPerBase : 0
+  const freshRateAvailable = transactionCurrency === baseCurrency || liveCurrencyRates?.cacheStatus === 'fresh'
+  const transactionTotal = cartTotal * unitsPerBase
+  const changeDue = amountPaid !== '' && unitsPerBase > 0 && amountPaid >= transactionTotal ? amountPaid - transactionTotal : 0
   const hasValidAmountPaid = amountPaid !== '' && Number.isFinite(Number(amountPaid)) && Number(amountPaid) > 0
   const matchedCustomer = useMemo(() => {
     const name = customerName.trim().toLowerCase()
@@ -428,6 +459,7 @@ export default function SalesPage() {
         logo: settings?.logo || null,
         receiptHeader: settings?.receiptHeader || settings?.receipt_header || null,
         receiptFooter: settings?.receiptFooter || settings?.receipt_footer || null,
+        currency: baseCurrency,
       },
       cashier: cashierName,
       paymentMethod: paymentMode,
@@ -436,6 +468,12 @@ export default function SalesPage() {
       discount: invoiceCashDiscount,
       tax,
       total,
+      baseCurrency,
+      transactionCurrency,
+      foreignTotal: total * unitsPerBase,
+      exchangeRateToBase: rateToBase || 1,
+      exchangeRateAsOf: liveCurrencyRates?.rateDate || null,
+      exchangeRateSource: transactionCurrency === baseCurrency ? 'Business base currency' : liveCurrencyRates?.provider || null,
       customerName: customerName || undefined,
       amountPaid: amountPaidValue,
       changeGiven: changeGivenValue,
@@ -483,6 +521,10 @@ export default function SalesPage() {
     }
     if (cart.length === 0) {
       toast({ variant: 'destructive', title: 'Cart is empty', description: 'Add at least one item to checkout.' })
+      return
+    }
+    if (transactionCurrency !== baseCurrency && (!online || unitsPerBase <= 0 || !freshRateAvailable)) {
+      toast({ variant: 'destructive', title: 'Exchange rate unavailable', description: !online ? 'Foreign-currency checkout requires an internet connection.' : 'Refresh a current exchange-rate quote before checkout.' })
       return
     }
 
@@ -545,6 +587,7 @@ export default function SalesPage() {
           cashDiscount: invoiceCashDiscount,
           amountPaid: amountPaid !== '' ? amountPaid : undefined,
           changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
+          currency: baseCurrency,
         })
 
         window.dispatchEvent(new CustomEvent('jibusales:notification', {
@@ -580,9 +623,11 @@ export default function SalesPage() {
         customerName: customerName?.trim() || undefined,
         amountPaid: amountPaid !== '' ? amountPaid : undefined,
         changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
+        currency: transactionCurrency,
+        unitsPerBase,
       })
       const completedSaleId = String(result?.sale?.id || result?.sale?.receiptNo || Date.now())
-      const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(result?.sale?.total ?? result.total ?? cartTotal)
+      const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(result?.foreignTotal ?? transactionTotal, transactionCurrency)
       window.dispatchEvent(new CustomEvent('jibusales:notification', {
         detail: {
           id: 'sale:' + completedSaleId, title: 'Sale completed', message: completedSaleMessage, type: 'sale',
@@ -1097,6 +1142,34 @@ export default function SalesPage() {
                       <span className="font-medium">Subtotal</span>
                       <span>{formatCurrency(cartSubtotal)}</span>
                     </div>
+                    {currencyFeatureEnabled && <div className="mb-3 space-y-2 rounded-md border p-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="sale-transaction-currency">Transaction currency</Label>
+                        <select
+                          id="sale-transaction-currency"
+                          value={transactionCurrency}
+                          onChange={e => { setTransactionCurrency(e.target.value); setAmountPaid('') }}
+                          disabled={!online}
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value={baseCurrency}>{baseCurrency} · business base currency</option>
+                          {(liveCurrencyRates ? supportedCurrencies.filter(c => c.code !== baseCurrency && liveCurrencyRates.rates[c.code] != null) : []).map(c => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+                        </select>
+                      </div>
+                      {transactionCurrency !== baseCurrency && <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">
+                        {unitsPerBase > 0
+                          ? `1 ${baseCurrency} = ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(unitsPerBase)} ${transactionCurrency}. Applied rate: 1 ${transactionCurrency} = ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(rateToBase)} ${baseCurrency}.`
+                          : currencyRatesError || 'Loading the live exchange rate…'}
+                        {liveCurrencyRates?.rateDate ? ` Provider update: ${new Date(liveCurrencyRates.rateDate).toLocaleString()}.` : ''}
+                        {' '}Rate by <a href={liveCurrencyRates?.attributionUrl || 'https://www.exchangerate-api.com'} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a>.
+                      </p>
+                      {liveCurrencyRates?.cacheStatus === 'stale' && <p role="alert" className="text-xs text-amber-700">This saved rate is stale and cannot be used to post a sale.</p>}
+                      <Button type="button" size="sm" variant="outline" disabled={!online} onClick={() => currencyApi.rates(baseCurrency).then(setLiveCurrencyRates).catch(error => setCurrencyRatesError(error?.message || 'Exchange rates could not be loaded.'))}>
+                        <RefreshCw className="mr-2 h-4 w-4" /> Refresh quote
+                      </Button>
+                      </div>}
+                    </div>}
                     {lineCashDiscounts > 0 && (
                       <div className="flex justify-between mb-1 text-sm text-muted-foreground">
                         <span>Line Discounts</span>
@@ -1109,8 +1182,8 @@ export default function SalesPage() {
                         type="number"
                         min="0"
                         step="any"
-                        value={invoiceCashDiscount}
-                        onChange={(e) => setInvoiceCashDiscount(parseFloat(e.target.value) || 0)}
+                        value={Number((invoiceCashDiscount * unitsPerBase).toFixed(2))}
+                        onChange={(e) => setInvoiceCashDiscount((parseFloat(e.target.value) || 0) * rateToBase)}
                         className="w-28 h-8 text-sm text-right"
                         placeholder="0"
                       />
@@ -1152,7 +1225,7 @@ export default function SalesPage() {
                               <span className="text-xs text-muted-foreground">Credit balance</span>
                             </span>
                           </div>
-                          {Number(matchedCustomer.creditLimit || 0) > 0 && (
+                          {canViewCustomerCreditLimit && Number(matchedCustomer.creditLimit || 0) > 0 && (
                             <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(matchedCustomer.creditLimit || 0)}</p>
                           )}
                         </button>
@@ -1166,15 +1239,16 @@ export default function SalesPage() {
                     )}
                     <div className="flex justify-between mb-2">
                       <span className="font-medium">Total</span>
-                      <span className="font-bold text-lg">
-                        {formatCurrency(cartTotal)}
+                      <span className="text-right">
+                        <strong className="block text-lg">{formatCurrency(transactionTotal, transactionCurrency)}</strong>
+                        {transactionCurrency !== baseCurrency && <span className="text-xs text-muted-foreground">Base total {formatCurrency(cartTotal, baseCurrency)}</span>}
                       </span>
                     </div>
 
                     {/* Amount Paid + Change */}
                     <div className="space-y-2 mb-4 p-3 rounded-lg border bg-muted/30">
                       <div className="flex items-center justify-between gap-2">
-                        <label className="text-sm font-medium">Amount Paid</label>
+                          <label className="text-sm font-medium">Amount Paid ({transactionCurrency})</label>
                         <Input
                           type="number"
                           min="0"
@@ -1192,7 +1266,7 @@ export default function SalesPage() {
                             {changeDue > 0 ? 'Change Due' : amountPaid < cartTotal ? 'Shortfall' : 'Change Due'}
                           </span>
                           <span className={changeDue > 0 ? 'font-bold text-green-600' : 'font-bold text-red-600'}>
-                            {changeDue > 0 ? formatCurrency(changeDue) : formatCurrency(amountPaid - cartTotal)}
+                            {changeDue > 0 ? formatCurrency(changeDue, transactionCurrency) : formatCurrency(amountPaid - transactionTotal, transactionCurrency)}
                           </span>
                         </div>
                       )}
@@ -1269,7 +1343,7 @@ export default function SalesPage() {
                     <Button
                       className="w-full"
                       onClick={handleCheckout}
-                      disabled={processing || !hasValidAmountPaid || cartTotal <= 0 || (
+                      disabled={processing || !hasValidAmountPaid || cartTotal <= 0 || unitsPerBase <= 0 || !freshRateAvailable || (
                         paymentMode === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
                         paymentMode === 'card' ? !transactionId.trim() :
                         false
@@ -1334,7 +1408,12 @@ export default function SalesPage() {
                       <p className="text-xs text-muted-foreground">{sale.items ? sale.items.length : 0} items &middot; {payLabel} &middot; {staff}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-medium">{formatCurrency(sale.total)}</span>
+                      <span className="text-right font-medium">
+                        {sale.currency && sale.currency !== baseCurrency && sale.foreignTotal != null ? <>
+                          <span className="block">{formatCurrency(sale.foreignTotal, sale.currency)}</span>
+                          <span className="block text-xs text-muted-foreground">Base {formatCurrency(sale.total, baseCurrency)}</span>
+                        </> : formatCurrency(sale.total, baseCurrency)}
+                      </span>
                       <span className="text-xs text-muted-foreground">{dateStr}</span>
                       <ReceiptViewer saleId={String(sale.id)} receiptNo={sale.receiptNo} />
                     </div>
@@ -1378,10 +1457,10 @@ export default function SalesPage() {
                 <p className="text-xs text-muted-foreground">Outstanding Balance</p>
                 <p className="mt-1 font-semibold">{formatCurrency(creditAlertCustomer?.balance || 0)}</p>
               </div>
-              <div className="rounded-md border p-3">
+              {canViewCustomerCreditLimit && <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">Credit Limit</p>
                 <p className="mt-1 font-semibold">{formatCurrency(creditAlertCustomer?.creditLimit || 0)}</p>
-              </div>
+              </div>}
             </div>
 
             {!creditInfo && !creditInfoLoading && (

@@ -51,12 +51,19 @@ function normalizeReceipt(receipt: Partial<ReceiptPreview> | null | undefined): 
       logo: receipt?.business?.logo ?? null,
       receiptHeader: receipt?.business?.receiptHeader ?? null,
       receiptFooter: receipt?.business?.receiptFooter ?? null,
+      currency: receipt?.business?.currency,
     },
     branch: receipt?.branch ?? null,
     cashier: receipt?.cashier || '-',
     customerName: receipt?.customerName ?? null,
     paymentMethod: receipt?.paymentMethod || 'cash',
     createdAt: receipt?.createdAt || new Date().toISOString(),
+    baseCurrency: receipt?.baseCurrency || receipt?.business?.currency || 'UGX',
+    transactionCurrency: receipt?.transactionCurrency || receipt?.baseCurrency || receipt?.business?.currency || 'UGX',
+    foreignTotal: Number(receipt?.foreignTotal ?? receipt?.total ?? 0),
+    exchangeRateToBase: Number(receipt?.exchangeRateToBase || 1),
+    exchangeRateAsOf: receipt?.exchangeRateAsOf ?? null,
+    exchangeRateSource: receipt?.exchangeRateSource ?? null,
     subtotal: Number(receipt?.subtotal || 0),
     discount: Number(receipt?.discount || 0),
     tax: Number(receipt?.tax || 0),
@@ -85,6 +92,9 @@ function receiptHtml(receipt: ReceiptPreview): string {
   const cashier = receipt.cashier || '-'
   const customerName = receipt.customerName || ''
   const paymentMethod = receipt.paymentMethod || 'cash'
+  const baseCurrency = receipt.baseCurrency || receipt.business.currency || 'UGX'
+  const transactionCurrency = receipt.transactionCurrency || baseCurrency
+  const foreign = transactionCurrency !== baseCurrency
 
   return baseHtml(`
     <main class="receipt">
@@ -110,18 +120,19 @@ function receiptHtml(receipt: ReceiptPreview): string {
       <div class="dash"></div>
 
       <section class="items">
-        ${receipt.items.map(itemHtml).join('')}
+        ${receipt.items.map(item => itemHtml(item, baseCurrency)).join('')}
       </section>
 
       <div class="dash"></div>
 
       <section class="totals">
-        ${row('Subtotal', formatCurrency(receipt.subtotal))}
-        ${receipt.discount > 0 ? row('Discount', formatCurrency(receipt.discount)) : ''}
-        ${receipt.tax > 0 ? row('Tax', formatCurrency(receipt.tax)) : ''}
-        ${row('TOTAL', formatCurrency(receipt.total), 'total')}
-        ${receipt.amountPaid != null ? row('Amount Paid', formatCurrency(receipt.amountPaid)) : ''}
-        ${receipt.amountPaid != null ? row('Change', formatCurrency(receipt.changeGiven || 0)) : ''}
+        ${row(`Subtotal (${baseCurrency})`, formatCurrency(receipt.subtotal, baseCurrency))}
+        ${receipt.discount > 0 ? row('Discount', formatCurrency(receipt.discount, baseCurrency)) : ''}
+        ${receipt.tax > 0 ? row('Tax', formatCurrency(receipt.tax, baseCurrency)) : ''}
+        ${row(foreign ? `Base total (${baseCurrency})` : 'TOTAL', formatCurrency(receipt.total, baseCurrency), 'total')}
+        ${foreign ? row(`TRANSACTION TOTAL (${transactionCurrency})`, formatCurrency(receipt.foreignTotal ?? receipt.total, transactionCurrency), 'total') : ''}
+        ${receipt.amountPaid != null ? row(`Amount Paid (${transactionCurrency})`, formatCurrency(receipt.amountPaid, transactionCurrency)) : ''}
+        ${receipt.amountPaid != null ? row(`Change (${transactionCurrency})`, formatCurrency(receipt.changeGiven || 0, transactionCurrency)) : ''}
       </section>
 
       <div class="dash"></div>
@@ -136,13 +147,13 @@ function receiptHtml(receipt: ReceiptPreview): string {
   `)
 }
 
-function itemHtml(item: ReceiptPreview['items'][number]): string {
+function itemHtml(item: ReceiptPreview['items'][number], currency: string): string {
   return `
     <div class="item">
       <div class="item-name">${escapeHtml(item.name || 'Item')}</div>
       <div class="line">
-        <span>${escapeHtml(String(item.quantity))} x ${escapeHtml(formatCurrency(item.price))}</span>
-        <strong>${escapeHtml(formatCurrency(item.total))}</strong>
+        <span>${escapeHtml(String(item.quantity))} x ${escapeHtml(formatCurrency(item.price, currency))}</span>
+        <strong>${escapeHtml(formatCurrency(item.total, currency))}</strong>
       </div>
     </div>
   `
