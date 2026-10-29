@@ -1,11 +1,12 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3 } from 'lucide-react'
+import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3, Download, Printer } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { apiFetch } from '@/lib/api'
+import { RichTextDisplay, markdownToHtml } from '@/components/RichTextArea'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { cn, formatCurrency, formatDisplayDate } from '@/lib/utils'
@@ -143,7 +144,7 @@ type CustomerHistoryResponse = {
 
 type RentalLedgerResponse = {
   customer: { profilePhotoUrl?: string | null; nationalId?: string | null; nationalIdFrontUrl?: string | null; nationalIdBackUrl?: string | null }
-  tenancies: Array<{ id: string; tenantName: string; agreementRef?: string | null; status: string; startDate: string; endDate?: string | null; rentAmount: number; currency: string; balance: number; rentAdvanceBalance?: number; maritalStatus?: string | null; spouseNames?: string | null; childrenCount?: number | null; householdSize?: number | null; placeOfOrigin?: string | null; arrearsAging?: RentAging; unit: { unitCode: string; property: { name: string; owner?: { name: string } | null } } }>
+  tenancies: Array<{ id: string; tenantName: string; agreementRef?: string | null; agreementNotes?: string | null; status: string; startDate: string; endDate?: string | null; rentAmount: number; currency: string; balance: number; depositRequired?: number; depositHeld?: number; rentAdvanceBalance?: number; maritalStatus?: string | null; spouseNames?: string | null; childrenCount?: number | null; householdSize?: number | null; placeOfOrigin?: string | null; arrearsAging?: RentAging; unit: { unitCode: string; property: { name: string; owner?: { name: string } | null } } }>
   entries: Array<{ id: string; tenancyId?: string; date: string; type: string; reference: string; description: string; debit: number; credit: number; runningBalance: number; rentMonths?: number | null; arrearsMonths?: number | null; paymentMethod?: string | null; status?: string; propertyName?: string; unitCode?: string; currency?: string; planNo?: string | null; cashAccountName?: string | null; transactionRef?: string | null }>
   closingBalance: number
   arrearsAging: RentAging
@@ -156,6 +157,15 @@ type RentPlanPayment = { id: string; receiptNo: string; amount: number; paymentD
 type RentPaymentPlan = { id: string; planNo: string; status: string; totalAmount: number; amountPaid: number; installmentCount: number; frequency: string; startDate: string; notes?: string | null; tenancy: { tenantName: string; currency: string; unit: { unitCode: string; property: { name: string } } }; installments: RentPlanInstallment[]; payments: RentPlanPayment[] }
 type RentPlanProfileData = { plans: RentPaymentPlan[]; eligibleCharges: Array<{ id: string; tenancyId: string; tenancyName: string; propertyName: string; unitCode: string; currency: string; period: string; dueDate: string; description: string; amount: number; amountPaid: number; balance: number }> }
 type RentPaymentAccount = { id: string; name: string; type: string; paymentMethod: string }
+type RentalAgreementDraft = { id: string; rentalNo: string; hireDate: string; expectedReturnDate: string; status: string; bookingState?: string; contractDraft?: string | null; contractGeneratedAt?: string | null }
+
+function escapeAgreementHtml(value: string) {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+function agreementHtml(title: string, body: string) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeAgreementHtml(title)}</title><style>body{font:14px/1.6 Arial,sans-serif;color:#171717;margin:24mm}h1{font-size:22px}h2{font-size:17px;margin-top:24px}strong{font-weight:700}.meta{color:#555}</style></head><body>${body}</body></html>`
+}
 
 const normalizeText = (value?: string | null) => String(value || '').replace(/_/g, ' ')
 const localDateInputValue = () => {
@@ -385,6 +395,9 @@ export default function CustomerTransactionHistoryDialog({
   const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
   const [rentalData, setRentalData] = useState<RentalLedgerResponse | null>(null)
+  const [rentalAgreements, setRentalAgreements] = useState<RentalAgreementDraft[]>([])
+  const [rentalAgreementsLoading, setRentalAgreementsLoading] = useState(false)
+  const [rentalAgreementsError, setRentalAgreementsError] = useState('')
   const [rentPlanData, setRentPlanData] = useState<RentPlanProfileData | null>(null)
   const [rentPlanReload, setRentPlanReload] = useState(0)
   const [rentPlanError, setRentPlanError] = useState('')
@@ -410,6 +423,7 @@ export default function CustomerTransactionHistoryDialog({
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const propertyManagementEnabled = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
+  const canViewRentalAgreements = hasFeature('rentals') && hasPermission('canViewRental')
   const canLoadRentalProfile = propertyManagementEnabled && hasPermission('canViewPropertyStatements')
   const canLoadHouseholdProfile = propertyManagementEnabled && (hasPermission('canViewTenantPersonalDetails') || hasPermission('canManageTenantPersonalDetails'))
   const canViewRentPaymentPlans = propertyManagementEnabled && (hasPermission('canViewRentPaymentPlans') || hasPermission('canManageRentPaymentPlans'))
@@ -459,6 +473,27 @@ export default function CustomerTransactionHistoryDialog({
     loadHistory()
     return () => controller.abort()
   }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile])
+
+  useEffect(() => {
+    if (!open || !customer?.id || !canViewRentalAgreements) {
+      setRentalAgreements([])
+      setRentalAgreementsError('')
+      setRentalAgreementsLoading(false)
+      return
+    }
+    const controller = new AbortController()
+    setRentalAgreementsLoading(true)
+    setRentalAgreementsError('')
+    void apiFetch(`/api/rentals?customerId=${encodeURIComponent(customer.id)}&page=1&limit=500`, { signal: controller.signal } as RequestInit)
+      .then(async response => {
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(payload?.error || 'Could not load rental agreements.')
+        if (!controller.signal.aborted) setRentalAgreements(Array.isArray(payload?.rentals) ? payload.rentals : [])
+      })
+      .catch(error => { if (error?.name !== 'AbortError') setRentalAgreementsError(error?.message || 'Could not load rental agreements.') })
+      .finally(() => { if (!controller.signal.aborted) setRentalAgreementsLoading(false) })
+    return () => controller.abort()
+  }, [open, customer?.id, canViewRentalAgreements, rentalReload])
 
   useEffect(() => {
     if (!open || !customer?.id || !canViewRentPaymentPlans) {
@@ -604,6 +639,7 @@ export default function CustomerTransactionHistoryDialog({
   const canViewRent = canLoadRentalProfile
   const canViewTenantHousehold = canLoadHouseholdProfile && householdTenancies.length > 0
   const hasRentalTenancies = Boolean(rentalData?.tenancies.length)
+  const canViewTenancyAgreements = canViewRent || canViewRentalAgreements
   const canEditRentalDetails = hasPermission('canManageTenancies')
   const creditActivity = transactions.filter((row) => [
     'opening_balance', 'receivable_sale', 'property_sale', 'property_sale_payment', 'sale_payment_adjustment', 'customer_payment',
@@ -643,6 +679,26 @@ export default function CustomerTransactionHistoryDialog({
   }, [rentPlanData?.eligibleCharges])
   const activeRentPlanBalance = (rentPlanData?.plans || []).filter(plan => plan.status === 'active').reduce((sum, plan) => sum + Math.max(0, Number(plan.totalAmount) - Number(plan.amountPaid)), 0)
   const lastDate = useMemo(() => data?.summary?.lastTransactionDate ? formatDisplayDate(data.summary.lastTransactionDate) : 'No activity yet', [data?.summary?.lastTransactionDate])
+
+  const agreementDocumentAction = (title: string, draft: string, action: 'print' | 'download') => {
+    const document = agreementHtml(title, `<h1>${markdownToHtml(title)}</h1><hr>${markdownToHtml(draft)}`)
+    if (action === 'download') {
+      const url = URL.createObjectURL(new Blob([document], { type: 'text/html;charset=utf-8' }))
+      const link = window.document.createElement('a')
+      link.href = url
+      link.download = `${title.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'tenancy-agreement'}.html`
+      link.click()
+      URL.revokeObjectURL(url)
+      return
+    }
+    const popup = window.open('', '_blank')
+    if (!popup) return
+    popup.opener = null
+    popup.document.write(document)
+    popup.document.close()
+    popup.focus()
+    popup.print()
+  }
 
   const content = (
     <div className="space-y-4">
@@ -729,6 +785,7 @@ export default function CustomerTransactionHistoryDialog({
               {canViewSalesAndPayments && <TabsTrigger value="sales-payments">{hasRentalTenancies && !hasCommercialHistory ? 'Rent activity' : hasRentalTenancies ? 'Trade activity' : 'Account activity'}</TabsTrigger>}
               {(canViewCreditHistory || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="credit-history">{hasRentalTenancies ? 'Tenant standing' : 'Credit History'}</TabsTrigger>}
               {canViewRent && <TabsTrigger value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
+              {canViewTenancyAgreements && <TabsTrigger value="tenancy-agreements">Tenancy Agreement</TabsTrigger>}
               {canViewRentPaymentPlans && <TabsTrigger value="payment-plans">Payment Plans</TabsTrigger>}
             </TabsList>
 
@@ -941,6 +998,37 @@ export default function CustomerTransactionHistoryDialog({
                 <div className="border-b px-4 py-3"><h3 className="font-semibold">Rent ledger</h3><p className="text-xs text-muted-foreground">Rent charges and receipts are shown from the rental ledger.</p></div>
                 <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Date</th><th className="p-3">Description</th><th className="p-3">Reference</th><th className="p-3 text-right">Charge</th><th className="p-3 text-right">Receipt</th><th className="p-3 text-right">Balance</th><th className="p-3 text-right">Action</th></tr></thead><tbody>{rentalData?.entries.map(row => <tr key={`${row.type}-${row.id}`} className="border-t"><td className="p-3">{formatDisplayDate(row.date)}</td><td className="p-3">{row.description}</td><td className="p-3">{row.reference}</td><td className="p-3 text-right">{row.debit ? formatCurrency(row.debit, row.currency) : '—'}</td><td className="p-3 text-right">{row.credit ? formatCurrency(row.credit, row.currency) : '—'}</td><td className="p-3 text-right font-medium">{formatCurrency(row.runningBalance, row.currency)}</td><td className="p-3 text-right">{canPrintRentReceipts && row.credit > 0 && <TransactionReceiptButton label="Reprint" data={{ title: row.type === 'rent_plan_payment' ? 'Rent Payment Plan Receipt' : 'Rent Payment Receipt', reference: row.reference, date: row.date, amount: Number(row.credit), currency: row.currency, partyLabel: 'Renter', partyName: rentalData?.tenancies.find(tenancy => tenancy.id === row.tenancyId)?.tenantName, fields: [{ label: 'Property', value: row.propertyName }, { label: 'Unit', value: row.unitCode }, { label: 'Rent period', value: row.rentMonths ? `${row.rentMonths} month(s)` : null }, { label: 'Prior arrears added', value: row.arrearsMonths ? `${row.arrearsMonths} month(s)` : null }, { label: 'Repayment plan', value: row.planNo }, { label: 'Payment method', value: normalizeText(row.paymentMethod) }, { label: 'Account', value: row.cashAccountName }, { label: 'Transaction reference', value: row.transactionRef }] }} />}</td></tr>)}{!rentalData?.entries.length && <tr><td colSpan={7} className="p-5 text-center text-sm text-muted-foreground">No rental charges or receipts are recorded.</td></tr>}</tbody></table></div>
               </section>
+            </TabsContent>}
+
+            {canViewTenancyAgreements && <TabsContent value="tenancy-agreements" className="space-y-5">
+              <div><h3 className="font-semibold">Tenancy agreements</h3><p className="mt-1 text-sm text-muted-foreground">Review saved agreement terms and print or download a formatted copy.</p></div>
+              {canViewRent && rentalData?.tenancies.map(tenancy => {
+                const title = `Tenancy Agreement ${tenancy.agreementRef || tenancy.unit.unitCode}`
+                const draft = [
+                  `**Agreement reference:** ${tenancy.agreementRef || 'Not provided'}`,
+                  `**Renter:** ${tenancy.tenantName}`,
+                  `**Property / unit:** ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`,
+                  `**Term:** ${formatDisplayDate(tenancy.startDate)}${tenancy.endDate ? ` to ${formatDisplayDate(tenancy.endDate)}` : ' ongoing'}`,
+                  `**Monthly rent:** ${formatCurrency(Number(tenancy.rentAmount), tenancy.currency)}`,
+                  `**Security deposit required:** ${formatCurrency(Number(tenancy.depositRequired || 0), tenancy.currency)}`,
+                  `**Security deposit held:** ${formatCurrency(Number(tenancy.depositHeld || 0), tenancy.currency)}`,
+                  `**Status:** ${normalizeText(tenancy.status)}`,
+                  '',
+                  '**Agreement notes and terms**',
+                  tenancy.agreementNotes || 'No agreement notes have been recorded.',
+                ].join('\n')
+                return <section key={`property-${tenancy.id}`} className="space-y-3 rounded-md border p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-semibold">{title}</h4><p className="mt-1 text-sm text-muted-foreground">{tenancy.tenantName} · {tenancy.unit.property.name} / {tenancy.unit.unitCode}</p></div><div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => agreementDocumentAction(title, draft, 'print')}><Printer className="mr-1.5 h-4 w-4" />Print</Button><Button type="button" variant="outline" size="sm" onClick={() => agreementDocumentAction(title, draft, 'download')}><Download className="mr-1.5 h-4 w-4" />Download</Button></div></div>
+                  <div className="rounded-md bg-muted/20 p-3"><RichTextDisplay value={draft} className="space-y-1 text-sm leading-6" /></div>
+                </section>
+              })}
+              {canViewRentalAgreements && rentalAgreements.map(rental => <section key={`rental-${rental.id}`} className="space-y-3 rounded-md border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-semibold">Tenancy Agreement · {rental.rentalNo}</h4><p className="mt-1 text-sm text-muted-foreground">{formatDisplayDate(rental.hireDate)} – {formatDisplayDate(rental.expectedReturnDate)} · {normalizeText(rental.bookingState || rental.status)}</p></div>{rental.contractDraft && <div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => agreementDocumentAction(`Tenancy Agreement ${rental.rentalNo}`, rental.contractDraft || '', 'print')}><Printer className="mr-1.5 h-4 w-4" />Print</Button><Button type="button" variant="outline" size="sm" onClick={() => agreementDocumentAction(`Tenancy Agreement ${rental.rentalNo}`, rental.contractDraft || '', 'download')}><Download className="mr-1.5 h-4 w-4" />Download</Button></div>}</div>
+                {rental.contractDraft ? <div className="max-h-[520px] overflow-y-auto rounded-md bg-muted/20 p-3"><RichTextDisplay value={rental.contractDraft} className="space-y-1 text-sm leading-6" /></div> : <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No agreement draft has been saved for this rental yet.</p>}
+              </section>)}
+              {rentalAgreementsLoading && <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">Loading rental agreements…</div>}
+              {rentalAgreementsError && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{rentalAgreementsError}</div>}
+              {!rentalAgreementsLoading && !rentalAgreementsError && canViewRentalAgreements && rentalAgreements.length === 0 && (!canViewRent || !rentalData?.tenancies.length) && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No tenancy agreements are linked to this customer.</div>}
             </TabsContent>}
 
             {canViewRentPaymentPlans && <TabsContent value="payment-plans" className="space-y-5">
