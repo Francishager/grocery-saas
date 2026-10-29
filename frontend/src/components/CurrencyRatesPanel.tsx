@@ -46,10 +46,7 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
             </div>
           ))}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {rateDate ? `Provider updated ${rateDate.toLocaleString()}. ` : ''}
-          Rates by <a className="underline underline-offset-2" href={data.attributionUrl} target="_blank" rel="noreferrer">ExchangeRate-API</a>.
-        </p>
+        {rateDate && <p className="text-xs text-muted-foreground">Rates updated {rateDate.toLocaleString()}.</p>}
       </> : <p className="text-sm text-muted-foreground">{loading ? 'Loading rates…' : 'No rates loaded.'}</p>}
     </section>
   )

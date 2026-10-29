@@ -1,6 +1,6 @@
 import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
 
-const CACHE_TTL_MS = 60 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_STALE_MS = 48 * 60 * 60 * 1000;
 const cache = new Map();
 
@@ -51,19 +51,21 @@ const normalizeCode = (value) => {
 export async function getCurrencyRates(baseCurrency, fetchImpl = fetch) {
   const base = normalizeCode(baseCurrency);
   if (!base) throw Object.assign(new Error('Enter a valid three-letter base currency.'), { statusCode: 400 });
+  const apiKey = String(process.env.EXCHANGE_RATE_API_KEY || '').trim();
+  if (!apiKey) throw Object.assign(new Error('Currency rates are not configured. Set EXCHANGE_RATE_API_KEY in the backend environment.'), { statusCode: 503 });
 
   const now = Date.now();
   const existing = cache.get(base);
   if (existing && now - existing.cachedAt < CACHE_TTL_MS) return { ...existing.data, cacheStatus: 'fresh' };
 
   try {
-    const response = await fetchImpl(`https://open.er-api.com/v6/latest/${encodeURIComponent(base)}`, {
-      headers: { Accept: 'application/json' },
+    const response = await fetchImpl(`https://v6.exchangerate-api.com/v6/latest/${encodeURIComponent(base)}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(6000),
     });
     if (!response.ok) throw new Error(`Rate provider returned ${response.status}.`);
     const payload = await response.json();
-    const rates = payload?.rates;
+    const rates = payload?.conversion_rates;
     if (payload?.result !== 'success' || payload?.base_code !== base || !rates || typeof rates !== 'object') {
       throw new Error('Rate provider returned an invalid response.');
     }
@@ -75,8 +77,7 @@ export async function getCurrencyRates(baseCurrency, fetchImpl = fetch) {
     const data = {
       baseCurrency: base,
       rates: validRates,
-      provider: 'ExchangeRate-API Open Access',
-      attributionUrl: 'https://www.exchangerate-api.com',
+      provider: 'ExchangeRate-API Standard',
       rateDate: payload.time_last_update_utc || null,
       nextUpdateAt: payload.time_next_update_utc || null,
     };

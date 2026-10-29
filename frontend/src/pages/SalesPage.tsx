@@ -1162,7 +1162,6 @@ export default function SalesPage() {
                           ? `1 ${baseCurrency} = ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(unitsPerBase)} ${transactionCurrency}. Applied rate: 1 ${transactionCurrency} = ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(rateToBase)} ${baseCurrency}.`
                           : currencyRatesError || 'Loading the live exchange rate…'}
                         {liveCurrencyRates?.rateDate ? ` Provider update: ${new Date(liveCurrencyRates.rateDate).toLocaleString()}.` : ''}
-                        {' '}Rate by <a href={liveCurrencyRates?.attributionUrl || 'https://www.exchangerate-api.com'} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a>.
                       </p>
                       {liveCurrencyRates?.cacheStatus === 'stale' && <p role="alert" className="text-xs text-amber-700">This saved rate is stale and cannot be used to post a sale.</p>}
                       <Button type="button" size="sm" variant="outline" disabled={!online} onClick={() => currencyApi.rates(baseCurrency).then(setLiveCurrencyRates).catch(error => setCurrencyRatesError(error?.message || 'Exchange rates could not be loaded.'))}>

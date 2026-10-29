@@ -85,7 +85,7 @@ export function TransactionCurrencyControl({ baseCurrency, currency, enabled, am
       <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
         <RefreshCw className={`mr-1 size-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
       </Button>
-      {rates?.attributionUrl && <span className="w-full text-muted-foreground">Reference rate by <a href={rates.attributionUrl} target="_blank" rel="noreferrer" className="underline">ExchangeRate-API</a>; your bank/provider may settle at a different rate.</span>}
+      <span className="w-full text-muted-foreground">Reference rates are indicative; your bank or payment provider may settle at a different rate.</span>
     </div>}
     {error && currency !== base && <p role="alert" className="text-xs text-destructive">{error}</p>}
   </div>

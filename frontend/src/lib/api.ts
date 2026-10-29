@@ -1033,7 +1033,6 @@ export interface LiveCurrencyRates {
   baseCurrency: string
   rates: Record<string, number>
   provider: string
-  attributionUrl: string
   rateDate: string | null
   nextUpdateAt: string | null
   cacheStatus: 'fresh' | 'stale'
