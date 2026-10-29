@@ -2915,6 +2915,7 @@ model RentCharge {
 
 model PropertyRentRateHistory {
   id              String          @id @default(cuid())
+  sequence        Int             @unique @default(autoincrement())
   tenantId        String
   tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   unitId          String
