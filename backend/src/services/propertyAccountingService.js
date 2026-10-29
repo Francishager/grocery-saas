@@ -235,6 +235,17 @@ export function propertyDepositRefundLines(config, { amount, cashAccountLedgerId
   ]
 }
 
+export function propertyDepositRentApplicationLines(config, { amount, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !config.depositLiabilityAccountId || !config.rentReceivableAccountId) {
+    throw Object.assign(new Error('Tenant deposit application accounting details are invalid.'), { statusCode: 400 })
+  }
+  return [
+    { accountId: config.depositLiabilityAccountId, debit: value, credit: 0, description: `Apply tenant security deposit to rent arrears ${reference}` },
+    { accountId: config.rentReceivableAccountId, debit: 0, credit: value, description: `Settle rent receivable from tenant deposit ${reference}` },
+  ]
+}
+
 export function propertyOpeningDepositLines(config, { amount, reference }) {
   const value = money(amount)
   return [

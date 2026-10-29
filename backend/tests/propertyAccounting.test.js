@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   propertyDepositReceiptLines,
   propertyDepositRefundLines,
+  propertyDepositRentApplicationLines,
   propertyOpeningDepositLines,
   propertyOwnerPayoutLines,
   propertyRentChargeLines,
@@ -128,12 +129,22 @@ test('tenant deposits remain liabilities on receipt, opening migration, and refu
   balanced(receipt); balanced(opening); balanced(refund)
 })
 
+test('applying a held tenant deposit settles rent receivable without moving cash', () => {
+  const application = propertyDepositRentApplicationLines(config, { amount: 450000, reference: 'DAPP-1' })
+  assert.equal(application[0].accountId, 'deposit-liability')
+  assert.equal(application[0].debit, 450000)
+  assert.equal(application[1].accountId, 'rent-ar')
+  assert.equal(application[1].credit, 450000)
+  assert.ok(application.every(line => line.accountId !== 'cash'))
+  balanced(application)
+})
+
 test('property permissions are exposed under the Property Management category', () => {
   const keys = [
     'canViewPropertyPortfolio', 'canViewPropertyCollections', 'canViewPropertyStatements', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails', 'canViewRentPaymentPlans', 'canManageRentPaymentPlans', 'canEditRentPeriods',
     'canManagePropertyOwners', 'canManageProperties', 'canManagePropertyUnits',
     'canCreateTenancies', 'canEndTenancies', 'canRecordRentPayment', 'canRecordTenantDeposit',
-    'canRefundTenantDeposit', 'canVoidRentPayment', 'canViewPropertyReports', 'canRecordOwnerPayout',
+    'canRefundTenantDeposit', 'canApplyTenantDepositToRent', 'canVoidRentPayment', 'canViewPropertyReports', 'canRecordOwnerPayout',
     'canViewPropertySales', 'canCreatePropertySale', 'canRecordPropertySalePayment',
     'canVoidPropertySalePayment', 'canCancelPropertySale', 'canManagePropertyLandInventory',
     'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment',
@@ -153,6 +164,8 @@ test('property permissions require an explicit landlord or property-agent featur
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management.agent'])), true)
   assert.equal(permissionAllowedForTenant('canEditRentPeriods', new Set(['property_management.landlord'])), true)
   assert.equal(permissionAllowedForTenant('canEditRentPeriods', new Set(['property_management.agent'])), true)
+  assert.equal(permissionAllowedForTenant('canApplyTenantDepositToRent', new Set(['property_management.landlord'])), true)
+  assert.equal(permissionAllowedForTenant('canApplyTenantDepositToRent', new Set(['property_management.agent'])), true)
   assert.equal(permissionAllowedForTenant('canEditRentPeriods', new Set(['property_management'])), false)
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set(['property_management'])), false)
   assert.equal(permissionAllowedForTenant('canViewPropertyPortfolio', new Set()), false)
