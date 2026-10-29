@@ -49,6 +49,19 @@ export async function rentAmountForPeriod(tx, tenancy, period) {
   return rate ? amount(rate.newAmount) : amount(tenancy.rentAmount)
 }
 
+export function correctedRentChargeValues(charge, periodAmount, now = new Date()) {
+  const nextAmount = amount(periodAmount)
+  const amountPaid = amount(charge.amountPaid)
+  if (amountPaid > nextAmount + 0.01) {
+    throw Object.assign(new Error('Payments already recorded exceed the rent for the corrected month. Reconcile the excess as tenant rent advance before correcting this period.'), { statusCode: 409 })
+  }
+  const dueDate = new Date(charge.dueDate)
+  const status = amountPaid + 0.001 >= nextAmount ? 'paid'
+    : amountPaid > 0 ? 'partial'
+      : dueDate < now ? 'overdue' : 'unpaid'
+  return { amount: nextAmount, status }
+}
+
 export async function recordUnitRentRate(tx, { tenantId, unitId, previousAmount, newAmount, changedById, effectivePeriod }) {
   const before = amount(previousAmount)
   const after = amount(newAmount)

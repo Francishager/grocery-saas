@@ -63,7 +63,7 @@ USER app
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
   CMD sh -c 'wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1'
 
-# Sync the Prisma schema before accepting requests. Starting the API in parallel
-# can make existing tenants hit database errors while schema updates are pending.
-CMD ["sh", "-c", "npx prisma db push && ./start.sh"]
+# Avoid applying the entire Prisma schema on every restart. A failed or
+# destructive schema diff otherwise prevents the API from starting at all.
+CMD ["./start.sh"]
 

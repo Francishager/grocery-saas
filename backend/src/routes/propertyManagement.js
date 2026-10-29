@@ -9,7 +9,7 @@ import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '.
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
 import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
-import { recordTenancyRentRate, recordUnitRentRate, rentAmountForPeriod, monthKey as rentRateMonthKey } from '../services/propertyRentRateService.js'
+import { correctedRentChargeValues, recordTenancyRentRate, recordUnitRentRate, rentAmountForPeriod, monthKey as rentRateMonthKey } from '../services/propertyRentRateService.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -1057,7 +1057,7 @@ router.put('/rent-charges/:id/period', requirePermission('canEditRentPeriods'), 
       if (charge.planAllocations.some(allocation => allocation.plan.status === 'active')) {
         throw Object.assign(new Error('This rent period is part of an active repayment plan. Update or complete that plan before correcting the period.'), { statusCode: 409 })
       }
-      if (charge.period === period) return charge
+      const periodChanged = charge.period !== period
       const dueDate = dueDateFor(period)
       const dayStamp = value => {
         const date = new Date(value)
@@ -1069,12 +1069,18 @@ router.put('/rent-charges/:id/period', requirePermission('canEditRentPeriods'), 
       const duplicate = await tx.rentCharge.findFirst({ where: { tenantId: tenantIdOf(req), tenancyId: charge.tenancyId, period, NOT: { id: charge.id } }, select: { id: true } })
       if (duplicate) throw Object.assign(new Error('A rent charge already exists for that month. Choose another period.'), { statusCode: 409 })
 
+      const periodAmount = await rentAmountForPeriod(tx, charge.tenancy, period)
+      const correctedValues = correctedRentChargeValues({ ...charge, dueDate }, periodAmount)
+      const amountChanged = Math.abs(Number(charge.amount) - correctedValues.amount) >= 0.01
+      if (!periodChanged && !amountChanged) return charge
+
       const journalCandidates = await tx.journalEntry.findMany({
         where: {
           tenantId: tenantIdOf(req), status: 'posted', reversalJournalId: null,
           OR: [
             { sourceType: 'PROPERTY_RENT_CHARGE', sourceId: charge.id },
             { sourceType: 'PROPERTY_RENT_CHARGE_PERIOD_CORRECTION', sourceId: { startsWith: `${charge.id}-` } },
+            { sourceType: 'PROPERTY_RENT_CHARGE_RATE_CORRECTION', sourceId: { startsWith: `${charge.id}-` } },
           ],
         },
         orderBy: { createdAt: 'desc' },
@@ -1091,9 +1097,8 @@ router.put('/rent-charges/:id/period', requirePermission('canEditRentPeriods'), 
         where: { id: charge.id },
         data: {
           period, dueDate, description: `Rent for ${period}`,
-          status: Number(charge.amountPaid) + 0.001 >= Number(charge.amount) ? 'paid'
-            : Number(charge.amountPaid) > 0 ? 'partial'
-              : dueDate < new Date() ? 'overdue' : 'unpaid',
+          amount: correctedValues.amount,
+          status: correctedValues.status,
         },
       })
       const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
@@ -1101,9 +1106,9 @@ router.put('/rent-charges/:id/period', requirePermission('canEditRentPeriods'), 
         tenantId: tenantIdOf(req), userId: req.user.id,
         sourceType: 'PROPERTY_RENT_CHARGE_PERIOD_CORRECTION', sourceId: `${charge.id}-${randomUUID()}`,
         date: dueDate, reference: `RENT-${charge.tenancyId}-${period}`,
-        description: `Corrected rent charge for ${charge.tenancy.tenantName}, ${charge.tenancy.unit.property.name} / ${charge.tenancy.unit.unitCode}`,
+        description: `Corrected rent charge for ${charge.tenancy.tenantName}, ${charge.tenancy.unit.property.name} / ${charge.tenancy.unit.unitCode} · ${period}`,
         lines: propertyRentChargeLines(config, {
-          amount: charge.amount, managed: Boolean(charge.tenancy.unit.property.ownerId), description: `Rent ${period}`,
+          amount: correctedValues.amount, managed: Boolean(charge.tenancy.unit.property.ownerId), description: `Rent ${period}`,
         }),
       })
       return updated
