@@ -779,14 +779,14 @@ export default function CustomerTransactionHistoryDialog({
 
         {!loading && !error && data && viewMode === 'profile' && (
           <Tabs key={`${customer?.id || ''}-${open}`} defaultValue="overview" className="space-y-4">
-            <TabsList className="flex h-auto w-full flex-wrap justify-start sm:w-fit">
-              <TabsTrigger value="overview">Profile</TabsTrigger>
-              {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="ledger">{hasRentalTenancies && !hasTradeTransactions ? 'Rent ledger' : hasRentalTenancies ? 'Trade ledger' : 'Transaction ledger'} ({hasRentalTenancies && !hasTradeTransactions ? rentalData?.entries.length || 0 : Number(data.summary.transactionCount || 0)})</TabsTrigger>}
-              {canViewSalesAndPayments && <TabsTrigger value="sales-payments">{hasRentalTenancies && !hasCommercialHistory ? 'Rent activity' : hasRentalTenancies ? 'Trade activity' : 'Account activity'}</TabsTrigger>}
-              {(canViewCreditHistory || (hasRentalTenancies && canViewRent)) && <TabsTrigger value="credit-history">{hasRentalTenancies ? 'Tenant standing' : 'Credit History'}</TabsTrigger>}
-              {canViewRent && <TabsTrigger value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
-              {canViewTenancyAgreements && <TabsTrigger value="tenancy-agreements">Tenancy Agreement</TabsTrigger>}
-              {canViewRentPaymentPlans && <TabsTrigger value="payment-plans">Payment Plans</TabsTrigger>}
+            <TabsList className="flex h-auto w-full flex-nowrap justify-start overflow-x-auto overscroll-x-contain sm:w-full">
+              <TabsTrigger className="shrink-0" value="overview">Profile</TabsTrigger>
+              {(canViewLedger || (hasRentalTenancies && canViewRent)) && <TabsTrigger className="shrink-0" value="ledger">{hasRentalTenancies && !hasTradeTransactions ? 'Rent ledger' : hasRentalTenancies ? 'Trade ledger' : 'Transaction ledger'} ({hasRentalTenancies && !hasTradeTransactions ? rentalData?.entries.length || 0 : Number(data.summary.transactionCount || 0)})</TabsTrigger>}
+              {canViewSalesAndPayments && <TabsTrigger className="shrink-0" value="sales-payments">{hasRentalTenancies && !hasCommercialHistory ? 'Rent activity' : hasRentalTenancies ? 'Trade activity' : 'Account activity'}</TabsTrigger>}
+              {(canViewCreditHistory || (hasRentalTenancies && canViewRent)) && <TabsTrigger className="shrink-0" value="credit-history">{hasRentalTenancies ? 'Tenant standing' : 'Credit History'}</TabsTrigger>}
+              {canViewRent && <TabsTrigger className="shrink-0" value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
+              {canViewTenancyAgreements && <TabsTrigger className="shrink-0" value="tenancy-agreements">Tenancy Agreement</TabsTrigger>}
+              {canViewRentPaymentPlans && <TabsTrigger className="shrink-0" value="payment-plans">Payment Plans</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
