@@ -1,22 +1,39 @@
 import { useEffect, useState } from 'react'
-import { DollarSign } from 'lucide-react'
+import { CheckCircle2, DollarSign, ExternalLink, ShieldCheck } from 'lucide-react'
 import { settingsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
+import { useAuth } from '@/hooks/useAuth'
 import { useOnlineStatus } from '@/db/hooks'
 import { getLocalSettings } from '@/db/hybrid'
+import { Switch } from '@/components/ui/switch'
 
 export default function TaxManagementPage() {
   const [settings, setSettings] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [efrisEnabled, setEfrisEnabled] = useState(false)
+  const [efrisLoading, setEfrisLoading] = useState(true)
+  const [efrisSaving, setEfrisSaving] = useState(false)
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  const canManageTax = hasPermission('canManageTax')
   const online = useOnlineStatus()
 
-  useEffect(() => { loadSettings() }, [])
+  useEffect(() => {
+    loadSettings()
+    if (online) {
+      settingsApi.getEfrisConfig()
+        .then((config) => setEfrisEnabled(config.enabled))
+        .catch(() => setEfrisEnabled(false))
+        .finally(() => setEfrisLoading(false))
+    } else {
+      setEfrisLoading(false)
+    }
+  }, [online])
 
   const loadSettings = async () => {
     try {
@@ -46,6 +63,19 @@ export default function TaxManagementPage() {
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Failed to save', description: err?.message })
     } finally { setSaving(false) }
+  }
+
+  const handleEfrisToggle = async (enabled: boolean) => {
+    setEfrisSaving(true)
+    try {
+      const config = await settingsApi.updateEfrisConfig(enabled)
+      setEfrisEnabled(config.enabled)
+      toast({ title: enabled ? 'EFRIS setup enabled' : 'EFRIS setup hidden' })
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Could not update EFRIS setup', description: err?.message })
+    } finally {
+      setEfrisSaving(false)
+    }
   }
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>
@@ -104,6 +134,42 @@ export default function TaxManagementPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />URA EFRIS</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">Choose whether EFRIS setup appears for this business.</p>
+          </div>
+          <Switch
+            checked={efrisEnabled}
+            disabled={efrisLoading || efrisSaving || !online || !canManageTax}
+            onCheckedChange={handleEfrisToggle}
+            aria-label="Enable EFRIS setup"
+          />
+        </CardHeader>
+        {efrisEnabled && (
+          <CardContent className="space-y-4">
+            <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+              <div className="min-w-0">
+                <p className="font-medium">Setup is enabled, but URA is not connected.</p>
+                <p className="mt-1 text-sm">Sales, tax calculations, and receipts continue using the existing workflow. No invoice is being submitted or fiscalized through EFRIS yet.</p>
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border p-4">
+                <p className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-4 w-4" />Business tax details</p>
+                <p className="mt-1 text-sm text-muted-foreground">TIN currently recorded: {settings?.taxId || 'Not set'}. Review the tax details above before onboarding.</p>
+              </div>
+              <div className="rounded-md border p-4">
+                <p className="font-medium">URA system-to-system onboarding</p>
+                <p className="mt-1 text-sm text-muted-foreground">Complete URA onboarding and obtain the approved technical specification and test credentials before connecting fiscal submissions.</p>
+                <a className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline" href="https://ura.go.ug/en/efris/" target="_blank" rel="noreferrer">EFRIS information <ExternalLink className="h-3.5 w-3.5" /></a>
+              </div>
+            </div>
+          </CardContent>
+        )}
+      </Card>
     </div>
   )
 }

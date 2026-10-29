@@ -1006,6 +1006,12 @@ export const settingsApi = {
   getTaxConfig: () =>
     api.get<any>('/api/settings/tax-config'),
 
+  getEfrisConfig: () =>
+    api.get<{ enabled: boolean; connectionStatus: string }>('/api/settings/efris-config'),
+
+  updateEfrisConfig: (enabled: boolean) =>
+    api.put<{ enabled: boolean; connectionStatus: string }>('/api/settings/efris-config', { body: { enabled } }),
+
   getBusinessProfile: () =>
     api.get<any>('/api/settings/business-profile'),
 

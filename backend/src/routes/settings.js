@@ -155,6 +155,61 @@ router.get("/tax-config", authenticateToken, async (req, res) => {
   }
 });
 
+// EFRIS is an explicit, tenant-scoped opt-in. This stores setup intent only;
+// it does not submit receipts or change the existing sales tax workflow.
+router.get("/efris-config", authenticateToken, requirePermission("canViewTax"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const config = await prisma.integrationConfig.findUnique({
+      where: { tenantId_provider: { tenantId, provider: "efris" } },
+      select: { settings: true },
+    });
+    const settings = config?.settings && typeof config.settings === "object" ? config.settings : {};
+    res.json({
+      enabled: settings.optedIn === true,
+      connectionStatus: "not_connected",
+    });
+  } catch (err) {
+    console.error("Get EFRIS setup error:", err);
+    res.status(500).json({ error: "Failed to load EFRIS setup" });
+  }
+});
+
+router.put("/efris-config", authenticateToken, requirePermission("canManageTax"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+    if (typeof req.body?.enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled must be a boolean" });
+    }
+
+    const existing = await prisma.integrationConfig.findUnique({
+      where: { tenantId_provider: { tenantId, provider: "efris" } },
+      select: { settings: true },
+    });
+    const previousSettings = existing?.settings && typeof existing.settings === "object" ? existing.settings : {};
+    const settings = { ...previousSettings, optedIn: req.body.enabled };
+    await prisma.integrationConfig.upsert({
+      where: { tenantId_provider: { tenantId, provider: "efris" } },
+      create: {
+        tenantId,
+        provider: "efris",
+        displayName: "URA EFRIS",
+        isActive: false,
+        settings,
+      },
+      update: { settings },
+    });
+
+    res.json({ enabled: req.body.enabled, connectionStatus: "not_connected" });
+  } catch (err) {
+    console.error("Update EFRIS setup error:", err);
+    res.status(500).json({ error: "Failed to update EFRIS setup" });
+  }
+});
+
 // Upload logo image.
 router.post("/logo", authenticateToken, requirePermission("canEditSettings"), upload.single("logo"), async (req, res) => {
   try {
