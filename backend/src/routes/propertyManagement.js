@@ -8,6 +8,7 @@ import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordProper
 import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '../services/payablesAccountingService.js'
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
+import { tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -19,11 +20,6 @@ const monthStart = value => {
   if (!isMonthKey(value)) return null
   const [year, month] = value.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, 1, 12))
-}
-const monthEnd = value => {
-  if (!isMonthKey(value)) return null
-  const [year, month] = value.split('-').map(Number)
-  return new Date(Date.UTC(year, month, 0, 12))
 }
 const dueDateFor = period => {
   const [year, month] = period.split('-').map(Number)
@@ -70,7 +66,7 @@ async function applyRentAdvancesToCharge(tx, { tenantId, userId, charge }) {
 }
 async function ensureRentChargeForPeriod(tx, { tenancy, period, userId }) {
   const dueDate = dueDateFor(period)
-  if (new Date(tenancy.startDate) > dueDate || (tenancy.endDate && new Date(tenancy.endDate) < dueDate)) return null
+  if (!tenancyOccupiesRentPeriod(tenancy, period)) return null
   const charge = await tx.rentCharge.upsert({
     where: { tenancyId_period: { tenancyId: tenancy.id, period } },
     update: {},
@@ -88,7 +84,7 @@ async function ensureRentChargeForPeriod(tx, { tenancy, period, userId }) {
 async function ensureTenancyRentSchedule(tx, { tenancy, arrearsMonths = 0, userId }) {
   const currentPeriod = monthKey(new Date())
   const startPeriod = monthKey(tenancy.startDate)
-  const endPeriod = tenancy.endDate ? monthKey(tenancy.endDate) : null
+  const endPeriod = tenancy.status === 'ended' && tenancy.endDate ? monthKey(tenancy.endDate) : null
   const existing = await tx.rentCharge.findMany({ where: { tenantId: tenancy.tenantId, tenancyId: tenancy.id }, select: { period: true, amount: true, amountPaid: true } })
   const byPeriod = new Map(existing.map(charge => [charge.period, charge]))
   const latestPrior = endPeriod && endPeriod < currentPeriod ? endPeriod : monthKey(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 1)))
@@ -107,7 +103,7 @@ async function ensureTenancyRentSchedule(tx, { tenancy, arrearsMonths = 0, userI
     }
   }
   if (openArrears < arrearsMonths) throw Object.assign(new Error('There are not enough eligible rent months between the starting month and tenancy end to create the selected arrears.'), { statusCode: 400 })
-  if (tenancy.status === 'active' && startPeriod <= currentPeriod && (!endPeriod || endPeriod >= currentPeriod)) {
+  if (tenancy.status === 'active' && tenancyOccupiesRentPeriod(tenancy, currentPeriod)) {
     await ensureRentChargeForPeriod(tx, { tenancy, period: currentPeriod, userId })
   }
 }
@@ -443,10 +439,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
   const arrearsMonths = req.body?.arrearsMonths == null || req.body?.arrearsMonths === '' ? 0 : Number(req.body.arrearsMonths)
   const depositRequired = Number(req.body?.depositRequired || 0)
   const depositHeld = Number(req.body?.depositHeld || 0)
-  const endMonth = req.body?.endMonth ? String(req.body.endMonth).trim() : null
-  const endDate = endMonth ? monthEnd(endMonth) : req.body?.endDate ? new Date(req.body.endDate) : null
-  if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (startMonth && !isMonthKey(startMonth)) || (req.body?.endMonth && !endMonth) || (endMonth && !isMonthKey(endMonth)) || (endDate && (!Number.isFinite(endDate.getTime()) || endDate < startDate)) || !Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120 || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01) return badRequest(res, 'Enter a tenant, valid starting rent month and optional end month, arrears from 0 to 120 months, positive monthly rent, and valid deposit amounts.')
-  if (endMonth && endMonth < monthKey(startDate)) return badRequest(res, 'The tenancy end month cannot be before its starting rent month.')
+  if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (startMonth && !isMonthKey(startMonth)) || !Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120 || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01) return badRequest(res, 'Enter a tenant, valid starting rent month, arrears from 0 to 120 months, positive monthly rent, and valid deposit amounts.')
   if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage renter household details.' })
   try {
     const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
@@ -462,7 +455,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
         : await findOrCreateRenterCustomer(tx, tenantIdOf(req), req.body)
       if (!customer) throw Object.assign(new Error('Select a tenant from this business, or create a new tenant.'), { statusCode: 400 })
       const renterName = customer.name
-      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName: renterName, email: customer.email || req.body.email?.trim() || null, phone: customer.phone || req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || customer.nin || null, ...personalDetails, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate, dueDay: 1, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
+      const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName: renterName, email: customer.email || req.body.email?.trim() || null, phone: customer.phone || req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || customer.nin || null, ...personalDetails, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate: null, dueDay: 1, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
       if (Object.values(identity).some(Boolean)) await tx.propertyTenantIdentity.create({ data: { tenantId: tenantIdOf(req), tenancyId: tenancy.id, profilePhotoUrl: identity.profilePhoto, nationalIdFrontUrl: identity.nationalIdFront, nationalIdBackUrl: identity.nationalIdBack } })
       if (depositHeld > 0) {
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
@@ -515,24 +508,18 @@ router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canMan
     const phone = req.body.phone === undefined ? undefined : String(req.body.phone).trim() || null
     const email = req.body.email === undefined ? undefined : String(req.body.email).trim() || null
     const startMonth = req.body.startMonth === undefined ? undefined : String(req.body.startMonth).trim()
-    const endMonth = req.body.endMonth === undefined ? undefined : String(req.body.endMonth).trim()
   const arrearsMonths = req.body.arrearsMonths === undefined ? 0 : Number(req.body.arrearsMonths)
     const rentAmount = req.body.rentAmount === undefined ? undefined : Number(req.body.rentAmount)
     const depositRequired = req.body.depositRequired === undefined ? undefined : Number(req.body.depositRequired)
     if (tenantName !== undefined && !tenantName) return badRequest(res, 'Tenant name is required.')
     if (startMonth !== undefined && !isMonthKey(startMonth)) return badRequest(res, 'Choose a valid starting rent month.')
-    if (endMonth !== undefined && endMonth !== '' && !isMonthKey(endMonth)) return badRequest(res, 'Choose a valid end rent month or leave it blank for an ongoing tenancy.')
     if (!Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120) return badRequest(res, 'Enter arrears as a whole number of months from 0 to 120.')
     if (rentAmount !== undefined && (!Number.isFinite(rentAmount) || rentAmount <= 0)) return badRequest(res, 'Monthly rent must be greater than zero.')
     if (depositRequired !== undefined && (!Number.isFinite(depositRequired) || depositRequired < 0)) return badRequest(res, 'Required deposit cannot be negative.')
 
     const nextStartDate = startMonth === undefined ? tenancy.startDate : monthStart(startMonth)
-    const nextEndMonth = endMonth === undefined ? undefined : endMonth || null
-    const nextEndDate = nextEndMonth === undefined ? tenancy.endDate : nextEndMonth ? monthEnd(nextEndMonth) : null
-    if (nextEndDate && nextEndDate < nextStartDate) return badRequest(res, 'The tenancy end month cannot be before its starting rent month.')
-    const rangeChanged = (startMonth !== undefined && monthKey(nextStartDate) !== monthKey(tenancy.startDate))
-      || (endMonth !== undefined && (nextEndDate ? monthKey(nextEndDate) : null) !== (tenancy.endDate ? monthKey(tenancy.endDate) : null))
-    const effectiveEndMonth = nextEndDate ? monthKey(nextEndDate) : null
+    const effectiveEndMonth = tenancy.status === 'ended' && tenancy.endDate ? monthKey(tenancy.endDate) : null
+    const rangeChanged = startMonth !== undefined && monthKey(nextStartDate) !== monthKey(tenancy.startDate)
 
     const data = {
       ...(tenantName !== undefined ? { tenantName } : {}),
@@ -542,7 +529,6 @@ router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canMan
       ...(req.body.agreementNotes !== undefined ? { agreementNotes: String(req.body.agreementNotes).trim() || null } : {}),
       ...personalDetails,
       ...(startMonth !== undefined ? { startDate: nextStartDate } : {}),
-      ...(endMonth !== undefined ? { endDate: nextEndDate } : {}),
       ...(rentAmount !== undefined ? { rentAmount: money(rentAmount) } : {}),
       ...(depositRequired !== undefined ? { depositRequired: money(depositRequired) } : {}),
     }
@@ -852,6 +838,48 @@ router.post('/tenancies/:id/end', requireAnyPermission(['canEndTenancies', 'canM
   } catch (error) { console.error('End tenancy failed:', error); res.status(500).json({ error: 'Could not end tenancy.' }) }
 })
 
+router.post('/tenancies/:id/reactivate', requireAnyPermission(['canReactivateTenancies', 'canManageTenancies']), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const result = await prisma.$transaction(async tx => {
+      const tenancy = await tx.propertyTenancy.findFirst({
+        where: { id: req.params.id, tenantId, status: { in: ['active', 'ended'] } },
+        include: { unit: { include: { property: true } } },
+      })
+      if (!tenancy || (tenancy.status === 'active' && !tenancy.endDate)) throw Object.assign(new Error('This tenancy is already active and has no legacy end date to clear.'), { statusCode: 409 })
+      const occupyingTenancy = await tx.propertyTenancy.findFirst({
+        where: { tenantId, unitId: tenancy.unitId, status: 'active', id: { not: tenancy.id } },
+        select: { id: true, tenantName: true },
+      })
+      if (occupyingTenancy) throw Object.assign(new Error(`This unit is already assigned to ${occupyingTenancy.tenantName}.`), { statusCode: 409 })
+
+      const reactivated = await tx.propertyTenancy.update({
+        where: { id: tenancy.id },
+        data: { status: 'active', endDate: null },
+        include: { unit: { include: { property: true } } },
+      })
+      await tx.propertyUnit.update({ where: { id: tenancy.unitId }, data: { status: 'occupied' } })
+
+      const currentPeriod = monthKey(new Date())
+      const firstAfterRecordedEnd = tenancy.endDate
+        ? monthKey(new Date(Date.UTC(tenancy.endDate.getUTCFullYear(), tenancy.endDate.getUTCMonth() + 1, 1)))
+        : currentPeriod
+      let period = firstAfterRecordedEnd <= currentPeriod ? firstAfterRecordedEnd : currentPeriod
+      for (let guard = 0; period <= currentPeriod && guard < 1200; guard += 1) {
+        await ensureRentChargeForPeriod(tx, { tenancy: reactivated, period, userId: req.user.id })
+        period = monthKey(new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 1)))
+      }
+      return reactivated
+    }, { isolationLevel: 'Serializable' })
+    res.json(result)
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    if (error.code === 'P2034') return res.status(409).json({ error: 'The unit changed at the same time. Refresh and retry.' })
+    console.error('Reactivate tenancy failed:', error)
+    res.status(500).json({ error: 'Could not reactivate tenancy.' })
+  }
+})
+
 router.get('/tenancies/:id/rent-periods', requirePermission('canEditRentPeriods'), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({
@@ -899,7 +927,7 @@ router.put('/rent-charges/:id/period', requirePermission('canEditRentPeriods'), 
         const date = new Date(value)
         return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
       }
-      if (dayStamp(dueDate) < dayStamp(charge.tenancy.startDate) || (charge.tenancy.endDate && dayStamp(dueDate) > dayStamp(charge.tenancy.endDate))) {
+      if (dayStamp(dueDate) < dayStamp(charge.tenancy.startDate) || (charge.tenancy.status === 'ended' && charge.tenancy.endDate && dayStamp(dueDate) > dayStamp(charge.tenancy.endDate))) {
         throw Object.assign(new Error('The corrected rent month must fall within the tenancy dates.'), { statusCode: 400 })
       }
       const duplicate = await tx.rentCharge.findFirst({ where: { tenantId: tenantIdOf(req), tenancyId: charge.tenancyId, period, NOT: { id: charge.id } }, select: { id: true } })
@@ -1015,7 +1043,7 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
         const priorPeriod = monthKey(periodDate)
         const priorDueDate = dueDateFor(priorPeriod)
         if (new Date(tenancy.startDate) > priorDueDate) break
-        if (tenancy.endDate && new Date(tenancy.endDate) < priorDueDate) continue
+        if (tenancy.status === 'ended' && tenancy.endDate && new Date(tenancy.endDate) < priorDueDate) continue
         if (!existingPeriods.has(priorPeriod)) arrearsPeriods.push(priorPeriod)
       }
       if (arrearsPeriods.length < arrearsMonths) throw Object.assign(new Error('There are not enough missing rent months within this tenancy to add the selected arrears.'), { statusCode: 400 })
@@ -1276,7 +1304,7 @@ export async function runPropertyRentAutomation(now = new Date()) {
   await prisma.rentCharge.updateMany({ where: { dueDate: { lt: now }, status: { in: ['unpaid', 'partial'] }, tenantId: { in: [...enabledTenants] } }, data: { status: 'overdue' } })
   for (const tenancy of active.filter(row => enabledTenants.has(row.tenantId))) {
     const dueDate = dueDateFor(period)
-    if (new Date(tenancy.startDate) <= dueDate && (!tenancy.endDate || new Date(tenancy.endDate) >= dueDate)) {
+      if (tenancyOccupiesRentPeriod(tenancy, period)) {
       await prisma.$transaction(async tx => {
         const user = await tx.user.findFirst({ where: { tenantId: tenancy.tenantId, isActive: true }, select: { id: true } })
         if (!user) throw new Error(`Cannot post property rent charge for tenant ${tenancy.tenantId}: no active user is available for the system journal.`)

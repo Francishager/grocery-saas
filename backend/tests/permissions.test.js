@@ -93,6 +93,17 @@ test('new transaction permissions are grouped separately from accounting permiss
   assert.equal(PERMISSION_METADATA.canCreateWithdrawal.category, 'transactions');
 });
 
+test('tenancy reactivation is a separately assignable property-management permission', () => {
+  const granted = resolveEffectivePermissions({ role: 'attendant' }, { canReactivateTenancies: true });
+  const denied = resolveEffectivePermissions({ role: 'attendant' }, { canReactivateTenancies: false });
+  const owner = resolveEffectivePermissions({ role: 'owner' });
+
+  assert.ok(granted.includes('canReactivateTenancies'));
+  assert.ok(!denied.includes('canReactivateTenancies'));
+  assert.ok(owner.includes('canReactivateTenancies'));
+  assert.equal(PERMISSION_METADATA.canReactivateTenancies.category, 'property_management');
+});
+
 test('team messaging permissions are separate from generic communication permissions', () => {
   const messagingPermissions = resolveEffectivePermissions(
     { role: 'attendant' },
