@@ -17,6 +17,7 @@ import { getLocalRentals, getLocalBranches, getLocalProducts, getLocalSettings }
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { RichTextArea, RichTextDisplay, markdownToHtml } from '@/components/RichTextArea'
 
 const localDateInput = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
@@ -67,6 +68,13 @@ interface Rental {
 }
 
 interface RentalChargeDraft { label: string; category: string; quantity: number; unitPrice: number }
+
+function heldDepositAmount(rental: Pick<Rental, 'depositPaid' | 'depositAmount' | 'depositRefunded' | 'depositStatus'>) {
+  const paid = Number(rental.depositPaid || 0)
+  const legacyCollected = ['collected', 'held'].includes(String(rental.depositStatus || '').toLowerCase())
+  const collected = paid > 0 ? paid : legacyCollected ? Number(rental.depositAmount || 0) : 0
+  return Math.max(0, collected - Number(rental.depositRefunded || 0))
+}
 
 export default function RentalsPage({ section = 'bookings' }: { section?: 'bookings' | 'returns' }) {
   const location = useLocation()
@@ -135,6 +143,11 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const canCreateRental = hasPermission('canCreateRental')
   const canProcessReturn = hasPermission('canProcessRentalReturn')
   const canDeleteRental = hasPermission('canDeleteRental')
+  const canRecordRentalPayment = hasPermission('canRecordRentalPayment') || canCreateRental
+  const canRefundRentalDeposit = hasPermission('canRefundRentalDeposit') || canProcessReturn
+  const canRefundRentalAdvance = hasPermission('canRefundRentalAdvance') || canDeleteRental
+  const canForfeitRentalDeposit = hasPermission('canForfeitRentalDeposit') || canProcessReturn
+  const canCancelRental = hasPermission('canCancelRental') || canDeleteRental
   const canViewReport = hasPermission('canViewReportRentalsSummary')
   const canGenerateContract = hasPermission('canGenerateRentalContract')
   const canSelectExistingCustomer = hasPermission('canViewCustomer')
@@ -575,8 +588,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     const popup = window.open('', '_blank')
     if (!popup) return toast({ title: 'Print blocked', description: 'Allow pop-ups to print the contract draft.', variant: 'destructive' })
     popup.opener = null
-    const escaped = selectedRental.contractDraft.replace(/[&<>]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[character] || character))
-    popup.document.write(`<html><head><title>Rental Agreement ${selectedRental.rentalNo}</title><style>body{font:14px/1.55 Arial,sans-serif;color:#111;margin:24mm;white-space:pre-wrap}h1{font-size:20px}</style></head><body>${escaped}</body></html>`)
+    const formattedDraft = markdownToHtml(selectedRental.contractDraft)
+    popup.document.write(`<html><head><title>Rental Agreement ${selectedRental.rentalNo}</title><style>body{font:14px/1.55 Arial,sans-serif;color:#111;margin:24mm}strong{font-weight:700}</style></head><body>${formattedDraft}</body></html>`)
     popup.document.close()
     popup.focus()
     popup.print()
@@ -692,7 +705,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             <section className="space-y-3 border-t pt-4">
               <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Payments and receipts</h3><p className="text-sm text-muted-foreground">Collections and deposit movements are linked to cash accounts and the general ledger.</p></div></div>
               {selectedRental.payments?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Receipt</th><th>Date</th><th>Type</th><th>Account</th><th className="text-right">Amount</th><th></th></tr></thead><tbody>{selectedRental.payments.map(payment => <tr key={payment.id} className="border-b last:border-0"><td className="py-2 font-medium">{payment.receiptNo}</td><td>{new Date(payment.paymentDate).toLocaleDateString()}</td><td className="capitalize">{payment.kind.replaceAll('_', ' ')}</td><td>{payment.cashAccount?.name || 'Non-cash settlement'}</td><td className="text-right">{formatCurrency(payment.amount)}</td><td className="text-right"><Button size="sm" variant="outline" onClick={() => printRentalReceipt(payment.id)}><Printer className="mr-2 h-4 w-4" />Receipt</Button></td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No posted payment records yet. Existing legacy totals remain visible until a new payment is recorded.</p>}
-              {canCreateRental && Number(selectedRental.balance) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+              {canRecordRentalPayment && Number(selectedRental.balance) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1"><Label htmlFor="rental-payment-amount">Receive rent payment</Label><Input id="rental-payment-amount" type="number" min="0.01" max={selectedRental.balance} step="any" value={paymentAmount || ''} onChange={event => setPaymentAmount(Number(event.target.value) || 0)} /></div>
                 <div className="space-y-1"><Label htmlFor="rental-payment-method">Payment method</Label><select id="rental-payment-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
                 <div className="space-y-1"><Label htmlFor="rental-payment-account">Receiving account</Label><select id="rental-payment-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>
@@ -700,7 +713,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 {!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-payment-reference">Transaction reference</Label><Input id="rental-payment-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}
                 <div className="flex items-end"><Button className="w-full" onClick={handleRecordRentalPayment} disabled={savingRentalPayment || paymentAmount <= 0 || paymentAmount > Number(selectedRental.balance) || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Record payment'}</Button></div>
               </div>}
-              {canDeleteRental && selectedRental.bookingState !== 'checked_out' && selectedRental.status === 'active' && Number(selectedRental.amountPaid) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+              {canRefundRentalAdvance && selectedRental.bookingState !== 'checked_out' && selectedRental.status === 'active' && Number(selectedRental.amountPaid) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1"><Label htmlFor="rental-advance-refund">Refund reservation advance</Label><Input id="rental-advance-refund" type="number" min="0.01" max={selectedRental.amountPaid} step="any" value={advanceRefundAmount || ''} onChange={event => setAdvanceRefundAmount(Number(event.target.value) || 0)} /></div>
                 <div className="space-y-1"><Label htmlFor="rental-advance-refund-method">Refund method</Label><select id="rental-advance-refund-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
                 <div className="space-y-1"><Label htmlFor="rental-advance-refund-account">Refund account</Label><select id="rental-advance-refund-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>
@@ -708,15 +721,15 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 {!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-advance-reference">Transaction reference</Label><Input id="rental-advance-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}
                 <div className="flex items-end"><Button variant="outline" className="w-full" onClick={handleRefundRentalAdvance} disabled={savingRentalPayment || advanceRefundAmount <= 0 || advanceRefundAmount > Number(selectedRental.amountPaid) || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Refund advance'}</Button></div>
               </div>}
-              {canProcessReturn && (selectedRental.status === 'returned' || (selectedRental.status === 'active' && selectedRental.bookingState !== 'checked_out')) && Number(selectedRental.depositPaid || selectedRental.depositAmount) - Number(selectedRental.depositRefunded || 0) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-1"><Label htmlFor="rental-deposit-refund">Refund held deposit</Label><Input id="rental-deposit-refund" type="number" min="0.01" max={Math.max(0, Number(selectedRental.depositPaid || selectedRental.depositAmount) - Number(selectedRental.depositRefunded || 0))} step="any" value={depositRefundAmount || ''} onChange={event => setDepositRefundAmount(Number(event.target.value) || 0)} /></div>
+              {canRefundRentalDeposit && (selectedRental.status === 'returned' || (selectedRental.status === 'active' && selectedRental.bookingState !== 'checked_out')) && heldDepositAmount(selectedRental) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1"><Label htmlFor="rental-deposit-refund">Refund held deposit</Label><Input id="rental-deposit-refund" type="number" min="0.01" max={heldDepositAmount(selectedRental)} step="any" value={depositRefundAmount || ''} onChange={event => setDepositRefundAmount(Number(event.target.value) || 0)} /></div>
                 <div className="space-y-1"><Label htmlFor="rental-refund-method">Refund from method</Label><select id="rental-refund-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
                 <div className="space-y-1"><Label htmlFor="rental-refund-account">Refund account</Label><select id="rental-refund-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>
                 {paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label htmlFor="rental-refund-provider">Provider</Label><Input id="rental-refund-provider" value={mobileProvider} onChange={event => setMobileProvider(event.target.value)} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label htmlFor="rental-refund-phone">Phone</Label><Input id="rental-refund-phone" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} type="tel" /></div></>}
                 {!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-refund-reference">Transaction reference</Label><Input id="rental-refund-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}
                 <div className="flex items-end"><Button variant="outline" className="w-full" onClick={handleRefundRentalDeposit} disabled={savingRentalPayment || depositRefundAmount <= 0 || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Record refund'}</Button></div>
               </div>}
-              {canProcessReturn && selectedRental.status === 'returned' && Number(selectedRental.depositPaid || selectedRental.depositAmount) - Number(selectedRental.depositRefunded || 0) > 0 && <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              {canForfeitRentalDeposit && selectedRental.status === 'returned' && heldDepositAmount(selectedRental) > 0 && <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                 <Input aria-label="Deposit forfeiture reason" placeholder="Reason for forfeiting deposit" value={forfeitureReason} onChange={event => setForfeitureReason(event.target.value)} maxLength={500} />
                 <Button variant="destructive" onClick={handleForfeitRentalDeposit} disabled={savingRentalPayment || forfeitureReason.trim().length < 5}>Forfeit remaining deposit</Button>
               </div>}
@@ -735,7 +748,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 </div>
               </div>
               {selectedRental.contractDraft && <>
-                <textarea aria-label="Rental contract draft" readOnly={!hasPermission('canEditRental')} value={contractDraftValue || selectedRental.contractDraft} onChange={event => setContractDraftValue(event.target.value)} className="min-h-[420px] w-full rounded-md border border-input bg-background p-4 font-mono text-sm leading-6" />
+                {hasPermission('canEditRental')
+                  ? <RichTextArea id="rental-contract-draft" placeholder="Review and edit the rental agreement…" value={contractDraftValue || selectedRental.contractDraft} onChange={setContractDraftValue} maxLength={20000} className="min-h-[420px]" />
+                  : <RichTextDisplay value={selectedRental.contractDraft} className="min-h-[420px] rounded-md border border-input bg-background p-4 text-sm leading-6" />}
                 {hasPermission('canEditRental') && <div className="flex justify-end"><Button variant="outline" onClick={handleSaveContractDraft} disabled={savingContract || contractDraftValue === selectedRental.contractDraft}>{savingContract ? 'Saving…' : 'Save edits'}</Button></div>}
               </>}
             </section>
@@ -949,7 +964,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                               Return
                             </Button>
                           )}
-                          {canDeleteRental && rental.status === 'active' && rental.bookingState !== 'checked_out' && (
+                          {canCancelRental && rental.status === 'active' && rental.bookingState !== 'checked_out' && (
                             <Button
                               variant="ghost"
                               size="icon"

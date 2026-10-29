@@ -5,6 +5,13 @@ const debitNormal = type => ['asset', 'expense', 'expenses'].includes(String(typ
 const markerFor = role => `JibuSales rental accounting role: ${role}`
 const sourceName = (type, id) => `${type}-${id}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
 
+export function heldRentalDeposit(rental) {
+  const paid = Number(rental?.depositPaid || 0)
+  const legacyCollected = ['collected', 'held'].includes(String(rental?.depositStatus || '').toLowerCase())
+  const collected = paid > 0 ? paid : legacyCollected ? Number(rental?.depositAmount || 0) : 0
+  return money(Math.max(0, collected - Number(rental?.depositRefunded || 0)))
+}
+
 const roles = [
   ['receivableAccountId', 'Rental Receivables', 'RNT-1140', 'asset', 'current_asset'],
   ['revenueAccountId', 'Rental Revenue', 'RNT-4400', 'revenue', 'operating_revenue'],
@@ -148,9 +155,7 @@ export async function ensureLegacyRentalOpeningEntry(tx, { tenantId, rental, use
   const issued = await tx.journalEntry.findFirst({ where: { tenantId, sourceType: 'RENTAL_ISSUE', sourceId: rental.id } })
   if (issued) return issued
   const balance = money(Math.max(0, rental.balance))
-  const depositHeld = ['collected', 'held'].includes(String(rental.depositStatus || '').toLowerCase())
-    ? money(Math.max(0, Number(rental.depositAmount || 0) - Number(rental.depositRefunded || 0)))
-    : 0
+  const depositHeld = heldRentalDeposit(rental)
   if (balance <= 0 && depositHeld <= 0) return null
   const existing = await tx.journalEntry.findFirst({ where: { tenantId, sourceType: 'RENTAL_LEGACY_OPENING', sourceId: rental.id } })
   if (existing) return existing

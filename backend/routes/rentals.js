@@ -7,7 +7,7 @@ import { requireFeature, requireAnyFeature, hasFeatureAccess } from "../middlewa
 import { requestBusinessAdvice } from "../src/services/businessAdvisor.js";
 import { checkUsageLimit } from "../src/utils/usageLimits.js";
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from "../src/utils/customerIdentity.js";
-import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalRevenueRecognitionLines, rentalDamageChargeLines, ensureLegacyRentalOpeningEntry } from "../src/services/rentalAccountingService.js";
+import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalRevenueRecognitionLines, rentalDamageChargeLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -160,7 +160,7 @@ router.get("/dashboard/summary", authenticateToken, requirePermission("canViewRe
       prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: { in: ["reserved", "confirmed"] } }) }),
       prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: "checked_out", expectedReturnDate: { lt: now } }) }),
       prisma.rental.aggregate({ where: scopedWhere(scope, { status: { notIn: ["cancelled"] }, balance: { gt: 0 } }), _sum: { balance: true } }),
-      prisma.rental.findMany({ where: scopedWhere(scope, { status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositPaid: true, depositAmount: true, depositRefunded: true } }),
+      prisma.rental.findMany({ where: scopedWhere(scope, { status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositPaid: true, depositAmount: true, depositRefunded: true, depositStatus: true } }),
       prisma.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, status: "posted", kind: { in: ["rental_payment", "rental_advance"] }, paymentDate: { gte: monthStart }, ...(scope.branchId ? { rental: { branchId: scope.branchId } } : {}) }, _sum: { amount: true }, _count: true }),
       prisma.rental.count({ where: scopedWhere(scope, { status: "returned", actualReturnDate: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }) }),
     ]);
@@ -173,7 +173,7 @@ router.get("/dashboard/summary", authenticateToken, requirePermission("canViewRe
       itemsOut: openRentals.reduce((sum, rental) => sum + rental.items.reduce((itemSum, item) => itemSum + Number(item.quantity || 0), 0), 0),
       overdueBalance: overdue.reduce((sum, rental) => sum + Math.max(0, Number(rental.balance || 0)), 0),
       outstandingBalance: Number(openBalance._sum.balance || 0),
-      depositsHeld: heldDeposits.reduce((sum, rental) => sum + Math.max(0, Number(rental.depositPaid || rental.depositAmount || 0) - Number(rental.depositRefunded || 0)), 0),
+      depositsHeld: heldDeposits.reduce((sum, rental) => sum + heldRentalDeposit(rental), 0),
       collectionsThisMonth: Number(collections._sum.amount || 0),
       receiptsThisMonth: Number(collections._count || 0),
       returnsToday: returnedToday,
@@ -677,7 +677,7 @@ router.get("/:id", authenticateToken, requirePermission("canViewRental"), requir
   }
 });
 
-router.post("/:id/payments", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.post("/:id/payments", authenticateToken, requireAnyPermission(["canRecordRentalPayment", "canCreateRental"]), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
@@ -703,7 +703,7 @@ router.post("/:id/payments", authenticateToken, requirePermission("canCreateRent
   }
 });
 
-router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.post("/:id/deposit-refunds", authenticateToken, requireAnyPermission(["canRefundRentalDeposit", "canProcessRentalReturn"]), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
@@ -716,7 +716,7 @@ router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canPro
       if (!rental || rental.status === "cancelled") throw Object.assign(new Error("Rental not found or cancelled."), { statusCode: 404 });
       const isUnissuedReservation = rental.status === "active" && rental.bookingState !== "checked_out";
       if (rental.status !== "returned" && !isUnissuedReservation) throw Object.assign(new Error("Security deposits can only be refunded after return inspection, or before checkout when cancelling a reservation."), { statusCode: 409 });
-      const held = Math.max(0, Number(rental.depositPaid || rental.depositAmount || 0) - Number(rental.depositRefunded || 0));
+      const held = heldRentalDeposit(rental);
       const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).slice(0, 120);
       const prior = await tx.rentalPayment.findUnique({ where: { tenantId_idempotencyKey: { tenantId: scope.tenantId, idempotencyKey } } });
       if (prior) {
@@ -731,7 +731,8 @@ router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canPro
       const config = await ensureRentalAccounting(tx, scope.tenantId);
       await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_DEPOSIT_REFUND", sourceId: payment.id, reference: receiptNo, description: `Security deposit refund ${rental.rentalNo}`, lines: rentalDepositRefundLines(config, { amount: value, cashAccountId: cashLedger.id, reference: receiptNo }) });
       const totalRefunded = Number(rental.depositRefunded || 0) + value;
-      await tx.rental.update({ where: { id: rental.id }, data: { depositRefunded: totalRefunded, depositStatus: totalRefunded + 0.01 >= Number(rental.depositPaid || rental.depositAmount || 0) ? "refunded" : "held" } });
+      const collectedDeposit = Number(rental.depositPaid || 0) > 0 ? Number(rental.depositPaid) : ["collected", "held"].includes(String(rental.depositStatus || "").toLowerCase()) ? Number(rental.depositAmount || 0) : 0;
+      await tx.rental.update({ where: { id: rental.id }, data: { depositRefunded: totalRefunded, depositStatus: totalRefunded + 0.01 >= collectedDeposit ? "refunded" : "held" } });
       return payment;
     }, { isolationLevel: "Serializable" });
     res.status(201).json({ payment: refund });
@@ -742,7 +743,7 @@ router.post("/:id/deposit-refunds", authenticateToken, requirePermission("canPro
   }
 });
 
-router.post("/:id/advance-refunds", authenticateToken, requirePermission("canDeleteRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.post("/:id/advance-refunds", authenticateToken, requireAnyPermission(["canRefundRentalAdvance", "canDeleteRental"]), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
@@ -783,7 +784,7 @@ router.post("/:id/advance-refunds", authenticateToken, requirePermission("canDel
   }
 });
 
-router.post("/:id/deposit-forfeitures", authenticateToken, requirePermission("canProcessRentalReturn"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.post("/:id/deposit-forfeitures", authenticateToken, requireAnyPermission(["canForfeitRentalDeposit", "canProcessRentalReturn"]), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const reason = String(req.body.reason || "").trim();
@@ -797,7 +798,7 @@ router.post("/:id/deposit-forfeitures", authenticateToken, requirePermission("ca
         if (prior.rentalId !== rental.id || prior.kind !== "deposit_forfeiture") throw Object.assign(new Error("This request key was already used for a different rental payment."), { statusCode: 409 });
         return prior;
       }
-      const held = Math.max(0, Number(rental.depositPaid || rental.depositAmount || 0) - Number(rental.depositRefunded || 0));
+      const held = heldRentalDeposit(rental);
       if (held <= 0 || rental.depositStatus === "forfeited") throw Object.assign(new Error("There is no refundable deposit remaining to forfeit."), { statusCode: 409 });
       const receiptNo = `RNT-FOR-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
       const payment = await tx.rentalPayment.create({ data: { tenantId: scope.tenantId, rentalId: rental.id, userId: req.user.id, kind: "deposit_forfeiture", receiptNo, idempotencyKey, amount: held, balanceAfter: 0, notes: reason } });
@@ -1179,7 +1180,7 @@ router.put("/:id", authenticateToken, requirePermission("canEditRental"), requir
 });
 
 // Cancel reservations only. Checked-out items must pass through the return flow.
-router.delete("/:id", authenticateToken, requirePermission("canDeleteRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+router.delete("/:id", authenticateToken, requireAnyPermission(["canCancelRental", "canDeleteRental"]), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const { id } = req.params;
@@ -1192,7 +1193,7 @@ router.delete("/:id", authenticateToken, requirePermission("canDeleteRental"), r
     if (rental.status === "returned") return res.status(400).json({ error: "Cannot cancel a returned rental." });
     if (rental.bookingState === "checked_out") return res.status(409).json({ error: "Checked-out items must be returned before the rental can be closed." });
 
-    if (Number(rental.amountPaid) > 0 || Number(rental.depositPaid || rental.depositAmount) > Number(rental.depositRefunded || 0)) return res.status(409).json({ error: "Refund any reservation advance and security deposit through the payment workflow before cancelling. This preserves the cash and general-ledger audit trail." });
+    if (Number(rental.amountPaid) > 0 || heldRentalDeposit(rental) > 0) return res.status(409).json({ error: "Refund any reservation advance and collected security deposit through the payment workflow before cancelling. This preserves the cash and general-ledger audit trail." });
 
     await prisma.rental.update({ where: { id }, data: { status: "cancelled", bookingState: "cancelled" } });
 

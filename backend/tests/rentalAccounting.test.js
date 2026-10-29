@@ -8,6 +8,7 @@ import {
   rentalDepositForfeitLines,
   rentalRevenueRecognitionLines,
   rentalDamageChargeLines,
+  heldRentalDeposit,
 } from '../src/services/rentalAccountingService.js'
 
 const config = {
@@ -51,6 +52,12 @@ test('security deposits remain liabilities until refund or forfeiture', () => {
   assertBalanced(receipt)
   assertBalanced(refund)
   assertBalanced(forfeiture)
+})
+
+test('only collected security deposits are treated as refundable or held', () => {
+  assert.equal(heldRentalDeposit({ depositAmount: 300, depositPaid: 0, depositRefunded: 0, depositStatus: 'not_required' }), 0)
+  assert.equal(heldRentalDeposit({ depositAmount: 500, depositPaid: 200, depositRefunded: 50, depositStatus: 'held' }), 150)
+  assert.equal(heldRentalDeposit({ depositAmount: 500, depositPaid: 0, depositRefunded: 100, depositStatus: 'held' }), 400)
 })
 
 test('earned rent and assessed damage charges post as balanced entries', () => {

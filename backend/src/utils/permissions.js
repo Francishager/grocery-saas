@@ -208,6 +208,11 @@ const PERMISSION_TO_FEATURES = {
   canEditRental: ['rentals', 'inventory.rentals'],
   canDeleteRental: ['rentals', 'inventory.rentals'],
   canProcessRentalReturn: ['rentals', 'inventory.rentals'],
+  canCancelRental: ['rentals', 'inventory.rentals'],
+  canRecordRentalPayment: ['rentals', 'inventory.rentals'],
+  canRefundRentalDeposit: ['rentals', 'inventory.rentals'],
+  canRefundRentalAdvance: ['rentals', 'inventory.rentals'],
+  canForfeitRentalDeposit: ['rentals', 'inventory.rentals'],
   canGenerateRentalContract: ['rentals', 'inventory.rentals'],
   canViewPlanner: ['planner', 'rentals'],
   canManagePlanner: ['planner', 'rentals'],
@@ -374,7 +379,7 @@ export const ALL_PERMISSION_KEYS = [
   "canManageServiceCategory",
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
-  "canProcessRentalReturn", "canGenerateRentalContract",
+  "canProcessRentalReturn", "canCancelRental", "canRecordRentalPayment", "canRefundRentalDeposit", "canRefundRentalAdvance", "canForfeitRentalDeposit", "canGenerateRentalContract",
   "canViewPlanner", "canManagePlanner", "canViewCRM", "canCreateCRM", "canEditCRM", "canDeleteCRM",
   "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
@@ -964,6 +969,26 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canProcessRentalReturn: {
     name: 'Process rental returns',
     description: 'Receive returned rental items, update availability, and record charges or balances.',
+  },
+  canCancelRental: {
+    name: 'Cancel rental reservations',
+    description: 'Cancel an eligible reservation after any collected advances or deposits have been refunded with an auditable receipt.',
+  },
+  canRecordRentalPayment: {
+    name: 'Record rental payments',
+    description: 'Collect rental balances and post the cash movement, receipt, and general-ledger settlement.',
+  },
+  canRefundRentalDeposit: {
+    name: 'Refund rental security deposits',
+    description: 'Refund only security deposits actually collected and still held, through a permitted transaction account.',
+  },
+  canRefundRentalAdvance: {
+    name: 'Refund rental reservation advances',
+    description: 'Refund an unearned reservation advance with a cash movement, receipt, and ledger reversal.',
+  },
+  canForfeitRentalDeposit: {
+    name: 'Forfeit rental security deposits',
+    description: 'Forfeit a held deposit after return with a required reason and balanced journal entry.',
   },
   canGenerateRentalContract: {
     name: 'Generate rental contract drafts',
