@@ -8,7 +8,7 @@ import { ensurePropertyAccounting, ensurePropertyCashLedgerAccount, recordProper
 import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '../services/payablesAccountingService.js'
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
-import { tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
+import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -84,28 +84,27 @@ async function ensureRentChargeForPeriod(tx, { tenancy, period, userId }) {
 async function ensureTenancyRentSchedule(tx, { tenancy, arrearsMonths = 0, userId }) {
   const currentPeriod = monthKey(new Date())
   const startPeriod = monthKey(tenancy.startDate)
-  const endPeriod = tenancy.status === 'ended' && tenancy.endDate ? monthKey(tenancy.endDate) : null
-  const existing = await tx.rentCharge.findMany({ where: { tenantId: tenancy.tenantId, tenancyId: tenancy.id }, select: { period: true, amount: true, amountPaid: true } })
-  const byPeriod = new Map(existing.map(charge => [charge.period, charge]))
-  const latestPrior = endPeriod && endPeriod < currentPeriod ? endPeriod : monthKey(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 1, 1)))
-  let openArrears = [...byPeriod.entries()].filter(([period, charge]) => period >= startPeriod && period <= latestPrior && Number(charge.amount) - Number(charge.amountPaid) > 0.01).length
-  for (let offset = 1; openArrears < arrearsMonths && offset <= 1200; offset += 1) {
-    const prior = monthKey(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - offset, 1)))
-    if (prior < startPeriod) break
-    if (endPeriod && prior > endPeriod) continue
-    const charge = byPeriod.get(prior)
-    if (charge && Number(charge.amount) - Number(charge.amountPaid) > 0.01) continue
-    if (charge) continue
-    const created = await ensureRentChargeForPeriod(tx, { tenancy, period: prior, userId })
-    if (created && Number(created.amount) - Number(created.amountPaid) > 0.01) {
-      byPeriod.set(prior, created)
-      openArrears += 1
-    }
-  }
-  if (openArrears < arrearsMonths) throw Object.assign(new Error('There are not enough eligible rent months between the starting month and tenancy end to create the selected arrears.'), { statusCode: 400 })
+  const lastEligiblePeriod = tenancy.status === 'ended' && tenancy.endDate ? monthKey(tenancy.endDate) : currentPeriod
   if (tenancy.status === 'active' && tenancyOccupiesRentPeriod(tenancy, currentPeriod)) {
     await ensureRentChargeForPeriod(tx, { tenancy, period: currentPeriod, userId })
   }
+  const existing = await tx.rentCharge.findMany({ where: { tenantId: tenancy.tenantId, tenancyId: tenancy.id }, select: { period: true, amount: true, amountPaid: true } })
+  const byPeriod = new Map(existing.map(charge => [charge.period, charge]))
+  let openArrears = countUnpaidRentMonths([...byPeriod.values()], startPeriod, lastEligiblePeriod)
+  let candidate = lastEligiblePeriod
+  for (let guard = 0; openArrears < arrearsMonths && candidate >= startPeriod && guard < 1200; guard += 1) {
+    if (byPeriod.has(candidate)) {
+      candidate = monthKey(new Date(Date.UTC(Number(candidate.slice(0, 4)), Number(candidate.slice(5, 7)) - 2, 1)))
+      continue
+    }
+    const created = await ensureRentChargeForPeriod(tx, { tenancy, period: candidate, userId })
+    if (created && Number(created.amount) - Number(created.amountPaid) > 0.01) {
+      byPeriod.set(candidate, created)
+      openArrears += 1
+    }
+    candidate = monthKey(new Date(Date.UTC(Number(candidate.slice(0, 4)), Number(candidate.slice(5, 7)) - 2, 1)))
+  }
+  if (openArrears < arrearsMonths) throw Object.assign(new Error('There are not enough eligible months from the tenancy start through the current or move-out month to record the selected number of unpaid months.'), { statusCode: 400 })
 }
 const planDueDate = (startDate, sequence, frequency) => {
   const date = new Date(startDate)
@@ -338,8 +337,20 @@ router.put('/properties/:id', requirePermission('canManageProperties'), async (r
   try {
     const property = await prisma.managedProperty.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) } })
     if (!property) return res.status(404).json({ error: 'Property not found.' })
-    if (req.body.ownerId && !await prisma.propertyOwner.findFirst({ where: { id: req.body.ownerId, tenantId: tenantIdOf(req) } })) return badRequest(res, 'Select an owner in this business.')
-    const updated = await prisma.managedProperty.update({ where: { id: property.id }, data: { name: String(req.body.name || property.name).trim(), address: String(req.body.address || property.address).trim(), city: req.body.city?.trim() || null, propertyType: req.body.propertyType || property.propertyType, ownerId: req.body.ownerId || null, notes: req.body.notes?.trim() || null, status: req.body.status || property.status } })
+    const name = req.body.name === undefined ? property.name : String(req.body.name).trim()
+    const address = req.body.address === undefined ? property.address : String(req.body.address).trim()
+    const city = req.body.city === undefined ? property.city : String(req.body.city).trim() || null
+    const propertyType = req.body.propertyType || property.propertyType
+    const ownerId = req.body.ownerId === undefined ? property.ownerId : req.body.ownerId || null
+    const validPropertyTypes = ['residential', 'commercial', 'mixed_use', 'industrial', 'land', 'other']
+    if (!name || !address) return badRequest(res, 'Property name and address are required.')
+    if (!validPropertyTypes.includes(propertyType)) return badRequest(res, 'Choose a valid property type.')
+    if (ownerId && !await prisma.propertyOwner.findFirst({ where: { id: ownerId, tenantId: tenantIdOf(req) } })) return badRequest(res, 'Select an owner in this business.')
+    if (propertyType !== property.propertyType || ownerId !== property.ownerId) {
+      const linkedUnits = await prisma.propertyUnit.count({ where: { propertyId: property.id } })
+      if (linkedUnits > 0) return res.status(409).json({ error: 'Property type and ownership cannot be changed after units or plots have been added, because they are linked to inventory and accounting history.' })
+    }
+    const updated = await prisma.managedProperty.update({ where: { id: property.id }, data: { name, address, city, propertyType, ownerId, notes: req.body.notes === undefined ? property.notes : String(req.body.notes).trim() || null } })
     res.json(updated)
   } catch (error) { console.error('Update property failed:', error); res.status(500).json({ error: 'Could not update property.' }) }
 })
@@ -422,10 +433,12 @@ router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canV
     res.json(rows.map(row => {
       const { nationalId, maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin, ...details } = row
       const aging = calculateRentAging(row.charges)
-      const currentRentBalance = money(row.charges.filter(charge => charge.period === monthKey(new Date())).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
+      const currentPeriod = monthKey(new Date())
+      const currentRentBalance = money(row.charges.filter(charge => charge.period === currentPeriod).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
       const balance = money(row.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
-      const arrearsMonths = row.charges.filter(charge => charge.period < monthKey(new Date()) && charge.amount - charge.amountPaid > 0.01).length
-      return { ...details, payments: undefined, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), ...(canViewTenantPersonalDetails(req) ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance, currentRentBalance, arrearsBalance: money(Math.max(0, balance - currentRentBalance)), arrearsMonths, rentAdvanceBalance: money(row.payments.reduce((sum, payment) => sum + Number(payment.advanceAmount || 0), 0)), overdueBalance: aging.overdueTotal, arrearsAging: aging }
+      const arrearsMonths = row.charges.filter(charge => charge.period < currentPeriod && charge.amount - charge.amountPaid > 0.01).length
+      const unpaidRentMonths = row.charges.filter(charge => charge.period <= currentPeriod && charge.amount - charge.amountPaid > 0.01).length
+      return { ...details, payments: undefined, ...(canViewCustomerIdentity(req) ? { nationalId } : {}), ...(canViewTenantPersonalDetails(req) ? { maritalStatus, spouseNames, childrenCount, householdSize, placeOfOrigin } : {}), balance, currentRentBalance, arrearsBalance: money(Math.max(0, balance - currentRentBalance)), arrearsMonths, unpaidRentMonths, rentAdvanceBalance: money(row.payments.reduce((sum, payment) => sum + Number(payment.advanceAmount || 0), 0)), overdueBalance: aging.overdueTotal, arrearsAging: aging }
     }))
   } catch (error) { console.error('List property tenancies failed:', error); res.status(500).json({ error: 'Could not load tenancies.' }) }
 })
@@ -439,7 +452,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
   const arrearsMonths = req.body?.arrearsMonths == null || req.body?.arrearsMonths === '' ? 0 : Number(req.body.arrearsMonths)
   const depositRequired = Number(req.body?.depositRequired || 0)
   const depositHeld = Number(req.body?.depositHeld || 0)
-  if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (startMonth && !isMonthKey(startMonth)) || !Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120 || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01) return badRequest(res, 'Enter a tenant, valid starting rent month, arrears from 0 to 120 months, positive monthly rent, and valid deposit amounts.')
+  if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (startMonth && !isMonthKey(startMonth)) || !Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120 || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01) return badRequest(res, 'Enter a tenant, valid tenancy start month, total unpaid rent months including the current month from 0 to 120, positive monthly rent, and valid deposit amounts.')
   if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage renter household details.' })
   try {
     const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
@@ -513,7 +526,7 @@ router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canMan
     const depositRequired = req.body.depositRequired === undefined ? undefined : Number(req.body.depositRequired)
     if (tenantName !== undefined && !tenantName) return badRequest(res, 'Tenant name is required.')
     if (startMonth !== undefined && !isMonthKey(startMonth)) return badRequest(res, 'Choose a valid starting rent month.')
-    if (!Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120) return badRequest(res, 'Enter arrears as a whole number of months from 0 to 120.')
+    if (!Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120) return badRequest(res, 'Enter the total unpaid rent months, including the current month, as a whole number from 0 to 120.')
     if (rentAmount !== undefined && (!Number.isFinite(rentAmount) || rentAmount <= 0)) return badRequest(res, 'Monthly rent must be greater than zero.')
     if (depositRequired !== undefined && (!Number.isFinite(depositRequired) || depositRequired < 0)) return badRequest(res, 'Required deposit cannot be negative.')
 
