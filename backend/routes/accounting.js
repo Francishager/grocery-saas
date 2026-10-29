@@ -9,6 +9,7 @@ import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync
 import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSetupService.js";
 import { applyTenantAccountingCutover, previewTenantAccountingCutover, resolveTenantAccountingException } from "../src/services/tenantAccountingCutoverService.js";
 import { resolveTenantTransactionCurrency, toBaseCurrency } from "../src/services/currencyRates.js";
+import { buildFinancialYearCloseSnapshot } from "../src/services/financialYearClosingService.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -48,6 +49,107 @@ const STANDARD_HR_ACCOUNT_NAMES = new Set([
   "paye tax payable",
   "social security payable",
 ]);
+
+const financialYearPermissions = requireFeature("accounting");
+router.get("/financial-year-closes", authenticateToken, requireAnyPermission(["canViewAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose"]), financialYearPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const closes = await prisma.financialYearClose.findMany({ where: { tenantId }, orderBy: { startDate: "desc" } });
+    const actorIds = [...new Set(closes.flatMap(close => [close.createdById, close.signedOffById, close.reopenedById, ...(Array.isArray(close.lifecycleEvents) ? close.lifecycleEvents.map(event => event?.userId) : [])]).filter(Boolean))];
+    const actors = actorIds.length ? await prisma.user.findMany({ where: { id: { in: actorIds }, tenantId }, select: { id: true, fname: true, lname: true } }) : [];
+    const actorNames = new Map(actors.map(actor => [actor.id, [actor.fname, actor.lname].filter(Boolean).join(" ") || "Business user"]));
+    res.json({ closes: closes.map(close => ({
+      ...close,
+      createdByName: actorNames.get(close.createdById) || "Business user",
+      signedOffByName: close.signedOffById ? actorNames.get(close.signedOffById) || "Business user" : null,
+      reopenedByName: close.reopenedById ? actorNames.get(close.reopenedById) || "Business user" : null,
+      lifecycleEvents: (Array.isArray(close.lifecycleEvents) ? close.lifecycleEvents : []).map(event => ({ ...event, actorName: actorNames.get(event.userId) || "Business user" })),
+    })) });
+  } catch (error) {
+    console.error("Financial year close list failed:", error);
+    res.status(500).json({ error: "Could not load financial-year close history." });
+  }
+});
+
+router.post("/financial-year-closes/preview", authenticateToken, requireAnyPermission(["canViewAccounting", "canManageFinancialYearClose"]), financialYearPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const snapshot = await buildFinancialYearCloseSnapshot(prisma, tenantId, req.body?.startDate, req.body?.endDate);
+    res.json(snapshot);
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message || "Could not prepare the financial-year close." });
+  }
+});
+
+router.post("/financial-year-closes", authenticateToken, requirePermission("canManageFinancialYearClose"), financialYearPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (!tenantId) return res.status(400).json({ error: "Business account is required." });
+    const snapshot = await buildFinancialYearCloseSnapshot(prisma, tenantId, req.body?.startDate, req.body?.endDate);
+    const startDate = new Date(`${snapshot.period.startDate}T00:00:00.000Z`);
+    const endDate = new Date(`${snapshot.period.endDate}T00:00:00.000Z`);
+    const existing = await prisma.financialYearClose.findUnique({ where: { tenantId_startDate_endDate: { tenantId, startDate, endDate } } });
+    if (existing?.status === "closed") return res.status(409).json({ error: "This financial year is closed. Reopen it before changing its draft pack." });
+    const event = { action: existing ? "draft_refreshed" : "draft_created", userId: req.user.id, at: new Date().toISOString() };
+    const saved = existing
+      ? await prisma.financialYearClose.update({ where: { id: existing.id }, data: { snapshot, status: "draft", lifecycleEvents: [...(Array.isArray(existing.lifecycleEvents) ? existing.lifecycleEvents : []), event] } })
+      : await prisma.financialYearClose.create({ data: { tenantId, startDate, endDate, snapshot, createdById: req.user.id, lifecycleEvents: [event] } });
+    res.status(existing ? 200 : 201).json(saved);
+  } catch (error) {
+    console.error("Financial year close draft failed:", error);
+    res.status(error.statusCode || 400).json({ error: error.message || "Could not save the close draft." });
+  }
+});
+
+router.post("/financial-year-closes/:id/sign-off", authenticateToken, requirePermission("canSignOffFinancialYearClose"), financialYearPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    if (req.body?.confirmed !== true) return res.status(400).json({ error: "Explicit sign-off confirmation is required." });
+    const updated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(981273, hashtext(${tenantId}))`;
+      const close = await tx.financialYearClose.findFirst({ where: { id: req.params.id, tenantId } });
+      if (!close) throw Object.assign(new Error("Financial-year close draft not found."), { statusCode: 404 });
+      if (close.status === "closed") throw Object.assign(new Error("This financial year is already closed."), { statusCode: 409 });
+      const snapshot = await buildFinancialYearCloseSnapshot(tx, tenantId, close.startDate, close.endDate);
+      const blockers = snapshot.checks.filter(check => check.severity === "blocking" && !check.passed);
+      if (blockers.length) throw Object.assign(new Error("Resolve all blocking close checks before signing off."), { statusCode: 409, checks: blockers });
+      const overlap = await tx.financialYearClose.findFirst({ where: { tenantId, status: "closed", id: { not: close.id }, startDate: { lte: close.endDate }, endDate: { gte: close.startDate } } });
+      if (overlap) throw Object.assign(new Error("This period overlaps an already-closed financial year."), { statusCode: 409 });
+      const at = new Date();
+      return tx.financialYearClose.update({ where: { id: close.id }, data: {
+        status: "closed", snapshot,
+        signedOffById: req.user.id, signedOffAt: at, closedAt: at,
+        lifecycleEvents: [...(Array.isArray(close.lifecycleEvents) ? close.lifecycleEvents : []), { action: "signed_off_and_closed", userId: req.user.id, at: at.toISOString(), snapshotHash: snapshot.snapshotHash }],
+      } });
+    }, { isolationLevel: "Serializable" });
+    res.json(updated);
+  } catch (error) {
+    console.error("Financial year sign-off failed:", error);
+    res.status(error.statusCode || 500).json({ error: error.message || "Could not close this financial year.", ...(error.checks ? { checks: error.checks } : {}) });
+  }
+});
+
+router.post("/financial-year-closes/:id/reopen", authenticateToken, requirePermission("canReopenFinancialYearClose"), financialYearPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const reason = String(req.body?.reason || "").trim();
+    if (reason.length < 10) return res.status(400).json({ error: "Provide a reason of at least 10 characters to reopen a financial year." });
+    const close = await prisma.financialYearClose.findFirst({ where: { id: req.params.id, tenantId } });
+    if (!close) return res.status(404).json({ error: "Financial-year close not found." });
+    if (close.status !== "closed") return res.status(409).json({ error: "Only a closed financial year can be reopened." });
+    const at = new Date();
+    const updated = await prisma.financialYearClose.update({ where: { id: close.id }, data: {
+      status: "reopened", reopenedById: req.user.id, reopenedAt: at, reopenReason: reason,
+      lifecycleEvents: [...(Array.isArray(close.lifecycleEvents) ? close.lifecycleEvents : []), { action: "reopened", userId: req.user.id, at: at.toISOString(), reason }],
+    } });
+    res.json(updated);
+  } catch (error) {
+    console.error("Financial year reopen failed:", error);
+    res.status(500).json({ error: "Could not reopen this financial year." });
+  }
+});
 
 const cashAccountMarker = (cashAccountId) => `${LINKED_CASH_ACCOUNT_MARKER}${cashAccountId}`;
 

@@ -280,6 +280,9 @@ const PERMISSION_TO_FEATURES = {
   canViewAccounting: ['accounting'],
   canCreateAccounting: ['accounting'],
   canEditAccounting: ['accounting'],
+  canManageFinancialYearClose: ['accounting'],
+  canSignOffFinancialYearClose: ['accounting'],
+  canReopenFinancialYearClose: ['accounting'],
   canDeleteAccounting: ['accounting'],
   canReverseAccountingEntry: ['accounting'],
   canViewChartOfAccounts: ['accounting'],
@@ -403,7 +406,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   "canViewTeamMessaging", "canSendTeamMessages",
   // Accounting
-  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canDeleteAccounting", "canReverseAccountingEntry", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose", "canDeleteAccounting", "canReverseAccountingEntry", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
   // Transaction Accounts & Cash Movements
   "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
   "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
@@ -1150,6 +1153,18 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Edit accounting entries',
     description: 'Correct accounting records where editing is allowed.',
   },
+  canManageFinancialYearClose: {
+    name: 'Prepare financial-year close',
+    description: 'Review close checks, prepare the year-end statement snapshot, and maintain draft close packs.',
+  },
+  canSignOffFinancialYearClose: {
+    name: 'Sign off and close financial year',
+    description: 'Approve the reviewed close pack and lock its dates against new or changed ledger postings.',
+  },
+  canReopenFinancialYearClose: {
+    name: 'Reopen financial year',
+    description: 'Reopen a closed period with a documented reason when an authorized correction is required.',
+  },
   canDeleteAccounting: {
     name: 'Delete accounting entries',
     description: 'Remove accounting records where allowed.',
@@ -1289,6 +1304,7 @@ function permissionCategoryForKey(key) {
   if (key.includes('Agriculture')) return 'agriculture';
   if (key.includes('Communication')) return 'communication';
   if (key.includes('TransactionAccount') || key === 'canUseOtherCashAccount') return 'transactions';
+  if (key.includes('FinancialYearClose')) return 'accounting';
   if (key.includes('Accounting') || key.includes('ChartOfAccounts')) return 'accounting';
   return 'settings';
 }

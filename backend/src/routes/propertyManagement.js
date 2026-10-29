@@ -418,12 +418,30 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
       const dimensionUnit = String(req.body.dimensionUnit ?? unit.dimensionUnit ?? '').toLowerCase()
       if (areaSize != null && (!Number.isFinite(areaSize) || areaSize <= 0 || !['sqm', 'sqft', 'acre', 'hectare'].includes(areaUnit))) return badRequest(res, 'Enter a positive plot area and a supported area unit.')
       if ([frontage, depth].some(value => value != null && (!Number.isFinite(value) || value <= 0)) || ((frontage != null || depth != null) && !['m', 'ft'].includes(dimensionUnit))) return badRequest(res, 'Enter valid positive dimensions and select metres or feet.')
+    } else if (req.body.rentAmount != null) {
+      const rentAmount = Number(req.body.rentAmount)
+      if (!Number.isFinite(rentAmount) || rentAmount < 0) return badRequest(res, 'Enter a valid non-negative default rent amount.')
     }
     const active = await prisma.propertyTenancy.count({ where: { unitId: unit.id, status: 'active' } })
     if (active && req.body.status === 'vacant') return res.status(409).json({ error: 'End the active tenancy before marking this unit vacant.' })
-    const updated = await prisma.propertyUnit.update({ where: { id: unit.id }, data: { unitCode: req.body.unitCode?.trim() || unit.unitCode, unitType: req.body.unitType?.trim() || null, areaSize: req.body.areaSize == null ? unit.areaSize : Number(req.body.areaSize), areaUnit: req.body.areaUnit || unit.areaUnit, frontage: req.body.frontage == null ? unit.frontage : Number(req.body.frontage), depth: req.body.depth == null ? unit.depth : Number(req.body.depth), dimensionUnit: req.body.dimensionUnit || unit.dimensionUnit, plotNumber: req.body.plotNumber == null ? unit.plotNumber : String(req.body.plotNumber).trim() || null, blockNumber: req.body.blockNumber == null ? unit.blockNumber : String(req.body.blockNumber).trim() || null, titleReference: req.body.titleReference == null ? unit.titleReference : String(req.body.titleReference).trim() || null, landTenure: req.body.landTenure == null ? unit.landTenure : String(req.body.landTenure).trim() || null, rentAmount: req.body.rentAmount == null ? unit.rentAmount : money(req.body.rentAmount), status: req.body.status || unit.status, notes: req.body.notes?.trim() || null } })
+    const updated = await prisma.propertyUnit.update({ where: { id: unit.id }, data: {
+      unitCode: req.body.unitCode === undefined ? unit.unitCode : String(req.body.unitCode).trim() || unit.unitCode,
+      unitType: req.body.unitType === undefined ? unit.unitType : String(req.body.unitType).trim() || null,
+      areaSize: req.body.areaSize == null ? unit.areaSize : Number(req.body.areaSize),
+      areaUnit: req.body.areaUnit || unit.areaUnit,
+      frontage: req.body.frontage === undefined ? unit.frontage : req.body.frontage == null || req.body.frontage === '' ? null : Number(req.body.frontage),
+      depth: req.body.depth === undefined ? unit.depth : req.body.depth == null || req.body.depth === '' ? null : Number(req.body.depth),
+      dimensionUnit: req.body.dimensionUnit || unit.dimensionUnit,
+      plotNumber: req.body.plotNumber === undefined ? unit.plotNumber : String(req.body.plotNumber).trim() || null,
+      blockNumber: req.body.blockNumber === undefined ? unit.blockNumber : String(req.body.blockNumber).trim() || null,
+      titleReference: req.body.titleReference === undefined ? unit.titleReference : String(req.body.titleReference).trim() || null,
+      landTenure: req.body.landTenure === undefined ? unit.landTenure : String(req.body.landTenure).trim() || null,
+      rentAmount: req.body.rentAmount == null ? unit.rentAmount : money(req.body.rentAmount),
+      status: req.body.status || unit.status,
+      notes: req.body.notes === undefined ? unit.notes : String(req.body.notes).trim() || null,
+    } })
     res.json(updated)
-  } catch (error) { console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
+  } catch (error) { if (error.code === 'P2002') return res.status(409).json({ error: 'That unit code already exists in this property.' }); console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
 })
 
 router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies', 'canEditRentPeriods']), async (req, res) => {

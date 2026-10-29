@@ -199,6 +199,7 @@ model Tenant {
   payablesAccountingConfig        PayablesAccountingConfig?
   receivablesGlMigrationBatches   ReceivablesGlMigrationBatch[]
   accountingCutover               TenantAccountingCutover?
+  financialYearCloses              FinancialYearClose[]
   hrAuditLogs                     HRAuditLog[]
 
   // =====================
@@ -1065,6 +1066,9 @@ model UserPermission {
   canViewAccounting                 Boolean  @default(false)
   canCreateAccounting               Boolean  @default(false)
   canEditAccounting                 Boolean  @default(false)
+  canManageFinancialYearClose       Boolean  @default(false)
+  canSignOffFinancialYearClose      Boolean  @default(false)
+  canReopenFinancialYearClose       Boolean  @default(false)
   canDeleteAccounting               Boolean  @default(false)
   canReverseAccountingEntry         Boolean  @default(false)
   canViewChartOfAccounts            Boolean  @default(false)
@@ -3962,6 +3966,30 @@ model TenantAccountingCutover {
 
   @@index([status, cutoverAt])
   @@map("tenant_accounting_cutovers")
+}
+
+model FinancialYearClose {
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startDate         DateTime
+  endDate           DateTime
+  status            String   @default("draft") // draft, closed, reopened
+  snapshot          Json
+  lifecycleEvents   Json     @default("[]")
+  createdById       String
+  signedOffById     String?
+  signedOffAt       DateTime?
+  closedAt          DateTime?
+  reopenedById      String?
+  reopenedAt        DateTime?
+  reopenReason      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([tenantId, startDate, endDate])
+  @@index([tenantId, status, startDate, endDate])
+  @@map("financial_year_closes")
 }
 
 // =====================================================

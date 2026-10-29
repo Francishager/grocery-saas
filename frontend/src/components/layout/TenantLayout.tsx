@@ -325,7 +325,8 @@ const reportCategories: ReportCategoryDef[] = [
 ]
 
 const accountingSubItems = [
-  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts'] },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts'] },
+  { to: '/tenant/accounting/financial-year-close', label: 'Financial-year Close', icon: FileSpreadsheet, feature: 'accounting', permission: ['canViewAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose'] },
   { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: ['accounting', 'expenses'], permission: 'canViewTransactionAccount' },
   { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewAccounting'] },
   { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },

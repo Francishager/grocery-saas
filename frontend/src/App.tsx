@@ -39,6 +39,7 @@ const RentalPlannerPage = lazy(() => import('@/pages/RentalPlannerPage'))
 const PropertyManagementPage = lazy(() => import('@/pages/PropertyManagementPage'))
 const ReturnsPage = lazy(() => import('@/pages/ReturnsPage'))
 const AccountingPage = lazy(() => import('@/pages/accounting/AccountingPage'))
+const FinancialYearClosePage = lazy(() => import('@/pages/accounting/FinancialYearClosePage'))
 const TransactionAccountsPage = lazy(() => import('@/pages/accounting/TransactionAccountsPage'))
 const StaffTillSheetPage = lazy(() => import('@/pages/accounting/StaffTillSheetPage'))
 const DataImporterPage = lazy(() => import('@/pages/inventory/DataImporterPage'))
@@ -218,6 +219,7 @@ function App() {
           <Route path="property-management/:tab" element={<FeatureGuard feature={['property_management.landlord', 'property_management.agent']} permission={['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyCollections', 'canViewPropertyReports', 'canViewPropertyStatements', 'canManageTenancies', 'canViewPropertySales', 'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment']}><PropertyManagementPage /></FeatureGuard>} />
           <Route path="returns" element={<FeatureGuard feature="sales.returns"><ReturnsPage /></FeatureGuard>} />
           <Route path="accounting" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts']}><AccountingPage /></FeatureGuard>} />
+          <Route path="accounting/financial-year-close" element={<FeatureGuard feature="accounting" permission={['canViewAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose']}><FinancialYearClosePage /></FeatureGuard>} />
           <Route path="accounting/expenses" element={<FeatureGuard feature="expenses" permission={['canViewAccounting', 'canViewExpense', 'canCreateExpense']}><ExpensesPage /></FeatureGuard>} />
           <Route path="accounting/transactions" element={<FeatureGuard feature={['accounting', 'expenses']} permission="canViewTransactionAccount"><TransactionAccountsPage /></FeatureGuard>} />
           <Route path="accounting/staff-till" element={<FeatureGuard feature="accounting" permission="canViewStaffTillSheet"><StaffTillSheetPage /></FeatureGuard>} />
