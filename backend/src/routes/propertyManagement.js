@@ -9,6 +9,7 @@ import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from '.
 import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js'
 import { calculateRentAging } from '../utils/rentAging.js'
 import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
+import { nextUnchargedRentPeriod, recordTenancyRentRate, recordUnitRentRate, rentAmountForPeriod, monthKey as rentRateMonthKey } from '../services/propertyRentRateService.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -67,10 +68,11 @@ async function applyRentAdvancesToCharge(tx, { tenantId, userId, charge }) {
 async function ensureRentChargeForPeriod(tx, { tenancy, period, userId }) {
   const dueDate = dueDateFor(period)
   if (!tenancyOccupiesRentPeriod(tenancy, period)) return null
+  const rentAmount = await rentAmountForPeriod(tx, tenancy, period)
   const charge = await tx.rentCharge.upsert({
     where: { tenancyId_period: { tenancyId: tenancy.id, period } },
     update: {},
-    create: { tenantId: tenancy.tenantId, tenancyId: tenancy.id, period, dueDate, amount: tenancy.rentAmount, status: dueDate < new Date() ? 'overdue' : 'unpaid', description: `Rent for ${period}` },
+    create: { tenantId: tenancy.tenantId, tenancyId: tenancy.id, period, dueDate, amount: rentAmount, status: dueDate < new Date() ? 'overdue' : 'unpaid', description: `Rent for ${period}` },
   })
   const config = await ensurePropertyAccounting(tx, tenancy.tenantId)
   await postPropertyJournal(tx, {
@@ -424,7 +426,24 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
     }
     const active = await prisma.propertyTenancy.count({ where: { unitId: unit.id, status: 'active' } })
     if (active && req.body.status === 'vacant') return res.status(409).json({ error: 'End the active tenancy before marking this unit vacant.' })
-    const updated = await prisma.propertyUnit.update({ where: { id: unit.id }, data: {
+    const nextRentAmount = req.body.rentAmount == null ? unit.rentAmount : money(req.body.rentAmount)
+    const rentChanged = String(unit.property.propertyType).toLowerCase() !== 'land' && money(unit.rentAmount) !== nextRentAmount
+    const result = await prisma.$transaction(async tx => {
+      const rateChanges = []
+      if (rentChanged) {
+        const currentPeriod = rentRateMonthKey(new Date())
+        await recordUnitRentRate(tx, { tenantId: tenantIdOf(req), unitId: unit.id, previousAmount: unit.rentAmount, newAmount: nextRentAmount, changedById: req.user.id, effectivePeriod: currentPeriod })
+        const activeTenancies = await tx.propertyTenancy.findMany({ where: { tenantId: tenantIdOf(req), unitId: unit.id, status: 'active' } })
+        for (const tenancy of activeTenancies) {
+          const effectivePeriod = await nextUnchargedRentPeriod(tx, tenancy.id)
+          const history = await recordTenancyRentRate(tx, { tenancy, newAmount: nextRentAmount, changedById: req.user.id, effectivePeriod, changeSource: 'unit_edit', note: `Unit default rent changed from ${money(tenancy.rentAmount)} to ${nextRentAmount}. Existing rent charges were preserved.` })
+          if (history || money(tenancy.rentAmount) !== nextRentAmount) {
+            await tx.propertyTenancy.update({ where: { id: tenancy.id }, data: { rentAmount: nextRentAmount } })
+            rateChanges.push({ tenancyId: tenancy.id, tenantName: tenancy.tenantName, effectivePeriod })
+          }
+        }
+      }
+      const updatedUnit = await tx.propertyUnit.update({ where: { id: unit.id }, data: {
       unitCode: req.body.unitCode === undefined ? unit.unitCode : String(req.body.unitCode).trim() || unit.unitCode,
       unitType: req.body.unitType === undefined ? unit.unitType : String(req.body.unitType).trim() || null,
       areaSize: req.body.areaSize == null ? unit.areaSize : Number(req.body.areaSize),
@@ -436,12 +455,28 @@ router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req
       blockNumber: req.body.blockNumber === undefined ? unit.blockNumber : String(req.body.blockNumber).trim() || null,
       titleReference: req.body.titleReference === undefined ? unit.titleReference : String(req.body.titleReference).trim() || null,
       landTenure: req.body.landTenure === undefined ? unit.landTenure : String(req.body.landTenure).trim() || null,
-      rentAmount: req.body.rentAmount == null ? unit.rentAmount : money(req.body.rentAmount),
+      rentAmount: nextRentAmount,
       status: req.body.status || unit.status,
       notes: req.body.notes === undefined ? unit.notes : String(req.body.notes).trim() || null,
-    } })
-    res.json(updated)
+      } })
+      return { unit: updatedUnit, rateChanges }
+    })
+    res.json(result)
   } catch (error) { if (error.code === 'P2002') return res.status(409).json({ error: 'That unit code already exists in this property.' }); console.error('Update property unit failed:', error); res.status(500).json({ error: 'Could not update unit.' }) }
+})
+
+router.get('/units/:id/rent-history', requireAnyPermission(['canViewPropertyPortfolio', 'canManagePropertyUnits']), async (req, res) => {
+  try {
+    const unit = await prisma.propertyUnit.findFirst({ where: { id: req.params.id, property: { tenantId: tenantIdOf(req) } }, select: { id: true } })
+    if (!unit) return res.status(404).json({ error: 'Unit not found.' })
+    const history = await prisma.propertyRentRateHistory.findMany({
+      where: { tenantId: tenantIdOf(req), unitId: unit.id },
+      orderBy: [{ effectivePeriod: 'desc' }, { createdAt: 'desc' }],
+      include: { tenancy: { select: { id: true, tenantName: true, agreementRef: true } } },
+      take: 200,
+    })
+    res.json(history)
+  } catch (error) { console.error('Load unit rent history failed:', error); res.status(500).json({ error: 'Could not load rent history.' }) }
 })
 
 router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies', 'canEditRentPeriods']), async (req, res) => {
@@ -487,6 +522,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
       if (!customer) throw Object.assign(new Error('Select a tenant from this business, or create a new tenant.'), { statusCode: 400 })
       const renterName = customer.name
       const tenancy = await tx.propertyTenancy.create({ data: { tenantId: tenantIdOf(req), customerId: customer.id, unitId: unit.id, tenantName: renterName, email: customer.email || req.body.email?.trim() || null, phone: customer.phone || req.body.phone?.trim() || null, nationalId: req.body.nationalId?.trim() || customer.nin || null, ...personalDetails, agreementRef: req.body.agreementRef?.trim() || null, startDate, endDate: null, dueDay: 1, rentAmount: money(rentAmount), currency: req.body.currency || unit.currency || 'UGX', depositRequired: money(depositRequired), depositHeld: money(depositHeld), agreementNotes: req.body.agreementNotes?.trim() || null }, include: { customer: { select: { id: true, name: true } }, unit: { include: { property: { include: { owner: true } } } } } })
+      await recordTenancyRentRate(tx, { tenancy, newAmount: rentAmount, changedById: req.user.id, effectivePeriod: monthKey(startDate), changeSource: 'tenancy_start', note: 'Initial rent rate from the tenancy agreement.' })
       if (Object.values(identity).some(Boolean)) await tx.propertyTenantIdentity.create({ data: { tenantId: tenantIdOf(req), tenancyId: tenancy.id, profilePhotoUrl: identity.profilePhoto, nationalIdFrontUrl: identity.nationalIdFront, nationalIdBackUrl: identity.nationalIdBack } })
       if (depositHeld > 0) {
         const config = await ensurePropertyAccounting(tx, tenantIdOf(req))
@@ -583,6 +619,10 @@ router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canMan
         } })
       }
       const result = await tx.propertyTenancy.update({ where: { id: tenancy.id }, data, include: { unit: { include: { property: true } } } })
+      if (rentAmount !== undefined && tenancy.status === 'active' && money(tenancy.rentAmount) !== money(rentAmount)) {
+        const effectivePeriod = await nextUnchargedRentPeriod(tx, tenancy.id)
+        await recordTenancyRentRate(tx, { tenancy, newAmount: rentAmount, changedById: req.user.id, effectivePeriod, changeSource: 'tenancy_edit', note: 'Rent changed on the tenancy agreement; previously issued charges were preserved.' })
+      }
       await ensureTenancyRentSchedule(tx, { tenancy: result, arrearsMonths, userId: req.user.id })
       return result
     })

@@ -180,6 +180,7 @@ model Tenant {
   propertySales                   PropertySale[]
   propertySalePayments            PropertySalePayment[]
   propertyLandPurchases           PropertyLandPurchase[]
+  propertyRentRateHistory        PropertyRentRateHistory[]
   propertyLandPurchasePayments    PropertyLandPurchasePayment[]
   saleReturns                     SaleReturn[]
   accounts                        Account[]
@@ -2822,6 +2823,7 @@ model PropertyUnit {
   tenancies      PropertyTenancy[]
   propertySales  PropertySale[]
   landPurchase   PropertyLandPurchase?
+  rentRateHistory PropertyRentRateHistory[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -2862,6 +2864,7 @@ model PropertyTenancy {
   paymentPlans      PropertyRentPaymentPlan[]
   identity          PropertyTenantIdentity?
   reminders         PropertyRentReminder[]
+  rentRateHistory   PropertyRentRateHistory[]
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
@@ -2908,6 +2911,27 @@ model RentCharge {
   @@index([tenantId, dueDate, status])
   @@index([tenancyId, dueDate])
   @@map("rent_charges")
+}
+
+model PropertyRentRateHistory {
+  id              String          @id @default(cuid())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unitId          String
+  unit            PropertyUnit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  tenancyId       String?
+  tenancy         PropertyTenancy? @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  previousAmount  Float
+  newAmount       Float
+  effectivePeriod String
+  changedById     String
+  changeSource    String          @default("unit_edit")
+  note            String?
+  createdAt       DateTime        @default(now())
+
+  @@index([tenantId, unitId, effectivePeriod], map: "property_rent_rate_history_tenant_unit_period_idx")
+  @@index([tenancyId, effectivePeriod], map: "property_rent_rate_history_tenancy_period_idx")
+  @@map("property_rent_rate_history")
 }
 
 model PropertyRentPayment {
