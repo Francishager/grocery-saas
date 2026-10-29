@@ -20,9 +20,16 @@ test('startup script launches the app without blocking on prisma bootstrap', () 
   assert.doesNotMatch(startupScript, /prisma db seed/);
 });
 
-test('container completes the Prisma schema sync before starting the API', () => {
-  assert.match(dockerfile, /npx prisma db push --accept-data-loss && \.\/start\.sh/);
-  assert.doesNotMatch(dockerfile, /\(npx prisma db push[\s\S]*?\)\s*&\s*\.\/start\.sh/);
+test('container runs additive schema checks from its startup script without destructive schema push', () => {
+  assert.match(dockerfile, /CMD \["\.\/start\.sh"\]/);
+  assert.doesNotMatch(dockerfile, /prisma db push/);
+  assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
+});
+
+test('startup applies the additive alternate renter phone column before serving tenancy queries', () => {
+  assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
+  const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-property-tenancy-alternate-phone-schema.js'), 'utf8');
+  assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS "alternatePhone" TEXT/);
 });
 
 test('backend loads every router and serves the Railway healthcheck without a database', { timeout: 45000 }, async () => {
