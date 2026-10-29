@@ -49,13 +49,14 @@ export async function ensurePropertyAccounting(tx, tenantId) {
   const distinct = new Set(Object.values(values))
   if (distinct.size !== roles.length) throw Object.assign(new Error('Property Management system accounts must be distinct.'), { statusCode: 409 })
   const rentAdvance = await ensureAccount(tx, tenantId, 'rentAdvance', 'Tenant Rent Advances', 'PM-2265', 'liability', 'current_liability', accounts)
+  const rentOpeningEquity = await ensureAccount(tx, tenantId, 'rentOpeningEquity', 'Property Rent Opening Balance Equity', 'PM-3925', 'equity', 'opening_balance', accounts)
   const config = await tx.propertyAccountingConfig.upsert({
     where: { tenantId },
     create: { tenantId, ...values, isEnabled: true, isSystemManaged: true },
     update: { ...values, isEnabled: true, isSystemManaged: true },
     include: { rentReceivableAccount: true, rentPlanReceivableAccount: true, rentIncomeAccount: true, ownerPayableAccount: true, depositLiabilityAccount: true },
   })
-  return { ...config, rentAdvanceAccountId: rentAdvance.id }
+  return { ...config, rentAdvanceAccountId: rentAdvance.id, rentOpeningEquityAccountId: rentOpeningEquity.id }
 }
 
 export async function ensurePropertyCashLedgerAccount(tx, tenantId, cashAccount) {
@@ -251,6 +252,17 @@ export function propertyOpeningDepositLines(config, { amount, reference }) {
   return [
     { accountId: config.depositOpeningEquityAccountId, debit: value, credit: 0, description: `Opening tenant deposit balance ${reference}` },
     { accountId: config.depositLiabilityAccountId, debit: 0, credit: value, description: `Tenant security deposit held at migration ${reference}` },
+  ]
+}
+
+export function propertyOpeningRentSettlementLines(config, { amount, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !config.rentOpeningEquityAccountId || !config.rentReceivableAccountId) {
+    throw Object.assign(new Error('Opening rent settlement accounting details are invalid.'), { statusCode: 400 })
+  }
+  return [
+    { accountId: config.rentOpeningEquityAccountId, debit: value, credit: 0, description: `Opening rent paid before system use ${reference}` },
+    { accountId: config.rentReceivableAccountId, debit: 0, credit: value, description: `Settle historical rent receivable ${reference}` },
   ]
 }
 

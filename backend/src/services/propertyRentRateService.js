@@ -3,15 +3,15 @@ const amount = value => Math.round((Number(value) || 0) * 100) / 100
 
 export async function recordTenancyRentRate(tx, { tenancy, newAmount, changedById, effectivePeriod, changeSource, note }) {
   const nextAmount = amount(newAmount)
-  const latest = await tx.propertyRentRateHistory.findFirst({
+  let baseline = await tx.propertyRentRateHistory.findFirst({
     where: { tenancyId: tenancy.id },
     orderBy: [{ effectivePeriod: 'desc' }, { sequence: 'desc' }],
     select: { id: true, newAmount: true, effectivePeriod: true },
   })
 
-  if (!latest) {
+  if (!baseline) {
     const startingAmount = amount(tenancy.rentAmount)
-    await tx.propertyRentRateHistory.create({ data: {
+    baseline = await tx.propertyRentRateHistory.create({ data: {
       tenantId: tenancy.tenantId,
       unitId: tenancy.unitId,
       tenancyId: tenancy.id,
@@ -24,7 +24,12 @@ export async function recordTenancyRentRate(tx, { tenancy, newAmount, changedByI
     } })
   }
 
-  const previousAmount = latest ? amount(latest.newAmount) : amount(tenancy.rentAmount)
+  const previousRate = await tx.propertyRentRateHistory.findFirst({
+    where: { tenancyId: tenancy.id, effectivePeriod: { lte: effectivePeriod } },
+    orderBy: [{ effectivePeriod: 'desc' }, { sequence: 'desc' }],
+    select: { newAmount: true },
+  })
+  const previousAmount = previousRate ? amount(previousRate.newAmount) : amount(tenancy.rentAmount)
   if (previousAmount === nextAmount) return null
 
   return tx.propertyRentRateHistory.create({ data: {
@@ -38,6 +43,15 @@ export async function recordTenancyRentRate(tx, { tenancy, newAmount, changedByI
     changeSource,
     note: note || null,
   } })
+}
+
+export async function nextRentRatePeriod(tx, tenancyId, period) {
+  const next = await tx.propertyRentRateHistory.findFirst({
+    where: { tenancyId, effectivePeriod: { gt: period } },
+    orderBy: [{ effectivePeriod: 'asc' }, { sequence: 'asc' }],
+    select: { effectivePeriod: true },
+  })
+  return next?.effectivePeriod || null
 }
 
 export async function rentAmountForPeriod(tx, tenancy, period) {

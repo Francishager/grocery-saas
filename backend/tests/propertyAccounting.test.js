@@ -5,6 +5,7 @@ import {
   propertyDepositRefundLines,
   propertyDepositRentApplicationLines,
   propertyOpeningDepositLines,
+  propertyOpeningRentSettlementLines,
   propertyOwnerPayoutLines,
   propertyRentChargeLines,
   propertyRentReceiptLines,
@@ -28,6 +29,7 @@ const config = {
   ownerPayableAccountId: 'owner-payable',
   depositLiabilityAccountId: 'deposit-liability',
   depositOpeningEquityAccountId: 'opening-equity',
+  rentOpeningEquityAccountId: 'rent-opening-equity',
   landSaleReceivableAccountId: 'plot-ar',
   landSaleRevenueAccountId: 'plot-revenue',
   landInventoryAccountId: 'land-inventory',
@@ -127,6 +129,16 @@ test('tenant deposits remain liabilities on receipt, opening migration, and refu
   assert.equal(opening[1].accountId, 'deposit-liability')
   assert.equal(refund[0].accountId, 'deposit-liability')
   balanced(receipt); balanced(opening); balanced(refund)
+})
+
+test('marking historical rent paid settles receivable without recording cash', () => {
+  const lines = propertyOpeningRentSettlementLines(config, { amount: 275000, reference: 'OPEN-RENT-1' })
+  assert.deepEqual(lines.map(line => [line.accountId, line.debit, line.credit]), [
+    ['rent-opening-equity', 275000, 0],
+    ['rent-ar', 0, 275000],
+  ])
+  assert.ok(lines.every(line => line.accountId !== 'cash'))
+  balanced(lines)
 })
 
 test('applying a held tenant deposit settles rent receivable without moving cash', () => {

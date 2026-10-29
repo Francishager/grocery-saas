@@ -1,13 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { correctedRentChargeValues, recordTenancyRentRate, rentAmountForPeriod } from '../src/services/propertyRentRateService.js'
+import { correctedRentChargeValues, nextRentRatePeriod, recordTenancyRentRate, rentAmountForPeriod } from '../src/services/propertyRentRateService.js'
 
 function mockTx({ histories = [], charges = [], startDate = new Date('2026-02-01T12:00:00.000Z') } = {}) {
   return {
     historyRows: histories,
     propertyRentRateHistory: {
       findFirst: async ({ where }) => histories
-        .filter(row => row.tenancyId === where.tenancyId && (!where.effectivePeriod || row.effectivePeriod <= where.effectivePeriod.lte))
+        .filter(row => row.tenancyId === where.tenancyId && (!where.effectivePeriod || (typeof where.effectivePeriod === 'string'
+          ? row.effectivePeriod === where.effectivePeriod
+          : (!where.effectivePeriod.lte || row.effectivePeriod <= where.effectivePeriod.lte) && (!where.effectivePeriod.lt || row.effectivePeriod < where.effectivePeriod.lt) && (!where.effectivePeriod.gt || row.effectivePeriod > where.effectivePeriod.gt))))
         .sort((a, b) => b.effectivePeriod.localeCompare(a.effectivePeriod) || b.sequence - a.sequence)[0] || null,
       create: async ({ data }) => {
         const row = { id: `history-${histories.length + 1}`, sequence: histories.length + 1, createdAt: new Date().toISOString(), ...data }
@@ -33,6 +35,19 @@ test('rate history preserves the old amount and applies the new rate only from i
   assert.equal(tx.historyRows[2].newAmount, 130000)
   assert.equal(await rentAmountForPeriod(tx, tenancy, '2026-10'), 100000)
   assert.equal(await rentAmountForPeriod(tx, tenancy, '2026-11'), 130000)
+})
+
+test('backdated rate correction preserves the later saved rate period', async () => {
+  const tx = mockTx()
+  await recordTenancyRentRate(tx, { tenancy, newAmount: 100000, changedById: 'user-1', effectivePeriod: '2026-02', changeSource: 'tenancy_start' })
+  await recordTenancyRentRate(tx, { tenancy, newAmount: 125000, changedById: 'user-1', effectivePeriod: '2026-11', changeSource: 'unit_edit' })
+  await recordTenancyRentRate(tx, { tenancy, newAmount: 110000, changedById: 'user-1', effectivePeriod: '2026-08', changeSource: 'unit_edit' })
+
+  assert.equal(await rentAmountForPeriod(tx, tenancy, '2026-07'), 100000)
+  assert.equal(await rentAmountForPeriod(tx, tenancy, '2026-08'), 110000)
+  assert.equal(await rentAmountForPeriod(tx, tenancy, '2026-10'), 110000)
+  assert.equal(await rentAmountForPeriod(tx, tenancy, '2026-11'), 125000)
+  assert.equal(await nextRentRatePeriod(tx, tenancy.id, '2026-08'), '2026-11')
 })
 
 test('existing tenancies without history fall back to their stored rate', async () => {

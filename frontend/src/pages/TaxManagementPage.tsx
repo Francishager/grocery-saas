@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, DollarSign, ExternalLink, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, DollarSign, ShieldCheck } from 'lucide-react'
 import { settingsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -159,12 +159,7 @@ export default function TaxManagementPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md border p-4">
                 <p className="flex items-center gap-2 font-medium"><CheckCircle2 className="h-4 w-4" />Business tax details</p>
-                <p className="mt-1 text-sm text-muted-foreground">TIN currently recorded: {settings?.taxId || 'Not set'}. Review the tax details above before onboarding.</p>
-              </div>
-              <div className="rounded-md border p-4">
-                <p className="font-medium">URA system-to-system onboarding</p>
-                <p className="mt-1 text-sm text-muted-foreground">Complete URA onboarding and obtain the approved technical specification and test credentials before connecting fiscal submissions.</p>
-                <a className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline" href="https://ura.go.ug/en/efris/" target="_blank" rel="noreferrer">EFRIS information <ExternalLink className="h-3.5 w-3.5" /></a>
+                <p className="mt-1 text-sm text-muted-foreground">TIN currently recorded: {settings?.taxId || 'Not set'}.</p>
               </div>
             </div>
           </CardContent>
