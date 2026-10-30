@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -50,6 +52,14 @@ function DashboardCard({ label, value, detail }: { label: string; value: string;
   );
 }
 
+function MenuButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Open navigation menu" onPress={onPress} hitSlop={10} style={styles.menuButton}>
+      <View style={styles.menuBars}><View style={styles.menuBar} /><View style={styles.menuBar} /><View style={styles.menuBar} /></View>
+    </Pressable>
+  );
+}
+
 export default function HomeScreen() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [dashboard, setDashboard] = useState<DashboardState | null>(null);
@@ -60,6 +70,8 @@ export default function HomeScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [activePage, setActivePage] = useState<'overview' | 'modules' | 'account'>('overview');
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setError('');
@@ -123,6 +135,7 @@ export default function HomeScreen() {
         return;
       }
       setUser(result.data.user);
+      setActivePage('overview');
       setPassword('');
       await loadDashboard();
     } catch {
@@ -143,6 +156,8 @@ export default function HomeScreen() {
     await logoutRemote();
     setUser(null);
     setDashboard(null);
+    setActivePage('overview');
+    setMenuOpen(false);
     setError('');
   };
 
@@ -173,6 +188,13 @@ export default function HomeScreen() {
     .filter(([, value]) => value?.enabled)
     .map(([name]) => name.replace(/[._]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()))
     .sort((a, b) => a.localeCompare(b)), [dashboard]);
+  const platformUser = user?.role === 'saas_admin' || user?.role === 'platform_staff';
+  const pageTitle = activePage === 'overview' ? 'Overview' : activePage === 'modules' ? 'Modules' : 'Account';
+
+  const navigate = (page: 'overview' | 'modules' | 'account') => {
+    setActivePage(page);
+    setMenuOpen(false);
+  };
 
   if (booting) {
     return <View style={styles.center}><ActivityIndicator color={palette.green} size="large" /></View>;
@@ -183,8 +205,7 @@ export default function HomeScreen() {
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.loginWrap} keyboardShouldPersistTaps="handled">
-            <View style={styles.brandMark}><Text style={styles.brandMarkText}>J</Text></View>
-            <Text style={styles.brand}>JibuSales</Text>
+            <Image source={require('@/assets/images/icon.png')} style={styles.loginLogo} resizeMode="contain" accessibilityLabel="JibuSales logo" />
             <Text style={styles.loginTitle}>Sign in to your business</Text>
             <Text style={styles.subtle}>Use the same account you use for JibuSales on the web.</Text>
             <View style={styles.form}>
@@ -232,73 +253,108 @@ export default function HomeScreen() {
     );
   }
 
-  if (user.role === 'saas_admin' || user.role === 'platform_staff') {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.topBar}>
-          <View><Text style={styles.brand}>JibuSales</Text><Text style={styles.subtle}>Platform account</Text></View>
-          <Pressable onPress={onLogout} style={styles.textButton}><Text style={styles.textButtonLabel}>Sign out</Text></Pressable>
-        </View>
-        <View style={styles.platformNotice}>
-          <Text style={styles.platformTitle}>SaaS Admin</Text>
-          <Text style={styles.subtle}>The first mobile release currently supports secure sign-in and business dashboards. Platform administration remains available in the web app.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.dashboardWrap}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.green} colors={[palette.green]} />}
-      >
-        <View style={styles.topBar}>
-          <View style={styles.brandLine}>
-            <View style={styles.smallMark}><Text style={styles.smallMarkText}>J</Text></View>
-            <View><Text style={styles.brand}>JibuSales</Text><Text style={styles.subtle}>Business overview</Text></View>
+      <View style={styles.appShell}>
+        <View style={styles.navbar}>
+          <Image source={require('@/assets/images/icon.png')} style={styles.navbarLogo} resizeMode="contain" accessibilityLabel="JibuSales" />
+          <Text style={styles.navbarTitle}>{pageTitle}</Text>
+          <MenuButton onPress={() => setMenuOpen(true)} />
+        </View>
+        {activePage === 'overview' && !platformUser ? (
+          <ScrollView
+            style={styles.pageScroll}
+            contentContainerStyle={styles.dashboardWrap}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.green} colors={[palette.green]} />}
+          >
+            <View style={styles.welcome}>
+              <Text style={styles.eyebrow}>{dashboard?.businessName || 'YOUR BUSINESS'}</Text>
+              <Text style={styles.welcomeTitle} numberOfLines={2}>Welcome, {displayName(user)}</Text>
+              <Text style={styles.subtle}>{user.role.replace(/_/g, ' ')}</Text>
+            </View>
+            {error ? <Pressable onPress={onRefresh} style={styles.warningBox}><Text style={styles.warningText}>{error}</Text><Text style={styles.warningAction}>Tap to retry</Text></Pressable> : null}
+            {dashboard ? (
+              <>
+                <Text style={styles.sectionTitle}>This month</Text>
+                {metrics.length ? <View style={styles.metricsGrid}>{metrics.map((metric) => <DashboardCard key={metric.label} {...metric} />)}</View> : <View style={styles.emptyCard}><Text style={styles.subtle}>Your account does not have access to dashboard totals.</Text></View>}
+                <Pressable onPress={() => navigate('modules')} style={styles.modulesShortcut}>
+                  <View><Text style={styles.modulesShortcutTitle}>Your modules</Text><Text style={styles.metricDetail}>{enabledFeatures.length} enabled</Text></View>
+                  <Text style={styles.shortcutArrow}>›</Text>
+                </Pressable>
+                <Text style={styles.syncNote}>Pull down to refresh live data.</Text>
+              </>
+            ) : !error ? <View style={styles.loadingInline}><ActivityIndicator color={palette.green} /></View> : null}
+          </ScrollView>
+        ) : activePage === 'modules' && !platformUser ? (
+          <ScrollView style={styles.pageScroll} contentContainerStyle={styles.dashboardWrap}>
+            <Text style={styles.pageIntro}>Modules available to your business</Text>
+            {enabledFeatures.length ? enabledFeatures.map((feature) => (
+              <View key={feature} style={styles.moduleRow}>
+                <View style={styles.moduleDot} />
+                <Text style={styles.moduleName}>{feature}</Text>
+                <Text style={styles.moduleStatus}>Enabled</Text>
+              </View>
+            )) : <View style={styles.emptyCard}><Text style={styles.subtle}>No enabled modules were returned for this account.</Text></View>}
+          </ScrollView>
+        ) : activePage === 'account' ? (
+          <ScrollView style={styles.pageScroll} contentContainerStyle={styles.dashboardWrap}>
+            <View style={styles.accountIdentity}>
+              <View style={styles.avatar}><Text style={styles.avatarText}>{displayName(user).slice(0, 1).toUpperCase()}</Text></View>
+              <Text style={styles.accountName}>{displayName(user)}</Text>
+              <Text style={styles.subtle}>{platformUser ? 'Platform account' : dashboard?.businessName || 'Business account'}</Text>
+            </View>
+            <View style={styles.accountDetails}>
+              <AccountRow label="Email" value={user.email} />
+              <AccountRow label="Role" value={user.role.replace(/_/g, ' ')} />
+              {(user as any).branchId ? <AccountRow label="Assigned branch" value={(user as any).branchId} /> : null}
+            </View>
+            <Pressable onPress={onLogout} style={styles.signOutButton}><Text style={styles.signOutLabel}>Sign out</Text></Pressable>
+          </ScrollView>
+        ) : (
+          <View style={styles.platformNotice}>
+            <Text style={styles.platformTitle}>SaaS Admin</Text>
+            <Text style={styles.subtle}>Platform administration remains available in the web app. The mobile workspace is focused on business operations.</Text>
           </View>
-          <Pressable accessibilityRole="button" accessibilityLabel="Sign out" onPress={onLogout} style={styles.textButton}>
-            <Text style={styles.textButtonLabel}>Sign out</Text>
-          </Pressable>
+        )}
+        <View style={styles.bottomNav}>
+          <NavItem label="Overview" active={activePage === 'overview'} onPress={() => navigate('overview')} />
+          {!platformUser ? <NavItem label="Modules" active={activePage === 'modules'} onPress={() => navigate('modules')} /> : null}
+          <NavItem label="Account" active={activePage === 'account'} onPress={() => navigate('account')} />
         </View>
-        <View style={styles.welcome}>
-          <Text style={styles.eyebrow}>{dashboard?.businessName || 'YOUR BUSINESS'}</Text>
-          <Text style={styles.welcomeTitle} numberOfLines={2}>Welcome, {displayName(user)}</Text>
-          <Text style={styles.subtle}>{user.role.replace(/_/g, ' ')}</Text>
+      </View>
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <View style={styles.drawerRoot}>
+          <Pressable style={styles.drawerScrim} onPress={() => setMenuOpen(false)} />
+          <View style={styles.drawerPanel}>
+            <View style={styles.drawerHeader}>
+              <Image source={require('@/assets/images/icon.png')} style={styles.drawerLogo} resizeMode="contain" accessibilityLabel="JibuSales" />
+              <Pressable accessibilityRole="button" accessibilityLabel="Close menu" onPress={() => setMenuOpen(false)} style={styles.closeMenu}><Text style={styles.closeMenuText}>×</Text></Pressable>
+            </View>
+            <Text style={styles.drawerName} numberOfLines={1}>{displayName(user)}</Text>
+            <Text style={styles.drawerEmail} numberOfLines={1}>{user.email}</Text>
+            <View style={styles.drawerDivider} />
+            <DrawerItem label="Overview" active={activePage === 'overview'} onPress={() => navigate('overview')} />
+            {!platformUser ? <DrawerItem label="Modules" active={activePage === 'modules'} onPress={() => navigate('modules')} /> : null}
+            <DrawerItem label="Account" active={activePage === 'account'} onPress={() => navigate('account')} />
+            <View style={styles.drawerSpacer} />
+            <Pressable onPress={onLogout} style={styles.drawerSignOut}><Text style={styles.drawerSignOutText}>Sign out</Text></Pressable>
+          </View>
         </View>
-        {error ? (
-          <Pressable onPress={onRefresh} style={styles.warningBox}>
-            <Text style={styles.warningText}>{error}</Text>
-            <Text style={styles.warningAction}>Tap to retry</Text>
-          </Pressable>
-        ) : null}
-        {dashboard ? (
-          <>
-            <Text style={styles.sectionTitle}>This month</Text>
-            {metrics.length ? (
-              <View style={styles.metricsGrid}>
-                {metrics.map((metric) => <DashboardCard key={metric.label} {...metric} />)}
-              </View>
-            ) : (
-              <View style={styles.emptyCard}><Text style={styles.subtle}>Your account does not have access to dashboard totals.</Text></View>
-            )}
-            {enabledFeatures.length > 0 ? (
-              <View style={styles.featuresSection}>
-                <Text style={styles.sectionTitle}>Enabled modules</Text>
-                <View style={styles.featuresWrap}>
-                  {enabledFeatures.map((feature) => <View key={feature} style={styles.featurePill}><Text style={styles.featureText}>{feature}</Text></View>)}
-                </View>
-              </View>
-            ) : null}
-            <Text style={styles.syncNote}>Pull down to refresh live data.</Text>
-          </>
-        ) : !error ? (
-          <View style={styles.center}><ActivityIndicator color={palette.green} /></View>
-        ) : null}
-      </ScrollView>
+      </Modal>
     </SafeAreaView>
   );
+}
+
+function AccountRow({ label, value }: { label: string; value: string }) {
+  return <View style={styles.accountRow}><Text style={styles.accountLabel}>{label}</Text><Text style={styles.accountValue}>{value}</Text></View>;
+}
+
+function NavItem({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={styles.navItem}><Text style={[styles.navItemText, active && styles.navItemTextActive]}>{label}</Text><View style={[styles.navIndicator, active && styles.navIndicatorActive]} /></Pressable>;
+}
+
+function DrawerItem({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.drawerItem, active && styles.drawerItemActive]}><Text style={[styles.drawerItemText, active && styles.drawerItemTextActive]}>{label}</Text></Pressable>;
 }
 
 const styles = StyleSheet.create({
@@ -306,10 +362,9 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: palette.background },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: palette.background },
   loginWrap: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 38 },
-  brandMark: { width: 54, height: 54, borderRadius: 16, backgroundColor: palette.green, alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
-  brandMarkText: { color: '#fff', fontWeight: '800', fontSize: 29 },
+  loginLogo: { width: 170, height: 170, alignSelf: 'center', marginBottom: 8 },
   brand: { color: palette.ink, fontSize: 20, fontWeight: '800' },
-  loginTitle: { color: palette.ink, fontSize: 27, fontWeight: '700', marginTop: 36 },
+  loginTitle: { color: palette.ink, fontSize: 26, fontWeight: '700', marginTop: 22 },
   subtle: { color: palette.muted, fontSize: 14, lineHeight: 21, marginTop: 5 },
   form: { marginTop: 30, gap: 10 },
   label: { color: palette.ink, fontSize: 13, fontWeight: '700', marginTop: 8 },
@@ -323,11 +378,58 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.82 },
   error: { color: palette.danger, backgroundColor: '#fff0ee', borderRadius: 8, padding: 12, lineHeight: 20, marginTop: 4 },
   footerNote: { color: palette.muted, fontSize: 12, textAlign: 'center', marginTop: 24 },
+  appShell: { flex: 1, backgroundColor: palette.background },
+  loadingInline: { paddingVertical: 48, alignItems: 'center', justifyContent: 'center' },
+  navbar: { minHeight: 66, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: palette.line, backgroundColor: palette.surface },
+  navbarLogo: { width: 56, height: 56 },
+  navbarTitle: { flex: 1, color: palette.ink, fontSize: 17, fontWeight: '700', marginLeft: 10 },
+  menuButton: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  menuBars: { width: 22, gap: 5 },
+  menuBar: { height: 2, borderRadius: 2, backgroundColor: palette.ink },
+  pageScroll: { flex: 1 },
+  bottomNav: { minHeight: 60, paddingHorizontal: 8, paddingTop: 5, paddingBottom: 5, flexDirection: 'row', borderTopWidth: 1, borderTopColor: palette.line, backgroundColor: palette.surface },
+  navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
+  navItemText: { color: palette.muted, fontSize: 12, fontWeight: '600' },
+  navItemTextActive: { color: palette.green, fontWeight: '700' },
+  navIndicator: { height: 2, width: 26, borderRadius: 2, backgroundColor: 'transparent' },
+  navIndicatorActive: { backgroundColor: palette.green },
+  drawerRoot: { flex: 1, flexDirection: 'row' },
+  drawerScrim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(12, 24, 16, 0.42)' },
+  drawerPanel: { width: '82%', maxWidth: 340, height: '100%', backgroundColor: palette.surface, paddingHorizontal: 20, paddingTop: 22, paddingBottom: 18, elevation: 12 },
+  drawerHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  drawerLogo: { width: 70, height: 70 },
+  closeMenu: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  closeMenuText: { color: palette.muted, fontSize: 30, lineHeight: 34 },
+  drawerName: { color: palette.ink, fontSize: 16, fontWeight: '700', marginTop: 14 },
+  drawerEmail: { color: palette.muted, fontSize: 12, marginTop: 4 },
+  drawerDivider: { height: 1, backgroundColor: palette.line, marginVertical: 18 },
+  drawerItem: { minHeight: 48, borderRadius: 9, paddingHorizontal: 13, justifyContent: 'center', marginBottom: 4 },
+  drawerItemActive: { backgroundColor: palette.greenSoft },
+  drawerItemText: { color: palette.ink, fontSize: 14, fontWeight: '600' },
+  drawerItemTextActive: { color: palette.green, fontWeight: '700' },
+  drawerSpacer: { flex: 1 },
+  drawerSignOut: { borderTopWidth: 1, borderTopColor: palette.line, paddingTop: 18, paddingBottom: 8 },
+  drawerSignOutText: { color: palette.danger, fontSize: 14, fontWeight: '700' },
+  pageIntro: { color: palette.muted, fontSize: 14, marginBottom: 16 },
+  moduleRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: palette.line, gap: 10 },
+  moduleDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: palette.green },
+  moduleName: { flex: 1, color: palette.ink, fontSize: 14, fontWeight: '600', textTransform: 'capitalize' },
+  moduleStatus: { color: palette.green, fontSize: 11, fontWeight: '700' },
+  modulesShortcut: { marginTop: 24, minHeight: 66, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.line, borderRadius: 10 },
+  modulesShortcutTitle: { color: palette.ink, fontWeight: '700', fontSize: 14 },
+  shortcutArrow: { color: palette.green, fontSize: 28, lineHeight: 30 },
+  accountIdentity: { alignItems: 'center', paddingVertical: 26 },
+  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: palette.greenSoft, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: palette.green, fontSize: 28, fontWeight: '700' },
+  accountName: { color: palette.ink, fontSize: 18, fontWeight: '700', marginTop: 14 },
+  accountDetails: { backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.line, borderRadius: 10, paddingHorizontal: 14 },
+  accountRow: { minHeight: 58, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: palette.line },
+  accountLabel: { color: palette.muted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  accountValue: { color: palette.ink, fontSize: 14, marginTop: 4, textTransform: 'capitalize' },
+  signOutButton: { marginTop: 20, minHeight: 50, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#e8c5c1', backgroundColor: '#fff8f7' },
+  signOutLabel: { color: palette.danger, fontSize: 14, fontWeight: '700' },
   dashboardWrap: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 36 },
   topBar: { minHeight: 55, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: palette.line, paddingBottom: 12 },
-  brandLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  smallMark: { width: 38, height: 38, borderRadius: 12, backgroundColor: palette.green, alignItems: 'center', justifyContent: 'center' },
-  smallMarkText: { color: '#fff', fontSize: 22, fontWeight: '800' },
   textButton: { paddingVertical: 10, paddingHorizontal: 12 },
   textButtonLabel: { color: palette.green, fontWeight: '700', fontSize: 14 },
   welcome: { paddingTop: 25, paddingBottom: 24 },
@@ -339,10 +441,6 @@ const styles = StyleSheet.create({
   metricLabel: { color: palette.muted, fontSize: 12, fontWeight: '600' },
   metricValue: { color: palette.ink, fontSize: 21, fontWeight: '700', marginTop: 12 },
   metricDetail: { color: palette.muted, fontSize: 11, marginTop: 5 },
-  featuresSection: { marginTop: 28 },
-  featuresWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  featurePill: { paddingVertical: 8, paddingHorizontal: 11, borderRadius: 20, backgroundColor: palette.greenSoft },
-  featureText: { color: palette.green, fontSize: 12, fontWeight: '600' },
   syncNote: { color: palette.muted, fontSize: 12, textAlign: 'center', paddingTop: 22 },
   warningBox: { backgroundColor: '#fff5e8', borderWidth: 1, borderColor: '#f1d8ae', padding: 13, borderRadius: 10, marginBottom: 16 },
   warningText: { color: '#744a13', fontSize: 13, lineHeight: 19 },
