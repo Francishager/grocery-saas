@@ -2299,7 +2299,7 @@ export default function ReportsPage() {
     if (currentReport?.id === 'salesWeekly') {
       return {
         data: reportData?.transactions || [],
-        columns: [dateCol('date', 'Date'), textCol('reference', 'Receipt'), textCol('customer', 'Customer'), textCol('staff', 'Staff'), textCol('branch', 'Branch'), textCol('paymentMethod', 'Method'), currencyCol('grossAmount', 'Gross Sales'), currencyCol('revenue', 'Net Revenue'), currencyCol('tax', 'Tax'), currencyCol('discount', 'Discount')],
+        columns: [dateCol('date', 'Date'), textCol('reference', 'Receipt'), textCol('customer', 'Customer'), textCol('staff', 'Staff'), textCol('branch', 'Branch'), textCol('paymentMethod', 'Method'), textCol('item', 'Item'), textCol('quantity', 'Qty'), currencyCol('grossAmount', 'Gross Sales'), currencyCol('revenue', 'Net Revenue'), currencyCol('tax', 'Tax'), currencyCol('discount', 'Discount')],
       }
     }
     if (currentReport?.renderType === 'trialBalance') {

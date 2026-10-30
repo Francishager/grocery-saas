@@ -16,6 +16,8 @@ export interface EnrichedTransaction {
   reference: string
   balance?: number
   status?: string
+  item?: string
+  quantity?: string | number
   metadata?: Record<string, any>
 }
 
@@ -215,14 +217,14 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
           </div>
 
           <div className={cn('overflow-x-auto rounded-lg border', isWeeklySalesReport ? 'block' : 'hidden lg:block')}>
-            <table className={`w-full text-sm ${isWeeklySalesReport ? 'min-w-[1420px]' : 'min-w-[1600px]'}`}>
+            <table className="min-w-[1600px] w-full text-sm">
               <thead className="sticky top-0 bg-muted/50 border-b">
                 <tr>
                   <th className="whitespace-nowrap px-3 py-3 text-left font-medium text-muted-foreground">Date</th>
                   <th className="whitespace-nowrap px-3 py-3 text-left font-medium text-muted-foreground">Type</th>
                   <th className="min-w-56 px-3 py-3 text-left font-medium text-muted-foreground">Description</th>
                   <th className="whitespace-nowrap px-3 py-3 text-left font-medium text-muted-foreground">{isWeeklySalesReport ? 'Receipt' : 'Reference'}</th>
-                  {isWeeklySalesReport && <><th className="px-4 py-3 text-left font-medium text-muted-foreground">Customer</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Staff</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Branch</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Payment Method</th></>}
+                  {isWeeklySalesReport && <><th className="px-4 py-3 text-left font-medium text-muted-foreground">Customer</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Staff</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Branch</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Payment Method</th><th className="min-w-48 px-3 py-3 text-left font-medium text-muted-foreground">Item</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Qty</th></>}
                   {isWeeklySalesReport ? <><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Gross Sales</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Net Revenue</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Tax</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Discount</th></> : <><th className="px-3 py-3 text-right font-medium text-muted-foreground">Debit</th><th className="px-3 py-3 text-right font-medium text-muted-foreground">Credit</th></>}
                   {!isWeeklySalesReport && data.transactions.some(t => t.balance !== undefined) && (
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Balance</th>
@@ -243,7 +245,7 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
                     {!isWeeklySalesReport && txn.details && <div className="max-w-sm truncate text-xs text-muted-foreground">{txn.details}</div>}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 font-mono text-xs">{txn.reference || '—'}</td>
-                    {isWeeklySalesReport && <><td className="px-3 py-3">{txn.customer || '—'}</td><td className="px-3 py-3">{txn.staff || '—'}</td><td className="px-3 py-3">{txn.branch || '—'}</td><td className="whitespace-nowrap px-3 py-3 capitalize">{String(txn.paymentMethod || '—').replace(/_/g, ' ')}</td><td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(txn.grossAmount ?? txn.amount ?? 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(txn.revenue ?? txn.debit ?? 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(Number(txn.tax || 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(Number(txn.discount || 0))}</td></>}
+                    {isWeeklySalesReport && <><td className="px-3 py-3">{txn.customer || '—'}</td><td className="px-3 py-3">{txn.staff || '—'}</td><td className="px-3 py-3">{txn.branch || '—'}</td><td className="whitespace-nowrap px-3 py-3 capitalize">{String(txn.paymentMethod || '—').replace(/_/g, ' ')}</td><td className="whitespace-pre-line px-3 py-3">{txn.item || '—'}</td><td className="whitespace-pre-line px-3 py-3 text-right tabular-nums">{txn.quantity ?? '—'}</td><td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(txn.grossAmount ?? txn.amount ?? 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(txn.revenue ?? txn.debit ?? 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(Number(txn.tax || 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(Number(txn.discount || 0))}</td></>}
                     {!isWeeklySalesReport && <><td className="px-3 py-3 text-right font-semibold">{txn.debit ? formatCurrency(txn.debit) : '—'}</td><td className="px-3 py-3 text-right font-semibold">{txn.credit ? formatCurrency(txn.credit) : '—'}</td></>}
                     {!isWeeklySalesReport && data.transactions.some(t => t.balance !== undefined) && (
                       <td className="px-4 py-3 text-right font-bold">
