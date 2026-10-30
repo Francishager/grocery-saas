@@ -10,7 +10,7 @@ npm install
 npx expo start
 ```
 
-The production API defaults to `https://grocery-saas-production-e339.up.railway.app`. To target another API, create `.env.local` from `.env.example` and set `EXPO_PUBLIC_API_URL` before starting/building. This value is public client configuration, not a secret. Authentication tokens are stored with the device secure-storage APIs; passwords are not persisted.
+The production API defaults to the Cloudflare Worker at `https://jibusales.jibusales00.workers.dev`, which proxies `/api/*` to Railway like the production web app. To target another API, create `.env.local` from `.env.example` and set `EXPO_PUBLIC_API_URL` before starting/building. This value is public client configuration, not a secret. Authentication tokens are stored with the device secure-storage APIs; passwords are not persisted.
 
 ## Build a shareable Android APK
 

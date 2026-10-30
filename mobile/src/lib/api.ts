@@ -1,6 +1,8 @@
 import { clearSession, readSession, saveSession, type SessionTokens, type SessionUser } from './session';
 
-export const API_BASE = (process.env.EXPO_PUBLIC_API_URL || 'https://grocery-saas-production-e339.up.railway.app').replace(/\/$/, '');
+// Match the production web app: Cloudflare proxies /api/* to Railway, avoiding
+// device-specific DNS failures when connecting to the Railway hostname directly.
+export const API_BASE = (process.env.EXPO_PUBLIC_API_URL || 'https://jibusales.jibusales00.workers.dev').replace(/\/$/, '');
 
 export type DashboardKpis = {
   revenue: number | null;
