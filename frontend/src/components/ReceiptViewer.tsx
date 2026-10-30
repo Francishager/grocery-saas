@@ -21,6 +21,7 @@ import {
 } from '@/lib/printAgent'
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency } from '@/lib/utils'
+import { hasNativePrinterBridge, listNativePrinters, printWithNativePrinter, type NativePrinter } from '@/lib/nativePrinter'
 
 interface ReceiptViewerProps {
   saleId: string
@@ -40,6 +41,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const [agentBaseUrl, setAgentBaseUrl] = useState<string | null>(null)
   const [agentPrinters, setAgentPrinters] = useState<PrintAgentPrinter[]>([])
+  const [nativePrinters, setNativePrinters] = useState<NativePrinter[]>([])
   const { toast } = useToast()
   const pdfUrl = receiptsApi.getPdf(saleId)
   const directPrintAvailable = isDirectThermalPrintingAvailable()
@@ -180,6 +182,16 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const handlePrint = async () => {
     setPrinting(true)
     try {
+      if (hasNativePrinterBridge()) {
+        const printers = await listNativePrinters()
+        setNativePrinters(printers)
+        if (!printers.length) {
+          toast({ title: 'No compatible printer found', description: 'Pair a Bluetooth printer or connect a supported USB printer, then try again.' })
+          return
+        }
+        setShowPrinterPicker(true)
+        return
+      }
       fallbackToBrowserPrint()
     } catch (error: any) {
       toast({
@@ -187,6 +199,20 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
         title: 'Print failed',
         description: error?.message || 'Unable to open the browser receipt.',
       })
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  const handleNativePrinterChoice = async (printer: NativePrinter) => {
+    setShowPrinterPicker(false)
+    setPrinting(true)
+    try {
+      const { commands } = await receiptsApi.getEscPos(saleId)
+      await printWithNativePrinter(printer, commands)
+      toast({ title: 'Receipt sent to printer', description: printer.name })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Print failed', description: error?.message || 'The printer could not print this receipt.' })
     } finally {
       setPrinting(false)
     }
@@ -323,6 +349,20 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
               </Button>
             </div>
             <div className="grid gap-2 p-4">
+              {nativePrinters.map((printer) => (
+                <Button
+                  key={`${printer.transport}-${printer.id}`}
+                  variant="outline"
+                  className="justify-start"
+                  onClick={() => void handleNativePrinterChoice(printer)}
+                  disabled={printing}
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  <span className="min-w-0 truncate">{printer.name}</span>
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground">{printer.details || printer.transport}</span>
+                </Button>
+              ))}
+              {nativePrinters.length > 0 && <div className="my-1 border-t" />}
               {agentBaseUrl && (
                 <div className="grid gap-2">
                   {agentPrinters.length > 0 ? (

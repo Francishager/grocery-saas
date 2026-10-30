@@ -4,6 +4,7 @@ import {
   BackHandler,
   Linking,
   Platform,
+  PermissionsAndroid,
   Pressable,
   StyleSheet,
   Text,
@@ -12,9 +13,11 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
+import NativeThermalPrinter from '../../modules/thermal-printer/src';
 
 const WEB_APP_URL = (process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://jibusales.jibusales00.workers.dev').replace(/\/$/, '');
 const APP_ORIGIN = new URL(WEB_APP_URL).origin;
+const BRIDGE_ORIGIN = APP_ORIGIN;
 const brandGreen = '#16764a';
 // WebView's published declaration currently conflicts with this Expo/RN type set.
 const NativeWebView = WebView as any;
@@ -43,7 +46,10 @@ export default function HomeScreen() {
 
   const handleNavigation = (request: Pick<WebViewNavigation, 'url'>) => {
     const url = request.url;
-    if (url === 'about:blank' || url.startsWith(APP_ORIGIN)) return true;
+    if (url === 'about:blank') return true;
+    try {
+      if (new URL(url).origin === APP_ORIGIN) return true;
+    } catch { return false; }
     if (url.startsWith('https://')) return true;
     if (externalScheme(url)) {
       void Linking.openURL(url).catch(() => undefined);
@@ -58,6 +64,35 @@ export default function HomeScreen() {
     webView.current?.reload();
   };
 
+  const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
+    try {
+      if (!nativeEvent.url || new URL(nativeEvent.url).origin !== BRIDGE_ORIGIN) return;
+    } catch { return; }
+      let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[] };
+    try { request = JSON.parse(nativeEvent.data); } catch { return; }
+    if (!request.id || !['printer.list', 'printer.print'].includes(request.type || '')) return;
+    let response: { ok: boolean; result?: unknown; error?: string };
+    try {
+      if (request.type === 'printer.list') {
+        if (Platform.OS === 'android' && Number(Platform.Version) >= 31) {
+          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+        }
+        response = { ok: true, result: await NativeThermalPrinter.listPrinters() };
+      } else {
+        if (!request.transport || !request.deviceId || !Array.isArray(request.commands)) throw new Error('Invalid printer request.');
+        if (Platform.OS === 'android' && Number(Platform.Version) >= 31 && request.transport === 'bluetooth') {
+          const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) throw new Error('Bluetooth permission was not granted.');
+        }
+        await NativeThermalPrinter.print(request.transport, request.deviceId, request.commands);
+        response = { ok: true, result: true };
+      }
+    } catch (error) {
+      response = { ok: false, error: error instanceof Error ? error.message : 'Native printer operation failed.' };
+    }
+    webView.current?.injectJavaScript(`window.__jibuNativePrinterReply(${JSON.stringify(request.id)}, ${JSON.stringify(response)}); true;`);
+  };
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
@@ -67,6 +102,8 @@ export default function HomeScreen() {
         style={styles.webView}
         originWhitelist={['https://*', 'about:*', 'mailto:*', 'tel:*', 'sms:*', 'whatsapp:*', 'intent:*']}
         onShouldStartLoadWithRequest={handleNavigation}
+        onMessage={handleNativeMessage}
+        injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};window.__jibuNativePrinterReply=function(id,response){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||'Native printer operation failed.'));};window.JibuNativePrinter={request:function(payload){return new Promise(function(resolve,reject){var id='p'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error('Printer request timed out.'));}},30000);});}};})();true;`}
         onNavigationStateChange={(state: WebViewNavigation) => setCanGoBack(state.canGoBack)}
         onLoadStart={() => { setLoading(true); setFailed(false); }}
         onLoadEnd={() => setLoading(false)}

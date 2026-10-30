@@ -2,6 +2,12 @@
 
 An Expo React Native container for the existing responsive JibuSales web application. It loads the production Cloudflare Worker site so the mobile app uses the same login, responsive navigation, modules, business permissions, and workflows as the web product. Native configuration supplies device capabilities needed by supported web flows.
 
+## Thermal printers
+
+The mobile receipt flow uses a restricted WebView-to-native bridge for ESC/POS receipt bytes. Android lists paired Bluetooth Classic printers and attached USB printers; Bluetooth printers must first be paired in Android Settings. USB access uses Android's device permission prompt. iOS supports compatible Bluetooth Low Energy printers that expose a writable receipt characteristic. Generic USB thermal printing and Bluetooth Classic SPP are not available to an ordinary iOS app; the receipt's system/browser print option remains the fallback. Printer protocols vary, so validate each target model before rollout.
+
+Native printer code and permissions are included in the app binary. After changing it, create a new EAS build; an OTA update or Cloudflare/Railway deployment cannot add native code to an already-installed app.
+
 ## Run locally
 
 ```powershell

@@ -14,7 +14,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "JibuSales uses the camera when you choose to capture an image for a business record.",
         "NSPhotoLibraryUsageDescription": "JibuSales uses selected photos when you attach an image to a business record.",
-        "NSLocationWhenInUseUsageDescription": "JibuSales uses your location for attendance check-in and check-out when your business enables it."
+        "NSLocationWhenInUseUsageDescription": "JibuSales uses your location for attendance check-in and check-out when your business enables it.",
+        "NSBluetoothAlwaysUsageDescription": "JibuSales connects to a Bluetooth receipt printer when you choose to print."
       }
     },
     "android": {
@@ -22,7 +23,8 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "BLUETOOTH_CONNECT"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#16764A",
@@ -48,6 +50,9 @@
       ],
       "expo-secure-store"
     ],
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    },
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true

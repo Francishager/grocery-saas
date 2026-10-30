@@ -20,6 +20,7 @@ import { db } from '@/db/index'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
 import { discoverPrintAgent, getPrintAgentPrinters, printReceiptViaAgent, type PrintAgentPrinter } from '@/lib/printAgent'
+import { hasNativePrinterBridge, listNativePrinters, printWithNativePrinter } from '@/lib/nativePrinter'
 
 interface Table { id: string; name: string; capacity: number; status: string; area: string | null; isActive: boolean; _count?: { orders: number } }
 interface Waiter { id: string; name: string; phone: string | null; code: string | null; isActive: boolean; employeeId?: string | null; hasPin?: boolean; _count?: { orders: number; tips: number } }
@@ -469,12 +470,23 @@ export default function RestaurantPage() {
   const discoverKitchenPrinters = async () => {
     setPrinterDiscoveryBusy(true)
     try {
-      const connection = await discoverPrintAgent()
-      if (!connection) throw new Error('No local print service found on this device')
-      const printers = await getPrintAgentPrinters(connection.baseUrl)
-      setPrintAgentUrl(connection.baseUrl)
+      const [connection, nativePrinters] = await Promise.all([
+        discoverPrintAgent().catch(() => null),
+        hasNativePrinterBridge() ? listNativePrinters().catch(() => []) : Promise.resolve([]),
+      ])
+      const agentPrinters = connection ? await getPrintAgentPrinters(connection.baseUrl).catch(() => []) : []
+      const printers: PrintAgentPrinter[] = [
+        ...agentPrinters,
+        ...nativePrinters.map(printer => ({
+          id: `native:${printer.transport}:${printer.id}`,
+          name: printer.name,
+          connectionType: printer.details || printer.transport,
+          isOnline: true,
+        })),
+      ]
+      setPrintAgentUrl(connection?.baseUrl || '')
       setAvailablePrinters(printers)
-      if (!printers.length) throw new Error('No printers were reported by the local print service')
+      if (!printers.length) throw new Error('No printers found. Connect a supported printer or start the local print service.')
       setShowPrinterDialog(true)
     } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not find printers' }) }
     finally { setPrinterDiscoveryBusy(false) }
@@ -497,7 +509,12 @@ export default function RestaurantPage() {
     }
     commands.push('1B4500', line('--------------------------------'), line(order.specialInstructions ? `Order note: ${order.specialInstructions}` : ''), '1B6404', '1D5600')
     try {
-      await printReceiptViaAgent({ baseUrl: printAgentUrl || undefined, printerId: kitchenPrinterId, saleId: order.id, receiptNo: `${station.toUpperCase()}-${order.orderNo}`, commands, documentType: station === 'bar' ? 'BAR_TICKET' : 'KITCHEN_TICKET', rememberPrinter: false })
+      if (kitchenPrinterId.startsWith('native:')) {
+        const [, transport, ...idParts] = kitchenPrinterId.split(':')
+        await printWithNativePrinter({ id: idParts.join(':'), transport: transport as 'usb' | 'bluetooth', name: availablePrinters.find(printer => printer.id === kitchenPrinterId)?.name || 'Kitchen printer' }, commands)
+      } else {
+        await printReceiptViaAgent({ baseUrl: printAgentUrl || undefined, printerId: kitchenPrinterId, saleId: order.id, receiptNo: `${station.toUpperCase()}-${order.orderNo}`, commands, documentType: station === 'bar' ? 'BAR_TICKET' : 'KITCHEN_TICKET', rememberPrinter: false })
+      }
       toast({ title: `${station === 'bar' ? 'Bar' : 'Kitchen'} ticket sent` })
     } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Ticket printing failed' }) }
     finally { setPrintingOrderId('') }
