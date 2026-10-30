@@ -141,13 +141,12 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
   const isWeeklySalesReport = data.title === 'Weekly Sales Report'
 
   const toggleRow = (id: string) => {
-    const newSet = new Set(expandedRows)
-    if (newSet.has(id)) {
-      newSet.delete(id)
-    } else {
-      newSet.add(id)
-    }
-    setExpandedRows(newSet)
+    setExpandedRows((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   return (
@@ -215,19 +214,17 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
             <p className="text-xs text-muted-foreground">{data.transactions.length} transactions</p>
           </div>
 
-          {/* Desktop View */}
-          <div className="hidden lg:block overflow-x-auto rounded-lg border">
-            <table className="min-w-[1600px] w-full text-sm">
+          <div className={cn('overflow-x-auto rounded-lg border', isWeeklySalesReport ? 'block' : 'hidden lg:block')}>
+            <table className={`w-full text-sm ${isWeeklySalesReport ? 'min-w-[1420px]' : 'min-w-[1600px]'}`}>
               <thead className="sticky top-0 bg-muted/50 border-b">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-20">Date</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Type</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground flex-1">Description</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28">Reference</th>
+                  <th className="whitespace-nowrap px-3 py-3 text-left font-medium text-muted-foreground">Date</th>
+                  <th className="whitespace-nowrap px-3 py-3 text-left font-medium text-muted-foreground">Type</th>
+                  <th className="min-w-56 px-3 py-3 text-left font-medium text-muted-foreground">Description</th>
+                  <th className="whitespace-nowrap px-3 py-3 text-left font-medium text-muted-foreground">{isWeeklySalesReport ? 'Receipt' : 'Reference'}</th>
                   {isWeeklySalesReport && <><th className="px-4 py-3 text-left font-medium text-muted-foreground">Customer</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Staff</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Branch</th><th className="px-4 py-3 text-left font-medium text-muted-foreground">Payment Method</th></>}
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Debit</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Credit</th>
-                  {data.transactions.some(t => t.balance !== undefined) && (
+                  {isWeeklySalesReport ? <><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Gross Sales</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Net Revenue</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Tax</th><th className="whitespace-nowrap px-3 py-3 text-right font-medium text-muted-foreground">Discount</th></> : <><th className="px-3 py-3 text-right font-medium text-muted-foreground">Debit</th><th className="px-3 py-3 text-right font-medium text-muted-foreground">Credit</th></>}
+                  {!isWeeklySalesReport && data.transactions.some(t => t.balance !== undefined) && (
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Balance</th>
                   )}
                 </tr>
@@ -235,25 +232,20 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
               <tbody>
                 {data.transactions.map((txn, idx) => (
                   <tr key={txn.id || idx} className="cursor-pointer border-t hover:bg-muted/30 transition-colors" onClick={() => setDetail({ title: txn.description || txn.type || 'Transaction', rows: [txn] })}>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs">{formatDateDDMMYY(txn.date)}</td>
-                    <td className="px-4 py-3">
+                    <td className="whitespace-nowrap px-3 py-3 text-xs">{formatDateDDMMYY(txn.date)}</td>
+                    <td className="px-3 py-3">
                       <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTypeColor(txn.type)}`}>
                         {txn.type}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="truncate">{txn.description}</div>
-                    {!isWeeklySalesReport && txn.details && <div className="text-xs text-muted-foreground truncate">{txn.details}</div>}
+                    <td className="px-3 py-3">
+                      <div className="max-w-sm truncate">{txn.description}</div>
+                    {!isWeeklySalesReport && txn.details && <div className="max-w-sm truncate text-xs text-muted-foreground">{txn.details}</div>}
                     </td>
-                    <td className="px-4 py-3 text-xs whitespace-nowrap font-mono">{txn.reference || '—'}</td>
-                    {isWeeklySalesReport && <><td className="px-4 py-3">{txn.customer || '—'}</td><td className="px-4 py-3">{txn.staff || '—'}</td><td className="px-4 py-3">{txn.branch || '—'}</td><td className="px-4 py-3 capitalize">{String(txn.paymentMethod || '—').replace(/_/g, ' ')}</td></>}
-                    <td className="px-4 py-3 text-right font-semibold">
-                      {txn.debit ? formatCurrency(txn.debit) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold">
-                      {txn.credit ? formatCurrency(txn.credit) : '—'}
-                    </td>
-                    {data.transactions.some(t => t.balance !== undefined) && (
+                    <td className="whitespace-nowrap px-3 py-3 font-mono text-xs">{txn.reference || '—'}</td>
+                    {isWeeklySalesReport && <><td className="px-3 py-3">{txn.customer || '—'}</td><td className="px-3 py-3">{txn.staff || '—'}</td><td className="px-3 py-3">{txn.branch || '—'}</td><td className="whitespace-nowrap px-3 py-3 capitalize">{String(txn.paymentMethod || '—').replace(/_/g, ' ')}</td><td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(txn.grossAmount ?? txn.amount ?? 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums">{formatCurrency(Number(txn.revenue ?? txn.debit ?? 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(Number(txn.tax || 0))}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{formatCurrency(Number(txn.discount || 0))}</td></>}
+                    {!isWeeklySalesReport && <><td className="px-3 py-3 text-right font-semibold">{txn.debit ? formatCurrency(txn.debit) : '—'}</td><td className="px-3 py-3 text-right font-semibold">{txn.credit ? formatCurrency(txn.credit) : '—'}</td></>}
+                    {!isWeeklySalesReport && data.transactions.some(t => t.balance !== undefined) && (
                       <td className="px-4 py-3 text-right font-bold">
                         <span className={txn.balance !== undefined && txn.balance > 0 ? 'text-red-600' : 'text-green-600'}>
                           {txn.balance !== undefined ? formatCurrency(txn.balance) : '—'}
@@ -266,59 +258,38 @@ export function EnrichedReport({ data, summaryKeys }: EnrichedReportProps) {
             </table>
           </div>
 
-          {/* Mobile/Tablet View */}
-          <div className="lg:hidden space-y-3">
-            {data.transactions.map((txn, idx) => (
-              <Card key={txn.id || idx} className="border-l-4 border-l-blue-500">
-                <div className="p-4">
-                  <div className="flex items-start justify-between mb-2 cursor-pointer" onClick={() => toggleRow(txn.id || String(idx))}>
-                    <div className="flex-1">
-                      <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTypeColor(txn.type)}`}>
-                        {txn.type}
-                      </span>
-                      <p className="text-xs text-muted-foreground mt-1">{formatDateDDMMYY(txn.date)}</p>
+          {!isWeeklySalesReport && <div className="space-y-3 lg:hidden">
+            {data.transactions.map((txn, idx) => {
+              const rowId = txn.id || String(idx)
+              const expanded = expandedRows.has(rowId)
+              return (
+                <Card key={rowId} className="border-l-4 border-l-blue-500">
+                  <div className="p-4">
+                    <div className="mb-2 flex cursor-pointer items-start justify-between" onClick={() => toggleRow(rowId)}>
+                      <div>
+                        <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTypeColor(txn.type)}`}>
+                          {txn.type}
+                        </span>
+                        <p className="mt-1 text-xs text-muted-foreground">{formatDateDDMMYY(txn.date)}</p>
+                      </div>
+                      {expanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                     </div>
-                    <div>
-                      {expandedRows.has(txn.id || String(idx)) ? (
-                        <ChevronUp className="h-5 w-5" />
-                      ) : (
-                        <ChevronDown className="h-5 w-5" />
-                      )}
+
+                    <p className="mb-2 text-sm font-medium">{txn.description}</p>
+                    {txn.details && expanded && <p className="mb-2 rounded bg-muted/50 p-2 text-xs text-muted-foreground">{txn.details}</p>}
+
+                    <div className="grid grid-cols-3 gap-2 border-t pt-2 text-sm">
+                      <div><p className="text-xs text-muted-foreground">Debit</p><p className="font-semibold">{txn.debit ? formatCurrency(txn.debit) : '—'}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Credit</p><p className="font-semibold">{txn.credit ? formatCurrency(txn.credit) : '—'}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Balance</p><p className={`font-bold ${txn.balance !== undefined && txn.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>{txn.balance !== undefined ? formatCurrency(txn.balance) : '—'}</p></div>
                     </div>
+
+                    {txn.reference && <div className="mt-2 text-xs text-muted-foreground"><span className="font-medium">Ref:</span> {txn.reference}</div>}
                   </div>
-
-                  <p className="font-medium text-sm mb-2">{txn.description}</p>
-                  {isWeeklySalesReport && <p className="mb-2 break-words text-xs text-muted-foreground">{[txn.customer && `Customer: ${txn.customer}`, txn.staff && `Staff: ${txn.staff}`, txn.branch && `Branch: ${txn.branch}`, txn.paymentMethod && `Method: ${String(txn.paymentMethod).replace(/_/g, ' ')}`].filter(Boolean).join(' | ')}</p>}
-                  {!isWeeklySalesReport && txn.details && expandedRows.has(txn.id || String(idx)) && (
-                    <p className="text-xs text-muted-foreground mb-2 bg-muted/50 p-2 rounded">{txn.details}</p>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t text-sm">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Debit</p>
-                      <p className="font-semibold">{txn.debit ? formatCurrency(txn.debit) : '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Credit</p>
-                      <p className="font-semibold">{txn.credit ? formatCurrency(txn.credit) : '—'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Balance</p>
-                      <p className={`font-bold ${txn.balance !== undefined && txn.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {txn.balance !== undefined ? formatCurrency(txn.balance) : '—'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {txn.reference && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      <span className="font-medium">Ref:</span> {txn.reference}
-                    </div>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
+                </Card>
+              )
+            })}
+          </div>}
         </div>
       )}
 
