@@ -10,6 +10,7 @@ import { safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryU
 import { calculateRentAging } from '../utils/rentAging.js'
 import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
 import { correctedRentChargeValues, nextRentRatePeriod, recordTenancyRentRate, recordUnitRentRate, rentAmountForPeriod, monthKey as rentRateMonthKey } from '../services/propertyRentRateService.js'
+import { propertyRentPeriods } from '../utils/propertyRentPeriods.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -17,6 +18,21 @@ const money = value => Math.round((Number(value) || 0) * 100) / 100
 const tenantIdOf = req => req.user?.tenantId
 const monthKey = date => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
 const isMonthKey = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || ''))
+const userDisplayName = user => [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || null
+async function paymentHandlerNames(tenantId, receiptNos) {
+  const references = [...new Set(receiptNos.filter(Boolean))]
+  if (!references.length) return new Map()
+  const [movements, journals] = await Promise.all([
+    prisma.cashTransaction.findMany({ where: { tenantId, reference: { in: references } }, orderBy: { createdAt: 'asc' }, select: { reference: true, User: { select: { fname: true, lname: true } } } }),
+    prisma.journalEntry.findMany({ where: { tenantId, reference: { in: references } }, orderBy: { createdAt: 'asc' }, select: { reference: true, user: { select: { fname: true, lname: true } } } }),
+  ])
+  const names = new Map()
+  for (const row of [...movements, ...journals]) {
+    const name = userDisplayName(row.User || row.user)
+    if (row.reference && name && !names.has(row.reference)) names.set(row.reference, name)
+  }
+  return names
+}
 const monthStart = value => {
   if (!isMonthKey(value)) return null
   const [year, month] = value.split('-').map(Number)
@@ -806,16 +822,24 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
             },
           },
         },
-        payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan', 'deposit_application', 'opening_settlement'] } }, orderBy: { paymentDate: 'asc' }, include: { cashAccount: { select: { name: true } }, rentPaymentPlan: { select: { planNo: true } } } },
+        payments: { where: { status: 'posted', paymentType: { in: ['rent', 'rent_plan', 'deposit_application', 'opening_settlement'] } }, orderBy: { paymentDate: 'asc' }, include: { rentPaymentPlan: { select: { planNo: true } }, allocations: { include: { charge: { select: { period: true } } } } } },
         identity: true,
       },
     })
     const includeIdentity = canViewCustomerIdentity(req)
     const includePersonalDetails = canViewTenantPersonalDetails(req)
     const allCharges = tenancies.flatMap(row => row.charges)
+    const handlers = await paymentHandlerNames(tenantIdOf(req), tenancies.flatMap(row => row.payments.map(payment => payment.receiptNo)))
     const entries = tenancies.flatMap(tenancy => [
       ...tenancy.charges.map(charge => ({ id: charge.id, tenancyId: tenancy.id, date: charge.dueDate, type: 'rent_due', reference: charge.period, description: `${charge.description} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, debit: charge.amount, credit: 0, status: charge.status })),
-      ...tenancy.payments.map(payment => ({ id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: payment.paymentType === 'rent_plan' ? 'rent_plan_payment' : payment.paymentType === 'deposit_application' ? 'deposit_application' : payment.paymentType === 'opening_settlement' ? 'opening_rent_settlement' : 'rent_payment', reference: payment.receiptNo, description: `${payment.paymentType === 'deposit_application' ? 'Security deposit applied to rent' : payment.paymentType === 'rent_plan' ? 'Rent payment plan receipt' : payment.paymentType === 'opening_settlement' ? 'Historical rent marked paid (non-cash)' : `Rent payment${payment.rentMonths ? ` · ${payment.rentMonths} month(s)` : ''}${payment.arrearsMonths ? ` · ${payment.arrearsMonths} arrears month(s)` : ''}`} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, currency: tenancy.currency, rentMonths: payment.rentMonths, arrearsMonths: payment.arrearsMonths, planNo: payment.rentPaymentPlan?.planNo, cashAccountName: payment.cashAccount?.name, transactionRef: payment.transactionRef, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status })),
+      ...tenancy.payments.map(payment => {
+        const rentPeriods = propertyRentPeriods({ ...payment, monthlyRent: tenancy.rentAmount })
+        const periodLabel = rentPeriods.map(period => {
+          const [year, month] = period.split('-').map(Number)
+          return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+        }).join(', ')
+        return { id: payment.id, tenancyId: tenancy.id, date: payment.paymentDate, type: payment.paymentType === 'rent_plan' ? 'rent_plan_payment' : payment.paymentType === 'deposit_application' ? 'deposit_application' : payment.paymentType === 'opening_settlement' ? 'opening_rent_settlement' : 'rent_payment', reference: payment.receiptNo, description: `${payment.paymentType === 'deposit_application' ? 'Security deposit applied to rent' : payment.paymentType === 'rent_plan' ? 'Rent payment plan receipt' : payment.paymentType === 'opening_settlement' ? 'Historical rent marked paid (non-cash)' : `Rent payment${periodLabel ? ` · ${periodLabel}` : ''}${payment.arrearsMonths ? ` · ${payment.arrearsMonths} arrears month(s)` : ''}`} · ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`, propertyName: tenancy.unit.property.name, unitCode: tenancy.unit.unitCode, currency: tenancy.currency, rentMonths: payment.rentMonths, rentPeriods, arrearsMonths: payment.arrearsMonths, planNo: payment.rentPaymentPlan?.planNo, receivedBy: handlers.get(payment.receiptNo), transactionRef: payment.transactionRef, notes: payment.notes, debit: 0, credit: payment.amount, paymentMethod: payment.paymentMethod, status: payment.status }
+      }),
     ]).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     let balance = 0
     for (const entry of entries) { balance = money(balance + entry.debit - entry.credit); entry.runningBalance = balance }
@@ -864,7 +888,7 @@ router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canVie
           tenancy: { include: { unit: { include: { property: true } } } },
           installments: { orderBy: { sequence: 'asc' } },
           chargeAllocations: { include: { charge: { select: { id: true, period: true, dueDate: true, description: true, amount: true } } } },
-          payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, select: { id: true, receiptNo: true, amount: true, paymentDate: true, paymentMethod: true, status: true, transactionRef: true, cashAccount: { select: { name: true } }, planInstallmentAllocations: { select: { amount: true, installment: { select: { sequence: true } } } } } },
+          payments: { where: { status: 'posted' }, orderBy: { paymentDate: 'desc' }, select: { id: true, receiptNo: true, amount: true, paymentDate: true, paymentMethod: true, status: true, transactionRef: true, allocations: { select: { amount: true, charge: { select: { period: true } } } }, planInstallmentAllocations: { select: { amount: true, installment: { select: { sequence: true } } } } } },
         },
       }),
       prisma.rentCharge.findMany({
@@ -880,7 +904,8 @@ router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canVie
       description: charge.description, amount: money(charge.amount), amountPaid: money(charge.amountPaid),
       balance: money(charge.amount - charge.amountPaid),
     }))
-    res.json({ plans, eligibleCharges })
+    const handlers = await paymentHandlerNames(tenantId, plans.flatMap(plan => plan.payments.map(payment => payment.receiptNo)))
+    res.json({ plans: plans.map(plan => ({ ...plan, payments: plan.payments.map(payment => ({ ...payment, rentPeriods: propertyRentPeriods({ ...payment, paymentType: 'rent_plan' }), receivedBy: handlers.get(payment.receiptNo) })) })), eligibleCharges })
   } catch (error) { console.error('List renter payment plans failed:', error); res.status(500).json({ error: 'Could not load renter payment plans.' }) }
 })
 
@@ -1335,7 +1360,8 @@ router.get('/payments/:id/receipt', requireAnyPermission(['canViewPropertyCollec
     const payment = await prisma.propertyRentPayment.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { cashAccount: { select: { name: true, type: true } }, tenancy: { include: { unit: { include: { property: { include: { owner: true } } } } } }, allocations: { include: { charge: true } } } })
     if (!payment) return res.status(404).json({ error: 'Payment receipt not found.' })
     if (payment.paymentType === 'opening_settlement') return res.status(409).json({ error: 'Historical rent settlement is a non-cash opening entry, not a payment receipt.' })
-    res.json({ receipt: payment, business: await prisma.tenant.findUnique({ where: { id: tenantIdOf(req) }, select: { name: true, address: true, phone: true, logo: true } }) })
+    const handlers = await paymentHandlerNames(tenantIdOf(req), [payment.receiptNo])
+    res.json({ receipt: { ...payment, rentPeriods: propertyRentPeriods({ ...payment, monthlyRent: payment.tenancy.rentAmount }), receivedBy: handlers.get(payment.receiptNo) }, business: await prisma.tenant.findUnique({ where: { id: tenantIdOf(req) }, select: { name: true, address: true, phone: true, logo: true } }) })
   } catch (error) { console.error('Rent receipt failed:', error); res.status(500).json({ error: 'Could not load receipt.' }) }
 })
 

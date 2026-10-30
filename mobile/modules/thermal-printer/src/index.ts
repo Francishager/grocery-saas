@@ -1,4 +1,4 @@
-import { requireNativeModule } from 'expo-modules-core'
+import { requireOptionalNativeModule } from 'expo-modules-core'
 
 export type NativePrinter = {
   id: string
@@ -12,4 +12,4 @@ type JibuThermalPrinterModuleType = {
   print(transport: NativePrinter['transport'], deviceId: string, commands: string[]): Promise<void>
 }
 
-export default requireNativeModule<JibuThermalPrinterModuleType>('JibuThermalPrinter')
+export default requireOptionalNativeModule<JibuThermalPrinterModuleType>('JibuThermalPrinter')

@@ -15,8 +15,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
 import NativeThermalPrinter from '../../modules/thermal-printer/src';
 
-const WEB_APP_URL = (process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://jibusales.jibusales00.workers.dev').replace(/\/$/, '');
-const APP_ORIGIN = new URL(WEB_APP_URL).origin;
+const DEFAULT_WEB_APP_URL = 'https://jibusales.jibusales00.workers.dev';
+const configuredWebAppUrl = (process.env.EXPO_PUBLIC_WEB_APP_URL || DEFAULT_WEB_APP_URL).replace(/\/$/, '');
+const WEB_APP_URL = /^https:\/\//i.test(configuredWebAppUrl) ? configuredWebAppUrl : DEFAULT_WEB_APP_URL;
+const APP_ORIGIN = getOrigin(WEB_APP_URL);
 const BRIDGE_ORIGIN = APP_ORIGIN;
 const brandGreen = '#16764a';
 // WebView's published declaration currently conflicts with this Expo/RN type set.
@@ -26,11 +28,24 @@ function externalScheme(url: string) {
   return /^(mailto:|tel:|sms:|whatsapp:|intent:)/i.test(url);
 }
 
+function getOrigin(url: string) {
+  return url.match(/^https?:\/\/[^/]+/i)?.[0] || '';
+}
+
 export default function HomeScreen() {
   const webView = useRef<any>(null);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!loading) return;
+    const timeout = setTimeout(() => {
+      setLoading(false);
+      setFailed(true);
+    }, 30_000);
+    return () => clearTimeout(timeout);
+  }, [loading]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -47,9 +62,8 @@ export default function HomeScreen() {
   const handleNavigation = (request: Pick<WebViewNavigation, 'url'>) => {
     const url = request.url;
     if (url === 'about:blank') return true;
-    try {
-      if (new URL(url).origin === APP_ORIGIN) return true;
-    } catch { return false; }
+    if (!getOrigin(url)) return false;
+    if (getOrigin(url) === APP_ORIGIN) return true;
     if (url.startsWith('https://')) return true;
     if (externalScheme(url)) {
       void Linking.openURL(url).catch(() => undefined);
@@ -65,20 +79,20 @@ export default function HomeScreen() {
   };
 
   const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
-    try {
-      if (!nativeEvent.url || new URL(nativeEvent.url).origin !== BRIDGE_ORIGIN) return;
-    } catch { return; }
-      let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[] };
+    if (!nativeEvent.url || getOrigin(nativeEvent.url) !== BRIDGE_ORIGIN) return;
+    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[] };
     try { request = JSON.parse(nativeEvent.data); } catch { return; }
     if (!request.id || !['printer.list', 'printer.print'].includes(request.type || '')) return;
     let response: { ok: boolean; result?: unknown; error?: string };
     try {
       if (request.type === 'printer.list') {
+        if (!NativeThermalPrinter) throw new Error('Printer support needs the latest JibuSales app update.');
         if (Platform.OS === 'android' && Number(Platform.Version) >= 31) {
           await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
         }
         response = { ok: true, result: await NativeThermalPrinter.listPrinters() };
       } else {
+        if (!NativeThermalPrinter) throw new Error('Printer support needs the latest JibuSales app update.');
         if (!request.transport || !request.deviceId || !Array.isArray(request.commands)) throw new Error('Invalid printer request.');
         if (Platform.OS === 'android' && Number(Platform.Version) >= 31 && request.transport === 'bluetooth') {
           const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
@@ -112,6 +126,7 @@ export default function HomeScreen() {
           if (nativeEvent.statusCode >= 500) setFailed(true);
         }}
         onContentProcessDidTerminate={() => webView.current?.reload()}
+        onRenderProcessGone={() => { setLoading(false); setFailed(true); }}
         onFileDownload={({ nativeEvent }: { nativeEvent: { downloadUrl: string } }) => {
           void Linking.openURL(nativeEvent.downloadUrl).catch(() => undefined);
         }}
