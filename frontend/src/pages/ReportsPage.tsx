@@ -28,6 +28,7 @@ import { getLocalReportData } from '@/db/hybrid'
 import { EnrichedReport, type EnrichedReportData } from '@/components/EnrichedReportRenderer'
 import DailyBusinessReport from '@/components/DailyBusinessReport'
 import WeeklySalesCharts from '@/components/WeeklySalesCharts'
+import RentalReportView from '@/components/RentalReportView'
 import { canViewReportItem } from '@/lib/reportPermissions'
 
 type IconType = React.ComponentType<{ className?: string }>
@@ -39,7 +40,7 @@ interface ReportItem {
   id: string
   label: string
   apiFn: (params?: ReportParams) => Promise<any>
-  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched' | 'dailyBusiness' | 'propertyManagement'
+  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched' | 'dailyBusiness' | 'propertyManagement' | 'rental'
   columns?: { key: string; label: string; format?: 'currency' | 'number' | 'date' | 'text' }[]
   summaryKeys?: { key: string; label: string; format?: 'currency' | 'number' | 'text' }[]
   entityType?: 'customer' | 'supplier' | 'product' | 'tenancy'
@@ -472,7 +473,7 @@ const CATEGORIES: ReportCategory[] = [
   {
     id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport',
     items: [
-      { id: 'rentalsSummary', label: 'Rental Summary', apiFn: reportsApiV2.rentalsSummary, renderType: 'summary',
+      { id: 'rentalsSummary', label: 'Rental Summary', apiFn: reportsApiV2.rentalsSummary, renderType: 'rental', showBranchFilter: true,
         summaryKeys: [
           { key: 'count', label: 'Total Rentals', format: 'number' },
           { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
@@ -484,31 +485,40 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'cancelledCount', label: 'Cancelled', format: 'number' },
         ]
       },
-      { id: 'rentalsList', label: 'Rental List Report', apiFn: reportsApiV2.rentalsList, renderType: 'table',
-        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), textCol('branch', 'Branch'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), textCol('status', 'Status'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
+      { id: 'rentalsList', label: 'Rental List Report', apiFn: reportsApiV2.rentalsList, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Rental Records', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }, { key: 'totalBalance', label: 'Outstanding', format: 'currency' }],
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('item', 'Items'), numberCol('quantity', 'Qty'), textCol('phone', 'Phone'), textCol('branch', 'Branch'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), textCol('status', 'Status'), currencyCol('totalAmount', 'Total'), currencyCol('paid', 'Paid'), currencyCol('balance', 'Balance')]
       },
-      { id: 'rentalsByItem', label: 'Rental by Item', apiFn: reportsApiV2.rentalsByItem, renderType: 'table',
+      { id: 'rentalsByItem', label: 'Rental by Item', apiFn: reportsApiV2.rentalsByItem, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'itemCount', label: 'Items Rented', format: 'number' }, { key: 'hireCount', label: 'Hires', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }],
         columns: [textCol('item', 'Item'), numberCol('hireCount', 'Hire Count'), currencyCol('totalRevenue', 'Revenue'), currencyCol('totalDeposit', 'Deposits')]
       },
-      { id: 'rentalsByCustomer', label: 'Rental by Customer', apiFn: reportsApiV2.rentalsByCustomer, renderType: 'table',
+      { id: 'rentalsByCustomer', label: 'Rental by Customer', apiFn: reportsApiV2.rentalsByCustomer, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'customerCount', label: 'Customers', format: 'number' }, { key: 'count', label: 'Rental Records', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'balance', label: 'Outstanding', format: 'currency' }],
         columns: [textCol('customer', 'Customer'), numberCol('count', 'Rentals'), currencyCol('totalRevenue', 'Revenue'), currencyCol('totalDeposit', 'Deposits'), currencyCol('balance', 'Balance')]
       },
-      { id: 'rentalsByBranch', label: 'Rental by Branch', apiFn: reportsApiV2.rentalsByBranch, renderType: 'table',
+      { id: 'rentalsByBranch', label: 'Rental by Branch', apiFn: reportsApiV2.rentalsByBranch, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'branchCount', label: 'Branches', format: 'number' }, { key: 'count', label: 'Rental Records', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }],
         columns: [textCol('branch', 'Branch'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
       },
-      { id: 'rentalsActive', label: 'Active Rentals', apiFn: reportsApiV2.rentalsActive, renderType: 'table',
+      { id: 'rentalsActive', label: 'Active Rentals', apiFn: reportsApiV2.rentalsActive, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Active Rentals', format: 'number' }, { key: 'overdue', label: 'Overdue', format: 'number' }, { key: 'totalBalance', label: 'Outstanding', format: 'currency' }],
         columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), numberCol('daysOverdue', 'Days Overdue'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
       },
-      { id: 'rentalsOverdue', label: 'Overdue Rentals', apiFn: reportsApiV2.rentalsOverdue, renderType: 'table',
+      { id: 'rentalsOverdue', label: 'Overdue Rentals', apiFn: reportsApiV2.rentalsOverdue, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Overdue Rentals', format: 'number' }, { key: 'totalBalance', label: 'Outstanding', format: 'currency' }],
         columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), dateCol('expectedReturnDate', 'Expected Return'), numberCol('daysOverdue', 'Days Overdue'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
       },
-      { id: 'rentalsReturns', label: 'Rental Returns Report', apiFn: reportsApiV2.rentalsReturns, renderType: 'table',
+      { id: 'rentalsReturns', label: 'Rental Returns Report', apiFn: reportsApiV2.rentalsReturns, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Returns', format: 'number' }, { key: 'totalDamageFees', label: 'Damage Fees', format: 'currency' }],
         columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), dateCol('hireDate', 'Hire Date'), dateCol('actualReturnDate', 'Return Date'), currencyCol('totalAmount', 'Total'), textCol('depositStatus', 'Deposit Status'), currencyCol('damageFees', 'Damage Fees')]
       },
-      { id: 'rentalsDaily', label: 'Daily Rental Report', apiFn: reportsApiV2.rentalsDaily, renderType: 'table',
-        columns: [dateCol('date', 'Date'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
+      { id: 'rentalsDaily', label: 'Daily Rental Report', apiFn: reportsApiV2.rentalsDaily, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'rentalsStarted', label: 'Hires / Reservations', format: 'number' }, { key: 'rentalCharges', label: 'Rental Charges', format: 'currency' }, { key: 'returns', label: 'Items Returned', format: 'number' }, { key: 'overdueRentals', label: 'Overdue Rentals', format: 'number' }],
+        columns: [dateCol('date', 'Date'), textCol('type', 'Activity'), textCol('reference', 'Receipt / Rental No'), textCol('customer', 'Customer'), textCol('item', 'Item'), numberCol('quantity', 'Qty'), textCol('staff', 'Staff'), textCol('branch', 'Branch'), textCol('paymentMethod', 'Method'), currencyCol('amount', 'Amount'), textCol('status', 'Status')]
       },
-      { id: 'rentalsMonthly', label: 'Monthly Rental Report', apiFn: reportsApiV2.rentalsMonthly, renderType: 'table',
+      { id: 'rentalsMonthly', label: 'Monthly Rental Report', apiFn: reportsApiV2.rentalsMonthly, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Rentals', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }],
         columns: [textCol('month', 'Month'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
       },
     ]
@@ -2170,7 +2180,7 @@ export default function ReportsPage() {
     setReportData(null)
     try {
       if (currentReport.entityType === 'tenancy' && !selectedEntityId) return
-      if (!online && (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness")) {
+      if (!online && (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'rental')) {
         throw new Error("Connect to the internet to load complete accounting data.")
       }
       if (online) {
@@ -2199,7 +2209,7 @@ export default function ReportsPage() {
         setReportData(result)
       }
     } catch (error: any) {
-      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'propertyManagement') {
+      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'propertyManagement' || currentReport.renderType === 'rental') {
         setReportData(null)
         toast({ variant: "destructive", title: "Report unavailable", description: error.message })
         return
@@ -2292,6 +2302,22 @@ export default function ReportsPage() {
 
   // Get data and columns for export based on report type
   const getExportData = () => {
+    if (currentReport?.renderType === 'rental') {
+      const columns = currentReport.columns || []
+      if (currentReport.id === 'rentalsSummary') {
+        const rows = (currentReport.summaryKeys || []).map((metric) => {
+          const value = reportData?.[metric.key] ?? 0
+          return { metric: metric.label, value: metric.format === 'currency' ? formatCurrency(Number(value) || 0) : new Intl.NumberFormat().format(Number(value) || 0) }
+        })
+        return { data: rows, columns: [textCol('metric', 'Metric'), textCol('value', 'Value')] }
+      }
+      if (currentReport.id === 'rentalsDaily') {
+        const monetaryKeys = new Set(['rentalCharges', 'rentalPayments', 'depositsReceived', 'depositsRefunded', 'damageFees', 'outstandingBalance'])
+        const summaryRows = Object.entries(reportData?.summary || {}).filter(([key]) => monetaryKeys.has(key)).map(([key, value]) => ({ type: 'Period Summary', reference: key.replace(/([A-Z])/g, ' $1'), amount: value }))
+        return { data: [...summaryRows, ...(reportData?.transactions || [])], columns }
+      }
+      return { data: reportData?.data || [], columns }
+    }
     if (currentReport?.renderType === 'propertyManagement') {
       if (currentReport.id === 'propertyRenterStatement') return { data: reportData?.entries || [], columns: currentReport.columns }
       return { data: reportData?.[currentReport.dataKey || ''] || [], columns: currentReport.columns }
@@ -2593,6 +2619,7 @@ export default function ReportsPage() {
                     {['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id) && (
                       <BusinessPerformanceCharts reportId={currentReport.id} data={reportData} />
                     )}
+                    {currentReport.renderType === 'rental' && <RentalReportView reportId={currentReport.id} data={reportData} columns={currentReport.columns} summaryKeys={currentReport.summaryKeys} />}
                     {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
                     {currentReport.renderType === 'propertyManagement' && <ReportTable data={currentReport.dataKey ? reportData[currentReport.dataKey] || [] : []} columns={currentReport.columns} />}
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}

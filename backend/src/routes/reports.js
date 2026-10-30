@@ -4945,6 +4945,8 @@ router.get("/rentals/list", authenticateToken, async (req, res) => {
     const data = rentals.map((r) => ({
       rentalNo: r.rentalNo,
       customer: r.customer?.name || r.customerName || "Walk-in",
+      item: r.items.map((item) => item.product?.name || "Unknown item").join("\n") || "—",
+      quantity: r.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
       phone: r.customer?.phone || r.customerPhone || "",
       branch: r.branch?.name || "Unassigned",
       hireDate: r.hireDate,
@@ -4957,7 +4959,7 @@ router.get("/rentals/list", authenticateToken, async (req, res) => {
       balance: r.balance,
       itemCount: r.items.length,
     }));
-    res.json({ data, summary: { count: data.length, totalRevenue: data.reduce((a, d) => a + d.totalAmount, 0), totalDeposit: data.reduce((a, d) => a + d.deposit, 0) } });
+    res.json({ data, summary: { count: data.length, totalRevenue: data.reduce((a, d) => a + d.totalAmount, 0), totalDeposit: data.reduce((a, d) => a + d.deposit, 0), totalBalance: data.reduce((a, d) => a + d.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -5093,16 +5095,92 @@ router.get("/rentals/returns", authenticateToken, async (req, res) => {
 router.get("/rentals/daily", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const rentals = await prisma.rental.findMany({ where: scopedWhere(s, df(req, "hireDate")), orderBy: { hireDate: "asc" } });
-    const map = {};
-    rentals.forEach((r) => {
-      const day = new Date(r.hireDate).toISOString().slice(0, 10);
-      if (!map[day]) map[day] = { date: day, count: 0, revenue: 0, deposit: 0 };
-      map[day].count++;
-      map[day].revenue += r.totalAmount;
-      map[day].deposit += r.depositAmount;
+    const tenant = await prisma.tenant.findUnique({ where: { id: s.tenantId }, select: { timezone: true } });
+    const timeZone = tenant?.timezone || "Africa/Kampala";
+    const defaultDay = localDateAt(new Date(), timeZone);
+    const from = req.query.from || req.query.to || defaultDay;
+    const to = req.query.to || from;
+    const { start, end } = dayRange(from, to, timeZone);
+    const hireRange = { hireDate: { gte: start, lte: end } };
+    const paymentRange = { paymentDate: { gte: start, lte: end } };
+    const returnDateRange = { gte: start, lte: end };
+    const [rentals, payments, returns] = await Promise.all([
+      prisma.rental.findMany({
+        where: scopedWhere(s, hireRange),
+        include: { customer: { select: { name: true } }, branch: { select: { name: true } }, User: { select: { fname: true, lname: true } }, items: { include: { product: { select: { name: true } } } } },
+        orderBy: { hireDate: "asc" },
+      }),
+      prisma.rentalPayment.findMany({
+        where: { tenantId: s.tenantId, status: "posted", ...paymentRange, ...(s.branchId ? { rental: { branchId: s.branchId } } : {}) },
+        include: { user: { select: { fname: true, lname: true } }, rental: { select: { rentalNo: true, customerName: true, customer: { select: { name: true } }, branch: { select: { name: true } }, items: { include: { product: { select: { name: true } } } } } } },
+        orderBy: { paymentDate: "asc" },
+      }),
+      prisma.rental.findMany({
+        where: scopedWhere(s, { status: "returned", actualReturnDate: { ...returnDateRange, not: null } }),
+        include: { customer: { select: { name: true } }, branch: { select: { name: true } }, User: { select: { fname: true, lname: true } }, items: { include: { product: { select: { name: true } } } } },
+        orderBy: { actualReturnDate: "asc" },
+      }),
+    ]);
+    const itemSummary = (items = []) => ({
+      item: items.map((item) => item.product?.name || "Unknown item").join("\n") || "—",
+      quantity: items.map((item) => Number(item.quantity || 0)).join("\n") || "—",
+      itemCount: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),
     });
-    res.json({ data: Object.values(map) });
+    const transactions = [];
+    const pushTransaction = (row) => transactions.push({ ...row, date: row.date, amount: Number(row.amount || 0) });
+    rentals.forEach((rental) => pushTransaction({
+      id: `rental-${rental.id}`, date: rental.hireDate, type: rental.bookingState === "reserved" ? "Reservation" : "Rental Started",
+      reference: rental.rentalNo, customer: rental.customer?.name || rental.customerName || "Walk-in", staff: [rental.User?.fname, rental.User?.lname].filter(Boolean).join(" ") || "—",
+      branch: rental.branch?.name || "Unassigned", paymentMethod: rental.paymentMethod || "—", amount: rental.totalAmount,
+      balance: rental.balance, status: rental.status, ...itemSummary(rental.items),
+    }));
+    payments.forEach((payment) => {
+      const receivedKinds = ["rental_payment", "rental_advance", "deposit"];
+      const refundKinds = ["deposit_refund", "rental_advance_refund"];
+      const type = payment.kind === "deposit" ? "Deposit Received"
+        : payment.kind === "deposit_refund" ? "Deposit Refund"
+          : payment.kind === "rental_advance_refund" ? "Advance Refund"
+            : payment.kind === "rental_advance" ? "Rental Advance" : "Rental Payment";
+      pushTransaction({
+        id: `rental-payment-${payment.id}`, date: payment.paymentDate, type, reference: payment.receiptNo,
+        customer: payment.rental?.customer?.name || payment.rental?.customerName || "Walk-in",
+        staff: [payment.user?.fname, payment.user?.lname].filter(Boolean).join(" ") || "—",
+        branch: payment.rental?.branch?.name || "Unassigned", paymentMethod: payment.paymentMethod || "—",
+        amount: payment.amount, direction: refundKinds.includes(payment.kind) ? "out" : receivedKinds.includes(payment.kind) ? "in" : "neutral",
+        status: payment.status, ...itemSummary(payment.rental?.items),
+      });
+    });
+    returns.forEach((rental) => pushTransaction({
+      id: `rental-return-${rental.id}`, date: rental.actualReturnDate, type: "Rental Returned", reference: rental.rentalNo,
+      customer: rental.customer?.name || rental.customerName || "Walk-in", staff: [rental.User?.fname, rental.User?.lname].filter(Boolean).join(" ") || "—",
+      branch: rental.branch?.name || "Unassigned", paymentMethod: "—", amount: (rental.items || []).reduce((sum, item) => sum + Number(item.damageFee || 0), 0),
+      status: rental.status, ...itemSummary(rental.items),
+    }));
+    transactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    const summary = {
+      rentalsStarted: rentals.length,
+      rentalCharges: rentals.reduce((sum, rental) => sum + Number(rental.totalAmount || 0), 0),
+      rentalPayments: payments.filter((payment) => ["rental_payment", "rental_advance"].includes(payment.kind)).reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+      depositsReceived: payments.filter((payment) => payment.kind === "deposit").reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+      depositsRefunded: payments.filter((payment) => ["deposit_refund", "rental_advance_refund"].includes(payment.kind)).reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+      returns: returns.length,
+      damageFees: returns.reduce((sum, rental) => sum + (rental.items || []).reduce((itemSum, item) => itemSum + Number(item.damageFee || 0), 0), 0),
+      outstandingBalance: rentals.reduce((sum, rental) => sum + Math.max(0, Number(rental.balance || 0)), 0),
+      overdueRentals: rentals.filter((rental) => rental.status === "active" && rental.expectedReturnDate < new Date()).length,
+    };
+    const dailyMap = new Map();
+    for (const transaction of transactions) {
+      const day = localDateAt(new Date(transaction.date), timeZone);
+      const point = dailyMap.get(day) || { date: day, rentals: 0, rentalCharges: 0, payments: 0, deposits: 0, refunds: 0, returns: 0 };
+      if (transaction.type === "Rental Started" || transaction.type === "Reservation") { point.rentals += 1; point.rentalCharges += transaction.amount; }
+      if (["Rental Payment", "Rental Advance"].includes(transaction.type)) point.payments += transaction.amount;
+      if (transaction.type === "Deposit Received") point.deposits += transaction.amount;
+      if (["Deposit Refund", "Advance Refund"].includes(transaction.type)) point.refunds += transaction.amount;
+      if (transaction.type === "Rental Returned") point.returns += 1;
+      dailyMap.set(day, point);
+    }
+    res.json({ title: "Daily Rental Report", summary, data: [...dailyMap.values()], transactions, period: { from, to, timeZone }, generatedAt: new Date().toISOString() });
   } catch (err) { handleBranchError(res, err); }
 });
 
