@@ -56,6 +56,7 @@ function MenuButton({ onPress }: { onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel="Open navigation menu" onPress={onPress} hitSlop={10} style={styles.menuButton}>
       <View style={styles.menuBars}><View style={styles.menuBar} /><View style={styles.menuBar} /><View style={styles.menuBar} /></View>
+      <Text style={styles.menuButtonLabel}>Menu</Text>
     </Pressable>
   );
 }
@@ -380,12 +381,13 @@ const styles = StyleSheet.create({
   footerNote: { color: palette.muted, fontSize: 12, textAlign: 'center', marginTop: 24 },
   appShell: { flex: 1, backgroundColor: palette.background },
   loadingInline: { paddingVertical: 48, alignItems: 'center', justifyContent: 'center' },
-  navbar: { minHeight: 66, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: palette.line, backgroundColor: palette.surface },
+  navbar: { minHeight: 70, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: palette.line, backgroundColor: palette.surface },
   navbarLogo: { width: 56, height: 56 },
   navbarTitle: { flex: 1, color: palette.ink, fontSize: 17, fontWeight: '700', marginLeft: 10 },
-  menuButton: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  menuBars: { width: 22, gap: 5 },
+  menuButton: { minWidth: 60, height: 48, borderRadius: 10, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  menuBars: { width: 22, gap: 4 },
   menuBar: { height: 2, borderRadius: 2, backgroundColor: palette.ink },
+  menuButtonLabel: { color: palette.ink, fontSize: 10, fontWeight: '700' },
   pageScroll: { flex: 1 },
   bottomNav: { minHeight: 60, paddingHorizontal: 8, paddingTop: 5, paddingBottom: 5, flexDirection: 'row', borderTopWidth: 1, borderTopColor: palette.line, backgroundColor: palette.surface },
   navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6 },
