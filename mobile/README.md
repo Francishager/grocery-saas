@@ -1,6 +1,6 @@
 # JibuSales Mobile
 
-An Expo React Native app using the existing JibuSales Railway API. The initial release includes secure sign-in, session renewal, permission-filtered business KPIs, enabled-module visibility, pull-to-refresh, and sign-out. It does not yet reproduce all web workflows; sales entry and other operational screens remain future mobile work.
+An Expo React Native container for the existing responsive JibuSales web application. It loads the production Cloudflare Worker site so the mobile app uses the same login, responsive navigation, modules, business permissions, and workflows as the web product. Native configuration supplies device capabilities needed by supported web flows.
 
 ## Run locally
 
@@ -10,7 +10,7 @@ npm install
 npx expo start
 ```
 
-The production API defaults to the Cloudflare Worker at `https://jibusales.jibusales00.workers.dev`, which proxies `/api/*` to Railway like the production web app. To target another API, create `.env.local` from `.env.example` and set `EXPO_PUBLIC_API_URL` before starting/building. This value is public client configuration, not a secret. Authentication tokens are stored with the device secure-storage APIs; passwords are not persisted.
+The app defaults to `https://jibusales.jibusales00.workers.dev`. To target another web origin, create `.env.local` from `.env.example` and set `EXPO_PUBLIC_WEB_APP_URL` before starting/building. This value is public client configuration, not a secret. Authentication and permissions are handled by the existing web app and API.
 
 ## Build a shareable Android APK
 
