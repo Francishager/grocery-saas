@@ -89,6 +89,7 @@ export default function SaaSAdminLoginPage() {
               <Input
                 id="email"
                 type="email"
+                autoComplete="username"
                 placeholder="admin@saas.internal"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -102,6 +103,7 @@ export default function SaaSAdminLoginPage() {
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

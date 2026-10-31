@@ -6,7 +6,7 @@ const PLANNER_TITLE = '__JIBUSALES_PLANNER_DATA__';
 
 export async function deliverDuePlannerReminders({ prismaClient = prisma, sendPush = sendNotificationToUser, now = new Date() } = {}) {
   const notes = await prismaClient.stickyNote.findMany({
-    where: { title: PLANNER_TITLE, userId: { not: null }, tenantId: { not: null } },
+    where: { title: PLANNER_TITLE, tenantId: { not: '' } },
     select: { id: true, userId: true, tenantId: true, lines: true },
     take: 5000,
   });
