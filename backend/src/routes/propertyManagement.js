@@ -11,6 +11,7 @@ import { calculateRentAging } from '../utils/rentAging.js'
 import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
 import { correctedRentChargeValues, nextRentRatePeriod, recordTenancyRentRate, recordUnitRentRate, rentAmountForPeriod, monthKey as rentRateMonthKey } from '../services/propertyRentRateService.js'
 import { propertyRentPeriods } from '../utils/propertyRentPeriods.js'
+import { calculateRentPromiseProgress } from '../utils/rentPromiseProgress.js'
 
 const router = Router()
 const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 3 } })
@@ -907,6 +908,126 @@ router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canVie
     const handlers = await paymentHandlerNames(tenantId, plans.flatMap(plan => plan.payments.map(payment => payment.receiptNo)))
     res.json({ plans: plans.map(plan => ({ ...plan, payments: plan.payments.map(payment => ({ ...payment, rentPeriods: propertyRentPeriods({ ...payment, paymentType: 'rent_plan' }), receivedBy: handlers.get(payment.receiptNo) })) })), eligibleCharges })
   } catch (error) { console.error('List renter payment plans failed:', error); res.status(500).json({ error: 'Could not load renter payment plans.' }) }
+})
+
+router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canViewRentPromises', 'canManageRentPromises']), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
+    if (!customer) return res.status(404).json({ error: 'Renter profile not found.' })
+    const records = await prisma.propertyRentPromise.findMany({
+      where: { tenantId, tenancy: { customerId: customer.id } },
+      orderBy: [{ createdAt: 'desc' }],
+      include: {
+        createdBy: { select: { fname: true, lname: true } },
+        tenancy: { select: { id: true, tenantName: true, currency: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } } },
+        allocations: {
+          include: {
+            charge: {
+              select: {
+                id: true,
+                period: true,
+                dueDate: true,
+                allocations: {
+                  where: { payment: { status: 'posted' } },
+                  select: { id: true, amount: true, payment: { select: { status: true, createdAt: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    const tenancies = await prisma.propertyTenancy.findMany({
+      where: { tenantId, customerId: customer.id, status: { in: ['active', 'ended'] } },
+      orderBy: { startDate: 'desc' },
+      select: { id: true, tenantName: true, currency: true, status: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } },
+    })
+    const { promises, counts } = calculateRentPromiseProgress(records)
+    res.json({ counts, tenancies, promises: promises.map(promise => ({
+      ...promise,
+      createdByName: [promise.createdBy?.fname, promise.createdBy?.lname].filter(Boolean).join(' ') || 'Staff',
+      allocations: promise.allocations.map(({ charge, ...allocation }) => ({ ...allocation, period: charge?.period, rentDueDate: charge?.dueDate })),
+    })) })
+  } catch (error) { console.error('Load renter payment promises failed:', error); res.status(500).json({ error: 'Could not load renter payment promises.' }) }
+})
+
+router.post('/customers/:customerId/rent-promises', requirePermission('canManageRentPromises'), async (req, res) => {
+  const tenancyId = String(req.body?.tenancyId || '').trim()
+  const amount = money(req.body?.amount)
+  const dueDate = req.body?.dueDate ? new Date(`${req.body.dueDate}T23:59:59.999Z`) : null
+  const notes = String(req.body?.notes || '').trim()
+  const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
+  if (!tenancyId) return badRequest(res, 'Choose the renter tenancy for this promise.')
+  if (!(amount > 0)) return badRequest(res, 'Enter a promised amount greater than zero.')
+  if (!dueDate || !Number.isFinite(dueDate.getTime())) return badRequest(res, 'Enter a valid promised payment date.')
+  if (notes.length > 1000 || idempotencyKey.length > 120) return badRequest(res, 'The notes or request key are too long.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const promise = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "property_tenancies" WHERE "id" = ${tenancyId} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const tenancy = await tx.propertyTenancy.findFirst({ where: { id: tenancyId, tenantId, customerId: req.params.customerId, status: { in: ['active', 'ended'] } }, select: { id: true } })
+      if (!tenancy) throw Object.assign(new Error('Renter tenancy not found.'), { statusCode: 404 })
+      const existing = await tx.propertyRentPromise.findFirst({ where: { tenantId, idempotencyKey } })
+      if (existing) {
+        if (existing.tenancyId !== tenancyId) throw Object.assign(new Error('This request key was already used for a different tenancy.'), { statusCode: 409 })
+        return existing
+      }
+      const charges = await tx.rentCharge.findMany({
+        where: { tenantId, tenancyId, dueDate: { lt: new Date() }, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
+        orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
+        include: { allocations: { where: { payment: { status: 'posted' } }, select: { id: true, amount: true, payment: { select: { status: true, createdAt: true } } } } },
+      })
+      const priorPromises = await tx.propertyRentPromise.findMany({
+        where: { tenantId, tenancyId },
+        include: {
+          allocations: {
+            include: {
+              charge: {
+                select: {
+                  id: true,
+                  period: true,
+                  dueDate: true,
+                  allocations: {
+                    where: { payment: { status: 'posted' } },
+                    select: { id: true, amount: true, payment: { select: { status: true, createdAt: true } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      })
+      const { promises: progress } = calculateRentPromiseProgress(priorPromises)
+      const reservedByCharge = new Map()
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      for (const row of progress) {
+        if (new Date(row.dueDate) < today) continue
+        for (const allocation of row.allocations) {
+        const chargeId = allocation.chargeId || allocation.charge?.id
+        reservedByCharge.set(chargeId, money((reservedByCharge.get(chargeId) || 0) + allocation.remainingAmount))
+        }
+      }
+      let remaining = amount
+      const allocations = []
+      for (const charge of charges) {
+        if (remaining <= 0.001) break
+        const outstanding = money(Number(charge.amount) - Number(charge.amountPaid))
+        const available = money(Math.max(0, outstanding - (reservedByCharge.get(charge.id) || 0)))
+        if (available <= 0.001) continue
+        const slice = money(Math.min(remaining, available))
+        allocations.push({ chargeId: charge.id, amount: slice })
+        remaining = money(remaining - slice)
+      }
+      if (remaining > 0.001) throw Object.assign(new Error(`Only ${money(amount - remaining).toFixed(2)} of overdue rent is currently available for a new promise. Existing promises and payment plans are excluded.`), { statusCode: 409 })
+      return tx.propertyRentPromise.create({ data: {
+        tenantId, tenancyId, createdById: req.user.id, amount, dueDate, notes: notes || null, idempotencyKey,
+        allocations: { create: allocations },
+      }, include: { allocations: { include: { charge: { select: { period: true } } } } } })
+    })
+    res.status(201).json(promise)
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create renter payment promise failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record renter payment promise.' : error.message }) }
 })
 
 router.post('/customers/:customerId/payment-plans', requirePermission('canManageRentPaymentPlans'), async (req, res) => {

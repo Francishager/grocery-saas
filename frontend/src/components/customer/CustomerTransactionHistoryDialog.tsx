@@ -165,6 +165,9 @@ type RentPlanInstallment = { id: string; sequence: number; dueDate: string; amou
 type RentPlanPayment = { id: string; receiptNo: string; amount: number; paymentDate: string; paymentMethod: string; status: string; rentPeriods?: string[]; receivedBy?: string | null; transactionRef?: string | null; planInstallmentAllocations?: Array<{ amount: number; installment: { sequence: number } }> }
 type RentPaymentPlan = { id: string; planNo: string; status: string; totalAmount: number; amountPaid: number; installmentCount: number; frequency: string; startDate: string; notes?: string | null; tenancy: { tenantName: string; currency: string; unit: { unitCode: string; property: { name: string } } }; installments: RentPlanInstallment[]; payments: RentPlanPayment[] }
 type RentPlanProfileData = { plans: RentPaymentPlan[]; eligibleCharges: Array<{ id: string; tenancyId: string; tenancyName: string; propertyName: string; unitCode: string; currency: string; period: string; dueDate: string; description: string; amount: number; amountPaid: number; balance: number }> }
+type RentPromiseTenancy = { id: string; tenantName: string; currency: string; status: string; unit: { unitCode: string; property: { name: string } } }
+type RentPromise = { id: string; amount: number; dueDate: string; notes?: string | null; createdAt: string; createdByName: string; fulfilledAmount: number; remainingAmount: number; status: string; tenancy: RentPromiseTenancy; allocations: Array<{ id: string; amount: number; fulfilledAmount: number; remainingAmount: number; period: string; rentDueDate: string }> }
+type RentPromiseProfileData = { counts: { total: number; upcoming: number; due_today: number; kept: number; partially_paid: number; partially_kept: number; missed: number; promisedAmount: number; fulfilledAmount: number; remainingAmount: number }; tenancies: RentPromiseTenancy[]; promises: RentPromise[] }
 type RentPaymentAccount = { id: string; name: string; type: string; paymentMethod: string }
 type RentalAgreementDraft = { id: string; rentalNo: string; hireDate: string; expectedReturnDate: string; status: string; bookingState?: string; contractDraft?: string | null; contractGeneratedAt?: string | null }
 
@@ -409,6 +412,11 @@ export default function CustomerTransactionHistoryDialog({
   const [rentalAgreementsError, setRentalAgreementsError] = useState('')
   const [rentPlanData, setRentPlanData] = useState<RentPlanProfileData | null>(null)
   const [rentPlanReload, setRentPlanReload] = useState(0)
+  const [rentPromiseData, setRentPromiseData] = useState<RentPromiseProfileData | null>(null)
+  const [rentPromiseReload, setRentPromiseReload] = useState(0)
+  const [rentPromiseError, setRentPromiseError] = useState('')
+  const [creatingPromise, setCreatingPromise] = useState(false)
+  const [showPromiseForm, setShowPromiseForm] = useState(false)
   const [rentPlanError, setRentPlanError] = useState('')
   const [rentPlanAccounts, setRentPlanAccounts] = useState<RentPaymentAccount[]>([])
   const [defaultRentPlanAccountId, setDefaultRentPlanAccountId] = useState('')
@@ -437,6 +445,8 @@ export default function CustomerTransactionHistoryDialog({
   const canLoadHouseholdProfile = propertyManagementEnabled && (hasPermission('canViewTenantPersonalDetails') || hasPermission('canManageTenantPersonalDetails'))
   const canViewRentPaymentPlans = propertyManagementEnabled && (hasPermission('canViewRentPaymentPlans') || hasPermission('canManageRentPaymentPlans'))
   const canManageRentPaymentPlans = propertyManagementEnabled && hasPermission('canManageRentPaymentPlans')
+  const canViewRentPromises = propertyManagementEnabled && (hasPermission('canViewRentPromises') || hasPermission('canManageRentPromises'))
+  const canManageRentPromises = propertyManagementEnabled && hasPermission('canManageRentPromises')
   const canRecordRentPayment = propertyManagementEnabled && hasPermission('canRecordRentPayment')
   const canPrintRentReceipts = propertyManagementEnabled && (hasPermission('canViewPropertyCollections') || canRecordRentPayment)
   const [loading, setLoading] = useState(false)
@@ -523,6 +533,24 @@ export default function CustomerTransactionHistoryDialog({
   }, [open, customer?.id, canViewRentPaymentPlans, rentPlanReload])
 
   useEffect(() => {
+    if (!open || !customer?.id || !canViewRentPromises) {
+      setRentPromiseData(null)
+      setRentPromiseError('')
+      return
+    }
+    const controller = new AbortController()
+    setRentPromiseError('')
+    void apiFetch(`/api/property-management/customers/${customer.id}/rent-promises`, { signal: controller.signal } as RequestInit)
+      .then(async response => {
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(payload?.error || 'Could not load renter payment promises.')
+        if (!controller.signal.aborted) setRentPromiseData(payload)
+      })
+      .catch(error => { if (error?.name !== 'AbortError') setRentPromiseError(error?.message || 'Could not load renter payment promises.') })
+    return () => controller.abort()
+  }, [open, customer?.id, canViewRentPromises, rentPromiseReload])
+
+  useEffect(() => {
     if (!open || !canViewRentPaymentPlans || !canRecordRentPayment) {
       setRentPlanAccounts([])
       setDefaultRentPlanAccountId('')
@@ -597,6 +625,26 @@ export default function CustomerTransactionHistoryDialog({
       setRentPlanReload(value => value + 1)
     } catch (error: any) { setRentPlanError(error?.message || 'Could not create rent payment plan.') }
     finally { setSavingPlan(false) }
+  }
+
+  async function createRentPromise(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customer?.id) return
+    const form = new FormData(event.currentTarget)
+    setCreatingPromise(true)
+    setRentPromiseError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/rent-promises`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          tenancyId: form.get('tenancyId'), amount: Number(form.get('amount')), dueDate: form.get('dueDate'), notes: form.get('notes'), idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not record renter payment promise.')
+      setShowPromiseForm(false)
+      setRentPromiseReload(value => value + 1)
+    } catch (error: any) { setRentPromiseError(error?.message || 'Could not record renter payment promise.') }
+    finally { setCreatingPromise(false) }
   }
 
   async function recordRentPlanPayment(event: FormEvent<HTMLFormElement>) {
@@ -796,6 +844,7 @@ export default function CustomerTransactionHistoryDialog({
               {canViewRent && <TabsTrigger className="shrink-0" value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
               {canViewTenancyAgreements && <TabsTrigger className="shrink-0" value="tenancy-agreements">Tenancy Agreement</TabsTrigger>}
               {canViewRentPaymentPlans && <TabsTrigger className="shrink-0" value="payment-plans">Payment Plans</TabsTrigger>}
+              {canViewRentPromises && <TabsTrigger className="shrink-0" value="rent-promises">Promises ({rentPromiseData?.counts.total || 0})</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="overview" className="space-y-5">
@@ -1099,6 +1148,36 @@ export default function CustomerTransactionHistoryDialog({
                   {cancelPlanTarget?.id === plan.id && <form onSubmit={cancelRentPaymentPlan} className="flex flex-col gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 sm:flex-row sm:items-end"><label className="flex-1 text-sm">Cancellation reason<input value={planCancelReason} onChange={event => setPlanCancelReason(event.target.value)} minLength={5} maxLength={500} required className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label><Button type="button" variant="outline" onClick={() => setCancelPlanTarget(null)}>Keep active</Button><Button type="submit" variant="destructive" disabled={savingPlanCancellation}>{savingPlanCancellation ? 'Cancelling…' : 'Cancel and release remaining balance'}</Button></form>}
                 </section>
               })}
+            </TabsContent>}
+
+            {canViewRentPromises && <TabsContent value="rent-promises" className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h3 className="font-semibold">Promises to pay</h3><p className="text-sm text-muted-foreground">Track what was promised, when it is due, and what posted rent receipts fulfilled.</p></div>
+                {canManageRentPromises && <Button type="button" disabled={!rentPromiseData?.tenancies.length} onClick={() => { setRentPromiseError(''); setShowPromiseForm(value => !value) }}><CalendarClock className="mr-2 h-4 w-4" />Record promise</Button>}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {countMetric('Promises recorded', rentPromiseData?.counts.total)}
+                {countMetric('Kept in full', rentPromiseData?.counts.kept)}
+                {countMetric('Partially kept', (rentPromiseData?.counts.partially_paid || 0) + (rentPromiseData?.counts.partially_kept || 0))}
+                {countMetric('Missed', rentPromiseData?.counts.missed)}
+                {metric('Promised amount', rentPromiseData?.counts.promisedAmount)}
+                {metric('Paid toward promises', rentPromiseData?.counts.fulfilledAmount, 'text-emerald-700')}
+                {metric('Still promised', rentPromiseData?.counts.remainingAmount, 'text-amber-700')}
+                {countMetric('Upcoming / due today', (rentPromiseData?.counts.upcoming || 0) + (rentPromiseData?.counts.due_today || 0))}
+              </div>
+              <p className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">Promise tracking is separate from rent receipts and accounting. Only posted payments allocated to the rent periods covered by a promise count toward fulfillment; a promise never changes the renter balance by itself.</p>
+              {rentPromiseError && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{rentPromiseError}</p>}
+              {showPromiseForm && canManageRentPromises && <form onSubmit={createRentPromise} className="grid gap-3 rounded-md border border-primary/30 bg-muted/20 p-4 sm:grid-cols-2">
+                <div className="sm:col-span-2"><h4 className="font-semibold">Record a promise to pay</h4><p className="text-sm text-muted-foreground">The amount is matched against overdue rent not already covered by an active payment plan or another outstanding promise.</p></div>
+                <label className="block text-sm">Tenancy<select name="tenancyId" required defaultValue="" className="mt-1 h-10 w-full rounded-md border bg-background px-3"><option value="" disabled>Select property / unit</option>{rentPromiseData?.tenancies.map(tenancy => <option key={tenancy.id} value={tenancy.id}>{tenancy.unit.property.name} · {tenancy.unit.unitCode} · {tenancy.status}</option>)}</select></label>
+                <label className="block text-sm">Promised amount<input name="amount" type="number" min="0.01" step="0.01" required className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label>
+                <label className="block text-sm">Promise due date<input name="dueDate" type="date" required defaultValue={localDateInputValue()} className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label>
+                <label className="block text-sm sm:col-span-2">Notes<textarea name="notes" maxLength={1000} rows={2} placeholder="Agreed follow-up, payment arrangement, or context" className="mt-1 w-full rounded-md border bg-background p-3" /></label>
+                <div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="outline" onClick={() => setShowPromiseForm(false)}>Cancel</Button><Button type="submit" disabled={creatingPromise}>{creatingPromise ? 'Recording…' : 'Save promise'}</Button></div>
+              </form>}
+              {!rentPromiseData && !rentPromiseError && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">Loading promise history…</div>}
+              {rentPromiseData && !rentPromiseData.promises.length && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No payment promises have been recorded for this renter.</div>}
+              {!!rentPromiseData?.promises.length && <div className="overflow-x-auto rounded-md border"><table className="min-w-[900px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">Recorded / by</th><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Due date</th><th className="px-3 py-2 text-right">Promised</th><th className="px-3 py-2 text-right">Fulfilled</th><th className="px-3 py-2 text-right">Remaining</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Rent periods / notes</th></tr></thead><tbody>{rentPromiseData.promises.map(promise => <tr key={promise.id} className="border-t align-top"><td className="px-3 py-3">{formatDisplayDate(promise.createdAt)}<div className="text-xs text-muted-foreground">{promise.createdByName}</div></td><td className="px-3 py-3">{promise.tenancy.unit.property.name}<div className="text-xs text-muted-foreground">{promise.tenancy.unit.unitCode}</div></td><td className="px-3 py-3">{formatDisplayDate(promise.dueDate)}</td><td className="px-3 py-3 text-right font-medium">{formatCurrency(promise.amount, promise.tenancy.currency)}</td><td className="px-3 py-3 text-right text-emerald-700">{formatCurrency(promise.fulfilledAmount, promise.tenancy.currency)}</td><td className="px-3 py-3 text-right">{formatCurrency(promise.remainingAmount, promise.tenancy.currency)}</td><td className="px-3 py-3"><Badge variant={promise.status === 'kept' ? 'outline' : promise.status === 'missed' ? 'destructive' : promise.status === 'partially_kept' ? 'secondary' : 'default'}>{promise.status.replace(/_/g, ' ')}</Badge></td><td className="max-w-64 whitespace-normal px-3 py-3">{[...new Set(promise.allocations.map(allocation => allocation.period))].join(', ') || '—'}{promise.notes && <div className="mt-1 text-xs text-muted-foreground">{promise.notes}</div>}</td></tr>)}</tbody></table></div>}
             </TabsContent>}
 
             {canViewSalesAndPayments && <TabsContent value="sales-payments" className="space-y-4">

@@ -174,6 +174,7 @@ model Tenant {
   rentCharges                     RentCharge[]
   propertyRentPayments            PropertyRentPayment[]
   rentPaymentPlans                PropertyRentPaymentPlan[]
+  rentPromises                   PropertyRentPromise[]
   rentReminders                   PropertyRentReminder[]
   propertyAccountingConfig       PropertyAccountingConfig?
   propertyOwnerPayouts            PropertyOwnerPayout[]
@@ -514,6 +515,7 @@ model User {
   propertyLandPurchasesCreated PropertyLandPurchase[] @relation("PropertyLandPurchaseCreator")
   propertyLandPurchasePaymentsCreated PropertyLandPurchasePayment[] @relation("PropertyLandPurchasePaymentCreator")
   rentPaymentPlansCreated PropertyRentPaymentPlan[] @relation("PropertyRentPaymentPlanCreator")
+  rentPromisesCreated    PropertyRentPromise[] @relation("PropertyRentPromiseCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -965,6 +967,8 @@ model UserPermission {
   canManageRentPayment              Boolean  @default(false)
   canViewRentPaymentPlans           Boolean  @default(false)
   canManageRentPaymentPlans         Boolean  @default(false)
+  canViewRentPromises                Boolean  @default(false)
+  canManageRentPromises              Boolean  @default(false)
   canViewPropertyReports            Boolean  @default(false)
   canRecordOwnerPayout              Boolean  @default(false)
   canViewPropertySales               Boolean  @default(false)
@@ -2863,6 +2867,7 @@ model PropertyTenancy {
   charges           RentCharge[]
   payments          PropertyRentPayment[]
   paymentPlans      PropertyRentPaymentPlan[]
+  promises          PropertyRentPromise[]
   identity          PropertyTenantIdentity?
   reminders         PropertyRentReminder[]
   rentRateHistory   PropertyRentRateHistory[]
@@ -2905,6 +2910,7 @@ model RentCharge {
   status         String                 @default("unpaid")
   allocations    RentPaymentAllocation[]
   planAllocations RentPaymentPlanChargeAllocation[]
+  promiseAllocations PropertyRentPromiseChargeAllocation[]
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
 
@@ -2999,6 +3005,40 @@ model PropertyRentPaymentPlan {
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, tenancyId, status])
   @@map("property_rent_payment_plans")
+}
+
+model PropertyRentPromise {
+  id          String                             @id @default(cuid())
+  tenantId    String
+  tenant      Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId   String
+  tenancy     PropertyTenancy                    @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  createdById String
+  createdBy   User                               @relation("PropertyRentPromiseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  idempotencyKey String?
+  amount      Float
+  dueDate     DateTime
+  notes       String?
+  allocations PropertyRentPromiseChargeAllocation[]
+  createdAt   DateTime                           @default(now())
+
+  @@index([tenantId, tenancyId, createdAt])
+  @@index([tenantId, dueDate])
+  @@unique([tenantId, idempotencyKey])
+  @@map("property_rent_promises")
+}
+
+model PropertyRentPromiseChargeAllocation {
+  id        String              @id @default(cuid())
+  promiseId String
+  promise   PropertyRentPromise @relation(fields: [promiseId], references: [id], onDelete: Cascade)
+  chargeId  String
+  charge    RentCharge          @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  amount    Float
+
+  @@unique([promiseId, chargeId])
+  @@index([chargeId])
+  @@map("property_rent_promise_charge_allocations")
 }
 
 model RentPaymentPlanChargeAllocation {
