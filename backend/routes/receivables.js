@@ -10,6 +10,7 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
 import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
 import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
+import { allocateCustomerReceipt } from '../src/utils/customerReceiptAllocation.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
@@ -2325,48 +2326,66 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
     let payment
     try {
       payment = await prisma.$transaction(async (tx) => {
-      let transactionSale = null
-      let legacyPaidBaseline = 0
-      let allocatedBefore = 0
-      let allocateToSale = 0
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
       const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
-      if (saleId) {
-        await tx.$queryRaw`SELECT "id" FROM "sale_records" WHERE "id" = ${saleId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
-        transactionSale = await tx.saleRecord.findFirst({
-          where: { id: saleId, tenantId: scope.tenantId, customerId, status: 'completed' },
-        })
-        if (!transactionSale) throw Object.assign(new Error('Sale is no longer available for payment'), { statusCode: 409 })
-
-        const [allocations, legacyPayments] = await Promise.all([
-          tx.customerPaymentAllocation.aggregate({
-            where: { tenantId: scope.tenantId, saleId, targetType: 'sale' },
+      const candidateSales = await tx.saleRecord.findMany({
+        where: { tenantId: scope.tenantId, branchId: scope.branchId, customerId, status: 'completed' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true, total: true, balance: true, amountPaid: true,
+          legacyPaidAmountAtCutover: true, legacySaleAmountPaidAtCutover: true,
+          legacyLinkedPaymentsAtCutover: true, createdAt: true,
+        },
+      })
+      if (saleId && !candidateSales.some((row) => row.id === saleId)) {
+        throw Object.assign(new Error('Sale is no longer available for payment in this branch'), { statusCode: 409 })
+      }
+      const candidateSaleIds = candidateSales.map((row) => row.id)
+      const [allocationGroups, legacyPaymentGroups, creditApplicationGroups] = candidateSaleIds.length
+        ? await Promise.all([
+          tx.customerPaymentAllocation.groupBy({
+            by: ['saleId'],
+            where: { tenantId: scope.tenantId, saleId: { in: candidateSaleIds }, targetType: 'sale' },
             _sum: { amount: true },
           }),
-          tx.customerPayment.aggregate({
-            where: { tenantId: scope.tenantId, customerId, saleId, allocationMode: 'legacy' },
+          tx.customerPayment.groupBy({
+            by: ['saleId'],
+            where: { tenantId: scope.tenantId, customerId, saleId: { in: candidateSaleIds }, allocationMode: 'legacy' },
+            _sum: { amount: true },
+          }),
+          tx.customerCreditApplication.groupBy({
+            by: ['saleId'],
+            where: { tenantId: scope.tenantId, customerId, saleId: { in: candidateSaleIds } },
             _sum: { amount: true },
           }),
         ])
-        allocatedBefore = toMoney(allocations._sum.amount)
-        const legacySalePaid = toMoney(transactionSale.amountPaid)
-        const legacyReceiptTotal = toMoney(legacyPayments._sum.amount)
-        legacyPaidBaseline = transactionSale.legacyPaidAmountAtCutover == null
-          ? Math.max(legacySalePaid, legacyReceiptTotal)
-          : toMoney(transactionSale.legacyPaidAmountAtCutover)
-
-        if (transactionSale.legacyPaidAmountAtCutover == null) {
-          await tx.saleRecord.update({
-            where: { id: saleId },
-            data: {
-              legacyPaidAmountAtCutover: legacyPaidBaseline,
-              legacySaleAmountPaidAtCutover: legacySalePaid,
-              legacyLinkedPaymentsAtCutover: legacyReceiptTotal,
-            },
-          })
+        : [[], [], []]
+      const allocatedBySale = new Map(allocationGroups.map((row) => [row.saleId, toMoney(row._sum.amount)]))
+      const legacyPaymentsBySale = new Map(legacyPaymentGroups.map((row) => [row.saleId, toMoney(row._sum.amount)]))
+      const creditApplicationsBySale = new Map(creditApplicationGroups.map((row) => [row.saleId, toMoney(row._sum.amount)]))
+      const openSales = candidateSales.map((row) => {
+        const recordedPaid = toMoney(row.amountPaid)
+        const legacyReceipts = toMoney(legacyPaymentsBySale.get(row.id))
+        const allocatedBefore = toMoney(allocatedBySale.get(row.id))
+        const creditAppliedBefore = toMoney(creditApplicationsBySale.get(row.id))
+        const legacyBaseline = row.legacyPaidAmountAtCutover == null
+          ? Math.max(legacyReceipts, recordedPaid - allocatedBefore - creditAppliedBefore)
+          : toMoney(row.legacyPaidAmountAtCutover)
+        const legacyPaidIncrease = Math.max(0, legacyBaseline - recordedPaid)
+        const effectiveBalance = Math.max(0, toMoney(row.balance) - legacyPaidIncrease)
+        const calculatedDue = Math.max(0, toMoney(row.total) - legacyBaseline - allocatedBefore - creditAppliedBefore)
+        return {
+          ...row,
+          recordedPaid,
+          legacyReceipts,
+          legacyBaseline,
+          allocatedBefore,
+          creditAppliedBefore,
+          openAmount: Math.min(effectiveBalance, calculatedDue),
         }
-        const amountStillDue = Math.max(0, transactionSale.total - legacyPaidBaseline - allocatedBefore)
-        allocateToSale = Math.min(paidAmount, Math.min(Math.max(0, transactionSale.balance), amountStillDue))
-      }
+      })
+      const receiptAllocation = allocateCustomerReceipt(paidAmount, openSales, saleId || null)
+      const allocationBySale = new Map(receiptAllocation.allocations.map((row) => [row.saleId, row.amount]))
 
       const createdPayment = await tx.customerPayment.create({
         data: {
@@ -2391,26 +2410,27 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
         }
       })
 
-      if (saleId && allocateToSale > 0) {
+      for (const allocation of receiptAllocation.allocations) {
         await tx.customerPaymentAllocation.create({
           data: {
             tenantId: scope.tenantId,
             customerId,
             paymentId: createdPayment.id,
-            saleId,
+            saleId: allocation.saleId,
             targetType: 'sale',
-            amount: allocateToSale,
+            amount: allocation.amount,
             createdById: req.user.id,
           }
         })
-      } else if (!saleId) {
+      }
+      if (receiptAllocation.unallocated > 0) {
         await tx.customerPaymentAllocation.create({
           data: {
             tenantId: scope.tenantId,
             customerId,
             paymentId: createdPayment.id,
             targetType: 'customer_account',
-            amount: paidAmount,
+            amount: receiptAllocation.unallocated,
             createdById: req.user.id,
           }
         })
@@ -2447,9 +2467,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
 
       const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
       if (arConfig?.isEnabled) {
-        const receivableApplied = saleId
-          ? allocateToSale
-          : Math.min(paidAmount, Math.max(0, toMoney(customerBalanceBefore?.balance)))
+        const receivableApplied = Math.min(paidAmount, Math.max(0, toMoney(customerBalanceBefore?.balance)))
         const transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` } } })
         if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${accountToUse.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
         await postReceivablesJournal(tx, {
@@ -2465,13 +2483,23 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
         })
       }
 
-      if (transactionSale) {
-        const newAmountPaid = legacyPaidBaseline + allocatedBefore + allocateToSale
-        const legacyPaidIncrease = Math.max(0, legacyPaidBaseline - toMoney(transactionSale.amountPaid))
-        const newSaleBalance = Math.max(0, transactionSale.balance - legacyPaidIncrease - allocateToSale)
-
+      for (const transactionSale of openSales) {
+        const allocatedNow = toMoney(allocationBySale.get(transactionSale.id))
+        if (allocatedNow <= 0) continue
+        if (transactionSale.legacyPaidAmountAtCutover == null) {
+          await tx.saleRecord.update({
+            where: { id: transactionSale.id },
+            data: {
+              legacyPaidAmountAtCutover: transactionSale.legacyBaseline,
+              legacySaleAmountPaidAtCutover: transactionSale.recordedPaid,
+              legacyLinkedPaymentsAtCutover: transactionSale.legacyReceipts,
+            },
+          })
+        }
+        const newAmountPaid = transactionSale.legacyBaseline + transactionSale.allocatedBefore + transactionSale.creditAppliedBefore + allocatedNow
+        const newSaleBalance = Math.max(0, transactionSale.openAmount - allocatedNow)
         await tx.saleRecord.update({
-          where: { id: saleId },
+          where: { id: transactionSale.id },
           data: {
             amountPaid: newAmountPaid,
             balance: newSaleBalance,

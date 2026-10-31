@@ -171,7 +171,12 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
     const applicationsFromLinkedReceipts = payments
       .filter((payment) => payment.saleId === sale.id)
       .reduce((sum, payment) => roundMoney(sum + toMoney(appliedByPayment.get(payment.id))), 0)
-    const unappliedForSale = explicitMode ? Math.max(0, explicitReceiptTotal - allocatedPaid - applicationsFromLinkedReceipts) : 0;
+    const allocationsFromLinkedReceipts = payments
+      .filter((payment) => payment.saleId === sale.id)
+      .reduce((sum, payment) => roundMoney(sum + toMoney(allocationsByPayment.get(payment.id))), 0)
+    const unappliedForSale = explicitMode
+      ? Math.max(0, explicitReceiptTotal - allocationsFromLinkedReceipts - applicationsFromLinkedReceipts)
+      : 0;
 
     if (unappliedForSale > 0) {
       unappliedCustomerReceiptsByCustomer.set(customerId,

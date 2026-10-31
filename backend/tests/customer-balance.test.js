@@ -221,6 +221,27 @@ test('applying a linked receipt surplus to a later sale consumes that customer a
   assert.equal(result.components.customerPayments, 0);
 });
 
+test('linked explicit receipt allocated across multiple invoices is not counted as customer credit twice', async () => {
+  const data = makeClient({
+    customer,
+    sales: [
+      sale({ id: 'selected-sale', total: 100, subtotal: 100, amountPaid: 100, legacyPaidAmountAtCutover: 0 }),
+      sale({ id: 'next-sale', total: 100, subtotal: 100, amountPaid: 50, legacyPaidAmountAtCutover: 0 }),
+    ],
+    payments: [{ id: 'receipt', customerId: customer.id, saleId: 'selected-sale', amount: 150, allocationMode: 'explicit' }],
+    allocations: [
+      { id: 'selected-allocation', paymentId: 'receipt', customerId: customer.id, saleId: 'selected-sale', amount: 100 },
+      { id: 'next-allocation', paymentId: 'receipt', customerId: customer.id, saleId: 'next-sale', amount: 50 },
+    ],
+  });
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id);
+
+  assert.equal(result.balance, 50);
+  assert.equal(result.components.salePayments, 150);
+  assert.equal(result.components.unappliedCustomerReceipts, 0);
+});
+
 test('explicit customer-account allocation reduces the customer account separately from invoice allocations', async () => {
   const data = makeClient({
     customer,
