@@ -56,6 +56,14 @@ test('transient notifications share a four-second timer and fully fade out', () 
   assert.match(readFileSync(root + '/components/ui/toast.tsx', 'utf8'), /data-\[state=closed\]:fade-out-0/);
 });
 
+test('notification polling pauses in hidden tabs and AI daily tips are not posted on every poll', () => {
+  const bell = readFileSync(root + '/components/NotificationBell.tsx', 'utf8');
+  assert.match(bell, /document\.visibilityState !== 'visible'/);
+  assert.match(bell, /document\.addEventListener\('visibilitychange', refreshIfVisible\)/);
+  assert.match(bell, /dailyTipsDoneRef\.current !== tipDayKey/);
+  assert.match(bell, /Date\.now\(\) - previousAttempt\.at >= 5 \* 60 \* 1000/);
+});
+
 test('login greetings use the account holder name, including older first/last-name profiles', () => {
   assert.equal(loginGreeting({ name: '  Delice  ', fname: 'Other', lname: 'Name' }), 'Welcome back, Delice!');
   assert.equal(loginGreeting({ name: ' ', fname: ' Aimable ', lname: ' Cyuzuzo ' }), 'Welcome back, Aimable Cyuzuzo!');

@@ -84,6 +84,9 @@ export function NotificationBell() {
   const startedAtRef = useRef(Date.now())
   const loadedRef = useRef(false)
   const userIdRef = useRef(user?.id)
+  const loadInFlightRef = useRef(false)
+  const dailyTipsDoneRef = useRef('')
+  const dailyTipsAttemptRef = useRef<{ key: string; at: number } | null>(null)
 
   // Browser push notifications
   const { permission: pushPermission, registered: pushRegistered, registerToken, unregisterToken, isDisabledOnDevice } = usePushNotifications()
@@ -94,6 +97,8 @@ export function NotificationBell() {
     readKeysRef.current.clear()
     immediateRef.current.clear()
     loadedRef.current = false
+    dailyTipsDoneRef.current = ''
+    dailyTipsAttemptRef.current = null
     startedAtRef.current = Date.now()
     setNotifications([])
     setAdvisorTipQueue([])
@@ -316,15 +321,23 @@ export function NotificationBell() {
   // Load all notifications
   const loadNotifications = useCallback(async () => {
     const loadingForUser = user?.id
-    if (!loadingForUser) return
+    if (!loadingForUser || document.visibilityState !== 'visible' || loadInFlightRef.current) return
+    loadInFlightRef.current = true
     setLoading(true)
     try {
       let apiNotifs: NotificationItem[] = []
       let localNotifs: NotificationItem[] = []
 
       if (online) {
-        if (hasPermission('canUseBusinessAI')) {
-          await apiFetch('/api/ai/daily-tips', { method: 'POST' }).catch(() => null)
+        if (hasPermission('canUseBusinessAI') && document.visibilityState === 'visible') {
+          const tipDayKey = `${loadingForUser}:${new Date().toISOString().slice(0, 10)}`
+          const previousAttempt = dailyTipsAttemptRef.current
+          const retryAllowed = !previousAttempt || previousAttempt.key !== tipDayKey || Date.now() - previousAttempt.at >= 5 * 60 * 1000
+          if (dailyTipsDoneRef.current !== tipDayKey && retryAllowed) {
+            dailyTipsAttemptRef.current = { key: tipDayKey, at: Date.now() }
+            const response = await apiFetch('/api/ai/daily-tips', { method: 'POST' }).catch(() => null)
+            if (response?.ok) dailyTipsDoneRef.current = tipDayKey
+          }
         }
         const [api, local] = await Promise.all([fetchApiNotifications(), fetchLocalNotifications()])
         apiNotifs = api
@@ -380,15 +393,25 @@ export function NotificationBell() {
     } catch {
       // ignore
     } finally {
+      loadInFlightRef.current = false
       setLoading(false)
     }
   }, [online, user?.id, hasPermission, announce, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
 
   // Initial load + polling plus immediate events emitted by completed workflows.
   useEffect(() => {
-    loadNotifications()
-    const interval = setInterval(loadNotifications, 30000)
-    return () => clearInterval(interval)
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadNotifications()
+    }
+    refreshIfVisible()
+    const interval = window.setInterval(refreshIfVisible, 30000)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+    window.addEventListener('focus', refreshIfVisible)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+      window.removeEventListener('focus', refreshIfVisible)
+    }
   }, [loadNotifications])
 
   useEffect(() => {
