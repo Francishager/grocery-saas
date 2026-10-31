@@ -121,6 +121,7 @@ interface SaleDraftItem {
   quantity: string
   price: string
   discount: string
+  unitName: string
 }
 
 const createEmptySaleItem = (): SaleDraftItem => ({
@@ -128,7 +129,10 @@ const createEmptySaleItem = (): SaleDraftItem => ({
   quantity: '1',
   price: '',
   discount: '0',
+  unitName: '',
 })
+
+const BASE_SELLING_UNIT = '__base_unit__'
 
 const CUSTOMER_OPTION_PAGE_SIZE = 100
 
@@ -804,7 +808,21 @@ export default function ReceivablesPage() {
     updateSaleItem(index, {
       productId,
       price: product ? String(defaultPrice) : '',
+      unitName: '',
     })
+  }
+
+  const handleSaleUnitChange = (index: number, unitName: string) => {
+    const item = saleItems[index]
+    const product = products.find((candidate) => String(candidate.id) === item?.productId)
+    if (!product) return
+    if (unitName === BASE_SELLING_UNIT) {
+      updateSaleItem(index, { unitName: '', price: String(product.unit_price) })
+      return
+    }
+    const selectedUnit = (product.units || []).find((unit: any) => unit.unitName === unitName)
+    if (!selectedUnit) return
+    updateSaleItem(index, { unitName: selectedUnit.unitName, price: String(selectedUnit.sellingPrice) })
   }
 
   const removeSaleItem = (index: number) => {
@@ -830,6 +848,7 @@ export default function ReceivablesPage() {
         quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
         price: parseAmount(item.price),
         discount: parseAmount(item.discount),
+        unitName: item.unitName || null,
       }))
 
     if (!saleForm.customerId || items.length === 0) {
@@ -1182,8 +1201,9 @@ export default function ReceivablesPage() {
     const saleItems = Array.isArray(sale?.items) ? sale.items : []
     const customer = customerOverride || sale?.customer || { name: 'Walk-in customer' }
     const items = saleItems.map((item: any) => ({
-      name: item?.product?.name || item?.name || 'Item',
+      name: `${item?.product?.name || item?.name || 'Item'}${item?.unitName ? ` (${item.unitName})` : ''}`,
       quantity: Number(item?.quantity || 0),
+      unitName: item?.unitName || '',
       price: Number(item?.price || item?.unitPrice || 0),
       total: Number(item?.total || (Number(item?.quantity || 0) * Number(item?.price || item?.unitPrice || 0)))
     }))
@@ -1242,7 +1262,7 @@ export default function ReceivablesPage() {
 
     const rows = invoice.items.map((item: any) => [
       item.name,
-      String(item.quantity),
+      `${item.quantity}${item.unitName ? ` ${item.unitName}` : ''}`,
       formatCurrency(Number(item.price)),
       formatCurrency(Number(item.total)),
     ])
@@ -1312,14 +1332,14 @@ export default function ReceivablesPage() {
 
     const invoiceItemsHtml = items.length
       ? items.map((item: any) => {
-          const productName = item?.product?.name || item?.name || 'Item'
+          const productName = `${item?.product?.name || item?.name || 'Item'}${item?.unitName ? ` (${item.unitName})` : ''}`
           const qty = Number(item?.quantity || 0)
           const price = Number(item?.price || 0)
           const total = Number(item?.total || qty * price)
           return `
             <tr>
               <td>${escapeHtml(productName)}</td>
-              <td>${qty}</td>
+              <td>${qty}${item?.unitName ? ` ${escapeHtml(item.unitName)}` : ''}</td>
               <td>${formatCurrency(price)}</td>
               <td>${formatCurrency(total)}</td>
             </tr>
@@ -2208,8 +2228,9 @@ export default function ReceivablesPage() {
                   const selectedItemType = (selectedItem as any)?.itemType
                   const isService = selectedItemType === 'service'
                   const isRental = selectedItemType === 'rental'
+                  const sellingUnits = selectedItem?.units || []
                   return (
-                  <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]">
+                  <div key={index} className={`grid gap-3 ${sellingUnits.length ? 'md:grid-cols-[minmax(0,1.3fr)_minmax(145px,0.9fr)_80px_110px_110px_40px]' : 'md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]'}`}>
                     <FormSelectSearch
                       containerClassName="min-w-0"
                       value={item.productId}
@@ -2220,6 +2241,26 @@ export default function ReceivablesPage() {
                       helperText={saleProductOptions.length === 0 ? 'No products or services found' : undefined}
                       clearable={false}
                     />
+                    {sellingUnits.length > 0 && (
+                      <Select
+                        value={item.unitName || BASE_SELLING_UNIT}
+                        onValueChange={(value) => handleSaleUnitChange(index, value)}
+                      >
+                        <SelectTrigger aria-label={`Selling unit for ${selectedItem?.product_name || 'item'}`}>
+                          <SelectValue placeholder="Selling unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={BASE_SELLING_UNIT}>
+                            {selectedItem?.baseUnit || 'Piece'} · {formatCurrency(selectedItem?.unit_price || 0)}
+                          </SelectItem>
+                          {sellingUnits.map((unit: any) => (
+                            <SelectItem key={unit.id || unit.unitName} value={unit.unitName}>
+                              {unit.unitName} ({unit.conversionFactor} {selectedItem?.baseUnit || 'Piece'}) · {formatCurrency(unit.sellingPrice || 0)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                     <Input
                       type="number"
                       min="1"
@@ -2232,8 +2273,9 @@ export default function ReceivablesPage() {
                       min="0"
                       step="0.01"
                       value={item.price}
+                      disabled={Boolean(item.unitName)}
                       onChange={(event) => updateSaleItem(index, { price: event.target.value })}
-                      placeholder="Price"
+                      placeholder={item.unitName ? 'Configured unit price' : 'Price'}
                     />
                     <Input
                       type="number"

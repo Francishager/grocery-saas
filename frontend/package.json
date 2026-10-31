@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "test:reports": "node --test tests/report-regressions.test.mjs tests/translation-regressions.test.mjs tests/sales-report-chart.test.mjs",
+    "test:sales": "node --test tests/credit-sale-units.test.mjs",
     "test:auth": "node --test tests/auth-network-regressions.test.mjs tests/api-proxy-regressions.test.mjs",
     "test:reports:browser": "node tests/report-translation.browser.mjs",
     "test:notifications": "node --test tests/notification-regressions.test.mjs",
     "test:notifications:browser": "node tests/notifications.browser.mjs",
-    "prebuild": "npm run test:reports && npm run test:notifications && npm run test:auth",
+    "prebuild": "npm run test:reports && npm run test:sales && npm run test:notifications && npm run test:auth",
     "dev": "vite",
     "build": "vite build",
     "deploy": "npx wrangler deploy",
