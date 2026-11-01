@@ -10,6 +10,8 @@ const receivablesPage = source('../src/pages/receivables/ReceivablesPage.tsx');
 const historyDialog = source('../src/components/customer/CustomerTransactionHistoryDialog.tsx');
 const transactionReceipt = source('../src/lib/transactionReceipt.ts');
 const transactionReceiptButton = source('../src/components/TransactionReceiptButton.tsx');
+const receiptViewer = source('../src/components/ReceiptViewer.tsx');
+const thermalPrinter = source('../src/lib/thermalPrinter.ts');
 
 test('record payment opens over the profile without navigating to the receivables table', () => {
   assert.match(profilePage, /onRecordPayment=\{\(customer\) => setPaymentCustomer\(customer\)\}/);
@@ -71,15 +73,15 @@ test('renter profile receipts include mobile-money provider, number, and transac
 });
 
 test('customer and renter reprints use the shared browser receipt print window', () => {
-  assert.match(transactionReceipt, /openReceiptPrintWindow\(data\.reference \|\| data\.title\)/);
-  assert.match(transactionReceipt, /printHtmlInBrowser\(html, `\$\{data\.title\} \$\{data\.reference\}`, printWindow\)/);
-  assert.doesNotMatch(transactionReceipt, /window\.open\(|window\.onload/);
+  assert.match(transactionReceiptButton, /<ReceiptViewer receiptNo=\{data\.reference\} transactionData=\{data\} triggerLabel=\{label\} previewOnTrigger/);
+  assert.match(receiptViewer, /printReceiptInBrowser\(loadReceiptForPrint, receiptNo\)/);
+  assert.match(receiptViewer, /Browser Print \/ Save as PDF/);
 });
 
 test('customer and renter reprints open an in-app preview with close, browser print, and direct PDF actions', () => {
-  assert.match(transactionReceiptButton, /<Dialog open=\{open\}/);
-  assert.match(transactionReceiptButton, /aria-label="Close receipt"/);
-  assert.match(transactionReceiptButton, /Print \/ Save as PDF/);
-  assert.match(transactionReceiptButton, /Download PDF/);
-  assert.match(transactionReceiptButton, /pdf\.save\(`/);
+  assert.match(receiptViewer, /aria-label="Close receipt"/);
+  assert.match(receiptViewer, /downloadReceiptPreviewPdf\(await loadReceiptForPrint\(\), receiptNo\)/);
+  assert.match(receiptViewer, /handleNativePrinterChoice/);
+  assert.match(receiptViewer, /previewOnTrigger \? \(\) => setShowPreview\(true\)/);
+  assert.match(thermalPrinter, /export function buildEscPosReceiptCommands\(receipt: ReceiptPreview\)/);
 });

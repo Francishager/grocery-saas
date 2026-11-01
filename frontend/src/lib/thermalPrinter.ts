@@ -1,3 +1,5 @@
+import type { ReceiptPreview } from '@/lib/api'
+
 /**
  * ESC/POS Thermal Printer Integration via Web Serial and Web Bluetooth APIs
  * 
@@ -447,6 +449,74 @@ function encode(text: string): number[] {
 
 function formatNum(n: number): string {
   return (n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
+export function buildEscPosReceiptCommands(receipt: ReceiptPreview): string[] {
+  const bytes: number[] = [0x1b, 0x40]
+  const text = (value: string) => bytes.push(...encode(value), 0x0a)
+  const align = (value: number) => bytes.push(0x1b, 0x61, value)
+  const bold = (value: boolean) => bytes.push(0x1b, 0x45, value ? 1 : 0)
+  const divider = () => text('--------------------------------')
+  const currency = receipt.transactionCurrency || receipt.baseCurrency || receipt.business.currency || 'UGX'
+
+  align(1)
+  bold(true)
+  text(receipt.business.name || 'Business')
+  bold(false)
+  for (const detail of [receipt.business.address, receipt.business.phone, receipt.business.email]) {
+    if (detail) text(detail)
+  }
+  divider()
+  bold(true)
+  text(receipt.documentTitle || 'RECEIPT')
+  bold(false)
+  text(receipt.receiptNo)
+  align(0)
+  text(`Date: ${new Date(receipt.createdAt).toLocaleString()}`)
+  if (receipt.customerName) text(`Customer: ${receipt.customerName}`)
+  if (receipt.cashier && receipt.cashier !== '-') text(`${receipt.cashierLabel || 'Cashier'}: ${receipt.cashier}`)
+  if (receipt.paymentMethod) text(`Payment: ${receipt.paymentMethod.toUpperCase()}`)
+  divider()
+
+  for (const item of receipt.items || []) {
+    for (const part of wrapReceiptText(item.name, 32)) text(part)
+    text(`  ${formatNum(item.quantity)} x ${formatNum(item.price)} = ${formatNum(item.total)}`)
+  }
+  if (receipt.items.length) divider()
+
+  const foreign = currency !== (receipt.baseCurrency || receipt.business.currency || 'UGX')
+  const total = foreign ? Number(receipt.foreignTotal ?? receipt.total) : Number(receipt.total)
+  text(`${receipt.amountLabel || 'TOTAL'} (${currency}): ${formatNum(total)}`)
+  for (const detail of receipt.additionalDetails || []) {
+    for (const part of wrapReceiptText(`${detail.label}: ${detail.value}`, 32)) text(part)
+  }
+  align(1)
+  text(receipt.business.receiptFooter || 'Powered by JibuSales')
+  bytes.push(0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x00)
+  return [bytes.map(byte => byte.toString(16).padStart(2, '0')).join('')]
+}
+
+function wrapReceiptText(value: string, width: number): string[] {
+  const words = String(value || '').split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  let line = ''
+  for (const word of words) {
+    if (word.length > width) {
+      if (line) lines.push(line)
+      for (let index = 0; index < word.length; index += width) lines.push(word.slice(index, index + width))
+      line = ''
+      continue
+    }
+    const candidate = line ? `${line} ${word}` : word
+    if (candidate.length > width) {
+      lines.push(line)
+      line = word
+    } else {
+      line = candidate
+    }
+  }
+  if (line) lines.push(line)
+  return lines.length ? lines : ['']
 }
 
 export interface ReceiptData {

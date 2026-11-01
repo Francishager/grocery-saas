@@ -50,7 +50,7 @@ export function printHtmlInBrowser(html: string, receiptNo = 'Receipt', printWin
 }
 
 function normalizeReceipt(receipt: Partial<ReceiptPreview> | null | undefined): ReceiptPreview {
-  const fallbackItems = Array.isArray(receipt?.items) && receipt.items.length ? receipt.items : [{ id: 'item-1', name: 'Item', quantity: 1, price: 0, total: 0 }]
+  const fallbackItems = Array.isArray(receipt?.items) ? receipt.items : [{ id: 'item-1', name: 'Item', quantity: 1, price: 0, total: 0 }]
   return {
     id: receipt?.id || 'receipt-preview',
     receiptNo: receipt?.receiptNo || 'Receipt',
@@ -81,6 +81,10 @@ function normalizeReceipt(receipt: Partial<ReceiptPreview> | null | undefined): 
     total: Number(receipt?.total || 0),
     amountPaid: receipt?.amountPaid ?? null,
     changeGiven: receipt?.changeGiven ?? null,
+    documentTitle: receipt?.documentTitle ?? null,
+    amountLabel: receipt?.amountLabel ?? null,
+    partyLabel: receipt?.partyLabel ?? null,
+    additionalDetails: receipt?.additionalDetails ?? [],
     items: fallbackItems.map((item: any, index: number) => ({
       id: item?.id || `item-${index}`,
       name: item?.name || 'Item',
@@ -121,10 +125,11 @@ function receiptHtml(receipt: ReceiptPreview): string {
       <div class="dash"></div>
 
       <section class="meta">
+        ${receipt.documentTitle ? `<h2>${escapeHtml(receipt.documentTitle)}</h2>` : ''}
         ${row('Receipt', receipt.receiptNo)}
         ${row('Date', new Date(receipt.createdAt).toLocaleString())}
-        ${row('Cashier', cashier)}
-        ${customerName ? row('Customer', customerName) : ''}
+        ${row(receipt.cashierLabel || 'Cashier', cashier)}
+        ${customerName ? row(receipt.partyLabel || 'Customer', customerName) : ''}
         ${row('Payment', paymentMethod.toUpperCase())}
       </section>
 
@@ -140,11 +145,13 @@ function receiptHtml(receipt: ReceiptPreview): string {
         ${row(`Subtotal (${baseCurrency})`, formatCurrency(receipt.subtotal, baseCurrency))}
         ${receipt.discount > 0 ? row('Discount', formatCurrency(receipt.discount, baseCurrency)) : ''}
         ${receipt.tax > 0 ? row('Tax', formatCurrency(receipt.tax, baseCurrency)) : ''}
-        ${row(foreign ? `Base total (${baseCurrency})` : 'TOTAL', formatCurrency(receipt.total, baseCurrency), 'total')}
+        ${row(receipt.amountLabel || (foreign ? `Base total (${baseCurrency})` : 'TOTAL'), formatCurrency(receipt.total, baseCurrency), 'total')}
         ${foreign ? row(`TRANSACTION TOTAL (${transactionCurrency})`, formatCurrency(receipt.foreignTotal ?? receipt.total, transactionCurrency), 'total') : ''}
         ${receipt.amountPaid != null ? row(`Amount Paid (${transactionCurrency})`, formatCurrency(receipt.amountPaid, transactionCurrency)) : ''}
         ${receipt.amountPaid != null ? row(`Change (${transactionCurrency})`, formatCurrency(receipt.changeGiven || 0, transactionCurrency)) : ''}
       </section>
+
+      ${receipt.additionalDetails?.length ? `<section class="details">${receipt.additionalDetails.map(detail => row(detail.label, detail.value)).join('')}</section>` : ''}
 
       <div class="dash"></div>
 

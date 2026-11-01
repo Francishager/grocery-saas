@@ -1319,8 +1319,10 @@ export interface ReceiptPreview {
   }
   branch?: BranchOption | null
   cashier?: string
+  cashierLabel?: string
   servedBy?: string | null
   customerName?: string | null
+  partyLabel?: string
   paymentMethod: string
   createdAt: string
   baseCurrency?: string
@@ -1342,6 +1344,9 @@ export interface ReceiptPreview {
   exchangeRateSource?: string | null
   amountPaid?: number | null
   changeGiven?: number | null
+  documentTitle?: string | null
+  amountLabel?: string | null
+  additionalDetails?: Array<{ label: string; value: string }>
   items: Array<{
     id: string
     name: string

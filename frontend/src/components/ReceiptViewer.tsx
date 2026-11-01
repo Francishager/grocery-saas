@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Download, FileText, Loader2, Printer, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { receiptsApi, type ReceiptPreview } from '@/lib/api'
+import { apiFetch, receiptsApi, type ReceiptPreview } from '@/lib/api'
 import {
   BluetoothThermalPrinter,
+  buildEscPosReceiptCommands,
   ThermalPrinter,
   UsbThermalPrinter,
   isBluetoothSupported,
@@ -22,17 +23,22 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { formatCurrency } from '@/lib/utils'
 import { hasNativePrinterBridge, listNativePrinters, printWithNativePrinter, type NativePrinter } from '@/lib/nativePrinter'
+import type { TransactionReceiptData } from '@/lib/transactionReceipt'
+import { downloadReceiptPreviewPdf } from '@/lib/receiptPdf'
 
 interface ReceiptViewerProps {
-  saleId: string
+  saleId?: string
   receiptNo: string
   onClose?: () => void
+  transactionData?: TransactionReceiptData
+  triggerLabel?: string
+  previewOnTrigger?: boolean
 }
 
 type DirectPrinter = BluetoothThermalPrinter | ThermalPrinter | UsbThermalPrinter
 type PrinterChoice = 'usb' | 'serial' | 'bluetooth'
 
-export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptViewerProps) {
+export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionData, triggerLabel, previewOnTrigger = false }: ReceiptViewerProps) {
   const [printing, setPrinting] = useState(false)
   const [showPrinterPicker, setShowPrinterPicker] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
@@ -43,7 +49,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   const [agentPrinters, setAgentPrinters] = useState<PrintAgentPrinter[]>([])
   const [nativePrinters, setNativePrinters] = useState<NativePrinter[]>([])
   const { toast } = useToast()
-  const pdfUrl = receiptsApi.getPdf(saleId)
+  const pdfUrl = saleId ? receiptsApi.getPdf(saleId) : ''
   const directPrintAvailable = isDirectThermalPrintingAvailable()
   const baseCurrency = receipt?.baseCurrency || receipt?.business.currency || 'UGX'
   const transactionCurrency = receipt?.transactionCurrency || baseCurrency
@@ -54,15 +60,25 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
 
     setLoadingReceipt(true)
     setReceiptError(null)
-    receiptsApi.get(saleId)
+    loadReceiptForPrint()
       .then(setReceipt)
       .catch((error) => {
         setReceiptError(error?.message || 'Failed to load receipt')
       })
       .finally(() => setLoadingReceipt(false))
-  }, [showPreview, receipt, loadingReceipt, saleId])
+  }, [showPreview, receipt, loadingReceipt, saleId, transactionData])
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
+    if (transactionData) {
+      try {
+        await downloadReceiptPreviewPdf(await loadReceiptForPrint(), receiptNo)
+      } catch (error: any) {
+        toast({ variant: 'destructive', title: 'PDF download failed', description: error?.message || 'Could not create the receipt PDF.' })
+      }
+      return
+    }
+
+    if (!saleId) return
     const link = document.createElement('a')
     link.href = pdfUrl
     link.download = `receipt-${receiptNo}.pdf`
@@ -77,7 +93,10 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     setLoadingReceipt(true)
     setReceiptError(null)
     try {
-      const loadedReceipt = await receiptsApi.get(saleId)
+      const loadedReceipt = transactionData
+        ? await loadTransactionReceipt(transactionData, receiptNo)
+        : saleId ? await receiptsApi.get(saleId) : null
+      if (!loadedReceipt) throw new Error('Receipt data is unavailable.')
       setReceipt(loadedReceipt)
       return loadedReceipt
     } catch (error: any) {
@@ -87,6 +106,13 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     } finally {
       setLoadingReceipt(false)
     }
+  }
+
+  const getEscPosCommands = async () => {
+    const receiptData = await loadReceiptForPrint()
+    if (transactionData) return buildEscPosReceiptCommands(receiptData)
+    if (!saleId) throw new Error('Receipt data is unavailable for this printer.')
+    return (await receiptsApi.getEscPos(saleId)).commands
   }
 
   const connectRememberedPrinter = async (): Promise<DirectPrinter | null> => {
@@ -208,7 +234,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
     setShowPrinterPicker(false)
     setPrinting(true)
     try {
-      const { commands } = await receiptsApi.getEscPos(saleId)
+      const commands = await getEscPosCommands()
       await printWithNativePrinter(printer, commands)
       toast({ title: 'Receipt sent to printer', description: printer.name })
     } catch (error: any) {
@@ -270,24 +296,22 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
   }
 
   const printWithPrinter = async (printer: DirectPrinter) => {
-    const { commands } = await receiptsApi.getEscPos(saleId)
+    const commands = await getEscPosCommands()
     await printer.printFromCommands(commands)
     toast({ title: 'Receipt printed successfully' })
   }
 
   const printWithAgent = async (printerId?: string, baseUrl?: string) => {
-    const [{ commands, receiptNo: generatedReceiptNo }, receiptData] = await Promise.all([
-      receiptsApi.getEscPos(saleId),
-      receipt ? Promise.resolve(receipt) : receiptsApi.get(saleId).catch(() => null),
-    ])
+    const receiptData = await loadReceiptForPrint()
+    const commands = await getEscPosCommands()
 
-    if (receiptData && !receipt) setReceipt(receiptData)
+    if (!receipt && receiptData) setReceipt(receiptData)
 
     const result = await printReceiptViaAgent({
       baseUrl,
       printerId,
-      saleId,
-      receiptNo: generatedReceiptNo || receiptNo,
+      saleId: saleId || `transaction-${receiptNo}`,
+      receiptNo,
       commands,
       receipt: receiptData,
     })
@@ -314,15 +338,15 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
         <Button
           variant="outline"
           size="sm"
-          onClick={handlePrint}
-          disabled={printing}
+          onClick={previewOnTrigger ? () => setShowPreview(true) : handlePrint}
+          disabled={!previewOnTrigger && printing}
           className="flex items-center gap-1"
         >
-          <Printer className="h-4 w-4" />
-          {printing ? 'Printing...' : 'Print'}
+          {previewOnTrigger ? <FileText className="h-4 w-4" /> : <Printer className="h-4 w-4" />}
+          {previewOnTrigger ? (triggerLabel || 'Receipt') : (printing ? 'Printing...' : (triggerLabel || 'Print'))}
         </Button>
 
-        <Button
+        {!previewOnTrigger && <Button
           variant="ghost"
           size="sm"
           onClick={() => setShowPreview(true)}
@@ -330,7 +354,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
         >
           <FileText className="h-4 w-4" />
           Receipt
-        </Button>
+        </Button>}
 
         {onClose && (
           <Button variant="ghost" size="icon" onClick={onClose}>
@@ -469,6 +493,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                   </div>
 
                   <div className="my-3 border-t border-dashed border-zinc-900" />
+                  {receipt.documentTitle && <p className="mb-2 text-center text-xs font-bold uppercase">{receipt.documentTitle}</p>}
 
                   <div className="space-y-1 text-zinc-950">
                     <div className="flex justify-between gap-3">
@@ -480,9 +505,13 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                       <span className="text-right font-bold">{new Date(receipt.createdAt).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between gap-3">
-                      <span>Cashier</span>
+                      <span>{receipt.cashierLabel || 'Cashier'}</span>
                       <span className="text-right font-bold">{receipt.cashier || '-'}</span>
                     </div>
+                    {receipt.customerName && <div className="flex justify-between gap-3">
+                      <span>{receipt.partyLabel || 'Customer'}</span>
+                      <span className="text-right font-bold">{receipt.customerName}</span>
+                    </div>}
                     {receipt.servedBy && <div className="flex justify-between gap-3">
                       <span>Served by</span>
                       <span className="text-right font-bold">{receipt.servedBy}</span>
@@ -527,7 +556,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                       </div>
                     )}
                     <div className="flex justify-between gap-3 border-t border-zinc-900 pt-2 text-lg font-extrabold">
-                      <span>{isForeignCurrencyReceipt ? `Base-currency total (${baseCurrency})` : 'Total'}</span>
+                      <span>{receipt.amountLabel || (isForeignCurrencyReceipt ? `Base-currency total (${baseCurrency})` : 'Total')}</span>
                       <span>{formatCurrency(receipt.total, baseCurrency)}</span>
                     </div>
                     {isForeignCurrencyReceipt && <div className="flex justify-between gap-3 text-lg font-extrabold text-emerald-800">
@@ -548,6 +577,12 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                     )}
                   </div>
 
+                  {receipt.additionalDetails?.length ? <div className="mt-2 space-y-1 border-t border-dashed border-zinc-900 pt-2">
+                    {receipt.additionalDetails.map((detail, index) => <div key={`${detail.label}-${index}`} className="flex justify-between gap-3">
+                      <span>{detail.label}</span><span className="max-w-[60%] text-right font-bold [overflow-wrap:anywhere]">{detail.value}</span>
+                    </div>)}
+                  </div> : null}
+
                   <div className="my-3 border-t border-dashed border-zinc-900" />
 
                   <div className="text-center">
@@ -566,7 +601,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
                 {printing ? 'Printing...' : 'Print'}
               </Button>
               <Button variant="ghost" size="sm" onClick={handleSystemPrint}>
-                System Print
+                Browser Print / Save as PDF
               </Button>
             </div>
           </div>
@@ -574,6 +609,61 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose }: ReceiptVie
       )}
     </>
   )
+}
+
+async function loadTransactionReceipt(data: TransactionReceiptData, fallbackReceiptNo: string): Promise<ReceiptPreview> {
+  let profile: any = {}
+  try {
+    const response = await apiFetch('/api/settings/business-profile')
+    if (response.ok) profile = await response.json()
+  } catch { /* Use a printable business-name fallback if settings are temporarily unavailable. */ }
+
+  const fields = (data.fields || []).filter(field => field.value !== undefined && field.value !== null && field.value !== '')
+  const fieldValue = (label: string) => fields.find(field => field.label.toLowerCase() === label.toLowerCase())?.value
+  const receivedBy = fieldValue('Received by') ?? fieldValue('Cashier')
+  const paymentMethod = fieldValue('Payment method')
+  const currency = data.currency || profile.currency || 'UGX'
+  const amount = Number(data.amount || 0)
+
+  return {
+    id: `transaction-${data.reference || fallbackReceiptNo}`,
+    receiptNo: data.reference || fallbackReceiptNo,
+    business: {
+      name: profile.name || profile.businessName || 'Business',
+      email: profile.email ?? null,
+      phone: profile.phone ?? null,
+      address: profile.address ?? null,
+      logo: profile.logo ?? null,
+      receiptHeader: profile.receiptHeader ?? profile.receipt_header ?? null,
+      receiptFooter: profile.receiptFooter ?? profile.receipt_footer ?? null,
+      currency: profile.currency || currency,
+    },
+    cashier: receivedBy ? String(receivedBy) : '-',
+    cashierLabel: receivedBy ? 'Received by' : 'Cashier',
+    partyLabel: data.partyLabel || 'Customer',
+    customerName: data.partyName || null,
+    paymentMethod: paymentMethod ? String(paymentMethod) : 'transaction',
+    createdAt: new Date(data.date).toISOString(),
+    baseCurrency: profile.currency || currency,
+    transactionCurrency: currency,
+    foreignTotal: amount,
+    subtotal: amount,
+    discount: 0,
+    tax: 0,
+    total: amount,
+    documentTitle: data.title,
+    amountLabel: data.amountLabel || 'Amount',
+    additionalDetails: fields
+      .filter(field => !['received by', 'cashier', 'payment method'].includes(field.label.toLowerCase()))
+      .map(field => ({ label: field.label, value: String(field.value) })),
+    items: (data.items || []).map((item, index) => ({
+      id: `item-${index}`,
+      name: item.name,
+      quantity: Number(item.quantity || 0),
+      price: Number(item.unitPrice || 0),
+      total: Number(item.total || 0),
+    })),
+  }
 }
 
 function isSelectionCancel(error: any) {
