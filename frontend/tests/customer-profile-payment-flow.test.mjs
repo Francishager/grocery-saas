@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const source = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const profilePage = source('../src/pages/receivables/CustomerProfilePage.tsx');
 const paymentDialog = source('../src/components/customer/CustomerPaymentDialog.tsx');
+const receivablesPage = source('../src/pages/receivables/ReceivablesPage.tsx');
 
 test('record payment opens over the profile without navigating to the receivables table', () => {
   assert.match(profilePage, /onRecordPayment=\{\(customer\) => setPaymentCustomer\(customer\)\}/);
@@ -31,4 +32,10 @@ test('mobile-money payments require and submit provider, phone, and transaction 
   assert.match(paymentDialog, /phoneNumber: method === 'mobile_money' \? phoneNumber/);
   assert.match(paymentDialog, /transactionId: \['mobile_money', 'card'\]\.includes\(method\)/);
   assert.match(paymentDialog, /provider, phone number, and transaction ID/);
+});
+
+test('receivables payment modal scrolls on mobile and saves the entered note', () => {
+  assert.match(receivablesPage, /max-h-\[calc\(100dvh-1rem\)\].*overflow-y-auto.*overscroll-contain/);
+  assert.match(receivablesPage, /<Textarea[\s\S]*?id="customerPaymentNotes"[\s\S]*?value=\{paymentNotes\}/);
+  assert.match(receivablesPage, /notes: paymentNotes\.trim\(\) \|\| 'Payment recorded via dashboard'/);
 });

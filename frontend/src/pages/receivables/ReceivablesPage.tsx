@@ -241,6 +241,7 @@ export default function ReceivablesPage() {
   const [paymentCurrency, setPaymentCurrency] = useState(baseCurrency)
   const [paymentRateToBase, setPaymentRateToBase] = useState<number | null>(1)
   const [paymentUnitsPerBase, setPaymentUnitsPerBase] = useState<number | null>(1)
+  const [paymentNotes, setPaymentNotes] = useState('')
   const [saleCurrency, setSaleCurrency] = useState(baseCurrency)
   const [saleRateToBase, setSaleRateToBase] = useState<number | null>(1)
   const [saleUnitsPerBase, setSaleUnitsPerBase] = useState<number | null>(1)
@@ -338,6 +339,7 @@ export default function ReceivablesPage() {
       setSelectedCustomer(customer)
       setSelectedSale(null)
       setPaymentAmount('')
+      setPaymentNotes('')
       setPaymentCurrency(baseCurrency)
       setPaymentRateToBase(1)
       setPaymentUnitsPerBase(1)
@@ -1017,7 +1019,7 @@ export default function ReceivablesPage() {
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
           transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
-          notes: `Payment recorded via dashboard`
+          notes: paymentNotes.trim() || 'Payment recorded via dashboard'
         })
       })
 
@@ -1033,6 +1035,7 @@ export default function ReceivablesPage() {
       setSelectedCustomer(null)
       setSelectedSale(null)
       setPaymentAmount('')
+      setPaymentNotes('')
       setPaymentMethod('cash')
       setMobileProvider('')
       setPhoneNumber('')
@@ -1875,6 +1878,7 @@ export default function ReceivablesPage() {
                           setSelectedCustomer(sale.customer)
                           setSelectedSale(sale)
                           setPaymentAmount(String(sale.balance || ''))
+                          setPaymentNotes('')
                           setShowPaymentModal(true)
                         }}
                       >
@@ -2080,6 +2084,7 @@ export default function ReceivablesPage() {
           setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
           setSelectedSale(null)
           setPaymentAmount('')
+          setPaymentNotes('')
           setHistoryCustomer(null)
           setShowPaymentModal(true)
         }}
@@ -2392,9 +2397,10 @@ export default function ReceivablesPage() {
 
       {/* Payment Modal */}
       {showPaymentModal && selectedCustomer && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold mb-4">Record Payment</h3>
+        <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/50 [touch-action:pan-y]">
+          <div className="flex min-h-full items-start justify-center p-2 sm:items-center sm:p-4">
+          <div className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-lg bg-background p-4 shadow-xl [-webkit-overflow-scrolling:touch] sm:max-h-[calc(100dvh-2rem)] sm:p-6">
+            <h3 className="mb-4 text-lg font-semibold">Record Payment</h3>
             <div className="space-y-4">
               <div>
                 <Label>Customer</Label>
@@ -2501,6 +2507,18 @@ export default function ReceivablesPage() {
               )}
 
               <div>
+                <Label htmlFor="customerPaymentNotes">Note (optional)</Label>
+                <Textarea
+                  id="customerPaymentNotes"
+                  value={paymentNotes}
+                  onChange={(event) => setPaymentNotes(event.target.value)}
+                  placeholder="Add a payment note"
+                  rows={3}
+                  className="mt-1 w-full resize-y"
+                />
+              </div>
+
+              <div>
                 <Label htmlFor="cashAccount">Staff Till / Account</Label>
                 <Select value={selectedCashAccountId || ''} onValueChange={(v) => setSelectedCashAccountId(v || null)}>
                   <SelectTrigger>
@@ -2532,6 +2550,7 @@ export default function ReceivablesPage() {
                   setSelectedSale(null)
                   setSelectedCustomer(null)
                   setPaymentAmount('')
+                  setPaymentNotes('')
                   setSelectedCashAccountId(null)
                 }}
               >
@@ -2548,6 +2567,7 @@ export default function ReceivablesPage() {
                 {savingPayment ? 'Recording...' : 'Record Payment'}
               </Button>
             </div>
+          </div>
           </div>
         </div>
       )}
