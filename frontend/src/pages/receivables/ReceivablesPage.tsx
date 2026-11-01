@@ -1943,7 +1943,7 @@ export default function ReceivablesPage() {
                       <TransactionReceiptButton data={{
                         title: 'Customer payment receipt', reference: displayReference(payment.reference || payment.transactionId, payment.id, 'PAY'),
                         date: payment.createdAt, amount: Number(payment.amount || 0), partyLabel: 'Received from', partyName: payment.customer?.name || 'Customer',
-                        fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Transaction reference', value: payment.transactionId }, { label: 'Applied to sale', value: payment.sale?.receiptNo }, { label: 'Notes', value: payment.notes }],
+                        fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Mobile money provider', value: payment.mobileProvider }, { label: 'Mobile money number', value: payment.phoneNumber }, { label: 'Transaction ID', value: payment.transactionId }, { label: 'Applied to sale', value: payment.sale?.receiptNo }, { label: 'Notes', value: payment.notes }],
                       }} />
                       <Button size="sm" variant="outline" onClick={() => printPaymentInvoice(payment)}>
                         <Printer className="h-4 w-4 mr-1" />

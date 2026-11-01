@@ -935,6 +935,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         mobileProvider: payment.mobileProvider || null,
         phoneNumber: payment.phoneNumber || null,
         transactionId: payment.transactionId || null,
+        notes: payment.notes || null,
         status: 'paid',
         branch: payment.branch?.name || '',
         staff: '',
