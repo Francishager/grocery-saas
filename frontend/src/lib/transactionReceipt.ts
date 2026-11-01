@@ -13,6 +13,7 @@ export interface TransactionReceiptData {
   itemsLabel?: string
   items?: Array<{ name: string; quantity: number; unitName?: string; unitPrice: number; discount?: number; total: number }>
   fields?: Array<{ label: string; value?: string | number | null }>
+  business?: { name?: string; address?: string | null; phone?: string | null; email?: string | null; logo?: string | null; currency?: string | null }
 }
 
 const escapeHtml = (value: unknown) => String(value ?? '')
@@ -27,11 +28,13 @@ export function printTransactionReceipt(data: TransactionReceiptData): boolean {
   if (!printWindow) return false
 
   void (async () => {
-    let business: any = {}
-    try {
-      const response = await apiFetch('/api/settings/business-profile')
-      if (response.ok) business = await response.json()
-    } catch { /* Receipt remains printable if profile lookup is temporarily unavailable. */ }
+    let business: any = data.business || {}
+    if (!data.business) {
+      try {
+        const response = await apiFetch('/api/settings/business-profile')
+        if (response.ok) business = await response.json()
+      } catch { /* Receipt remains printable if profile lookup is temporarily unavailable. */ }
+    }
 
     const fields = (data.fields || []).filter(field => field.value !== undefined && field.value !== null && field.value !== '')
     const details = fields.map(field => `<div class="row"><span>${escapeHtml(field.label)}</span><strong>${escapeHtml(field.value)}</strong></div>`).join('')
