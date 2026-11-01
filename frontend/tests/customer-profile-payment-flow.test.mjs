@@ -22,8 +22,8 @@ test('profile payment posts through the permission-checked receivables endpoint 
 
 test('payment-method and account selectors cannot dismiss the payment dialog through their portals', () => {
   assert.match(paymentDialog, /onInteractOutside=\{\(event\) => \{/);
-  assert.match(paymentDialog, /data-radix-popper-content-wrapper/);
   assert.match(paymentDialog, /event\.preventDefault\(\)/);
+  assert.match(paymentDialog, /onEscapeKeyDown=\{\(event\) => event\.preventDefault\(\)\}/);
 });
 
 test('mobile-money payments require and submit provider, phone, and transaction reference', () => {

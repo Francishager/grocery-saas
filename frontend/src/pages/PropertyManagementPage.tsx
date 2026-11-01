@@ -22,6 +22,14 @@ type RentPeriod = { id: string; period: string; dueDate: string; description: st
 type RentPeriodsTarget = { tenancy: { id: string; tenantName: string; currency: string; unit: { unitCode: string; property: { name: string } } }; periods: RentPeriod[] }
 type Report = { summary: Record<string, number>; arrears: any[]; collections: any[]; ownerPayouts?: any[] }
 type PaymentAccount = { id: string; name: string; type: string; paymentMethod: string }
+const RENT_PAYMENT_METHODS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'safe', label: 'Safe' },
+  { value: 'mobile_money', label: 'Mobile Money' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
+  { value: 'card', label: 'Card' },
+  { value: 'cheque', label: 'Cheque' },
+]
 
 function formatRentPeriods(periods?: string[]) {
   return [...new Set(periods || [])].sort().map(period => {
@@ -335,7 +343,13 @@ export default function PropertyManagementPage() {
     try {
       const account = paymentAccounts.find(row => row.id === form.get('cashAccountId'))
       if (!account) throw new Error('Choose a permitted payment account.')
-      const payment = await api.post<any>(`/api/property-management/tenancies/${paymentTarget.id}/payments`, { body: { amount: Number(form.get('amount')), rentMonths: Number(form.get('rentMonths')), arrearsMonths: Number(form.get('arrearsMonths')), paymentDate: form.get('paymentDate'), paymentMethod: account.paymentMethod, cashAccountId: account.id, idempotencyKey: crypto.randomUUID(), transactionRef: form.get('transactionRef'), notes: form.get('notes') } })
+      const method = String(form.get('paymentMethod') || '')
+      if (method !== account.paymentMethod) throw new Error('Choose an account that matches the selected payment method.')
+      const mobileProvider = String(form.get('mobileProvider') || '').trim()
+      const phoneNumber = String(form.get('phoneNumber') || '').trim()
+      const transactionRef = String(form.get('mobileTransactionRef') || form.get('transactionRef') || '').trim()
+      if (method === 'mobile_money' && (!mobileProvider || !phoneNumber || !transactionRef)) throw new Error('Enter the mobile-money provider, phone number, and transaction reference.')
+      const payment = await api.post<any>(`/api/property-management/tenancies/${paymentTarget.id}/payments`, { body: { amount: Number(form.get('amount')), rentMonths: Number(form.get('rentMonths')), arrearsMonths: Number(form.get('arrearsMonths')), paymentDate: form.get('paymentDate'), paymentMethod: method, cashAccountId: account.id, idempotencyKey: crypto.randomUUID(), transactionRef: transactionRef || undefined, mobileProvider: method === 'mobile_money' ? mobileProvider : undefined, phoneNumber: method === 'mobile_money' ? phoneNumber : undefined, notes: form.get('notes') } })
       setPaymentTarget(null); await load(); await openReceipt(payment.id); appNotify('Rent payment recorded.')
     } catch (error) { appNotify(error instanceof Error ? error.message : 'Could not record payment.') }
     finally { setBusy(false) }
@@ -741,7 +755,33 @@ function Fields({ fields, defaults = {}, readOnly = [] }: { fields: string[]; de
   </label>)}</div>
 }
 function HouseholdDetailsFields({ defaults = {} }: { defaults?: Partial<Tenancy> }) { return <section className="mt-4 space-y-3 rounded-md border p-4"><div><h3 className="text-sm font-semibold">Household details</h3><p className="mt-1 text-xs text-muted-foreground">Optional and restricted to staff with renter household-detail access.</p></div><div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm">Marital status<select name="maritalStatus" defaultValue={defaults.maritalStatus || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3"><option value="">Not provided</option><option value="single">Single</option><option value="married">Married</option><option value="separated">Separated</option><option value="divorced">Divorced</option><option value="widowed">Widowed</option><option value="prefer_not_to_say">Prefer not to say</option></select></label><label className="block text-sm">Spouse name(s)<input name="spouseNames" defaultValue={defaults.spouseNames || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label><label className="block text-sm">Number of children<input name="childrenCount" type="number" min="0" max="100" step="1" defaultValue={defaults.childrenCount ?? ''} placeholder="Not provided" className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label><label className="block text-sm">Household / family size<input name="householdSize" type="number" min="1" max="100" step="1" defaultValue={defaults.householdSize ?? ''} placeholder="Not provided" className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label><label className="block text-sm sm:col-span-2">Place of origin<input name="placeOfOrigin" defaultValue={defaults.placeOfOrigin || ''} placeholder="Town, district, region or country" className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label></div></section> }
-function PaymentAccountSelect({ accounts, defaultAccountId }: { accounts: PaymentAccount[]; defaultAccountId: string | null }) { const defaultValue = accounts.some(account => account.id === defaultAccountId) ? defaultAccountId! : accounts[0]?.id || ''; return <label className="mt-3 block text-sm">Receive/pay through<select name="cashAccountId" required defaultValue={defaultValue} className="mt-1 h-10 w-full rounded-md border bg-background px-3">{accounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.type}</option>)}</select>{!accounts.length && <span className="mt-1 block text-xs text-rose-700">No transaction account is available under your permissions.</span>}</label> }
+function PaymentAccountSelect({ accounts, defaultAccountId }: { accounts: PaymentAccount[]; defaultAccountId: string | null }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [rentCollection, setRentCollection] = useState(false)
+  const preferredAccount = accounts.find(account => account.id === defaultAccountId) || accounts[0]
+  const [method, setMethod] = useState(preferredAccount?.paymentMethod || 'cash')
+  const [accountId, setAccountId] = useState(preferredAccount?.id || '')
+  const methods = RENT_PAYMENT_METHODS.filter(method => accounts.some(account => account.paymentMethod === method.value))
+  const methodAccounts = accounts.filter(account => account.paymentMethod === method)
+  useEffect(() => {
+    setRentCollection(Boolean(containerRef.current?.closest('form')?.querySelector('[name="rentMonths"]')))
+  }, [])
+  useEffect(() => {
+    if (!methodAccounts.some(account => account.id === accountId)) setAccountId(methodAccounts[0]?.id || '')
+  }, [method, accounts])
+  if (rentCollection) return <div ref={containerRef} className="mt-3 space-y-3 rounded-md border p-3">
+    <label className="block text-sm">Payment method<select name="paymentMethod" required value={method} onChange={event => { const next = event.target.value; setMethod(next); setAccountId(accounts.find(account => account.paymentMethod === next)?.id || '') }} className="mt-1 h-10 w-full rounded-md border bg-background px-3">{methods.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+    <label className="block text-sm">Receive into<select name="cashAccountId" required value={accountId} onChange={event => setAccountId(event.target.value)} className="mt-1 h-10 w-full rounded-md border bg-background px-3">{methodAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.type}</option>)}</select></label>
+    {method === 'mobile_money' && <div className="grid gap-3 sm:grid-cols-2">
+      <label className="block text-sm">Mobile-money provider<input name="mobileProvider" required placeholder="MTN, Airtel, etc." className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label>
+      <label className="block text-sm">Mobile-money phone<input name="phoneNumber" type="tel" required placeholder="07…" className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label>
+      <label className="block text-sm sm:col-span-2">Transaction reference<input name="mobileTransactionRef" required className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label>
+    </div>}
+    {!accounts.length && <span className="text-xs text-rose-700">No transaction account is available under your permissions.</span>}
+  </div>
+  const defaultValue = accounts.some(account => account.id === defaultAccountId) ? defaultAccountId! : accounts[0]?.id || ''
+  return <div ref={containerRef}><label className="mt-3 block text-sm">Receive/pay through<select name="cashAccountId" required defaultValue={defaultValue} className="mt-1 h-10 w-full rounded-md border bg-background px-3">{accounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.type}</option>)}</select>{!accounts.length && <span className="mt-1 block text-xs text-rose-700">No transaction account is available under your permissions.</span>}</label></div>
+}
 function Submit({ busy, label = 'Save' }: { busy: boolean; label?: string }) { return <div className="mt-5 flex justify-end"><button disabled={busy} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{busy ? 'Saving…' : label}</button></div> }
 function receiptTitle(type?: string) { return type === 'deposit' ? 'Security deposit receipt' : type === 'deposit_refund' ? 'Security deposit refund receipt' : type === 'deposit_application' ? 'Security deposit applied to rent receipt' : 'Rent payment receipt' }
 function ReceiptView({ receipt, onPrint }: { receipt: any; onPrint: () => void }) { const payment = receipt.receipt; const isRefund = payment.paymentType === 'deposit_refund'; const isDepositApplication = payment.paymentType === 'deposit_application'; const rentPeriods = formatRentPeriods(payment.rentPeriods); return <div><div className="rounded-md border p-4"><h3 className="font-semibold">{receipt.business?.name || 'Managing business'}</h3><p className="text-sm text-muted-foreground">{receiptTitle(payment.paymentType)} · {payment.receiptNo}</p>{payment.status === 'void' && <p className="mt-2 text-sm font-semibold text-rose-700">VOIDED · {payment.voidReason}</p>}<div className="mt-4 grid grid-cols-2 gap-3 text-sm"><div>Tenant<strong className="block">{payment.tenancy.tenantName}</strong></div><div>Unit<strong className="block">{payment.tenancy.unit.property.name} · {payment.tenancy.unit.unitCode}</strong></div>{rentPeriods && <div>Rent paid for<strong className="block">{rentPeriods}</strong></div>}{payment.arrearsMonths > 0 && <div>{isDepositApplication ? 'Prior unpaid months settled' : 'Prior arrears added'}<strong className="block">{payment.arrearsMonths} month(s)</strong></div>}<div>Date<strong className="block">{new Date(payment.paymentDate).toLocaleDateString('en-GB')}</strong></div><div>Payment method<strong className="block">{isDepositApplication ? 'Security deposit (non-cash)' : payment.paymentMethod}</strong></div><div>{isRefund ? 'Processed by' : isDepositApplication ? 'Applied by' : 'Received by'}<strong className="block">{payment.receivedBy || 'Not recorded'}</strong></div>{payment.transactionRef && <div>Transaction reference<strong className="block">{payment.transactionRef}</strong></div>}{payment.notes && <div className="col-span-2">Note<strong className="block">{payment.notes}</strong></div>}{isDepositApplication && payment.allocations?.length > 0 && <div className="col-span-2">Applied to rent months<strong className="block">{payment.allocations.map((item: any) => `${formatRentPeriods([item.charge.period])}: ${money(item.amount, payment.tenancy.currency)}`).join(' · ')}</strong></div>}</div><div className="mt-4 border-t pt-3 text-right text-lg font-semibold">{isRefund ? 'Refunded' : isDepositApplication ? 'Applied to rent' : 'Received'} {money(payment.amount, payment.tenancy.currency)}</div>{isDepositApplication && <p className="mt-2 text-xs text-muted-foreground">This is a non-cash settlement from the tenant deposit liability; no cash was received.</p>}<p className="mt-3 text-center text-xs text-muted-foreground">Powered by JibuSales</p></div><button onClick={onPrint} className="mt-4 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"><Printer className="h-4 w-4"/> Print receipt</button></div> }

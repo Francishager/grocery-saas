@@ -13,6 +13,21 @@ const router = Router()
  */
 router.post('/register', authenticateToken, async (req, res) => {
   try {
+    const expoPushToken = String(req.body?.expoPushToken || '').trim()
+    const nativePlatform = String(req.body?.platform || '').toLowerCase()
+    if (expoPushToken) {
+      if (!['android', 'ios'].includes(nativePlatform) || !/^(Expo|Exponent)PushToken\[[A-Za-z0-9_-]+\]$/.test(expoPushToken)) {
+        return res.status(400).json({ error: 'A valid native push token and platform are required.' })
+      }
+      const userTenantId = req.user.tenantId || req.user.tenant_id || null
+      const pushToken = await prisma.pushToken.upsert({
+        where: { token: expoPushToken },
+        update: { userId: req.user.id, tenantId: userTenantId, platform: nativePlatform, isActive: true },
+        create: { token: expoPushToken, userId: req.user.id, tenantId: userTenantId, platform: nativePlatform, isActive: true },
+      })
+      return res.json({ message: 'Native token registered', registered: Boolean(pushToken.isActive) })
+    }
+
     const subscription = req.body?.subscription
     if (!subscription || typeof subscription.endpoint !== 'string' || !subscription.keys?.p256dh || !subscription.keys?.auth) {
       return res.status(400).json({ error: 'A valid Web Push subscription is required' })
@@ -60,6 +75,14 @@ router.post('/register', authenticateToken, async (req, res) => {
 router.delete('/unregister', authenticateToken, async (req, res) => {
   try {
     const endpoint = req.body?.endpoint
+    const expoPushToken = req.body?.expoPushToken
+    if (typeof expoPushToken === 'string') {
+      await prisma.pushToken.updateMany({
+        where: { userId: req.user.id, token: expoPushToken, platform: { in: ['android', 'ios'] }, isActive: true },
+        data: { isActive: false },
+      })
+      return res.json({ message: 'Native token unregistered' })
+    }
     if (typeof endpoint !== 'string') return res.status(400).json({ error: 'Subscription endpoint is required' })
     const subscriptions = await prisma.pushToken.findMany({ where: { userId: req.user.id, platform: 'web', isActive: true }, select: { token: true } })
     const matchingTokens = subscriptions.filter(row => {
@@ -163,7 +186,7 @@ router.post('/send-platform', authenticateToken, async (req, res) => {
 router.get('/tokens', authenticateToken, async (req, res) => {
   try {
     const tokens = await prisma.pushToken.findMany({
-      where: { userId: req.user.id, platform: 'web' },
+      where: { userId: req.user.id, platform: { in: ['web', 'android', 'ios'] } },
       select: { id: true, platform: true, isActive: true, createdAt: true, updatedAt: true },
       orderBy: { createdAt: 'desc' },
     })

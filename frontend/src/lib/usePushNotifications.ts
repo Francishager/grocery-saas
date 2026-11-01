@@ -11,6 +11,17 @@ export interface PushNotification {
   timestamp: number
 }
 
+type NativePushRegistration = { expoPushToken: string; platform: 'android' | 'ios'; permission: PushPermissionState }
+
+declare global {
+  interface Window {
+    JibuNativePush?: {
+      permission: () => Promise<PushPermissionState>
+      register: (userInitiated?: boolean) => Promise<NativePushRegistration | null>
+    }
+  }
+}
+
 const PUSH_DISABLED_KEY = 'jibusales_push_disabled'
 
 function decodeVapidKey(key: string) {
@@ -34,6 +45,10 @@ export function usePushNotifications() {
   const vapidPublicKey = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY || ''
 
   useEffect(() => {
+    if (window.JibuNativePush) {
+      void window.JibuNativePush.permission().then(setPermission).catch(() => setPermission('unsupported'))
+      return
+    }
     if (!('Notification' in window) || !('PushManager' in window) || !('serviceWorker' in navigator) || !window.isSecureContext) {
       setPermission('unsupported')
       return
@@ -51,6 +66,13 @@ export function usePushNotifications() {
   }, [])
 
   const requestPermission = useCallback(async () => {
+    if (window.JibuNativePush) {
+      const result = await window.JibuNativePush.register(true)
+      if (!result) return null
+      setPermission(result.permission)
+      if (result.expoPushToken) setToken(result.expoPushToken)
+      return result
+    }
     if (!vapidPublicKey) {
       setPermission('not-configured')
       return null
@@ -85,6 +107,26 @@ export function usePushNotifications() {
     if (!authToken) return false
 
     try {
+      if (window.JibuNativePush) {
+        if (!userInitiated && permission !== 'granted') return false
+        const nativeRegistration = userInitiated
+          ? await requestPermission()
+          : await window.JibuNativePush.register(false)
+        if (!nativeRegistration?.expoPushToken) {
+          if (nativeRegistration?.permission) setPermission(nativeRegistration.permission)
+          return false
+        }
+        const response = await apiFetch('/api/push/register', {
+          method: 'POST',
+          body: JSON.stringify({ expoPushToken: nativeRegistration.expoPushToken, platform: nativeRegistration.platform }),
+        })
+        if (!response.ok) return false
+        localStorage.removeItem(PUSH_DISABLED_KEY)
+        setPermission('granted')
+        setToken(nativeRegistration.expoPushToken)
+        setRegistered(true)
+        return true
+      }
       if (Notification.permission !== 'granted') {
         if (!userInitiated) return false
         const result = await requestPermission()
@@ -115,11 +157,20 @@ export function usePushNotifications() {
       // Silent fail — push not critical
       return false
     }
-  }, [requestPermission, getRegistration])
+  }, [requestPermission, getRegistration, permission])
 
   const unregisterToken = useCallback(async () => {
     localStorage.setItem(PUSH_DISABLED_KEY, '1')
     try {
+      if (window.JibuNativePush) {
+        if (token) {
+          await apiFetch('/api/push/unregister', {
+            method: 'DELETE',
+            body: JSON.stringify({ expoPushToken: token }),
+          })
+        }
+        return
+      }
       const registration = await getRegistration()
       const subscription = await registration.pushManager.getSubscription()
       if (subscription) {
@@ -135,7 +186,7 @@ export function usePushNotifications() {
       setRegistered(false)
       setToken(null)
     }
-  }, [getRegistration])
+  }, [getRegistration, token])
 
   const isDisabledOnDevice = useCallback(() => localStorage.getItem(PUSH_DISABLED_KEY) === '1', [])
 

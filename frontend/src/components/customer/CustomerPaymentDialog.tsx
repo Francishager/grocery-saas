@@ -183,11 +183,11 @@ export default function CustomerPaymentDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!saving) onOpenChange(nextOpen) }}>
       <DialogContent
         className="z-[70] max-h-[92dvh] w-[calc(100vw-1rem)] max-w-lg overflow-y-auto p-4 sm:p-6"
+        onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => {
-          const target = event.target
-          if (target instanceof Element && target.closest('[data-radix-popper-content-wrapper]')) {
-            event.preventDefault()
-          }
+          // Keep the payment form mounted while Radix Select portals handle a choice.
+          // Closing is explicit via Cancel/close or after a successful post.
+          event.preventDefault()
         }}
       >
         <DialogHeader>

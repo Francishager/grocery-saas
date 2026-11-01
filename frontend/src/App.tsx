@@ -262,7 +262,7 @@ function App() {
           <Route path="staff" element={<FeatureGuard feature="settings.users"><StaffPage /></FeatureGuard>} />
           <Route path="profile" element={<UserProfilePage />} />
           <Route path="referrals" element={<FeatureGuard feature="referrals"><ReferralPage /></FeatureGuard>} />
-          <Route path="settings" element={<FeatureGuard feature="settings"><BusinessSettingsPage /></FeatureGuard>} />
+          <Route path="settings" element={<FeatureGuard feature="settings" permission="canViewSettings"><BusinessSettingsPage /></FeatureGuard>} />
           <Route path="tax" element={<FeatureGuard feature="settings.taxes"><TaxManagementPage /></FeatureGuard>} />
           <Route path="receipt-settings" element={<FeatureGuard feature="settings"><ReceiptSettingsPage /></FeatureGuard>} />
           <Route path="roles" element={<FeatureGuard feature="settings.roles"><RolesPermissionsPage /></FeatureGuard>} />

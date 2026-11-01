@@ -48,10 +48,22 @@ export function buildWebPushPayload(payload = {}) {
   }
 }
 
-async function sendToTokens(tokens, payload) {
-  if (!tokens.length) return { success: 0, failure: 0 }
+export function buildExpoPushMessages(tokens, payload) {
+  const notification = buildWebPushPayload(payload)
+  return tokens.map(row => ({
+    to: row.token,
+    title: notification.title,
+    body: notification.body,
+    sound: 'default',
+    priority: 'default',
+    channelId: 'default',
+    data: notification.data,
+  }))
+}
+
+async function sendWebPushTokens(tokens, notification) {
   configureWebPush()
-  const notification = JSON.stringify(buildWebPushPayload(payload))
+  const serialized = JSON.stringify(notification)
   let success = 0
   let failure = 0
 
@@ -65,7 +77,7 @@ async function sendToTokens(tokens, payload) {
         return false
       }
       try {
-        await webpush.sendNotification(subscription, notification, { TTL: 3600, urgency: 'normal' })
+        await webpush.sendNotification(subscription, serialized, { TTL: 3600, urgency: 'normal' })
         return true
       } catch (error) {
         if (error.statusCode === 404 || error.statusCode === 410) {
@@ -82,9 +94,70 @@ async function sendToTokens(tokens, payload) {
   return { success, failure }
 }
 
+async function sendExpoPushTokens(tokens, payload) {
+  const messages = buildExpoPushMessages(tokens, payload)
+  let success = 0
+  let failure = 0
+  for (let offset = 0; offset < messages.length; offset += 100) {
+    const batch = messages.slice(offset, offset + 100)
+    try {
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
+        body: JSON.stringify(batch),
+        signal: AbortSignal.timeout(8000),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok || !Array.isArray(result?.data)) {
+        failure += batch.length
+        console.error('Expo Push delivery failed:', response.status)
+        continue
+      }
+      for (let index = 0; index < result.data.length; index += 1) {
+        const ticket = result.data[index]
+        if (ticket?.status === 'ok') {
+          success += 1
+        } else {
+          failure += 1
+          if (ticket?.details?.error === 'DeviceNotRegistered') {
+            await prisma.pushToken.updateMany({ where: { token: batch[index]?.to }, data: { isActive: false } })
+          }
+          console.error('Expo Push ticket failed:', ticket?.details?.error || ticket?.message || 'Unknown delivery error')
+        }
+      }
+    } catch (error) {
+      failure += batch.length
+      console.error('Expo Push request failed:', error.message)
+    }
+  }
+  return { success, failure }
+}
+
+async function sendToTokens(tokens, payload) {
+  if (!tokens.length) return { success: 0, failure: 0 }
+  const webTokens = tokens.filter(row => row.platform === 'web')
+  const expoTokens = tokens.filter(row => ['android', 'ios'].includes(row.platform))
+  const notification = buildWebPushPayload(payload)
+  const results = await Promise.all([
+    webTokens.length
+      ? sendWebPushTokens(webTokens, notification).catch(error => {
+        console.error('Web Push configuration failed:', error.message)
+        return { success: 0, failure: webTokens.length }
+      })
+      : Promise.resolve({ success: 0, failure: 0 }),
+    expoTokens.length
+      ? sendExpoPushTokens(expoTokens, payload).catch(error => {
+        console.error('Expo Push delivery failed:', error.message)
+        return { success: 0, failure: expoTokens.length }
+      })
+      : Promise.resolve({ success: 0, failure: 0 }),
+  ])
+  return results.reduce((total, result) => ({ success: total.success + result.success, failure: total.failure + result.failure }), { success: 0, failure: 0 })
+}
+
 export async function sendNotificationToUser(userId, payload) {
   try {
-    const tokens = await prisma.pushToken.findMany({ where: { userId, isActive: true, platform: 'web' }, select: { token: true } })
+    const tokens = await prisma.pushToken.findMany({ where: { userId, isActive: true, platform: { in: ['web', 'android', 'ios'] } }, select: { token: true, platform: true } })
     return await sendToTokens(tokens, payload)
   } catch (error) {
     console.error('Web Push send-to-user error:', error.message)
@@ -94,7 +167,7 @@ export async function sendNotificationToUser(userId, payload) {
 
 export async function sendNotificationToTenant(tenantId, payload) {
   try {
-    const tokens = await prisma.pushToken.findMany({ where: { tenantId, isActive: true, platform: 'web' }, select: { token: true } })
+    const tokens = await prisma.pushToken.findMany({ where: { tenantId, isActive: true, platform: { in: ['web', 'android', 'ios'] } }, select: { token: true, platform: true } })
     return await sendToTokens(tokens, payload)
   } catch (error) {
     console.error('Web Push send-to-tenant error:', error.message)
@@ -105,8 +178,8 @@ export async function sendNotificationToTenant(tenantId, payload) {
 export async function sendNotificationToPlatformAdmins(payload) {
   try {
     const tokens = await prisma.pushToken.findMany({
-      where: { isActive: true, platform: 'web', user: { role: { in: ['saas_admin', 'platform_admin', 'super_admin'] } } },
-      select: { token: true },
+      where: { isActive: true, platform: { in: ['web', 'android', 'ios'] }, user: { role: { in: ['saas_admin', 'platform_admin', 'super_admin'] } } },
+      select: { token: true, platform: true },
     })
     return await sendToTokens(tokens, payload)
   } catch (error) {

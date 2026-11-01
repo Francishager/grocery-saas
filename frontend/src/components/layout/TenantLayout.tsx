@@ -124,7 +124,7 @@ const navItems = [
   { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
   { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: GRANULAR_REPORT_PERMISSION_KEYS, isReports: true },
   { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
-  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: ['canViewSettings', 'canPaySubscriptionInvoice'], feature: 'settings', isSettings: true },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', feature: 'settings', isSettings: true },
   { to: '/tenant/data-importer', label: 'Data Importer', icon: FileSpreadsheet, permission: 'canImportInventory', feature: 'developer.data_importer' },
   { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: 'referrals' },
 ]

@@ -11,6 +11,8 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
 import NativeThermalPrinter from '../../modules/thermal-printer/src';
@@ -23,6 +25,19 @@ const BRIDGE_ORIGIN = APP_ORIGIN;
 const brandGreen = '#16764a';
 // WebView's published declaration currently conflicts with this Expo/RN type set.
 const NativeWebView = WebView as any;
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
+function normalizedPushPermission(status: string) {
+  return status === 'granted' || status === 'provisional' ? 'granted' : status === 'denied' ? 'denied' : 'default';
+}
 
 function externalScheme(url: string) {
   return /^(mailto:|tel:|sms:|whatsapp:|intent:)/i.test(url);
@@ -63,6 +78,15 @@ export default function HomeScreen() {
     return () => subscription.remove();
   }, [canGoBack]);
 
+  useEffect(() => {
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const route = response.notification.request.content.data?.url;
+      if (typeof route !== 'string' || !route.startsWith('/tenant/') || route.startsWith('//')) return;
+      webView.current?.injectJavaScript(`window.location.assign(${JSON.stringify(`${APP_ORIGIN}${route}`)}); true;`);
+    });
+    return () => responseSubscription.remove();
+  }, []);
+
   const handleNavigation = (request: Pick<WebViewNavigation, 'url'>) => {
     const url = request.url;
     if (url === 'about:blank') return true;
@@ -99,12 +123,38 @@ export default function HomeScreen() {
 
   const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
     if (!nativeEvent.url || getOrigin(nativeEvent.url) !== BRIDGE_ORIGIN) return;
-    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[] };
+    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[]; userInitiated?: boolean };
     try { request = JSON.parse(nativeEvent.data); } catch { return; }
-    if (!request.id || !['printer.list', 'printer.print'].includes(request.type || '')) return;
+    if (!request.id || !['printer.list', 'printer.print', 'push.permission', 'push.register'].includes(request.type || '')) return;
     let response: { ok: boolean; result?: unknown; error?: string };
     try {
-      if (request.type === 'printer.list') {
+      if (request.type === 'push.permission' || request.type === 'push.register') {
+        let permission = await Notifications.getPermissionsAsync();
+        if (request.type === 'push.register' && permission.status !== 'granted' && permission.ios?.status !== Notifications.IosAuthorizationStatus.PROVISIONAL) {
+          if (!request.userInitiated) {
+            response = { ok: true, result: { permission: normalizedPushPermission(permission.status) } };
+            webView.current?.injectJavaScript(`window.__jibuNativePushReply(${JSON.stringify(request.id)}, ${JSON.stringify(response)}); true;`);
+            return;
+          }
+          permission = await Notifications.requestPermissionsAsync();
+        }
+        const normalizedPermission = normalizedPushPermission(permission.status);
+        if (request.type === 'push.permission' || normalizedPermission !== 'granted') {
+          response = { ok: true, result: { permission: normalizedPermission } };
+        } else {
+          if (Platform.OS === 'android') {
+            await Notifications.setNotificationChannelAsync('default', {
+              name: 'JibuSales updates',
+              importance: Notifications.AndroidImportance.DEFAULT,
+              vibrationPattern: [0, 250, 250, 250],
+            });
+          }
+          const projectId = Constants.easConfig?.projectId || Constants.expoConfig?.extra?.eas?.projectId;
+          if (!projectId) throw new Error('Mobile notification project configuration is missing.');
+          const token = await Notifications.getExpoPushTokenAsync({ projectId });
+          response = { ok: true, result: { permission: 'granted', expoPushToken: token.data, platform: Platform.OS } };
+        }
+      } else if (request.type === 'printer.list') {
         if (!NativeThermalPrinter) throw new Error('Printer support needs the latest JibuSales app update.');
         if (Platform.OS === 'android' && Number(Platform.Version) >= 31) {
           await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
@@ -123,7 +173,8 @@ export default function HomeScreen() {
     } catch (error) {
       response = { ok: false, error: error instanceof Error ? error.message : 'Native printer operation failed.' };
     }
-    webView.current?.injectJavaScript(`window.__jibuNativePrinterReply(${JSON.stringify(request.id)}, ${JSON.stringify(response)}); true;`);
+    const reply = request.type?.startsWith('push.') ? '__jibuNativePushReply' : '__jibuNativePrinterReply';
+    webView.current?.injectJavaScript(`window.${reply}(${JSON.stringify(request.id)}, ${JSON.stringify(response)}); true;`);
   };
 
   return (
@@ -137,7 +188,7 @@ export default function HomeScreen() {
         originWhitelist={['https://*', 'about:*', 'mailto:*', 'tel:*', 'sms:*', 'whatsapp:*', 'intent:*']}
         onShouldStartLoadWithRequest={handleNavigation}
         onMessage={handleNativeMessage}
-        injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};window.__jibuNativePrinterReply=function(id,response){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||'Native printer operation failed.'));};window.JibuNativePrinter={request:function(payload){return new Promise(function(resolve,reject){var id='p'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error('Printer request timed out.'));}},30000);});}};})();true;`}
+        injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},30000);});}function reply(name,id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply('printer',id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply('push',id,response,'Native notification setup failed.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};})();true;`}
         onNavigationStateChange={(state: WebViewNavigation) => setCanGoBack(state.canGoBack)}
         onLoadStart={() => { setLoadProgress(0); setLoading(true); setFailed(false); }}
         onLoadProgress={({ nativeEvent }: { nativeEvent: { progress: number } }) => {

@@ -722,6 +722,7 @@ model UserPermission {
   canViewCustomer                   Boolean  @default(false)
   canViewCustomerPhone               Boolean  @default(false)
   canViewCustomerEmail               Boolean  @default(false)
+  canViewCustomerIdentity            Boolean  @default(false)
   canViewCustomerAddress              Boolean  @default(false)
   canViewCustomerBalance              Boolean  @default(false)
   canViewCustomerCreditLimit          Boolean  @default(false)
@@ -944,9 +945,20 @@ model UserPermission {
   canCreateRental                   Boolean  @default(false)
   canEditRental                     Boolean  @default(false)
   canDeleteRental                   Boolean  @default(false)
+  canCancelRental                   Boolean  @default(false)
+  canRecordRentalPayment            Boolean  @default(false)
+  canRefundRentalDeposit            Boolean  @default(false)
+  canRefundRentalAdvance            Boolean  @default(false)
+  canForfeitRentalDeposit           Boolean  @default(false)
   canProcessRentalReturn            Boolean  @default(false)
   canViewRentalReport               Boolean  @default(false)
   canGenerateRentalContract         Boolean  @default(false)
+  canViewPlanner                    Boolean  @default(false)
+  canManagePlanner                  Boolean  @default(false)
+  canViewCRM                        Boolean  @default(false)
+  canCreateCRM                      Boolean  @default(false)
+  canEditCRM                        Boolean  @default(false)
+  canDeleteCRM                      Boolean  @default(false)
   // Property Management
   canViewPropertyManagement         Boolean  @default(false)
   canViewPropertyPortfolio          Boolean  @default(false)
@@ -959,10 +971,13 @@ model UserPermission {
   canManagePropertyUnits            Boolean  @default(false)
   canCreateTenancies                Boolean  @default(false)
   canEndTenancies                   Boolean  @default(false)
+  canReactivateTenancies            Boolean  @default(false)
   canManageTenancies                Boolean  @default(false)
+  canEditRentPeriods                Boolean  @default(false)
   canRecordRentPayment              Boolean  @default(false)
   canRecordTenantDeposit            Boolean  @default(false)
   canRefundTenantDeposit            Boolean  @default(false)
+  canApplyTenantDepositToRent       Boolean  @default(false)
   canVoidRentPayment                Boolean  @default(false)
   canManageRentPayment              Boolean  @default(false)
   canViewRentPaymentPlans           Boolean  @default(false)
@@ -2958,6 +2973,8 @@ model PropertyRentPayment {
   arrearsMonths    Int?
   paymentDate      DateTime               @default(now())
   paymentMethod    String                 @default("cash")
+  mobileProvider   String?
+  phoneNumber      String?
   transactionRef   String?
   notes            String?
   status           String                 @default("posted")
