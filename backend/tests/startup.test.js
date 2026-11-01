@@ -7,12 +7,14 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
+import { ALL_PERMISSION_KEYS } from '../src/utils/permissions.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const startupScriptPath = path.resolve(__dirname, '../start.sh');
 const startupScript = fs.readFileSync(startupScriptPath, 'utf8');
 const dockerfile = fs.readFileSync(path.resolve(__dirname, '../Dockerfile'), 'utf8');
+const prismaSchema = fs.readFileSync(path.resolve(__dirname, '../prisma/schema.prisma'), 'utf8');
 
 test('startup script launches the app without blocking on prisma bootstrap', () => {
   assert.match(startupScript, /exec node --trace-warnings src\/app\.js/);
@@ -30,6 +32,26 @@ test('startup applies the additive alternate renter phone column before serving 
   assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
   const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-property-tenancy-alternate-phone-schema.js'), 'utf8');
   assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS "alternatePhone" TEXT/);
+});
+
+test('startup creates permission and rent payment columns before the app queries them', () => {
+  const migration = 'node src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js';
+  assert.ok(startupScript.indexOf(migration) > startupScript.indexOf('ensure-property-rent-promises-schema.js'));
+  assert.ok(startupScript.indexOf(migration) < startupScript.indexOf('=== Starting Node App ==='));
+  const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js'), 'utf8');
+  assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS.*BOOLEAN NOT NULL DEFAULT false/);
+  assert.match(ensureScript, /ALTER COLUMN.*SET NOT NULL/);
+  assert.match(ensureScript, /ALL_PERMISSION_KEYS/);
+  assert.doesNotMatch(ensureScript, /BOOLEAN\s*\?\s*\|\|\s*null/);
+  assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS "mobileProvider" TEXT/);
+  assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS "phoneNumber" TEXT/);
+});
+
+test('every active app permission has a non-null Prisma boolean column', () => {
+  const model = prismaSchema.match(/model UserPermission \{([\s\S]*?)\n\}/)?.[1] || '';
+  for (const permission of ALL_PERMISSION_KEYS) {
+    assert.match(model, new RegExp(`\\b${permission}\\s+Boolean\\s+@default\\(false\\)`), `${permission} must have a required boolean column`);
+  }
 });
 
 test('backend loads every router and serves the Railway healthcheck without a database', { timeout: 45000 }, async () => {
