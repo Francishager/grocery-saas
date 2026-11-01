@@ -8,6 +8,7 @@ const profilePage = source('../src/pages/receivables/CustomerProfilePage.tsx');
 const paymentDialog = source('../src/components/customer/CustomerPaymentDialog.tsx');
 const receivablesPage = source('../src/pages/receivables/ReceivablesPage.tsx');
 const historyDialog = source('../src/components/customer/CustomerTransactionHistoryDialog.tsx');
+const transactionReceipt = source('../src/lib/transactionReceipt.ts');
 
 test('record payment opens over the profile without navigating to the receivables table', () => {
   assert.match(profilePage, /onRecordPayment=\{\(customer\) => setPaymentCustomer\(customer\)\}/);
@@ -66,4 +67,10 @@ test('renter profile receipts include mobile-money provider, number, and transac
   assert.match(historyDialog, /mobileProvider\?: string \| null; phoneNumber\?: string \| null/);
   assert.match(historyDialog, /label: 'Mobile money provider', value: row\.mobileProvider/);
   assert.match(historyDialog, /label: 'Mobile money number', value: row\.phoneNumber/);
+});
+
+test('customer and renter reprints use the shared browser receipt print window', () => {
+  assert.match(transactionReceipt, /openReceiptPrintWindow\(data\.reference \|\| data\.title\)/);
+  assert.match(transactionReceipt, /printHtmlInBrowser\(html, `\$\{data\.title\} \$\{data\.reference\}`, printWindow\)/);
+  assert.doesNotMatch(transactionReceipt, /window\.open\(|window\.onload/);
 });

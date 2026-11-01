@@ -27,14 +27,25 @@ export function printReceiptInBrowser(receiptOrLoader: ReceiptLoader, receiptNo 
   loadReceipt()
     .then((receipt) => {
       const safeReceipt = normalizeReceipt(receipt)
-      writePrintWindow(targetWindow, receiptHtml(safeReceipt))
-      targetWindow.focus()
-      window.setTimeout(() => targetWindow.print(), 250)
+      printHtmlInBrowser(receiptHtml(safeReceipt), receiptNo, targetWindow)
     })
     .catch((error) => {
       writePrintWindow(targetWindow, errorHtml(error?.message || 'Failed to load receipt'))
     })
 
+  return true
+}
+
+export function printHtmlInBrowser(html: string, receiptNo = 'Receipt', printWindow?: Window | null): boolean {
+  const targetWindow = printWindow ?? openReceiptPrintWindow(receiptNo)
+  if (!targetWindow || targetWindow.closed) return false
+
+  writePrintWindow(targetWindow, html)
+  targetWindow.document.title = receiptNo
+  targetWindow.focus()
+  window.setTimeout(() => {
+    if (!targetWindow.closed) targetWindow.print()
+  }, 250)
   return true
 }
 
