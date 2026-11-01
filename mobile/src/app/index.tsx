@@ -37,12 +37,15 @@ export default function HomeScreen() {
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [failureMessage, setFailureMessage] = useState('Check your internet connection, then try again.');
+  const [webViewKey, setWebViewKey] = useState(0);
 
   useEffect(() => {
     if (!loading) return;
     const timeout = setTimeout(() => {
       setLoading(false);
       setFailed(true);
+      setFailureMessage('JibuSales did not respond within 30 seconds. Check your connection or open the site in your browser.');
     }, 30_000);
     return () => clearTimeout(timeout);
   }, [loading]);
@@ -62,20 +65,34 @@ export default function HomeScreen() {
   const handleNavigation = (request: Pick<WebViewNavigation, 'url'>) => {
     const url = request.url;
     if (url === 'about:blank') return true;
-    if (!getOrigin(url)) return false;
-    if (getOrigin(url) === APP_ORIGIN) return true;
-    if (url.startsWith('https://')) return true;
     if (externalScheme(url)) {
       void Linking.openURL(url).catch(() => undefined);
       return false;
     }
+    if (!getOrigin(url)) return false;
+    if (getOrigin(url) === APP_ORIGIN) return true;
+    if (url.startsWith('https://')) return true;
     return false;
   };
 
   const retry = () => {
+    setFailureMessage('Check your internet connection, then try again.');
     setFailed(false);
     setLoading(true);
-    webView.current?.reload();
+    setWebViewKey((key) => key + 1);
+  };
+
+  const openInBrowser = () => {
+    void Linking.openURL(WEB_APP_URL).catch(() => {
+      setFailureMessage('Could not open the JibuSales website. Check that this device has internet access.');
+    });
+  };
+
+  const handleLoadError = ({ nativeEvent }: { nativeEvent?: { description?: string; code?: number; url?: string } }) => {
+    setLoading(false);
+    setFailed(true);
+    const description = nativeEvent?.description?.trim();
+    setFailureMessage(description ? `Connection failed: ${description}` : 'The secure connection could not be established. Check internet access and try again.');
   };
 
   const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
@@ -111,6 +128,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
       <NativeWebView
+        key={webViewKey}
         ref={webView}
         source={{ uri: WEB_APP_URL }}
         style={styles.webView}
@@ -121,12 +139,20 @@ export default function HomeScreen() {
         onNavigationStateChange={(state: WebViewNavigation) => setCanGoBack(state.canGoBack)}
         onLoadStart={() => { setLoading(true); setFailed(false); }}
         onLoadEnd={() => setLoading(false)}
-        onError={() => { setLoading(false); setFailed(true); }}
-        onHttpError={({ nativeEvent }: { nativeEvent: { statusCode: number } }) => {
-          if (nativeEvent.statusCode >= 500) setFailed(true);
+        onError={handleLoadError}
+        onHttpError={({ nativeEvent }: { nativeEvent: { statusCode: number; description?: string; url?: string } }) => {
+          if (nativeEvent.statusCode >= 500) {
+            setLoading(false);
+            setFailed(true);
+            setFailureMessage(`JibuSales is temporarily unavailable (server error ${nativeEvent.statusCode}). Try again shortly.`);
+          }
         }}
         onContentProcessDidTerminate={() => webView.current?.reload()}
-        onRenderProcessGone={() => { setLoading(false); setFailed(true); }}
+        onRenderProcessGone={() => {
+          setLoading(false);
+          setFailed(true);
+          setFailureMessage('The app browser stopped unexpectedly. Reopen the page or try again.');
+        }}
         onFileDownload={({ nativeEvent }: { nativeEvent: { downloadUrl: string } }) => {
           void Linking.openURL(nativeEvent.downloadUrl).catch(() => undefined);
         }}
@@ -155,9 +181,12 @@ export default function HomeScreen() {
         <View style={styles.errorOverlay}>
           <View style={styles.errorMark}><Text style={styles.errorMarkText}>!</Text></View>
           <Text style={styles.errorTitle}>Can’t connect to JibuSales</Text>
-          <Text style={styles.errorCopy}>Check your internet connection, then try again.</Text>
+          <Text style={styles.errorCopy}>{failureMessage}</Text>
           <Pressable onPress={retry} style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}>
             <Text style={styles.retryLabel}>Try again</Text>
+          </Pressable>
+          <Pressable onPress={openInBrowser} style={({ pressed }) => [styles.browserButton, pressed && styles.pressed]}>
+            <Text style={styles.browserLabel}>Open in browser</Text>
           </Pressable>
         </View>
       ) : null}
@@ -180,5 +209,7 @@ const styles = StyleSheet.create({
   errorCopy: { color: '#66736b', fontSize: 14, textAlign: 'center', lineHeight: 21, marginTop: 8 },
   retryButton: { minHeight: 46, minWidth: 130, borderRadius: 9, backgroundColor: brandGreen, alignItems: 'center', justifyContent: 'center', marginTop: 22, paddingHorizontal: 18 },
   retryLabel: { color: '#ffffff', fontWeight: '700', fontSize: 14 },
+  browserButton: { minHeight: 44, minWidth: 130, alignItems: 'center', justifyContent: 'center', marginTop: 8, paddingHorizontal: 18 },
+  browserLabel: { color: brandGreen, fontWeight: '700', fontSize: 14 },
   pressed: { opacity: 0.8 },
 });

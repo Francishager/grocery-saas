@@ -2,7 +2,7 @@
   "expo": {
     "name": "JibuSales",
     "slug": "jibusales",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "jibusales",
@@ -21,6 +21,8 @@
     "android": {
       "package": "com.jibusales.app",
       "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "CAMERA",
