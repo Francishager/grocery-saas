@@ -50,7 +50,6 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
   const [agentPrinters, setAgentPrinters] = useState<PrintAgentPrinter[]>([])
   const [nativePrinters, setNativePrinters] = useState<NativePrinter[]>([])
   const { toast } = useToast()
-  const pdfUrl = saleId ? receiptsApi.getPdf(saleId) : ''
   const directPrintAvailable = isDirectThermalPrintingAvailable()
   const baseCurrency = receipt?.baseCurrency || receipt?.business.currency || 'UGX'
   const transactionCurrency = receipt?.transactionCurrency || baseCurrency
@@ -73,20 +72,9 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
     if (downloading) return
     setDownloading(true)
     try {
-      let savedOnDevice = false
-      if (transactionData) {
-        const result = await downloadReceiptPreviewPdf(await loadReceiptForPrint(), receiptNo)
-        savedOnDevice = result === 'native-saved'
-      } else {
-        if (!saleId) throw new Error('Receipt data is unavailable.')
-        const link = document.createElement('a')
-        link.href = pdfUrl
-        link.download = `receipt-${receiptNo}.pdf`
-        link.rel = 'noopener'
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-      }
+      if (!transactionData && !saleId) throw new Error('Receipt data is unavailable.')
+      const result = await downloadReceiptPreviewPdf(await loadReceiptForPrint(), receiptNo)
+      const savedOnDevice = result === 'native-saved'
       toast(savedOnDevice
         ? { title: 'Receipt saved', description: 'The PDF was saved to the folder you selected.' }
         : { title: 'Receipt download started', description: 'The PDF receipt is being downloaded.' })

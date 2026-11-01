@@ -89,10 +89,13 @@ test('customer and renter reprints use the shared browser receipt print window',
 
 test('customer and renter reprints open an in-app preview with close, browser print, and direct PDF actions', () => {
   assert.match(receiptViewer, /aria-label="Close receipt"/);
-  assert.match(receiptViewer, /downloadReceiptPreviewPdf\(await loadReceiptForPrint\(\), receiptNo\)/);
+  assert.match(receiptViewer, /const result = await downloadReceiptPreviewPdf\(await loadReceiptForPrint\(\), receiptNo\)/);
+  assert.doesNotMatch(receiptViewer, /link\.href = pdfUrl/);
   assert.match(receiptViewer, /type="button"[^>]*onClick=\{event => \{ event\.preventDefault\(\); event\.stopPropagation\(\); void handleDownloadPdf\(\) \}\}/);
   assert.match(receiptPdf, /pdf\.output\('blob'\)/);
   assert.match(receiptPdf, /window\.JibuNativeFile\?\.savePdf/);
+  assert.match(receiptPdf, /window\.ReactNativeWebView/);
+  assert.match(receiptPdf, /if \(!result\?\.saved\) throw new Error/);
   assert.match(receiptPdf, /link\.download = filename/);
   assert.match(receiptPdf, /receipt\.business\.receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);
   assert.match(mobileApp, /Directory\.pickDirectoryAsync\(\)/);

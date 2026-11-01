@@ -6,6 +6,9 @@ declare global {
     JibuNativeFile?: {
       savePdf: (filename: string, base64: string) => Promise<{ saved: boolean }>
     }
+    ReactNativeWebView?: {
+      postMessage: (message: string) => void
+    }
   }
 }
 
@@ -112,8 +115,12 @@ export async function downloadReceiptPreviewPdf(receipt: ReceiptPreview, fallbac
   if (typeof window !== 'undefined' && window.JibuNativeFile?.savePdf) {
     const dataUrl = pdf.output('datauristring')
     const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
-    await window.JibuNativeFile.savePdf(filename, base64)
+    const result = await window.JibuNativeFile.savePdf(filename, base64)
+    if (!result?.saved) throw new Error('The receipt was not saved. Please choose a folder and try again.')
     return 'native-saved'
+  }
+  if (typeof window !== 'undefined' && window.ReactNativeWebView) {
+    throw new Error('Receipt download is unavailable in this app version. Update JibuSales and try again.')
   }
 
   const blob = pdf.output('blob')
