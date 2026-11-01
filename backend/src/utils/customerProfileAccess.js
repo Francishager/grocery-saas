@@ -53,6 +53,7 @@ export function customerProfileAccess(permissions = []) {
 export function customerProfilePayload(customer, access) {
   return {
     id: customer.id,
+    ...(access.recordPayment && { branchId: customer.branchId || null }),
     name: customer.name,
     ...(access.phone && { phone: customer.phone }),
     ...(!access.phone && { maskedPhone: maskCustomerPhone(customer.phone) }),

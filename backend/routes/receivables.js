@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireFeature, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
-import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from '../src/utils/branchAccess.js'
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, tenantIdFromUser } from '../src/utils/branchAccess.js'
 import { checkUsageLimit } from '../src/utils/usageLimits.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
@@ -2244,14 +2244,31 @@ router.get('/payments', authenticateToken, requirePermission('canViewReceivable'
 })
 
 // Record customer payment
-router.post('/payments', authenticateToken, requirePermission('canRecordCustomerPayment'), requireTenant, loadUserPermissions, async (req, res) => {
+router.post('/payments', authenticateToken, requirePermission('canRecordCustomerPayment'), requireFeature('receivables'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
-    const scope = await resolveBranchScope(prisma, req, {
+    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
+    let branchId = req.body?.branchId || req.body?.branch_id || null
+    const tenantId = tenantIdFromUser(req.user)
+    if (!branchId && customerId && saleId) {
+      const saleScope = await prisma.saleRecord.findFirst({
+        where: { id: saleId, customerId, tenantId },
+        select: { branchId: true },
+      })
+      branchId = saleScope?.branchId || null
+    }
+    if (!branchId && customerId) {
+      const customerScope = await prisma.customer.findFirst({
+        where: { id: customerId, tenantId },
+        select: { branchId: true },
+      })
+      branchId = customerScope?.branchId || null
+    }
+    const scopeRequest = branchId ? { ...req, body: { ...req.body, branchId } } : req
+    const scope = await resolveBranchScope(prisma, scopeRequest, {
       source: 'body',
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
     const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
     const foreignAmount = toMoney(amount)
     const paidAmount = toBaseCurrency(foreignAmount, fx.rateToBase)
@@ -2274,11 +2291,14 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
 
     // Get customer
     const customer = await prisma.customer.findFirst({
-      where: scopedWhere(scope, { id: customerId })
+      where: { id: customerId, tenantId: scope.tenantId }
     })
 
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
+    }
+    if (!saleId && scope.branchId && customer.branchId && customer.branchId !== scope.branchId) {
+      return res.status(403).json({ error: 'This customer belongs to another branch.', code: 'CUSTOMER_BRANCH_MISMATCH' })
     }
 
     let sale = null

@@ -15,6 +15,7 @@ import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 
 export type CustomerHistoryTarget = {
   id?: string | null
+  branchId?: string | null
   name?: string | null
   phone?: string | null
   email?: string | null

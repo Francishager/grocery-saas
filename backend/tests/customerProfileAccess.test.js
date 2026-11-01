@@ -67,6 +67,12 @@ test('customer operational permissions are independent of profile viewing', () =
   assert.equal(access.sales, false)
 })
 
+test('record-payment profiles carry the customer branch needed to post in the correct scope', () => {
+  const access = customerProfileAccess(['canViewCustomer', 'canRecordCustomerPayment'])
+  const customer = customerProfilePayload({ id: 'customer-1', name: 'A Customer', status: 'active', branchId: 'branch-b' }, access)
+  assert.equal(customer.branchId, 'branch-b')
+})
+
 test('customer history permission groups do not expose other transaction categories', () => {
   const rows = [
     { source: 'receivable_sale' },

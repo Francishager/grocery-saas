@@ -51,6 +51,7 @@ import {
 
 interface Customer {
   id: string
+  branchId?: string | null
   name: string
   email?: string
   phone?: string
@@ -1005,6 +1006,7 @@ export default function ReceivablesPage() {
         headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({
           customerId: targetCustomer.id,
+          branchId: selectedSale?.branchId || selectedSale?.branch?.id || targetCustomer.branchId || undefined,
           saleId: selectedSale?.id,
           amount: parseFloat(paymentAmount),
           currency: paymentCurrency,
