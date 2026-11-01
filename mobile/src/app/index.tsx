@@ -37,6 +37,7 @@ export default function HomeScreen() {
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
   const [failureMessage, setFailureMessage] = useState('Check your internet connection, then try again.');
   const [webViewKey, setWebViewKey] = useState(0);
 
@@ -45,10 +46,10 @@ export default function HomeScreen() {
     const timeout = setTimeout(() => {
       setLoading(false);
       setFailed(true);
-      setFailureMessage('JibuSales did not respond within 30 seconds. Check your connection or open the site in your browser.');
+      setFailureMessage(`The app browser stopped at ${Math.round(loadProgress * 100)}% while opening JibuSales. Check your connection or open the site in your browser.`);
     }, 30_000);
     return () => clearTimeout(timeout);
-  }, [loading]);
+  }, [loading, loadProgress]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -76,6 +77,7 @@ export default function HomeScreen() {
   };
 
   const retry = () => {
+    setLoadProgress(0);
     setFailureMessage('Check your internet connection, then try again.');
     setFailed(false);
     setLoading(true);
@@ -137,8 +139,13 @@ export default function HomeScreen() {
         onMessage={handleNativeMessage}
         injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};window.__jibuNativePrinterReply=function(id,response){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||'Native printer operation failed.'));};window.JibuNativePrinter={request:function(payload){return new Promise(function(resolve,reject){var id='p'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error('Printer request timed out.'));}},30000);});}};})();true;`}
         onNavigationStateChange={(state: WebViewNavigation) => setCanGoBack(state.canGoBack)}
-        onLoadStart={() => { setLoading(true); setFailed(false); }}
-        onLoadEnd={() => setLoading(false)}
+        onLoadStart={() => { setLoadProgress(0); setLoading(true); setFailed(false); }}
+        onLoadProgress={({ nativeEvent }: { nativeEvent: { progress: number } }) => {
+          const progress = nativeEvent.progress;
+          setLoadProgress(progress);
+          if (progress >= 1) setLoading(false);
+        }}
+        onLoadEnd={() => { setLoadProgress(1); setLoading(false); }}
         onError={handleLoadError}
         onHttpError={({ nativeEvent }: { nativeEvent: { statusCode: number; description?: string; url?: string } }) => {
           if (nativeEvent.statusCode >= 500) {
