@@ -1035,9 +1035,9 @@ export default function PayablesPage() {
 
               {paymentMethod === 'mobile_money' && (
                 <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details (optional)</p>
                   <div>
-                    <Label>Network Provider *</Label>
+                    <Label>Network Provider</Label>
                     <select
                       value={mobileProvider}
                       onChange={(e) => setMobileProvider(e.target.value)}
@@ -1053,7 +1053,7 @@ export default function PayablesPage() {
                     </select>
                   </div>
                   <div>
-                    <Label>Phone Number *</Label>
+                    <Label>Supplier Phone Number</Label>
                     <Input
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value)}
@@ -1062,7 +1062,7 @@ export default function PayablesPage() {
                     />
                   </div>
                   <div>
-                    <Label>Transaction ID *</Label>
+                    <Label>Transaction ID</Label>
                     <Input
                       value={transactionId}
                       onChange={(e) => setTransactionId(e.target.value)}
@@ -1074,9 +1074,9 @@ export default function PayablesPage() {
 
               {paymentMethod === 'card' && (
                 <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details (optional)</p>
                   <div>
-                    <Label>Transaction ID *</Label>
+                    <Label>Transaction ID</Label>
                     <Input
                       value={transactionId}
                       onChange={(e) => setTransactionId(e.target.value)}
@@ -1096,9 +1096,7 @@ export default function PayablesPage() {
                 Cancel
               </Button>
               <Button onClick={recordPayment} disabled={
-                !paymentAmount || parseFloat(paymentAmount) <= 0 ||
-                (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
-                (paymentMethod === 'card' ? !transactionId.trim() : false)
+                !paymentAmount || parseFloat(paymentAmount) <= 0
               }>
                 Record Payment
               </Button>

@@ -11,6 +11,7 @@ import { calculateRentAging } from '../utils/rentAging.js'
 import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../utils/propertyTenancy.js'
 import { correctedRentChargeValues, nextRentRatePeriod, recordTenancyRentRate, recordUnitRentRate, rentAmountForPeriod, monthKey as rentRateMonthKey } from '../services/propertyRentRateService.js'
 import { propertyRentPeriods } from '../utils/propertyRentPeriods.js'
+import { allocateRentPaymentToPeriods } from '../utils/rentPaymentAllocation.js'
 import { calculateRentPromiseProgress } from '../utils/rentPromiseProgress.js'
 
 const router = Router()
@@ -18,6 +19,10 @@ const identityUpload = multer({ storage: multer.memoryStorage(), limits: { fileS
 const money = value => Math.round((Number(value) || 0) * 100) / 100
 const tenantIdOf = req => req.user?.tenantId
 const monthKey = date => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+const addRentMonths = (period, count) => {
+  const [year, month] = period.split('-').map(Number)
+  return monthKey(new Date(Date.UTC(year, month - 1 + count, 1)))
+}
 const isMonthKey = value => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || ''))
 const userDisplayName = user => [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || null
 async function paymentHandlerNames(tenantId, receiptNos) {
@@ -1389,8 +1394,12 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
   const amount = money(req.body?.amount)
   const rentMonths = req.body?.rentMonths == null || req.body?.rentMonths === '' ? null : Number(req.body.rentMonths)
   const arrearsMonths = req.body?.arrearsMonths == null || req.body?.arrearsMonths === '' ? 0 : Number(req.body.arrearsMonths)
-  if (rentMonths !== null && (!Number.isInteger(rentMonths) || rentMonths < 1 || rentMonths > 36)) return badRequest(res, 'Choose between 1 and 36 months of rent.')
-  if (!Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120) return badRequest(res, 'Choose between 0 and 120 missing prior rent months.')
+  const selectedPeriods = Array.isArray(req.body?.selectedPeriods) ? [...new Set(req.body.selectedPeriods.map(period => String(period || '').trim()))] : null
+  const advanceMonths = req.body?.advanceMonths == null || req.body?.advanceMonths === '' ? 0 : Number(req.body.advanceMonths)
+  if (selectedPeriods === null && rentMonths !== null && (!Number.isInteger(rentMonths) || rentMonths < 1 || rentMonths > 36)) return badRequest(res, 'Choose between 1 and 36 months of rent.')
+  if (selectedPeriods === null && (!Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120)) return badRequest(res, 'Choose between 0 and 120 missing prior rent months.')
+  if (selectedPeriods !== null && (selectedPeriods.length > 120 || selectedPeriods.some(period => !isMonthKey(period)) || (!selectedPeriods.length && advanceMonths < 1))) return badRequest(res, 'Select at least one rent period or a positive number of months paid ahead.')
+  if (!Number.isInteger(advanceMonths) || advanceMonths < 0 || advanceMonths > 36) return badRequest(res, 'Choose between 0 and 36 additional months paid ahead.')
   if (!Number.isFinite(amount) || amount <= 0) return badRequest(res, 'Enter a payment amount greater than zero.')
   const allowedMethods = new Set(['cash', 'safe', 'mobile_money', 'bank_transfer', 'bank', 'card', 'cheque'])
   const method = String(req.body?.paymentMethod || 'cash').toLowerCase()
@@ -1419,35 +1428,73 @@ router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment')
       if (!tenancy) throw Object.assign(new Error('Tenancy not found.'), { statusCode: 404 })
       const now = new Date()
       const currentPeriod = monthKey(now)
-      const existingPeriods = new Set((await tx.rentCharge.findMany({ where: { tenantId, tenancyId: tenancy.id }, select: { period: true } })).map(charge => charge.period))
-      const arrearsPeriods = []
-      for (let offset = 1; offset <= 1200 && arrearsPeriods.length < arrearsMonths; offset++) {
-        const periodDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1))
-        const priorPeriod = monthKey(periodDate)
-        const priorDueDate = dueDateFor(priorPeriod)
-        if (new Date(tenancy.startDate) > priorDueDate) break
-        if (tenancy.status === 'ended' && tenancy.endDate && new Date(tenancy.endDate) < priorDueDate) continue
-        if (!existingPeriods.has(priorPeriod)) arrearsPeriods.push(priorPeriod)
+      let charges
+      let open
+      let appliedAtReceipt
+      let advanceAmount
+      let receiptRentMonths = rentMonths
+      let receiptArrearsMonths = arrearsMonths
+      if (selectedPeriods !== null) {
+        const startPeriod = monthKey(new Date(tenancy.startDate))
+        const lastPeriod = tenancy.status === 'ended' && tenancy.endDate ? monthKey(new Date(tenancy.endDate)) : currentPeriod
+        for (const period of selectedPeriods) {
+          if (period < startPeriod || period > lastPeriod) throw Object.assign(new Error(`Rent period ${period} is outside this tenancy.`), { statusCode: 400 })
+          await ensureRentChargeForPeriod(tx, { tenancy, period, userId: req.user.id })
+        }
+        charges = selectedPeriods.length ? await tx.rentCharge.findMany({
+          where: { tenantId, tenancyId: tenancy.id, period: { in: selectedPeriods } },
+          include: { planAllocations: { include: { plan: { select: { status: true } } } } },
+          orderBy: [{ period: 'asc' }],
+        }) : []
+        if (charges.length !== selectedPeriods.length) throw Object.assign(new Error('One or more selected rent periods could not be found.'), { statusCode: 409 })
+        if (charges.some(charge => charge.planAllocations.some(allocation => allocation.plan.status === 'active'))) {
+          throw Object.assign(new Error('A selected rent period is locked by an active repayment plan. Record plan payments from the payment plan instead.'), { statusCode: 409 })
+        }
+        open = money(charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0))
+        let advanceCapacity = 0
+        if (advanceMonths > 0) {
+          if (tenancy.status !== 'active') throw Object.assign(new Error('Rent cannot be paid ahead after a tenancy has ended.'), { statusCode: 400 })
+          for (let offset = 1; offset <= advanceMonths; offset += 1) {
+            advanceCapacity = money(advanceCapacity + await rentAmountForPeriod(tx, tenancy, addRentMonths(currentPeriod, offset)))
+          }
+        }
+        const allocation = allocateRentPaymentToPeriods({ amount, charges, advanceCapacity })
+        if (allocation.error) throw Object.assign(new Error(allocation.error), { statusCode: 400 })
+        appliedAtReceipt = allocation.appliedAmount
+        advanceAmount = allocation.advanceAmount
+        receiptRentMonths = selectedPeriods.length + advanceMonths
+        receiptArrearsMonths = selectedPeriods.filter(period => period < currentPeriod).length
+      } else {
+        const existingPeriods = new Set((await tx.rentCharge.findMany({ where: { tenantId, tenancyId: tenancy.id }, select: { period: true } })).map(charge => charge.period))
+        const arrearsPeriods = []
+        for (let offset = 1; offset <= 1200 && arrearsPeriods.length < arrearsMonths; offset++) {
+          const periodDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1))
+          const priorPeriod = monthKey(periodDate)
+          const priorDueDate = dueDateFor(priorPeriod)
+          if (new Date(tenancy.startDate) > priorDueDate) break
+          if (tenancy.status === 'ended' && tenancy.endDate && new Date(tenancy.endDate) < priorDueDate) continue
+          if (!existingPeriods.has(priorPeriod)) arrearsPeriods.push(priorPeriod)
+        }
+        if (arrearsPeriods.length < arrearsMonths) throw Object.assign(new Error('There are not enough missing rent months within this tenancy to add the selected arrears.'), { statusCode: 400 })
+        for (const priorPeriod of arrearsPeriods.reverse()) await ensureRentChargeForPeriod(tx, { tenancy, period: priorPeriod, userId: req.user.id })
+        if (tenancy.status === 'active') await ensureRentChargeForPeriod(tx, { tenancy, period: currentPeriod, userId: req.user.id })
+        charges = await tx.rentCharge.findMany({
+          where: { tenantId, tenancyId: tenancy.id, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
+          orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
+        })
+        open = charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
+        const currentOpen = charges.filter(charge => charge.period === currentPeriod).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
+        if (rentMonths === null && amount - open > 0.01) throw Object.assign(new Error(`Payment exceeds outstanding rent of ${tenancy.currency} ${money(open).toLocaleString()}. Choose a rent period in months to record rent paid ahead.`), { statusCode: 400 })
+        const additionalMonths = rentMonths === null || tenancy.status !== 'active' ? 0 : Math.max(0, rentMonths - (currentOpen > 0.01 ? 1 : 0))
+        const maximumPeriodAmount = money(open + Number(tenancy.rentAmount) * additionalMonths)
+        if (rentMonths !== null && amount - maximumPeriodAmount > 0.01) throw Object.assign(new Error(`The amount exceeds recorded arrears/current rent plus the selected ${rentMonths} month(s) at the agreed rate.`), { statusCode: 400 })
+        appliedAtReceipt = money(Math.min(amount, open))
+        advanceAmount = money(amount - appliedAtReceipt)
       }
-      if (arrearsPeriods.length < arrearsMonths) throw Object.assign(new Error('There are not enough missing rent months within this tenancy to add the selected arrears.'), { statusCode: 400 })
-      for (const priorPeriod of arrearsPeriods.reverse()) await ensureRentChargeForPeriod(tx, { tenancy, period: priorPeriod, userId: req.user.id })
-      if (tenancy.status === 'active') await ensureRentChargeForPeriod(tx, { tenancy, period: currentPeriod, userId: req.user.id })
-      const charges = await tx.rentCharge.findMany({
-        where: { tenantId, tenancyId: tenancy.id, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
-        orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
-      })
-      const open = charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
-      const currentOpen = charges.filter(charge => charge.period === currentPeriod).reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0)
-      if (rentMonths === null && amount - open > 0.01) throw Object.assign(new Error(`Payment exceeds outstanding rent of ${tenancy.currency} ${money(open).toLocaleString()}. Choose a rent period in months to record rent paid ahead.`), { statusCode: 400 })
-      const additionalMonths = rentMonths === null || tenancy.status !== 'active' ? 0 : Math.max(0, rentMonths - (currentOpen > 0.01 ? 1 : 0))
-      const maximumPeriodAmount = money(open + Number(tenancy.rentAmount) * additionalMonths)
-      if (rentMonths !== null && amount - maximumPeriodAmount > 0.01) throw Object.assign(new Error(`The amount exceeds recorded arrears/current rent plus the selected ${rentMonths} month(s) at the agreed rate.`), { statusCode: 400 })
-      const appliedAtReceipt = money(Math.min(amount, open))
-      const advanceAmount = money(amount - appliedAtReceipt)
       const receiptNo = `RENT-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
       const account = await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId, isActive: true } })
       if (!account || account.type !== expectedType) throw Object.assign(new Error('Selected transaction account is no longer available; reload and retry.'), { statusCode: 409 })
-      const record = await tx.propertyRentPayment.create({ data: { tenantId, tenancyId: tenancy.id, cashAccountId: account.id, receiptNo, idempotencyKey, amount, advanceAmount, rentMonths, arrearsMonths, paymentDate, paymentMethod: method, mobileProvider: method === 'mobile_money' ? mobileProvider : null, phoneNumber: method === 'mobile_money' ? phoneNumber : null, transactionRef: transactionRef || null, notes: req.body.notes?.trim() || null, paymentType: 'rent' } })
+      const record = await tx.propertyRentPayment.create({ data: { tenantId, tenancyId: tenancy.id, cashAccountId: account.id, receiptNo, idempotencyKey, amount, advanceAmount, rentMonths: receiptRentMonths, arrearsMonths: receiptArrearsMonths, paymentDate, paymentMethod: method, mobileProvider: method === 'mobile_money' ? mobileProvider : null, phoneNumber: method === 'mobile_money' ? phoneNumber : null, transactionRef: transactionRef || null, notes: req.body.notes?.trim() || null, paymentType: 'rent' } })
       const movement = await recordPropertyCashMovement(tx, { tenantId, userId: req.user.id, cashAccount: account, amount, direction: 'receipt', reference: receiptNo, description: `Property rent received from ${tenancy.tenantName}` })
       const config = await ensurePropertyAccounting(tx, tenantId)
       await postPropertyJournal(tx, { tenantId, userId: req.user.id, sourceType: 'PROPERTY_RENT_PAYMENT', sourceId: record.id, date: paymentDate, reference: receiptNo, description: `Rent payment received from ${tenancy.tenantName}`, lines: propertyRentReceiptLines(config, { amount, cashAccountLedgerId: movement.ledgerAccount.id, reference: receiptNo, appliedAmount: appliedAtReceipt, advanceAmount }) })

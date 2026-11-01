@@ -2563,12 +2563,26 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
 // Record customer withdrawal
 router.post('/withdrawals', authenticateToken, requirePermission('canCreateWithdrawal'), requireTenant, loadUserPermissions, async (req, res) => {
   try {
-    const scope = await resolveBranchScope(prisma, req, {
+    const { customerId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    const tenantId = tenantIdFromUser(req.user)
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, tenantId },
+      select: { id: true, branchId: true },
+    })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const requestedBranchId = req.body?.branchId || req.body?.branch_id || null
+    if (customer.branchId && requestedBranchId && customer.branchId !== requestedBranchId) {
+      return res.status(403).json({ error: 'Customer is not available in the selected branch', code: 'BRANCH_ACCESS_DENIED' })
+    }
+    const branchId = customer.branchId || requestedBranchId
+    const scopeRequest = branchId ? { ...req, body: { ...req.body, branchId } } : req
+    const scope = await resolveBranchScope(prisma, scopeRequest, {
       source: 'body',
       requireBranch: true,
       allowOwnerAll: false
     })
-    const { customerId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
     const resolvedPaymentMethod = paymentMethod || 'cash'
     if (resolvedPaymentMethod === 'credit') {
       return res.status(400).json({ error: 'Withdrawal must use cash, mobile money, bank transfer, or card' })

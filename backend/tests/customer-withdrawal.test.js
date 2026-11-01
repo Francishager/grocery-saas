@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 
-function fixture({ paid = 10000, sales = [], notes = [], previousWithdrawals = [], cash = 50000, status = 'active', openingBalance = 0, failCashPosting = false } = {}) {
+function fixture({ paid = 10000, sales = [], notes = [], previousWithdrawals = [], cash = 50000, status = 'active', openingBalance = 0, failCashPosting = false, customerBranchId = 'branch' } = {}) {
   let state = {
-    customer: { id: 'customer', tenantId: 'tenant', branchId: 'branch', name: 'Customer', status, openingBalance, balance: -999999, creditLimit: 100000000 },
+    customer: { id: 'customer', tenantId: 'tenant', branchId: customerBranchId, name: 'Customer', status, openingBalance, balance: -999999, creditLimit: 100000000 },
     cash: { id: 'cash', tenantId: 'tenant', isActive: true, name: 'Till', balance: cash },
     linked: { id: 'linked', balance: cash }, withdrawals: previousWithdrawals.map((amount) => ({ amount })), movements: [],
   }
@@ -15,14 +15,18 @@ function fixture({ paid = 10000, sales = [], notes = [], previousWithdrawals = [
       return values[1] === 'tenant' ? [{ id: 'customer' }] : []
     },
     customer: {
-      findFirst: async ({ where }) => where.id === state.customer.id && where.tenantId === state.customer.tenantId
-        && (!where.branchId || where.branchId === state.customer.branchId) ? { ...state.customer } : null,
+      findFirst: async ({ where }) => where.id === state.customer.id && where.tenantId === state.customer.tenantId ? { ...state.customer } : null,
       update: async ({ data }) => Object.assign(state.customer, data),
     },
     saleRecord: { findMany: async () => sales },
     creditNote: { findMany: async () => notes },
-    customerPayment: { aggregate: async () => ({ _sum: { amount: paid } }) },
-    saleReturn: { aggregate: async () => ({ _sum: { total: 0 } }) },
+    customerPayment: {
+      aggregate: async () => ({ _sum: { amount: paid } }),
+      findMany: async () => paid ? [{ id: 'payment', customerId: 'customer', amount: paid, allocationMode: 'legacy', saleId: null }] : [],
+    },
+    customerPaymentAllocation: { findMany: async () => [] },
+    customerCreditApplication: { findMany: async () => [] },
+    saleReturn: { aggregate: async () => ({ _sum: { total: 0 } }), findMany: async () => [] },
     customerWithdrawal: {
       aggregate: async () => ({ _sum: { amount: state.withdrawals.reduce((sum, row) => sum + row.amount, 0) } }),
       create: async ({ data }) => {
@@ -50,6 +54,7 @@ function fixture({ paid = 10000, sales = [], notes = [], previousWithdrawals = [
       findFirst: async () => ({ ...state.linked }),
       update: async ({ data }) => Object.assign(state.linked, data),
     },
+    receivablesAccountingConfig: { findUnique: async () => null },
   }
   let queue = Promise.resolve()
   const client = { $transaction: (action, options) => {
@@ -97,8 +102,22 @@ test('exact available funds can be withdrawn and customer, cash, linked account 
   await assert.rejects(f.withdraw(0.01), { code: 'INSUFFICIENT_CUSTOMER_FUNDS', availableFunds: 0 })
 })
 
+test('branchless customer can be withdrawn against the resolved branch scope', async () => {
+  const f = fixture({ customerBranchId: null })
+  const result = await f.withdraw(100)
+  assert.equal(result.customer.balance, -9900)
+  assert.equal(f.state().withdrawals[0].branchId, 'branch')
+})
+
+test('customer assigned to another branch is rejected before any payout is posted', async () => {
+  const f = fixture({ customerBranchId: 'other-branch' })
+  const before = f.state()
+  await assert.rejects(f.withdraw(100), { code: 'BRANCH_ACCESS_DENIED', statusCode: 403 })
+  assert.deepEqual(f.state(), before)
+})
+
 test('existing withdrawals, opening debt and sales all reduce customer funds', async () => {
-  const f = fixture({ paid: 10000, sales: [{ total: 2000 }], openingBalance: 1000, previousWithdrawals: [3000] })
+  const f = fixture({ paid: 10000, sales: [{ id: 'sale', customerId: 'customer', total: 2000 }], openingBalance: 1000, previousWithdrawals: [3000] })
   await assert.rejects(f.withdraw(4000.01), { availableFunds: 4000 })
   const result = await f.withdraw(3500)
   assert.equal(result.customer.balance, -500)
@@ -148,6 +167,6 @@ test('rejects invalid amounts, inactive customers and inaccessible branches', as
     await assert.rejects(fixture().withdraw(amount), { code: 'INVALID_WITHDRAWAL_AMOUNT' })
   }
   await assert.rejects(fixture({ status: 'blocked' }).withdraw(10), { code: 'CUSTOMER_INACTIVE' })
-  await assert.rejects(fixture().withdraw(10, { scope: { tenantId: 'tenant', branchId: 'other' } }), { statusCode: 404 })
+  await assert.rejects(fixture().withdraw(10, { scope: { tenantId: 'tenant', branchId: 'other' } }), { statusCode: 403, code: 'BRANCH_ACCESS_DENIED' })
   await assert.rejects(fixture().withdraw(10, { scope: { tenantId: 'other', branchId: 'branch' } }), { statusCode: 404 })
 })

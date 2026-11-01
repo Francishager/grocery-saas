@@ -1,4 +1,3 @@
-import { scopedWhere } from '../utils/branchAccess.js'
 import { calculateCustomerReceivableBalance, reconcileCustomerReceivableBalance } from '../utils/customerBalance.js'
 import { syncLinkedTransactionAccountBalance } from '../utils/accountingSync.js'
 import { getReceivablesAccountingConfig, postReceivablesJournal, customerRefundLines } from './receivablesAccountingService.js'
@@ -21,8 +20,11 @@ export async function recordCustomerWithdrawal(client, {
     return await client.$transaction(async (tx) => {
       // Serialize payouts for one customer, and read their ledger inside the same transaction.
       await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
-      const customer = await tx.customer.findFirst({ where: scopedWhere(scope, { id: customerId }) })
+      const customer = await tx.customer.findFirst({ where: { id: customerId, tenantId: scope.tenantId } })
       if (!customer) throw fail('Customer not found', 'CUSTOMER_NOT_FOUND', 404)
+      if (customer.branchId && customer.branchId !== scope.branchId) {
+        throw fail('Customer is not available in the selected branch', 'BRANCH_ACCESS_DENIED', 403)
+      }
       if (customer.status !== 'active') throw fail('Customer is not active', 'CUSTOMER_INACTIVE')
 
       const snapshot = await calculateCustomerReceivableBalance(tx, scope, customerId)

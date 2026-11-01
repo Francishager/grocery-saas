@@ -1102,6 +1102,7 @@ export default function ReceivablesPage() {
         method: 'POST',
         body: JSON.stringify({
           customerId: targetCustomer.id,
+          branchId: targetCustomer.branchId || undefined,
           amount,
           paymentMethod,
           cashAccountId: selectedCashAccountId || undefined,
