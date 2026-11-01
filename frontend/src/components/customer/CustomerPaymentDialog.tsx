@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
@@ -58,6 +59,7 @@ export default function CustomerPaymentDialog({
   const [mobileProvider, setMobileProvider] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [transactionId, setTransactionId] = useState('')
+  const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -98,6 +100,7 @@ export default function CustomerPaymentDialog({
     setMobileProvider('')
     setPhoneNumber('')
     setTransactionId('')
+    setNotes('')
     setError('')
     setAccounts([])
     setAccountId('')
@@ -164,7 +167,7 @@ export default function CustomerPaymentDialog({
           mobileProvider: method === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: method === 'mobile_money' ? phoneNumber : undefined,
           transactionId: ['mobile_money', 'card'].includes(method) ? transactionId : undefined,
-          notes: 'Payment recorded from customer profile',
+          notes: notes.trim() || 'Payment recorded from customer profile',
         }),
       })
       const result = await response.json().catch(() => ({}))
@@ -182,8 +185,7 @@ export default function CustomerPaymentDialog({
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!saving) onOpenChange(nextOpen) }}>
       <DialogContent
-        className="z-[70] max-h-[92dvh] w-[calc(100vw-1rem)] max-w-lg overflow-y-auto p-4 sm:p-6"
-        onEscapeKeyDown={(event) => event.preventDefault()}
+        className="z-[110] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-lg touch-pan-y overflow-y-auto overscroll-contain p-4 [-webkit-overflow-scrolling:touch] sm:max-h-[calc(100dvh-2rem)] sm:p-6"
         onInteractOutside={(event) => {
           // Keep the payment form mounted while Radix Select portals handle a choice.
           // Closing is explicit via Cancel/close or after a successful post.
@@ -215,6 +217,10 @@ export default function CustomerPaymentDialog({
               <div className="sm:col-span-2"><Label htmlFor="profilePaymentTransaction">Transaction ID</Label><Input id="profilePaymentTransaction" required value={transactionId} onChange={(event) => setTransactionId(event.target.value)} /></div>
             </div>}
             {method === 'card' && <div><Label htmlFor="profilePaymentTransaction">Transaction ID</Label><Input id="profilePaymentTransaction" required value={transactionId} onChange={(event) => setTransactionId(event.target.value)} /></div>}
+            <div>
+              <Label htmlFor="profilePaymentNotes">Note (optional)</Label>
+              <Textarea id="profilePaymentNotes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Add a payment note" rows={3} />
+            </div>
             <div>
               <Label htmlFor="profilePaymentAccount">Transaction account</Label>
               <Select value={accountId} onValueChange={setAccountId}>

@@ -24,7 +24,8 @@ test('profile payment posts through the permission-checked receivables endpoint 
 test('payment-method and account selectors cannot dismiss the payment dialog through their portals', () => {
   assert.match(paymentDialog, /onInteractOutside=\{\(event\) => \{/);
   assert.match(paymentDialog, /event\.preventDefault\(\)/);
-  assert.match(paymentDialog, /onEscapeKeyDown=\{\(event\) => event\.preventDefault\(\)\}/);
+  assert.match(paymentDialog, /className="z-\[110\]/);
+  assert.doesNotMatch(paymentDialog, /onEscapeKeyDown=\{\(event\) => event\.preventDefault\(\)\}/);
 });
 
 test('mobile-money payments require and submit provider, phone, and transaction reference', () => {
@@ -38,4 +39,10 @@ test('receivables payment modal scrolls on mobile and saves the entered note', (
   assert.match(receivablesPage, /max-h-\[calc\(100dvh-1rem\)\].*overflow-y-auto.*overscroll-contain/);
   assert.match(receivablesPage, /<Textarea[\s\S]*?id="customerPaymentNotes"[\s\S]*?value=\{paymentNotes\}/);
   assert.match(receivablesPage, /notes: paymentNotes\.trim\(\) \|\| 'Payment recorded via dashboard'/);
+});
+
+test('customer-profile payment dialog stays above its overlay and records an optional note', () => {
+  assert.match(paymentDialog, /className="z-\[110\]/);
+  assert.match(paymentDialog, /<Textarea id="profilePaymentNotes"[\s\S]*?value=\{notes\}/);
+  assert.match(paymentDialog, /notes: notes\.trim\(\) \|\| 'Payment recorded from customer profile'/);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { currencyApi, type LiveCurrencyRates } from '@/lib/api'
@@ -7,40 +7,42 @@ const DISPLAY_CODES = ['UGX', 'USD', 'KES', 'TZS', 'RWF', 'EUR', 'GBP']
 
 export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
   const [data, setData] = useState<LiveCurrencyRates | null>(null)
-  const [usdUgxRate, setUsdUgxRate] = useState<number | null>(null)
-  const [usdUgxDate, setUsdUgxDate] = useState<string | null>(null)
-  const [usdUgxUnavailable, setUsdUgxUnavailable] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const requestId = useRef(0)
+  const normalizedBase = String(baseCurrency || 'UGX').toUpperCase()
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    const currentRequestId = ++requestId.current
     setLoading(true)
     setError('')
     try {
-      const normalizedBase = String(baseCurrency || 'UGX').toUpperCase()
-      const [baseResult, ugxResult] = await Promise.allSettled([
-        currencyApi.rates(normalizedBase),
-        normalizedBase === 'UGX' ? Promise.resolve(null) : currencyApi.rates('UGX'),
-      ])
-      if (baseResult.status === 'rejected') throw baseResult.reason
-      setData(baseResult.value)
-      const ugxRates = normalizedBase === 'UGX'
-        ? baseResult.value
-        : ugxResult.status === 'fulfilled' ? ugxResult.value : null
-      const usdPerUgx = Number(ugxRates?.rates?.USD || 0)
-      setUsdUgxRate(usdPerUgx > 0 ? 1 / usdPerUgx : null)
-      setUsdUgxDate(ugxRates?.rateDate || null)
-      setUsdUgxUnavailable(!ugxRates || usdPerUgx <= 0)
+      const rates = await currencyApi.rates(normalizedBase)
+      if (requestId.current === currentRequestId) setData(rates)
     } catch (err: any) {
-      setError(err?.message || 'Exchange rates are unavailable.')
+      if (requestId.current === currentRequestId) setError(err?.message || 'Exchange rates are unavailable.')
     } finally {
-      setLoading(false)
+      if (requestId.current === currentRequestId) setLoading(false)
     }
-  }
+  }, [normalizedBase])
 
-  useEffect(() => { void refresh() }, [baseCurrency])
+  useEffect(() => {
+    setData(null)
+    void refresh()
+    return () => { requestId.current += 1 }
+  }, [refresh])
 
   const rateDate = data?.rateDate ? new Date(data.rateDate) : null
+  const isCurrentCurrency = data?.baseCurrency?.toUpperCase() === normalizedBase
+  const rates = isCurrentCurrency ? data?.rates || {} : {}
+  const baseToUgx = normalizedBase === 'UGX' ? 1 : Number(rates.UGX || 0)
+  const usdToUgx = normalizedBase === 'USD'
+    ? Number(rates.UGX || 0)
+    : normalizedBase === 'UGX'
+      ? (Number(rates.USD || 0) > 0 ? 1 / Number(rates.USD) : 0)
+      : (Number(rates.USD || 0) > 0 ? Number(rates.UGX || 0) / Number(rates.USD) : 0)
+  const formatRate = (value: number) => new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(value)
+
   return (
     <section className="space-y-3 rounded-md border p-4 sm:col-span-2" aria-label="Live exchange rates">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -52,22 +54,40 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh rates
         </Button>
       </div>
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : data ? <>
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : isCurrentCurrency ? <>
         {data.warning && <p role="status" className="text-xs text-amber-700">{data.warning}</p>}
-        <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
-          <span className="text-sm font-medium">US dollar to Uganda shilling</span>
-          <strong className="tabular-nums">{usdUgxRate ? `1 USD = ${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(usdUgxRate)} UGX` : usdUgxUnavailable ? 'Rate unavailable' : 'Loading rate…'}</strong>
-        </div>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
-          {DISPLAY_CODES.filter(code => data.rates[code] != null).map(code => (
-            <div key={code} className="flex items-baseline justify-between gap-2 border-b py-2 text-sm">
-              <span className="text-muted-foreground">1 {data.baseCurrency} =</span>
-              <strong className="tabular-nums">{new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(data.rates[code])}</strong>
-              <span className="text-muted-foreground">{code}</span>
+        <div className="grid gap-2 min-[420px]:grid-cols-2">
+          <div className="min-w-0 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
+            <span className="block text-xs text-muted-foreground">Selected currency to Uganda shilling</span>
+            <strong className="mt-1 block break-words text-sm tabular-nums">
+              {baseToUgx > 0 ? `1 ${normalizedBase} = ${formatRate(baseToUgx)} UGX` : 'Rate unavailable'}
+            </strong>
+          </div>
+          {normalizedBase !== 'USD' && (
+            <div className="min-w-0 rounded-md border px-3 py-2.5">
+              <span className="block text-xs text-muted-foreground">US dollar to Uganda shilling</span>
+              <strong className="mt-1 block break-words text-sm tabular-nums">
+                {usdToUgx > 0 ? `1 USD = ${formatRate(usdToUgx)} UGX` : 'Rate unavailable'}
+              </strong>
             </div>
-          ))}
+          )}
         </div>
-        {rateDate && <p className="text-xs text-muted-foreground">Rates updated {rateDate.toLocaleString()}.{usdUgxDate && usdUgxDate !== data.rateDate ? ` USD/UGX reference updated ${new Date(usdUgxDate).toLocaleString()}.` : ''} These are single reference conversion rates, not separate buy and sell prices.</p>}
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full table-fixed text-sm">
+            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+              <tr><th className="w-[42%] px-3 py-2 font-medium">Currency pair</th><th className="px-3 py-2 text-right font-medium">Reference rate</th></tr>
+            </thead>
+            <tbody>
+              {DISPLAY_CODES.filter(code => code !== normalizedBase && rates[code] != null).map(code => (
+                <tr key={code} className="border-t">
+                  <td className="break-words px-3 py-2">{normalizedBase} to {code}</td>
+                  <td className="break-words px-3 py-2 text-right tabular-nums">1 {normalizedBase} = {formatRate(Number(rates[code]))} {code}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rateDate && <p className="text-xs text-muted-foreground">Rates updated {rateDate.toLocaleString()}. These are single reference conversion rates, not separate buy and sell prices.</p>}
       </> : <p className="text-sm text-muted-foreground">{loading ? 'Loading rates…' : 'No rates loaded.'}</p>}
     </section>
   )
