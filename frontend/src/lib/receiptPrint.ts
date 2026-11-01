@@ -157,8 +157,7 @@ function receiptHtml(receipt: ReceiptPreview): string {
 
       <section class="center">
         ${business.receiptHeader ? `<p>${escapeHtml(business.receiptHeader)}</p>` : ''}
-        <p>Thank you for your purchase!</p>
-        ${business.receiptFooter ? `<p>${escapeHtml(business.receiptFooter)}</p>` : ''}
+        <p>${escapeHtml(business.receiptFooter?.trim() || 'Thank you for your purchase!')}</p>
         <p class="powered">Powered by JibuSales</p>
       </section>
     </main>

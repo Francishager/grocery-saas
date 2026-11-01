@@ -587,8 +587,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
 
                   <div className="text-center">
                     {receipt.business.receiptHeader && <p className="mb-1">{receipt.business.receiptHeader}</p>}
-                    <p>Thank you for your purchase!</p>
-                    {receipt.business.receiptFooter && <p className="mt-1">{receipt.business.receiptFooter}</p>}
+                    <p>{receipt.business.receiptFooter?.trim() || 'Thank you for your purchase!'}</p>
                     <p className="mt-1 text-[11px]">Powered by JibuSales</p>
                   </div>
                 </div>

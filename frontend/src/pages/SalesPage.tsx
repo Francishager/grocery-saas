@@ -103,7 +103,7 @@ export default function SalesPage() {
   const { hasFeature } = useFeatureAccess()
   const navigate = useNavigate()
   const canCreateSaleJobs = hasFeature('service.job_cards') && hasPermission('canCreateServiceJobCard')
-  const canViewCustomerCreditLimit = hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit')
+  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit'))
   const [saleTechnicians, setSaleTechnicians] = useState<SaleTechnician[]>([])
   const [serviceOptionsError, setServiceOptionsError] = useState('')
   useEffect(() => {

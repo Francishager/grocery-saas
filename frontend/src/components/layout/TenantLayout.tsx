@@ -268,7 +268,7 @@ const reportCategories: ReportCategoryDef[] = [
       { id: 'propertyRentRoll', label: 'Rent Roll' },
       { id: 'propertyRentArrears', label: 'Rent Arrears & Aging' },
       { id: 'propertyRentCollections', label: 'Rent Collections' },
-      { id: 'propertyRenterStatement', label: 'Renter Statement', permission: 'canViewPropertyStatements' },
+      { id: 'propertyRenterStatement', label: 'Tenant Statement', permission: 'canViewPropertyStatements' },
       { id: 'propertyPaymentPlans', label: 'Repayment Plan Progress' },
       { id: 'propertyOwnerPayables', label: 'Landlord Payables', permission: 'canViewPayable' },
       { id: 'propertyOwnerPayouts', label: 'Landlord Payout History' },

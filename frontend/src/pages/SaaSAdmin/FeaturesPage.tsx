@@ -44,6 +44,7 @@ const MODULES = [
   {
     id: 'customers', name: 'Customer Management', icon: Users, color: 'text-teal-600 bg-teal-100', features: [
       { name: 'customers', displayName: 'Customer Management' },
+      { name: 'customers.credit_limits', displayName: 'Customer Credit Limits' },
       { name: 'customers.groups', displayName: 'Customer Groups' },
       { name: 'customers.loyalty', displayName: 'Loyalty Program' },
       { name: 'customers.wallet', displayName: 'Customer Wallet' },

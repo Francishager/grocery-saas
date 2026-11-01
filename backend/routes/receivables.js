@@ -215,6 +215,13 @@ const canManageCustomerCreditLimit = (req) =>
   req.user?.permissions?.includes('canManageCustomerCreditLimit') ||
   req.userPermissions?.canManageCustomerCreditLimit === true
 
+async function getTenantCustomerProfileAccess(req, tenantId) {
+  const access = customerProfileAccess(req.user?.permissions)
+  const features = await getTenantFeatures(tenantId)
+  if (!hasFeatureAccess(features, 'customers.credit_limits')) access.creditLimit = false
+  return access
+}
+
 const userSelect = { select: { id: true, fname: true, lname: true } }
 
 const withUser = (record) => {
@@ -288,7 +295,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
       console.error('Customer repayment score enrichment failed:', error)
       enrichmentWarnings.push('Repayment scores could not be refreshed.')
     }
-    const profileAccess = customerProfileAccess(req.user?.permissions)
+    const profileAccess = await getTenantCustomerProfileAccess(req, scope.tenantId)
     let rentalBalances = new Map()
     let rentalIntegrationEnabled = false
     const canReadRentalBalances = profileAccess.balance && (req.user?.permissions || []).includes('canViewPropertyStatements')
@@ -386,7 +393,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const access = customerProfileAccess(req.user?.permissions)
+    const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
 
     const customer = await prisma.customer.findFirst({
       where: scopedWhere(scope, { id }),
@@ -547,7 +554,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const access = customerProfileAccess(req.user?.permissions)
+    const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
     const tenantFeatures = await getTenantFeatures(scope.tenantId)
     const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord')
       || hasFeatureAccess(tenantFeatures, 'property_management.agent')
@@ -1308,8 +1315,14 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       return res.status(400).json({ error: 'Customer name is required' })
     }
 
-    if (creditLimit !== undefined && !canManageCustomerCreditLimit(req)) {
-      return res.status(403).json({ error: 'You do not have permission to set customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+    if (creditLimit !== undefined) {
+      const features = await getTenantFeatures(scope.tenantId)
+      if (!hasFeatureAccess(features, 'customers.credit_limits')) {
+        return res.status(403).json({ error: 'Customer credit limits are not enabled for this business plan.', code: 'CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED' })
+      }
+      if (!canManageCustomerCreditLimit(req)) {
+        return res.status(403).json({ error: 'You do not have permission to set customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+      }
     }
     const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit)
     if (!creditLimitCheck.valid) {
@@ -1386,7 +1399,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       console.error('Error attaching repayment trust scores:', err)
       return [customerRaw]
     })
-    res.status(201).json(customerProfilePayload(customer, customerProfileAccess(req.user?.permissions)))
+    res.status(201).json(customerProfilePayload(customer, await getTenantCustomerProfileAccess(req, scope.tenantId)))
   } catch (error) {
     if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
     console.error('Create customer error:', error)
@@ -1410,8 +1423,14 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
       return res.status(404).json({ error: 'Customer not found' })
     }
 
-    if (creditLimit !== undefined && !canManageCustomerCreditLimit(req)) {
-      return res.status(403).json({ error: 'You do not have permission to set or change customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+    if (creditLimit !== undefined) {
+      const features = await getTenantFeatures(scope.tenantId)
+      if (!hasFeatureAccess(features, 'customers.credit_limits')) {
+        return res.status(403).json({ error: 'Customer credit limits are not enabled for this business plan.', code: 'CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED' })
+      }
+      if (!canManageCustomerCreditLimit(req)) {
+        return res.status(403).json({ error: 'You do not have permission to set or change customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+      }
     }
 
     if (hasOpeningBalanceInput(req.body) && !canManageOpeningBalance(req)) {
@@ -1537,7 +1556,7 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
 
     const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
     const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
-    res.json(customerProfilePayload(customer, customerProfileAccess(req.user?.permissions)))
+    res.json(customerProfilePayload(customer, await getTenantCustomerProfileAccess(req, scope.tenantId)))
   } catch (error) {
     if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
       return res.status(409).json({ error: error.message, code: error.code, duplicateField: error.conflictField })
@@ -2838,7 +2857,7 @@ router.delete('/fuel-cards/:id', authenticateToken, requirePermission('canEditRe
 
 // === CREDIT ACCOUNTS (customers with credit limit > 0) ===
 
-router.get('/credit-accounts', authenticateToken, requirePermission('canViewReceivable'), requireFeature('receivables'), requireTenant, async (req, res) => {
+router.get('/credit-accounts', authenticateToken, requirePermission('canViewReceivable'), requireFeature('receivables'), requireFeature('customers.credit_limits'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { search, status } = req.query
@@ -2861,7 +2880,7 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
     })
     const balancedAccounts = await attachCustomerReceivableBalances(prisma, scope, accountsRaw)
     const accounts = await attachRepaymentTrustScores(prisma, scope, balancedAccounts)
-    const access = customerProfileAccess(req.user?.permissions)
+    const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
 
     res.json({ accounts: access.creditLimit ? accounts : accounts.map(({ creditLimit: _creditLimit, ...account }) => account) })
   } catch (error) {
@@ -2871,7 +2890,7 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
 })
 
 // Update credit terms. Trust score is calculated from repayment history.
-router.put('/credit-accounts/:id', authenticateToken, requirePermission('canManageCustomerCreditLimit'), requireFeature('receivables'), requireTenant, async (req, res) => {
+router.put('/credit-accounts/:id', authenticateToken, requirePermission('canManageCustomerCreditLimit'), requireFeature('receivables'), requireFeature('customers.credit_limits'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params

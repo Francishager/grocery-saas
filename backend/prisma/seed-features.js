@@ -38,6 +38,7 @@ async function seedFeatures() {
 
     // ===== Customers =====
     { name: 'customers', displayName: 'Customer Management', module: 'customers', category: 'core', description: 'Customer profiles and history' },
+    { name: 'customers.credit_limits', displayName: 'Customer Credit Limits', module: 'customers', category: 'advanced', description: 'Authorize and manage trade credit limits for customers' },
     { name: 'customers.groups', displayName: 'Customer Groups', module: 'customers', category: 'advanced', description: 'Organize customers into groups' },
     { name: 'customers.loyalty', displayName: 'Loyalty Program', module: 'customers', category: 'advanced', description: 'Customer loyalty points and rewards' },
     { name: 'customers.wallet', displayName: 'Customer Wallet', module: 'customers', category: 'advanced', description: 'Customer digital wallet' },
@@ -229,7 +230,7 @@ async function seedPlanFeatures() {
         // core financial controls for small businesses: Expenses and Returns & Refunds.
         planFeatureNames = [
           'dashboard', 'sales', 'sales.pos', 'sales.returns',
-          'customers',
+          'customers', 'customers.credit_limits',
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'expenses',
           'reports', 'reports.sales', 'reports.inventory',
@@ -240,7 +241,7 @@ async function seedPlanFeatures() {
       case 'starter':
         planFeatureNames = [
           'dashboard', 'sales', 'sales.pos',
-          'customers',
+          'customers', 'customers.credit_limits',
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'reports', 'reports.sales', 'reports.inventory',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',
@@ -251,7 +252,7 @@ async function seedPlanFeatures() {
         planFeatureNames = [
           'dashboard', 'dashboard.analytics',
           'sales', 'sales.pos', 'sales.returns', 'sales.discounts', 'sales.suspended',
-          'customers', 'customers.statements',
+          'customers', 'customers.credit_limits', 'customers.statements',
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'inventory.adjustments', 'inventory.multi_unit', 'inventory.expiry_tracking',
           'suppliers', 'suppliers.purchase_orders', 'suppliers.grn',
@@ -268,7 +269,7 @@ async function seedPlanFeatures() {
         planFeatureNames = [
           'dashboard', 'dashboard.analytics',
           'sales', 'sales.pos', 'sales.returns', 'sales.discounts', 'sales.suspended',
-          'customers', 'customers.statements',
+          'customers', 'customers.credit_limits', 'customers.statements',
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'inventory.adjustments', 'inventory.multi_unit', 'inventory.expiry_tracking',
           'inventory.transfers',
@@ -293,7 +294,7 @@ async function seedPlanFeatures() {
       default:
         planFeatureNames = [
           'dashboard', 'sales', 'sales.pos',
-          'customers',
+          'customers', 'customers.credit_limits',
           'inventory', 'inventory.products', 'inventory.services', 'inventory.categories',
           'reports', 'reports.sales', 'reports.inventory',
           'settings', 'settings.taxes', 'settings.units', 'settings.roles', 'settings.users',

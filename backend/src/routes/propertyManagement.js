@@ -668,7 +668,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
   const alternatePhone = req.body?.alternatePhone == null ? null : String(req.body.alternatePhone).trim() || null
   if (alternatePhone && alternatePhone.length > 40) return badRequest(res, 'The second phone number must be 40 characters or fewer.')
   if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (startMonth && !isMonthKey(startMonth)) || !Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120 || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01) return badRequest(res, 'Enter a tenant, valid tenancy start month, total unpaid rent months including the current month from 0 to 120, positive monthly rent, and valid deposit amounts.')
-  if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage renter household details.' })
+  if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage tenant household details.' })
   try {
     const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
     const identity = await uploadRenterIdentity(req)
@@ -723,7 +723,7 @@ router.put('/tenancies/:id/profile', identityUpload.fields([{ name: 'profilePhot
       }, select: { id: true, customerId: true, nationalId: true } })
     })
     res.json(updated)
-  } catch (error) { console.error('Update renter profile failed:', error); res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Could not update tenant profile.' }) }
+  } catch (error) { console.error('Update tenant profile failed:', error); res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Could not update tenant profile.' }) }
 })
 
 router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canManageTenantPersonalDetails']), async (req, res) => {
@@ -731,8 +731,8 @@ router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canMan
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { select: { name: true, ownerId: true } } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
     const canManageTenancy = ['*', 'canManageTenancies'].some(permission => req.user?.permissions?.includes(permission))
-    if (!canManageTenancy && Object.keys(req.body).some(field => !TENANT_PERSONAL_FIELDS.includes(field))) return res.status(403).json({ error: 'You may update renter household details only.' })
-    if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined) && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage renter household details.' })
+    if (!canManageTenancy && Object.keys(req.body).some(field => !TENANT_PERSONAL_FIELDS.includes(field))) return res.status(403).json({ error: 'You may update tenant household details only.' })
+    if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined) && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage tenant household details.' })
     const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
 
     const tenantName = req.body.tenantName === undefined ? undefined : String(req.body.tenantName).trim()
@@ -861,7 +861,7 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
       arrearsAging: calculateRentAging(allCharges),
       access: { identity: includeIdentity, personalDetails: includePersonalDetails, managePersonalDetails: canManageTenantPersonalDetails(req) },
     })
-  } catch (error) { console.error('Load renter ledger failed:', error); res.status(500).json({ error: 'Could not load rental history.' }) }
+  } catch (error) { console.error('Load tenant ledger failed:', error); res.status(500).json({ error: 'Could not load rental history.' }) }
 })
 
 router.get('/customers/:customerId/household', requireAnyPermission(['canViewTenantPersonalDetails', 'canManageTenantPersonalDetails']), async (req, res) => {
@@ -878,14 +878,14 @@ router.get('/customers/:customerId/household', requireAnyPermission(['canViewTen
       },
     })
     res.json({ tenancies })
-  } catch (error) { console.error('Load renter household details failed:', error); res.status(500).json({ error: 'Could not load renter household details.' }) }
+  } catch (error) { console.error('Load tenant household details failed:', error); res.status(500).json({ error: 'Could not load tenant household details.' }) }
 })
 
 router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canViewRentPaymentPlans', 'canManageRentPaymentPlans']), async (req, res) => {
   try {
     const tenantId = tenantIdOf(req)
     const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
-    if (!customer) return res.status(404).json({ error: 'Renter profile not found.' })
+    if (!customer) return res.status(404).json({ error: 'Tenant profile not found.' })
     const [plans, overdueCharges] = await Promise.all([
       prisma.propertyRentPaymentPlan.findMany({
         where: { tenantId, tenancy: { customerId: customer.id } },
@@ -912,14 +912,14 @@ router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canVie
     }))
     const handlers = await paymentHandlerNames(tenantId, plans.flatMap(plan => plan.payments.map(payment => payment.receiptNo)))
     res.json({ plans: plans.map(plan => ({ ...plan, payments: plan.payments.map(payment => ({ ...payment, rentPeriods: propertyRentPeriods({ ...payment, paymentType: 'rent_plan' }), receivedBy: handlers.get(payment.receiptNo) })) })), eligibleCharges })
-  } catch (error) { console.error('List renter payment plans failed:', error); res.status(500).json({ error: 'Could not load renter payment plans.' }) }
+  } catch (error) { console.error('List tenant payment plans failed:', error); res.status(500).json({ error: 'Could not load tenant payment plans.' }) }
 })
 
 router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canViewRentPromises', 'canManageRentPromises']), async (req, res) => {
   try {
     const tenantId = tenantIdOf(req)
     const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
-    if (!customer) return res.status(404).json({ error: 'Renter profile not found.' })
+    if (!customer) return res.status(404).json({ error: 'Tenant profile not found.' })
     const records = await prisma.propertyRentPromise.findMany({
       where: { tenantId, tenancy: { customerId: customer.id } },
       orderBy: [{ createdAt: 'desc' }],
@@ -954,7 +954,7 @@ router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canVie
       createdByName: [promise.createdBy?.fname, promise.createdBy?.lname].filter(Boolean).join(' ') || 'Staff',
       allocations: promise.allocations.map(({ charge, ...allocation }) => ({ ...allocation, period: charge?.period, rentDueDate: charge?.dueDate })),
     })) })
-  } catch (error) { console.error('Load renter payment promises failed:', error); res.status(500).json({ error: 'Could not load renter payment promises.' }) }
+  } catch (error) { console.error('Load tenant payment promises failed:', error); res.status(500).json({ error: 'Could not load tenant payment promises.' }) }
 })
 
 router.post('/customers/:customerId/rent-promises', requirePermission('canManageRentPromises'), async (req, res) => {
@@ -963,7 +963,7 @@ router.post('/customers/:customerId/rent-promises', requirePermission('canManage
   const dueDate = req.body?.dueDate ? new Date(`${req.body.dueDate}T23:59:59.999Z`) : null
   const notes = String(req.body?.notes || '').trim()
   const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim()
-  if (!tenancyId) return badRequest(res, 'Choose the renter tenancy for this promise.')
+  if (!tenancyId) return badRequest(res, 'Choose the tenant tenancy for this promise.')
   if (!(amount > 0)) return badRequest(res, 'Enter a promised amount greater than zero.')
   if (!dueDate || !Number.isFinite(dueDate.getTime())) return badRequest(res, 'Enter a valid promised payment date.')
   if (notes.length > 1000 || idempotencyKey.length > 120) return badRequest(res, 'The notes or request key are too long.')
@@ -972,7 +972,7 @@ router.post('/customers/:customerId/rent-promises', requirePermission('canManage
     const promise = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT "id" FROM "property_tenancies" WHERE "id" = ${tenancyId} AND "tenantId" = ${tenantId} FOR UPDATE`
       const tenancy = await tx.propertyTenancy.findFirst({ where: { id: tenancyId, tenantId, customerId: req.params.customerId, status: { in: ['active', 'ended'] } }, select: { id: true } })
-      if (!tenancy) throw Object.assign(new Error('Renter tenancy not found.'), { statusCode: 404 })
+      if (!tenancy) throw Object.assign(new Error('Tenant tenancy not found.'), { statusCode: 404 })
       const existing = await tx.propertyRentPromise.findFirst({ where: { tenantId, idempotencyKey } })
       if (existing) {
         if (existing.tenancyId !== tenancyId) throw Object.assign(new Error('This request key was already used for a different tenancy.'), { statusCode: 409 })
@@ -1032,7 +1032,7 @@ router.post('/customers/:customerId/rent-promises', requirePermission('canManage
       }, include: { allocations: { include: { charge: { select: { period: true } } } } } })
     })
     res.status(201).json(promise)
-  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create renter payment promise failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record renter payment promise.' : error.message }) }
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenant payment promise failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record tenant payment promise.' : error.message }) }
 })
 
 router.post('/customers/:customerId/payment-plans', requirePermission('canManageRentPaymentPlans'), async (req, res) => {
@@ -1055,7 +1055,7 @@ router.post('/customers/:customerId/payment-plans', requirePermission('canManage
       if (existing) return existing
       await tx.$queryRaw`SELECT "id" FROM "property_tenancies" WHERE "id" = ${tenancyId} AND "tenantId" = ${tenantId} FOR UPDATE`
       const tenancy = await tx.propertyTenancy.findFirst({ where: { id: tenancyId, tenantId, customerId: req.params.customerId, status: { in: ['active', 'ended'] } }, include: { unit: { include: { property: true } } } })
-      if (!tenancy) throw Object.assign(new Error('Renter tenancy not found.'), { statusCode: 404 })
+      if (!tenancy) throw Object.assign(new Error('Tenant tenancy not found.'), { statusCode: 404 })
       const charges = await tx.rentCharge.findMany({
         where: { tenantId, tenancyId, dueDate: { lt: new Date() }, status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } },
         orderBy: [{ dueDate: 'asc' }, { createdAt: 'asc' }],
@@ -1087,7 +1087,7 @@ router.post('/customers/:customerId/payment-plans', requirePermission('canManage
       return tx.propertyRentPaymentPlan.findUnique({ where: { id: created.id }, include: { tenancy: { include: { unit: { include: { property: true } } } }, installments: { orderBy: { sequence: 'asc' } }, chargeAllocations: { include: { charge: true } } } })
     })
     res.status(201).json(plan)
-  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create renter payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create renter payment plan.' : error.message }) }
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenant payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create tenant payment plan.' : error.message }) }
 })
 
 router.post('/payment-plans/:id/cancel', requirePermission('canManageRentPaymentPlans'), async (req, res) => {
@@ -1113,7 +1113,7 @@ router.post('/payment-plans/:id/cancel', requirePermission('canManageRentPayment
       return tx.propertyRentPaymentPlan.update({ where: { id: current.id }, data: { status: 'cancelled', notes: [current.notes, `Cancelled: ${reason}`].filter(Boolean).join('\n') } })
     })
     res.json(plan)
-  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Cancel renter payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not cancel renter payment plan.' : error.message }) }
+  } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Cancel tenant payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not cancel tenant payment plan.' : error.message }) }
 })
 
 router.post('/payment-plans/:id/payments', requirePermission('canRecordRentPayment'), async (req, res) => {
@@ -1387,7 +1387,7 @@ router.get('/reports/tenancies', requirePermission('canViewPropertyStatements'),
       select: { id: true, tenantName: true, status: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } },
     })
     res.json(rows)
-  } catch (error) { console.error('Property statement renter list failed:', error); res.status(500).json({ error: 'Could not load renter list.' }) }
+  } catch (error) { console.error('Property statement tenant list failed:', error); res.status(500).json({ error: 'Could not load tenant list.' }) }
 })
 
 router.post('/tenancies/:id/payments', requirePermission('canRecordRentPayment'), async (req, res) => {

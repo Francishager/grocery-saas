@@ -195,7 +195,7 @@ function HouseholdDetailsFields({ defaults = {} }: { defaults?: Partial<Househol
     <section className="mt-4 space-y-3 rounded-md border p-4">
       <div>
         <h3 className="text-sm font-semibold">Household details</h3>
-        <p className="mt-1 text-xs text-muted-foreground">Optional renter household details.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Optional tenant household details.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-sm">Marital status
@@ -534,10 +534,10 @@ export default function CustomerTransactionHistoryDialog({
     void apiFetch(`/api/property-management/customers/${customer.id}/payment-plans`, { signal: controller.signal } as RequestInit)
       .then(async response => {
         const payload = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(payload?.error || 'Could not load renter payment plans.')
+        if (!response.ok) throw new Error(payload?.error || 'Could not load tenant payment plans.')
         if (!controller.signal.aborted) setRentPlanData(payload)
       })
-      .catch(error => { if (error?.name !== 'AbortError') setRentPlanError(error?.message || 'Could not load renter payment plans.') })
+      .catch(error => { if (error?.name !== 'AbortError') setRentPlanError(error?.message || 'Could not load tenant payment plans.') })
     return () => controller.abort()
   }, [open, customer?.id, canViewRentPaymentPlans, rentPlanReload])
 
@@ -552,10 +552,10 @@ export default function CustomerTransactionHistoryDialog({
     void apiFetch(`/api/property-management/customers/${customer.id}/rent-promises`, { signal: controller.signal } as RequestInit)
       .then(async response => {
         const payload = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(payload?.error || 'Could not load renter payment promises.')
+        if (!response.ok) throw new Error(payload?.error || 'Could not load tenant payment promises.')
         if (!controller.signal.aborted) setRentPromiseData(payload)
       })
-      .catch(error => { if (error?.name !== 'AbortError') setRentPromiseError(error?.message || 'Could not load renter payment promises.') })
+      .catch(error => { if (error?.name !== 'AbortError') setRentPromiseError(error?.message || 'Could not load tenant payment promises.') })
     return () => controller.abort()
   }, [open, customer?.id, canViewRentPromises, rentPromiseReload])
 
@@ -588,10 +588,10 @@ export default function CustomerTransactionHistoryDialog({
     try {
       const response = await apiFetch(`/api/property-management/tenancies/${tenancyId}/profile`, { method: 'PUT', body: new FormData(event.currentTarget) })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(result?.error || 'Could not update renter identity.')
+      if (!response.ok) throw new Error(result?.error || 'Could not update tenant identity.')
       setEditingIdentity(false)
       setRentalReload(value => value + 1)
-    } catch (err: any) { setIdentityError(err?.message || 'Could not update renter identity.') }
+    } catch (err: any) { setIdentityError(err?.message || 'Could not update tenant identity.') }
     finally { setSavingIdentity(false) }
   }
 
@@ -608,10 +608,10 @@ export default function CustomerTransactionHistoryDialog({
         body: JSON.stringify({ maritalStatus: form.get('maritalStatus'), spouseNames: form.get('spouseNames'), childrenCount: form.get('childrenCount'), householdSize: form.get('householdSize'), placeOfOrigin: form.get('placeOfOrigin') }),
       })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(result?.error || 'Could not update renter household details.')
+      if (!response.ok) throw new Error(result?.error || 'Could not update tenant household details.')
       setEditingHouseholdTenancyId(null)
       setRentalReload(value => value + 1)
-    } catch (err: any) { setHouseholdError(err?.message || 'Could not update renter household details.') }
+    } catch (err: any) { setHouseholdError(err?.message || 'Could not update tenant household details.') }
     finally { setSavingHousehold(false) }
   }
 
@@ -649,10 +649,10 @@ export default function CustomerTransactionHistoryDialog({
         }),
       })
       const result = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(result?.error || 'Could not record renter payment promise.')
+      if (!response.ok) throw new Error(result?.error || 'Could not record tenant payment promise.')
       setShowPromiseForm(false)
       setRentPromiseReload(value => value + 1)
-    } catch (error: any) { setRentPromiseError(error?.message || 'Could not record renter payment promise.') }
+    } catch (error: any) { setRentPromiseError(error?.message || 'Could not record tenant payment promise.') }
     finally { setCreatingPromise(false) }
   }
 
@@ -922,7 +922,7 @@ export default function CustomerTransactionHistoryDialog({
               </div>
             </div>
 
-            {canViewTenantHousehold && <section className="space-y-3 rounded-md border p-4"><div><h3 className="font-semibold">Renter household details</h3><p className="text-xs text-muted-foreground">Optional details recorded on each tenancy.</p></div>{householdTenancies.map(row => <div key={row.id} className="space-y-3 border-t pt-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">{row.unit.property.name} · {row.unit.unitCode}</p>{hasPermission('canManageTenantPersonalDetails') && <Button type="button" variant="outline" size="sm" onClick={() => { setEditingHouseholdTenancyId(editingHouseholdTenancyId === row.id ? null : row.id); setHouseholdError('') }}>{editingHouseholdTenancyId === row.id ? 'Close editor' : 'Edit household details'}</Button>}</div>{editingHouseholdTenancyId === row.id ? <form onSubmit={saveHousehold}><HouseholdDetailsFields defaults={row}/>{householdError && <p role="alert" className="mt-2 text-sm text-destructive">{householdError}</p>}<div className="mt-3 flex justify-end"><Button type="submit" disabled={savingHousehold}>{savingHousehold ? 'Saving…' : 'Save household details'}</Button></div></form> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div><p className="text-xs text-muted-foreground">Marital status</p><p className="text-sm">{row.maritalStatus ? normalizeText(row.maritalStatus) : 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Spouse name(s)</p><p className="text-sm">{row.spouseNames || 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Children</p><p className="text-sm">{row.childrenCount == null ? 'Not provided' : row.childrenCount === 0 ? 'No children' : row.childrenCount}</p></div><div><p className="text-xs text-muted-foreground">Household size</p><p className="text-sm">{row.householdSize ?? 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Place of origin</p><p className="text-sm">{row.placeOfOrigin || 'Not provided'}</p></div></div>}</div>)}</section>}
+            {canViewTenantHousehold && <section className="space-y-3 rounded-md border p-4"><div><h3 className="font-semibold">Tenant household details</h3><p className="text-xs text-muted-foreground">Optional details recorded on each tenancy.</p></div>{householdTenancies.map(row => <div key={row.id} className="space-y-3 border-t pt-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">{row.unit.property.name} · {row.unit.unitCode}</p>{hasPermission('canManageTenantPersonalDetails') && <Button type="button" variant="outline" size="sm" onClick={() => { setEditingHouseholdTenancyId(editingHouseholdTenancyId === row.id ? null : row.id); setHouseholdError('') }}>{editingHouseholdTenancyId === row.id ? 'Close editor' : 'Edit household details'}</Button>}</div>{editingHouseholdTenancyId === row.id ? <form onSubmit={saveHousehold}><HouseholdDetailsFields defaults={row}/>{householdError && <p role="alert" className="mt-2 text-sm text-destructive">{householdError}</p>}<div className="mt-3 flex justify-end"><Button type="submit" disabled={savingHousehold}>{savingHousehold ? 'Saving…' : 'Save household details'}</Button></div></form> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div><p className="text-xs text-muted-foreground">Marital status</p><p className="text-sm">{row.maritalStatus ? normalizeText(row.maritalStatus) : 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Spouse name(s)</p><p className="text-sm">{row.spouseNames || 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Children</p><p className="text-sm">{row.childrenCount == null ? 'Not provided' : row.childrenCount === 0 ? 'No children' : row.childrenCount}</p></div><div><p className="text-xs text-muted-foreground">Household size</p><p className="text-sm">{row.householdSize ?? 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Place of origin</p><p className="text-sm">{row.placeOfOrigin || 'Not provided'}</p></div></div>}</div>)}</section>}
 
             {(data.access.recordPayment || data.access.withdraw || data.access.edit || data.access.delete || (hasRentalTenancies && canEditRentalDetails && onEditCustomer)) && (
               <div className="flex flex-wrap gap-2 border-b pb-4">
@@ -1063,7 +1063,7 @@ export default function CustomerTransactionHistoryDialog({
               </section>}
               <section className="overflow-hidden rounded-md border">
                 <div className="border-b px-4 py-3"><h3 className="font-semibold">Rent ledger</h3><p className="text-xs text-muted-foreground">Rent charges and receipts are shown from the rental ledger.</p></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Date</th><th className="p-3">Description</th><th className="p-3">Reference</th><th className="p-3 text-right">Charge</th><th className="p-3 text-right">Receipt</th><th className="p-3 text-right">Balance</th><th className="p-3 text-right">Action</th></tr></thead><tbody>{rentalData?.entries.map(row => <tr key={`${row.type}-${row.id}`} className="border-t"><td className="p-3">{formatDisplayDate(row.date)}</td><td className="p-3">{row.description}</td><td className="p-3">{row.reference}</td><td className="p-3 text-right">{row.debit ? formatCurrency(row.debit, row.currency) : '—'}</td><td className="p-3 text-right">{row.credit ? formatCurrency(row.credit, row.currency) : '—'}</td><td className="p-3 text-right font-medium">{formatCurrency(row.runningBalance, row.currency)}</td><td className="p-3 text-right">{canPrintRentReceipts && row.credit > 0 && row.type !== 'opening_rent_settlement' && <TransactionReceiptButton label="Reprint" data={{ title: row.type === 'rent_plan_payment' ? 'Rent Payment Plan Receipt' : 'Rent Payment Receipt', reference: row.reference, date: row.date, amount: Number(row.credit), currency: row.currency, partyLabel: 'Renter', partyName: rentalData?.tenancies.find(tenancy => tenancy.id === row.tenancyId)?.tenantName, fields: [{ label: 'Property', value: row.propertyName }, { label: 'Unit', value: row.unitCode }, { label: 'Rent period', value: formatRentPeriods(row.rentPeriods) || null }, { label: 'Prior arrears added', value: row.arrearsMonths ? `${row.arrearsMonths} month(s)` : null }, { label: 'Repayment plan', value: row.planNo }, { label: 'Payment method', value: normalizeText(row.paymentMethod) }, { label: 'Mobile money provider', value: row.mobileProvider }, { label: 'Mobile money number', value: row.phoneNumber }, { label: 'Received by', value: row.receivedBy }, { label: 'Transaction reference', value: row.transactionRef }, { label: 'Note', value: row.notes }] }} />}</td></tr>)}{!rentalData?.entries.length && <tr><td colSpan={7} className="p-5 text-center text-sm text-muted-foreground">No rental charges or receipts are recorded.</td></tr>}</tbody></table></div>
+                <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-muted/50 text-left"><tr><th className="p-3">Date</th><th className="p-3">Description</th><th className="p-3">Reference</th><th className="p-3 text-right">Charge</th><th className="p-3 text-right">Receipt</th><th className="p-3 text-right">Balance</th><th className="p-3 text-right">Action</th></tr></thead><tbody>{rentalData?.entries.map(row => <tr key={`${row.type}-${row.id}`} className="border-t"><td className="p-3">{formatDisplayDate(row.date)}</td><td className="p-3">{row.description}</td><td className="p-3">{row.reference}</td><td className="p-3 text-right">{row.debit ? formatCurrency(row.debit, row.currency) : '—'}</td><td className="p-3 text-right">{row.credit ? formatCurrency(row.credit, row.currency) : '—'}</td><td className="p-3 text-right font-medium">{formatCurrency(row.runningBalance, row.currency)}</td><td className="p-3 text-right">{canPrintRentReceipts && row.credit > 0 && row.type !== 'opening_rent_settlement' && <TransactionReceiptButton label="Reprint" data={{ title: row.type === 'rent_plan_payment' ? 'Rent Payment Plan Receipt' : 'Rent Payment Receipt', reference: row.reference, date: row.date, amount: Number(row.credit), currency: row.currency, partyLabel: 'Tenant', partyName: rentalData?.tenancies.find(tenancy => tenancy.id === row.tenancyId)?.tenantName, fields: [{ label: 'Property', value: row.propertyName }, { label: 'Unit', value: row.unitCode }, { label: 'Rent period', value: formatRentPeriods(row.rentPeriods) || null }, { label: 'Prior arrears added', value: row.arrearsMonths ? `${row.arrearsMonths} month(s)` : null }, { label: 'Repayment plan', value: row.planNo }, { label: 'Payment method', value: normalizeText(row.paymentMethod) }, { label: 'Mobile money provider', value: row.mobileProvider }, { label: 'Mobile money number', value: row.phoneNumber }, { label: 'Received by', value: row.receivedBy }, { label: 'Transaction reference', value: row.transactionRef }, { label: 'Note', value: row.notes }] }} />}</td></tr>)}{!rentalData?.entries.length && <tr><td colSpan={7} className="p-5 text-center text-sm text-muted-foreground">No rental charges or receipts are recorded.</td></tr>}</tbody></table></div>
               </section>
             </TabsContent>}
 
@@ -1073,7 +1073,7 @@ export default function CustomerTransactionHistoryDialog({
                 const title = `Tenancy Agreement ${tenancy.agreementRef || tenancy.unit.unitCode}`
                 const draft = [
                   `**Agreement reference:** ${tenancy.agreementRef || 'Not provided'}`,
-                  `**Renter:** ${tenancy.tenantName}`,
+                  `**Tenant:** ${tenancy.tenantName}`,
                   `**Property / unit:** ${tenancy.unit.property.name} / ${tenancy.unit.unitCode}`,
                   `**Term:** ${formatDisplayDate(tenancy.startDate)}${tenancy.endDate ? ` to ${formatDisplayDate(tenancy.endDate)}` : ' ongoing'}`,
                   `**Monthly rent:** ${formatCurrency(Number(tenancy.rentAmount), tenancy.currency)}`,
@@ -1100,7 +1100,7 @@ export default function CustomerTransactionHistoryDialog({
 
             {canViewRentPaymentPlans && <TabsContent value="payment-plans" className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h3 className="font-semibold">Renter repayment plans</h3><p className="text-sm text-muted-foreground">Schedule eligible overdue rent and record installments from this profile.</p></div>
+                <div><h3 className="font-semibold">Tenant repayment plans</h3><p className="text-sm text-muted-foreground">Schedule eligible overdue rent and record installments from this profile.</p></div>
                 {canManageRentPaymentPlans && <Button type="button" disabled={savingPlan || eligiblePlanTenancies.length === 0} title={eligiblePlanTenancies.length ? 'Create a plan for the oldest eligible overdue tenancy' : 'A repayment plan requires unplanned overdue rent'} onClick={() => { setRentPlanError(''); setCreatePlanTenancyId(eligiblePlanTenancies[0]?.tenancyId || '') }}><ReceiptText className="mr-2 h-4 w-4" />Create repayment plan</Button>}
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -1131,7 +1131,7 @@ export default function CustomerTransactionHistoryDialog({
               </section>}
 
               {!rentPlanData && !rentPlanError && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">Loading payment plans…</div>}
-              {rentPlanData && !rentPlanData.plans.length && !eligiblePlanTenancies.length && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">No repayment plans or unplanned overdue rent for this renter.</div>}
+              {rentPlanData && !rentPlanData.plans.length && !eligiblePlanTenancies.length && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">No repayment plans or unplanned overdue rent for this tenant.</div>}
               {rentPlanData?.plans.map(plan => {
                 const remaining = Math.max(0, Number(plan.totalAmount) - Number(plan.amountPaid))
                 const accountOptions = rentPlanAccounts.filter(account => account.paymentMethod === planPaymentMethod)
@@ -1141,7 +1141,7 @@ export default function CustomerTransactionHistoryDialog({
                   <div><div className="mb-1 flex justify-between text-xs text-muted-foreground"><span>Paid {formatCurrency(plan.amountPaid, plan.tenancy.currency)}</span><span>{progress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${progress}%` }} /></div></div>
                   {plan.notes && <p className="whitespace-pre-wrap rounded bg-muted/30 p-3 text-sm">{plan.notes}</p>}
                   <div className="overflow-x-auto rounded-md border"><table className="min-w-[620px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">Due date</th><th className="px-3 py-2 text-right">Installment</th><th className="px-3 py-2 text-right">Paid</th><th className="px-3 py-2 text-right">Remaining</th><th className="px-3 py-2">Status</th></tr></thead><tbody>{plan.installments.map(item => <tr key={item.id} className="border-t"><td className="px-3 py-2">{item.sequence}</td><td className="px-3 py-2">{formatDisplayDate(item.dueDate)}</td><td className="px-3 py-2 text-right">{formatCurrency(item.amount, plan.tenancy.currency)}</td><td className="px-3 py-2 text-right">{formatCurrency(item.amountPaid, plan.tenancy.currency)}</td><td className="px-3 py-2 text-right">{formatCurrency(Math.max(0, item.amount - item.amountPaid), plan.tenancy.currency)}</td><td className="px-3 py-2"><Badge variant={item.status === 'paid' ? 'outline' : item.status === 'overdue' ? 'destructive' : 'secondary'}>{normalizeText(item.status)}</Badge></td></tr>)}</tbody></table></div>
-                  {plan.payments.length > 0 && <div className="space-y-2"><h4 className="text-sm font-semibold">Receipts</h4><div className="overflow-x-auto rounded-md border"><table className="min-w-[700px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">Date / receipt</th><th className="px-3 py-2">Payment method</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">Amount</th><th className="px-3 py-2 text-right">Print</th></tr></thead><tbody>{plan.payments.map(payment => <tr key={payment.id} className="border-t"><td className="px-3 py-2">{formatDisplayDate(payment.paymentDate)}<div className="text-xs text-muted-foreground">{payment.receiptNo}</div></td><td className="px-3 py-2 capitalize">{normalizeText(payment.paymentMethod)}</td><td className="px-3 py-2">{payment.transactionRef || '—'}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(payment.amount, plan.tenancy.currency)}</td><td className="px-3 py-2 text-right"><TransactionReceiptButton label="Reprint" data={{ title: 'Rent Payment Receipt', reference: payment.receiptNo, date: payment.paymentDate, amount: Number(payment.amount), currency: plan.tenancy.currency, partyLabel: 'Renter', partyName: plan.tenancy.tenantName, fields: [{ label: 'Property', value: plan.tenancy.unit.property.name }, { label: 'Unit', value: plan.tenancy.unit.unitCode }, { label: 'Rent period', value: formatRentPeriods(payment.rentPeriods) || null }, { label: 'Repayment plan', value: plan.planNo }, { label: 'Payment method', value: normalizeText(payment.paymentMethod) }, { label: 'Received by', value: payment.receivedBy }, { label: 'Transaction reference', value: payment.transactionRef }, { label: 'Installments covered', value: payment.planInstallmentAllocations?.map(allocation => `#${allocation.installment.sequence}: ${formatCurrency(allocation.amount, plan.tenancy.currency)}`).join(', ') }] }} /></td></tr>)}</tbody></table></div></div>}
+                  {plan.payments.length > 0 && <div className="space-y-2"><h4 className="text-sm font-semibold">Receipts</h4><div className="overflow-x-auto rounded-md border"><table className="min-w-[700px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">Date / receipt</th><th className="px-3 py-2">Payment method</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">Amount</th><th className="px-3 py-2 text-right">Print</th></tr></thead><tbody>{plan.payments.map(payment => <tr key={payment.id} className="border-t"><td className="px-3 py-2">{formatDisplayDate(payment.paymentDate)}<div className="text-xs text-muted-foreground">{payment.receiptNo}</div></td><td className="px-3 py-2 capitalize">{normalizeText(payment.paymentMethod)}</td><td className="px-3 py-2">{payment.transactionRef || '—'}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(payment.amount, plan.tenancy.currency)}</td><td className="px-3 py-2 text-right"><TransactionReceiptButton label="Reprint" data={{ title: 'Rent Payment Receipt', reference: payment.receiptNo, date: payment.paymentDate, amount: Number(payment.amount), currency: plan.tenancy.currency, partyLabel: 'Tenant', partyName: plan.tenancy.tenantName, fields: [{ label: 'Property', value: plan.tenancy.unit.property.name }, { label: 'Unit', value: plan.tenancy.unit.unitCode }, { label: 'Rent period', value: formatRentPeriods(payment.rentPeriods) || null }, { label: 'Repayment plan', value: plan.planNo }, { label: 'Payment method', value: normalizeText(payment.paymentMethod) }, { label: 'Received by', value: payment.receivedBy }, { label: 'Transaction reference', value: payment.transactionRef }, { label: 'Installments covered', value: payment.planInstallmentAllocations?.map(allocation => `#${allocation.installment.sequence}: ${formatCurrency(allocation.amount, plan.tenancy.currency)}`).join(', ') }] }} /></td></tr>)}</tbody></table></div></div>}
                   <div className="flex flex-wrap justify-end gap-2">{canRecordRentPayment && plan.status === 'active' && remaining > 0.01 && <Button type="button" size="sm" onClick={() => { setPlanPaymentTarget(plan); const method = rentPlanAccounts.find(account => account.id === defaultRentPlanAccountId)?.paymentMethod || rentPlanAccounts[0]?.paymentMethod || 'cash'; setPlanPaymentMethod(method); setPlanPaymentAccountId(rentPlanAccounts.find(account => account.id === defaultRentPlanAccountId && account.paymentMethod === method)?.id || rentPlanAccounts.find(account => account.paymentMethod === method)?.id || '') }}>Record installment</Button>}{canManageRentPaymentPlans && plan.status === 'active' && <Button type="button" size="sm" variant="outline" onClick={() => { setCancelPlanTarget(plan); setPlanCancelReason('') }}>Cancel plan</Button>}</div>
                   {planPaymentTarget?.id === plan.id && <form onSubmit={recordRentPlanPayment} className="grid gap-3 rounded-md bg-muted/20 p-3 sm:grid-cols-2">
                     <div className="sm:col-span-2"><h4 className="text-sm font-semibold">Record plan installment</h4><p className="text-xs text-muted-foreground">Outstanding plan balance: {formatCurrency(remaining, plan.tenancy.currency)}. Payment is posted to the plan receivable account and allocated to the oldest unpaid plan installment.</p></div>
@@ -1174,7 +1174,7 @@ export default function CustomerTransactionHistoryDialog({
                 {metric('Still promised', rentPromiseData?.counts.remainingAmount, 'text-amber-700')}
                 {countMetric('Upcoming / due today', (rentPromiseData?.counts.upcoming || 0) + (rentPromiseData?.counts.due_today || 0))}
               </div>
-              <p className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">Promise tracking is separate from rent receipts and accounting. Only posted payments allocated to the rent periods covered by a promise count toward fulfillment; a promise never changes the renter balance by itself.</p>
+              <p className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-950">Promise tracking is separate from rent receipts and accounting. Only posted payments allocated to the rent periods covered by a promise count toward fulfillment; a promise never changes the tenant balance by itself.</p>
               {rentPromiseError && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{rentPromiseError}</p>}
               {showPromiseForm && canManageRentPromises && <form onSubmit={createRentPromise} className="grid gap-3 rounded-md border border-primary/30 bg-muted/20 p-4 sm:grid-cols-2">
                 <div className="sm:col-span-2"><h4 className="font-semibold">Record a promise to pay</h4><p className="text-sm text-muted-foreground">The amount is matched against overdue rent not already covered by an active payment plan or another outstanding promise.</p></div>
@@ -1185,7 +1185,7 @@ export default function CustomerTransactionHistoryDialog({
                 <div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="outline" onClick={() => setShowPromiseForm(false)}>Cancel</Button><Button type="submit" disabled={creatingPromise}>{creatingPromise ? 'Recording…' : 'Save promise'}</Button></div>
               </form>}
               {!rentPromiseData && !rentPromiseError && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">Loading promise history…</div>}
-              {rentPromiseData && !rentPromiseData.promises.length && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No payment promises have been recorded for this renter.</div>}
+              {rentPromiseData && !rentPromiseData.promises.length && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No payment promises have been recorded for this tenant.</div>}
               {!!rentPromiseData?.promises.length && <div className="overflow-x-auto rounded-md border"><table className="min-w-[900px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">Recorded / by</th><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Due date</th><th className="px-3 py-2 text-right">Promised</th><th className="px-3 py-2 text-right">Fulfilled</th><th className="px-3 py-2 text-right">Remaining</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Rent periods / notes</th></tr></thead><tbody>{rentPromiseData.promises.map(promise => <tr key={promise.id} className="border-t align-top"><td className="px-3 py-3">{formatDisplayDate(promise.createdAt)}<div className="text-xs text-muted-foreground">{promise.createdByName}</div></td><td className="px-3 py-3">{promise.tenancy.unit.property.name}<div className="text-xs text-muted-foreground">{promise.tenancy.unit.unitCode}</div></td><td className="px-3 py-3">{formatDisplayDate(promise.dueDate)}</td><td className="px-3 py-3 text-right font-medium">{formatCurrency(promise.amount, promise.tenancy.currency)}</td><td className="px-3 py-3 text-right text-emerald-700">{formatCurrency(promise.fulfilledAmount, promise.tenancy.currency)}</td><td className="px-3 py-3 text-right">{formatCurrency(promise.remainingAmount, promise.tenancy.currency)}</td><td className="px-3 py-3"><Badge variant={promise.status === 'kept' ? 'outline' : promise.status === 'missed' ? 'destructive' : promise.status === 'partially_kept' ? 'secondary' : 'default'}>{promise.status.replace(/_/g, ' ')}</Badge></td><td className="max-w-64 whitespace-normal px-3 py-3">{[...new Set(promise.allocations.map(allocation => allocation.period))].join(', ') || '—'}{promise.notes && <div className="mt-1 text-xs text-muted-foreground">{promise.notes}</div>}</td></tr>)}</tbody></table></div>}
             </TabsContent>}
 

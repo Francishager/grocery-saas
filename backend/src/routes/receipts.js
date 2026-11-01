@@ -265,8 +265,7 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     // Footer
     doc.fontSize(9).font("Helvetica-Bold");
     if (tenant?.receiptHeader) doc.text(tenant.receiptHeader, { align: "center" });
-    doc.text("Thank you for your purchase!", { align: "center" });
-    if (tenant?.receiptFooter) doc.text(tenant.receiptFooter, { align: "center" });
+    doc.text(tenant?.receiptFooter?.trim() || "Thank you for your purchase!", { align: "center" });
     doc.moveDown(0.2);
     doc.text("Powered by JibuSales", { align: "center" });
 
@@ -375,8 +374,7 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
     cmds.push(escText(""));
     cmds.push("1B6101"); // Center
     if (tenant?.receiptHeader) cmds.push(escText(tenant.receiptHeader));
-    cmds.push(escText("Thank you for your purchase!"));
-    if (tenant?.receiptFooter) cmds.push(escText(tenant.receiptFooter));
+    cmds.push(escText(tenant?.receiptFooter?.trim() || "Thank you for your purchase!"));
     cmds.push(escText("Powered by JibuSales"));
 
     // Feed and cut

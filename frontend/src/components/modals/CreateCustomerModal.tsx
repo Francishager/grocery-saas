@@ -63,7 +63,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
   const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
   const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
   const canViewCustomerAddress = hasPermission('canViewCustomerAddress')
-  const canManageCustomerCreditLimit = hasPermission('canManageCustomerCreditLimit')
+  const canManageCustomerCreditLimit = hasPermission('canManageCustomerCreditLimit') && isFeatureEnabled('customers.credit_limits')
   const canViewCustomerNotes = hasPermission('canViewCustomerNotes')
   
   const [formData, setFormData] = useState({

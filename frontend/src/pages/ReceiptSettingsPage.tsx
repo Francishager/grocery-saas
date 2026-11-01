@@ -137,12 +137,12 @@ export default function ReceiptSettingsPage() {
               <div className="space-y-2">
                 <Label>Receipt Header Text</Label>
                 <Input value={settings.receiptHeader || ''} onChange={e => setSettings((s: any) => ({ ...s, receiptHeader: e.target.value }))} placeholder="e.g. Thank you for shopping with us!" />
-                <p className="text-xs text-muted-foreground">Displayed above "Thank you for your purchase!" on receipts</p>
+                <p className="text-xs text-muted-foreground">Shown above the receipt footer.</p>
               </div>
               <div className="space-y-2">
                 <Label>Receipt Footer Text</Label>
                 <Input value={settings.receiptFooter || ''} onChange={e => setSettings((s: any) => ({ ...s, receiptFooter: e.target.value }))} placeholder="e.g. Goods sold are not refundable" />
-                <p className="text-xs text-muted-foreground">Displayed below "Thank you for your purchase!" on receipts</p>
+                <p className="text-xs text-muted-foreground">Replaces the default receipt footer text when provided.</p>
               </div>
 
               {/* Preview */}
@@ -168,8 +168,7 @@ export default function ReceiptSettingsPage() {
                   <p className="font-bold">TOTAL: ---.--</p>
                   <p className="text-center">- - - - - - - - - -</p>
                   {settings.receiptHeader && <p className="text-center">{settings.receiptHeader}</p>}
-                  <p className="text-center">Thank you for your purchase!</p>
-                  {settings.receiptFooter && <p className="text-center">{settings.receiptFooter}</p>}
+                  <p className="text-center">{settings.receiptFooter?.trim() || 'Thank you for your purchase!'}</p>
                   <p className="text-center">Powered by JibuSales</p>
                 </div>
               </div>

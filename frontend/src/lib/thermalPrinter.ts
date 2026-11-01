@@ -217,7 +217,7 @@ export class ThermalPrinter {
 
     // Footer - center
     cmds.push(0x1b, 0x61, 0x01)
-    cmds.push(...encode('Thank you for your purchase!'))
+    cmds.push(...encode(data.receiptFooter?.trim() || 'Thank you for your purchase!'))
     cmds.push(0x0a)
     cmds.push(...encode('Powered by JibuSales'))
     cmds.push(0x0a)
@@ -491,7 +491,8 @@ export function buildEscPosReceiptCommands(receipt: ReceiptPreview): string[] {
     for (const part of wrapReceiptText(`${detail.label}: ${detail.value}`, 32)) text(part)
   }
   align(1)
-  text(receipt.business.receiptFooter || 'Powered by JibuSales')
+  text(receipt.business.receiptFooter?.trim() || 'Thank you for your purchase!')
+  text('Powered by JibuSales')
   bytes.push(0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x00)
   return [bytes.map(byte => byte.toString(16).padStart(2, '0')).join('')]
 }
@@ -532,6 +533,7 @@ export interface ReceiptData {
   discount: number
   tax: number
   total: number
+  receiptFooter?: string
 }
 
 /**

@@ -190,6 +190,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 export default function ReceivablesPage() {
   const { user, hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
+  const propertyManagementBusiness = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
   const baseCurrency = getTenantCurrency()
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -263,8 +264,8 @@ export default function ReceivablesPage() {
   const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
   const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
   const canViewCustomerBalance = hasPermission('canViewCustomerBalance')
-  const canViewCustomerCreditLimit = hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit')
-  const canManageCustomerCreditLimit = hasPermission('canManageCustomerCreditLimit')
+  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit'))
+  const canManageCustomerCreditLimit = hasFeature('customers.credit_limits') && hasPermission('canManageCustomerCreditLimit')
   const canRecordCustomerPayment = hasPermission('canRecordCustomerPayment')
   const canEditCustomer = hasPermission('canEditCustomer') || hasPermission('canEditReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
@@ -1675,7 +1676,7 @@ export default function ReceivablesPage() {
           <p className="text-muted-foreground">{pageSubtitle}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {tab === 'customers' && (
+          {tab === 'customers' && !propertyManagementBusiness && (
             <Button variant="outline" onClick={() => {
               setEditingCustomer(null)
               setShowCustomerModal(true)

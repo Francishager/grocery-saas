@@ -12,6 +12,13 @@ const transactionReceipt = source('../src/lib/transactionReceipt.ts');
 const transactionReceiptButton = source('../src/components/TransactionReceiptButton.tsx');
 const receiptViewer = source('../src/components/ReceiptViewer.tsx');
 const thermalPrinter = source('../src/lib/thermalPrinter.ts');
+const createCustomerModal = source('../src/components/modals/CreateCustomerModal.tsx');
+const saasFeatures = source('../src/pages/SaaSAdmin/FeaturesPage.tsx');
+const saasPlans = source('../src/pages/SaaSAdmin/PlansPage.tsx');
+const receiptSettings = source('../src/pages/ReceiptSettingsPage.tsx');
+const browserReceiptPrint = source('../src/lib/receiptPrint.ts');
+const backendReceivables = source('../../backend/routes/receivables.js');
+const backendReceipts = source('../../backend/src/routes/receipts.js');
 
 test('record payment opens over the profile without navigating to the receivables table', () => {
   assert.match(profilePage, /onRecordPayment=\{\(customer\) => setPaymentCustomer\(customer\)\}/);
@@ -84,4 +91,24 @@ test('customer and renter reprints open an in-app preview with close, browser pr
   assert.match(receiptViewer, /handleNativePrinterChoice/);
   assert.match(receiptViewer, /previewOnTrigger \? \(\) => setShowPreview\(true\)/);
   assert.match(thermalPrinter, /export function buildEscPosReceiptCommands\(receipt: ReceiptPreview\)/);
+});
+
+test('customer credit limits are a plan feature and require the existing manage permission', () => {
+  assert.match(createCustomerModal, /hasPermission\('canManageCustomerCreditLimit'\) && isFeatureEnabled\('customers\.credit_limits'\)/);
+  assert.match(receivablesPage, /hasFeature\('customers\.credit_limits'\) && hasPermission\('canManageCustomerCreditLimit'\)/);
+  assert.match(saasFeatures, /customers\.credit_limits/);
+  assert.match(saasPlans, /customers\.credit_limits/);
+  assert.match(backendReceivables, /hasFeatureAccess\(features, 'customers\.credit_limits'\)/);
+});
+
+test('property-management businesses do not get the trade customer-create action in receivables', () => {
+  assert.match(receivablesPage, /propertyManagementBusiness = hasFeature\('property_management\.landlord'\) \|\| hasFeature\('property_management\.agent'\)/);
+  assert.match(receivablesPage, /tab === 'customers' && !propertyManagementBusiness/);
+});
+
+test('configured receipt footer replaces the default text in preview, browser and server printouts', () => {
+  for (const sourceText of [receiptSettings, receiptViewer, browserReceiptPrint]) {
+    assert.match(sourceText, /receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);
+  }
+  assert.equal((backendReceipts.match(/receiptFooter\?\.trim\(\) \|\| "Thank you for your purchase!"/g) || []).length, 2);
 });
