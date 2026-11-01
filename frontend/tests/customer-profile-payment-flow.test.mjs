@@ -20,6 +20,7 @@ const receiptSettings = source('../src/pages/ReceiptSettingsPage.tsx');
 const browserReceiptPrint = source('../src/lib/receiptPrint.ts');
 const backendReceivables = source('../../backend/routes/receivables.js');
 const backendReceipts = source('../../backend/src/routes/receipts.js');
+const mobileApp = source('../../mobile/src/app/index.tsx');
 
 test('record payment opens over the profile without navigating to the receivables table', () => {
   assert.match(profilePage, /onRecordPayment=\{\(customer\) => setPaymentCustomer\(customer\)\}/);
@@ -91,8 +92,11 @@ test('customer and renter reprints open an in-app preview with close, browser pr
   assert.match(receiptViewer, /downloadReceiptPreviewPdf\(await loadReceiptForPrint\(\), receiptNo\)/);
   assert.match(receiptViewer, /type="button"[^>]*onClick=\{event => \{ event\.preventDefault\(\); event\.stopPropagation\(\); void handleDownloadPdf\(\) \}\}/);
   assert.match(receiptPdf, /pdf\.output\('blob'\)/);
-  assert.match(receiptPdf, /link\.download = `\$\{safeReference\}\.pdf`/);
+  assert.match(receiptPdf, /window\.JibuNativeFile\?\.savePdf/);
+  assert.match(receiptPdf, /link\.download = filename/);
   assert.match(receiptPdf, /receipt\.business\.receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);
+  assert.match(mobileApp, /Directory\.pickDirectoryAsync\(\)/);
+  assert.match(mobileApp, /file\.write\(request\.base64, \{ encoding: 'base64' \}\)/);
   assert.match(receiptViewer, /handleNativePrinterChoice/);
   assert.match(receiptViewer, /previewOnTrigger \? \(\) => setShowPreview\(true\)/);
   assert.match(thermalPrinter, /export function buildEscPosReceiptCommands\(receipt: ReceiptPreview\)/);

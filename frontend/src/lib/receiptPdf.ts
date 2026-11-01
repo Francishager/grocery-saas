@@ -1,7 +1,15 @@
 import type { ReceiptPreview } from '@/lib/api'
 import { formatCurrency, formatDisplayDate } from '@/lib/utils'
 
-export async function downloadReceiptPreviewPdf(receipt: ReceiptPreview, fallbackReference: string) {
+declare global {
+  interface Window {
+    JibuNativeFile?: {
+      savePdf: (filename: string, base64: string) => Promise<{ saved: boolean }>
+    }
+  }
+}
+
+export async function downloadReceiptPreviewPdf(receipt: ReceiptPreview, fallbackReference: string): Promise<'native-saved' | 'browser-download'> {
   const { jsPDF } = await import('jspdf')
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageWidth = pdf.internal.pageSize.getWidth()
@@ -100,15 +108,24 @@ export async function downloadReceiptPreviewPdf(receipt: ReceiptPreview, fallbac
   pdf.text('Powered by JibuSales', pageWidth / 2, y, { align: 'center' })
 
   const safeReference = (receipt.receiptNo || fallbackReference).replace(/[^a-z0-9-_]/gi, '-') || 'receipt'
+  const filename = `${safeReference}.pdf`
+  if (typeof window !== 'undefined' && window.JibuNativeFile?.savePdf) {
+    const dataUrl = pdf.output('datauristring')
+    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+    await window.JibuNativeFile.savePdf(filename, base64)
+    return 'native-saved'
+  }
+
   const blob = pdf.output('blob')
   const downloadUrl = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = downloadUrl
-  link.download = `${safeReference}.pdf`
+  link.download = filename
   link.rel = 'noopener'
   link.style.display = 'none'
   document.body.appendChild(link)
   link.click()
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000)
+  return 'browser-download'
 }

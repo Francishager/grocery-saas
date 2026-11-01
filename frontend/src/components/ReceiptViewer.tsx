@@ -73,8 +73,10 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
     if (downloading) return
     setDownloading(true)
     try {
+      let savedOnDevice = false
       if (transactionData) {
-        await downloadReceiptPreviewPdf(await loadReceiptForPrint(), receiptNo)
+        const result = await downloadReceiptPreviewPdf(await loadReceiptForPrint(), receiptNo)
+        savedOnDevice = result === 'native-saved'
       } else {
         if (!saleId) throw new Error('Receipt data is unavailable.')
         const link = document.createElement('a')
@@ -85,7 +87,9 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
         link.click()
         link.remove()
       }
-      toast({ title: 'Receipt download started', description: 'The PDF receipt is being downloaded.' })
+      toast(savedOnDevice
+        ? { title: 'Receipt saved', description: 'The PDF was saved to the folder you selected.' }
+        : { title: 'Receipt download started', description: 'The PDF receipt is being downloaded.' })
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'PDF download failed', description: error?.message || 'Could not create the receipt PDF.' })
     } finally {

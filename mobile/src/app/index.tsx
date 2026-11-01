@@ -15,6 +15,7 @@ import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
+import { Directory } from 'expo-file-system';
 import NativeThermalPrinter from '../../modules/thermal-printer/src';
 
 const DEFAULT_WEB_APP_URL = 'https://jibusales.jibusales00.workers.dev';
@@ -123,12 +124,20 @@ export default function HomeScreen() {
 
   const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
     if (!nativeEvent.url || getOrigin(nativeEvent.url) !== BRIDGE_ORIGIN) return;
-    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[]; userInitiated?: boolean };
+    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[]; userInitiated?: boolean; filename?: string; base64?: string };
     try { request = JSON.parse(nativeEvent.data); } catch { return; }
-    if (!request.id || !['printer.list', 'printer.print', 'push.permission', 'push.register'].includes(request.type || '')) return;
+    if (!request.id || !['printer.list', 'printer.print', 'push.permission', 'push.register', 'file.savePdf'].includes(request.type || '')) return;
     let response: { ok: boolean; result?: unknown; error?: string };
     try {
-      if (request.type === 'push.permission' || request.type === 'push.register') {
+      if (request.type === 'file.savePdf') {
+        if (!request.filename || !request.base64) throw new Error('Receipt PDF data is missing.');
+        const safeFilename = request.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const directory = await Directory.pickDirectoryAsync();
+        const file = directory.createFile(safeFilename, 'application/pdf');
+        file.create({ overwrite: true });
+        await file.write(request.base64, { encoding: 'base64' });
+        response = { ok: true, result: { saved: true } };
+      } else if (request.type === 'push.permission' || request.type === 'push.register') {
         let permission = await Notifications.getPermissionsAsync();
         if (request.type === 'push.register' && permission.status !== 'granted' && permission.ios?.status !== Notifications.IosAuthorizationStatus.PROVISIONAL) {
           if (!request.userInitiated) {
@@ -173,7 +182,7 @@ export default function HomeScreen() {
     } catch (error) {
       response = { ok: false, error: error instanceof Error ? error.message : 'Native printer operation failed.' };
     }
-    const reply = request.type?.startsWith('push.') ? '__jibuNativePushReply' : '__jibuNativePrinterReply';
+    const reply = request.type?.startsWith('push.') ? '__jibuNativePushReply' : request.type?.startsWith('file.') ? '__jibuNativeFileReply' : '__jibuNativePrinterReply';
     webView.current?.injectJavaScript(`window.${reply}(${JSON.stringify(request.id)}, ${JSON.stringify(response)}); true;`);
   };
 
@@ -188,7 +197,7 @@ export default function HomeScreen() {
         originWhitelist={['https://*', 'about:*', 'mailto:*', 'tel:*', 'sms:*', 'whatsapp:*', 'intent:*']}
         onShouldStartLoadWithRequest={handleNavigation}
         onMessage={handleNativeMessage}
-        injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},30000);});}function reply(name,id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply('printer',id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply('push',id,response,'Native notification setup failed.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};})();true;`}
+        injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},30000);});}function reply(id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply(id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply(id,response,'Native notification setup failed.');};window.__jibuNativeFileReply=function(id,response){reply(id,response,'Could not save the receipt PDF.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};window.JibuNativeFile={savePdf:function(filename,base64){return request({type:'file.savePdf',filename:filename,base64:base64},'Receipt save timed out.');}};})();true;`}
         onNavigationStateChange={(state: WebViewNavigation) => setCanGoBack(state.canGoBack)}
         onLoadStart={() => { setLoadProgress(0); setLoading(true); setFailed(false); }}
         onLoadProgress={({ nativeEvent }: { nativeEvent: { progress: number } }) => {
