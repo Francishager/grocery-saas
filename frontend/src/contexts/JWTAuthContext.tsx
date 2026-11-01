@@ -545,11 +545,10 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Recheck live staff access; a saved token must not outlive an assigned working window.
+  // Recheck live staff access; only an explicit auth/access denial should end a session.
   useEffect(() => {
     if (!tokens?.accessToken || !user) return
     const staffSession = Boolean(user.tenantId) && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(user.role)
-    let initialCheck = true
     let cancelled = false
     let pending = false
     let controller: AbortController | null = null
@@ -593,17 +592,13 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
         if (cancelled) return
         if (response.ok && data.user) {
           setUser(data.user)
-              persistAuth(data.user, activeTokens)
-          initialCheck = false
+          persistAuth(data.user, activeTokens)
         } else if (response.status === 401 || response.status === 403) {
           revokeAccess(data.message || data.error || 'Please sign in again.')
-        } else if (staffSession && (initialCheck || user.workingHoursAccess?.restricted)) {
-          revokeAccess('Unable to verify your working hours. Reconnect and sign in again.')
         }
       } catch {
-        if (!cancelled && staffSession && (initialCheck || user.workingHoursAccess?.restricted)) {
-          revokeAccess('An internet connection is required to verify your working hours. Reconnect and sign in again.')
-        }
+        // A transient network failure must not erase a valid session. Protected API
+        // routes still enforce working hours when the server can be reached again.
       } finally {
         window.clearTimeout(timeout)
         pending = false
@@ -622,7 +617,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       window.removeEventListener('online', refreshUser)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokens?.accessToken, tokens?.refreshToken, user?.id, user?.role, user?.workingHoursAccess?.restricted, resolvedApiEndpoint, refreshTokens, tokenStorageKey])
+  }, [tokens?.accessToken, tokens?.refreshToken, user?.id, user?.role, resolvedApiEndpoint, refreshTokens, tokenStorageKey])
 
   // Auto refresh tokens before expiry
   useEffect(() => {

@@ -52,6 +52,16 @@ test('expired access tokens are refreshed before the session is cleared and refr
   assert.match(context, /document\.addEventListener\('visibilitychange', refreshIfExpiring\)/);
 });
 
+test('transient working-hours verification failures do not log staff out', () => {
+  const context = readFileSync(sourceRoot + '/contexts/JWTAuthContext.tsx', 'utf8');
+  const accessCheck = context.match(/\/\/ Recheck live staff access[\s\S]*?\n  \/\/ Auto refresh tokens before expiry/);
+  assert.ok(accessCheck, 'live access verification effect should exist');
+  assert.match(accessCheck[0], /response\.status === 401 \|\| response\.status === 403/);
+  assert.match(accessCheck[0], /transient network failure must not erase a valid session/i);
+  assert.doesNotMatch(accessCheck[0], /catch\s*\{\s*[^}]*revokeAccess/);
+  assert.doesNotMatch(accessCheck[0], /else if\s*\(staffSession[^)]*\)\s*\{\s*revokeAccess/);
+});
+
 test('expired SaaS Admin sessions return to the SaaS login page, not business login', () => {
   const apiSource = readFileSync(sourceRoot + '/lib/api.ts', 'utf8');
   assert.match(apiSource, /function clearStoredAuth\(\): string \| null[\s\S]*?return role/);
