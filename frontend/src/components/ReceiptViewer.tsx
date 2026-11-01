@@ -44,6 +44,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
   const [showPreview, setShowPreview] = useState(false)
   const [receipt, setReceipt] = useState<ReceiptPreview | null>(null)
   const [loadingReceipt, setLoadingReceipt] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [receiptError, setReceiptError] = useState<string | null>(null)
   const [agentBaseUrl, setAgentBaseUrl] = useState<string | null>(null)
   const [agentPrinters, setAgentPrinters] = useState<PrintAgentPrinter[]>([])
@@ -69,22 +70,27 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
   }, [showPreview, receipt, loadingReceipt, saleId, transactionData])
 
   const handleDownloadPdf = async () => {
-    if (transactionData) {
-      try {
+    if (downloading) return
+    setDownloading(true)
+    try {
+      if (transactionData) {
         await downloadReceiptPreviewPdf(await loadReceiptForPrint(), receiptNo)
-      } catch (error: any) {
-        toast({ variant: 'destructive', title: 'PDF download failed', description: error?.message || 'Could not create the receipt PDF.' })
+      } else {
+        if (!saleId) throw new Error('Receipt data is unavailable.')
+        const link = document.createElement('a')
+        link.href = pdfUrl
+        link.download = `receipt-${receiptNo}.pdf`
+        link.rel = 'noopener'
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
       }
-      return
+      toast({ title: 'Receipt download started', description: 'The PDF receipt is being downloaded.' })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'PDF download failed', description: error?.message || 'Could not create the receipt PDF.' })
+    } finally {
+      setDownloading(false)
     }
-
-    if (!saleId) return
-    const link = document.createElement('a')
-    link.href = pdfUrl
-    link.download = `receipt-${receiptNo}.pdf`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
   }
 
   const loadReceiptForPrint = async () => {
@@ -336,6 +342,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
     <>
       <div className="flex flex-wrap items-center gap-2">
         <Button
+          type="button"
           variant="outline"
           size="sm"
           onClick={previewOnTrigger ? () => setShowPreview(true) : handlePrint}
@@ -347,6 +354,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
         </Button>
 
         {!previewOnTrigger && <Button
+          type="button"
           variant="ghost"
           size="sm"
           onClick={() => setShowPreview(true)}
@@ -357,7 +365,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
         </Button>}
 
         {onClose && (
-          <Button variant="ghost" size="icon" onClick={onClose}>
+          <Button type="button" variant="ghost" size="icon" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         )}
@@ -368,13 +376,14 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
           <div className="w-full max-w-sm rounded-lg bg-background shadow-2xl">
             <div className="flex items-center justify-between border-b px-4 py-3">
               <p className="text-sm font-semibold">Select Printer</p>
-              <Button variant="ghost" size="icon" onClick={() => setShowPrinterPicker(false)} aria-label="Close printer selection">
+              <Button type="button" variant="ghost" size="icon" onClick={() => setShowPrinterPicker(false)} aria-label="Close printer selection">
                 <X className="h-4 w-4" />
               </Button>
             </div>
             <div className="grid gap-2 p-4">
               {nativePrinters.map((printer) => (
                 <Button
+                  type="button"
                   key={`${printer.transport}-${printer.id}`}
                   variant="outline"
                   className="justify-start"
@@ -392,6 +401,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
                   {agentPrinters.length > 0 ? (
                     agentPrinters.map((printer) => (
                       <Button
+                        type="button"
                         key={printer.id}
                         variant="outline"
                         className="justify-start"
@@ -407,6 +417,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
                     ))
                   ) : (
                     <Button
+                      type="button"
                       variant="outline"
                       className="justify-start"
                       onClick={() => handleAgentPrinterChoice({ id: '', name: 'Default printer' })}
@@ -420,6 +431,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
                 </div>
               )}
               <Button
+                type="button"
                 variant="outline"
                 className="justify-start"
                 onClick={() => handlePrinterChoice('usb')}
@@ -429,6 +441,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
                 USB Printer
               </Button>
               <Button
+                type="button"
                 variant="outline"
                 className="justify-start"
                 onClick={() => handlePrinterChoice('bluetooth')}
@@ -438,6 +451,7 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
                 Bluetooth Printer
               </Button>
               <Button
+                type="button"
                 variant="outline"
                 className="justify-start"
                 onClick={() => handlePrinterChoice('serial')}
@@ -457,10 +471,10 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
             <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
               <p className="min-w-0 truncate text-sm font-semibold">Receipt {receipt?.receiptNo || receiptNo}</p>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon" onClick={handleDownloadPdf} aria-label="Download receipt PDF">
-                  <Download className="h-4 w-4" />
+                <Button type="button" variant="ghost" size="icon" onClick={event => { event.preventDefault(); event.stopPropagation(); void handleDownloadPdf() }} disabled={downloading} aria-label="Download receipt PDF" title="Download receipt PDF">
+                  {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => setShowPreview(false)} aria-label="Close receipt">
+                <Button type="button" variant="ghost" size="icon" onClick={() => setShowPreview(false)} aria-label="Close receipt">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
@@ -595,11 +609,11 @@ export default function ReceiptViewer({ saleId, receiptNo, onClose, transactionD
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
-              <Button variant="outline" size="sm" onClick={handlePrint} disabled={printing}>
+              <Button type="button" variant="outline" size="sm" onClick={handlePrint} disabled={printing}>
                 <Printer className="mr-2 h-4 w-4" />
                 {printing ? 'Printing...' : 'Print'}
               </Button>
-              <Button variant="ghost" size="sm" onClick={handleSystemPrint}>
+              <Button type="button" variant="ghost" size="sm" onClick={handleSystemPrint}>
                 Browser Print / Save as PDF
               </Button>
             </div>

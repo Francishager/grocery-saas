@@ -11,6 +11,7 @@ const historyDialog = source('../src/components/customer/CustomerTransactionHist
 const transactionReceipt = source('../src/lib/transactionReceipt.ts');
 const transactionReceiptButton = source('../src/components/TransactionReceiptButton.tsx');
 const receiptViewer = source('../src/components/ReceiptViewer.tsx');
+const receiptPdf = source('../src/lib/receiptPdf.ts');
 const thermalPrinter = source('../src/lib/thermalPrinter.ts');
 const createCustomerModal = source('../src/components/modals/CreateCustomerModal.tsx');
 const saasFeatures = source('../src/pages/SaaSAdmin/FeaturesPage.tsx');
@@ -88,6 +89,10 @@ test('customer and renter reprints use the shared browser receipt print window',
 test('customer and renter reprints open an in-app preview with close, browser print, and direct PDF actions', () => {
   assert.match(receiptViewer, /aria-label="Close receipt"/);
   assert.match(receiptViewer, /downloadReceiptPreviewPdf\(await loadReceiptForPrint\(\), receiptNo\)/);
+  assert.match(receiptViewer, /type="button"[^>]*onClick=\{event => \{ event\.preventDefault\(\); event\.stopPropagation\(\); void handleDownloadPdf\(\) \}\}/);
+  assert.match(receiptPdf, /pdf\.output\('blob'\)/);
+  assert.match(receiptPdf, /link\.download = `\$\{safeReference\}\.pdf`/);
+  assert.match(receiptPdf, /receipt\.business\.receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);
   assert.match(receiptViewer, /handleNativePrinterChoice/);
   assert.match(receiptViewer, /previewOnTrigger \? \(\) => setShowPreview\(true\)/);
   assert.match(thermalPrinter, /export function buildEscPosReceiptCommands\(receipt: ReceiptPreview\)/);

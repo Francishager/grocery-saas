@@ -87,11 +87,28 @@ export async function downloadReceiptPreviewPdf(receipt: ReceiptPreview, fallbac
     : Number(receipt.total)
   line(receipt.amountLabel || 'Amount', formatCurrency(displayedTotal, totalCurrency), true)
   for (const detail of receipt.additionalDetails || []) line(detail.label, detail.value)
-  ensureSpace(12)
+  const footer = receipt.business.receiptFooter?.trim() || 'Thank you for your purchase!'
+  const footerLines = pdf.splitTextToSize(footer, pageWidth - 36)
+  ensureSpace(footerLines.length * 4 + 12)
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(9)
+  pdf.text(footerLines, pageWidth / 2, y, { align: 'center' })
+  y += footerLines.length * 4 + 4
+  ensureSpace(10)
   pdf.setFont('helvetica', 'normal')
   pdf.setFontSize(8)
-  pdf.text('Powered by JibuSales', pageWidth / 2, y + 5, { align: 'center' })
+  pdf.text('Powered by JibuSales', pageWidth / 2, y, { align: 'center' })
 
   const safeReference = (receipt.receiptNo || fallbackReference).replace(/[^a-z0-9-_]/gi, '-') || 'receipt'
-  pdf.save(`${safeReference}.pdf`)
+  const blob = pdf.output('blob')
+  const downloadUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = downloadUrl
+  link.download = `${safeReference}.pdf`
+  link.rel = 'noopener'
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000)
 }
