@@ -26,6 +26,7 @@ const BRIDGE_ORIGIN = APP_ORIGIN;
 const brandGreen = '#16764a';
 // WebView's published declaration currently conflicts with this Expo/RN type set.
 const NativeWebView = WebView as any;
+const NATIVE_BRIDGE_SCRIPT = `(function(){if(window.JibuNativeFile&&window.JibuNativePrinter&&window.JibuNativePush)return true;var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};if(!window.ReactNativeWebView){delete pending[id];reject(new Error('Native app bridge is unavailable. Update JibuSales and try again.'));return;}window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},30000);});}function reply(id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply(id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply(id,response,'Native notification setup failed.');};window.__jibuNativeFileReply=function(id,response){reply(id,response,'Could not save the receipt PDF.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};window.JibuNativeFile={savePdf:function(filename,base64){return request({type:'file.savePdf',filename:filename,base64:base64},'Receipt save timed out.');}};return true;})();true;`;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -123,7 +124,7 @@ export default function HomeScreen() {
   };
 
   const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
-    if (!nativeEvent.url || getOrigin(nativeEvent.url) !== BRIDGE_ORIGIN) return;
+    if (nativeEvent.url && getOrigin(nativeEvent.url) !== BRIDGE_ORIGIN) return;
     let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[]; userInitiated?: boolean; filename?: string; base64?: string };
     try { request = JSON.parse(nativeEvent.data); } catch { return; }
     if (!request.id || !['printer.list', 'printer.print', 'push.permission', 'push.register', 'file.savePdf'].includes(request.type || '')) return;
@@ -197,7 +198,8 @@ export default function HomeScreen() {
         originWhitelist={['https://*', 'about:*', 'mailto:*', 'tel:*', 'sms:*', 'whatsapp:*', 'intent:*']}
         onShouldStartLoadWithRequest={handleNavigation}
         onMessage={handleNativeMessage}
-        injectedJavaScriptBeforeContentLoaded={`(function(){var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},30000);});}function reply(id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply(id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply(id,response,'Native notification setup failed.');};window.__jibuNativeFileReply=function(id,response){reply(id,response,'Could not save the receipt PDF.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};window.JibuNativeFile={savePdf:function(filename,base64){return request({type:'file.savePdf',filename:filename,base64:base64},'Receipt save timed out.');}};})();true;`}
+        injectedJavaScriptBeforeContentLoaded={NATIVE_BRIDGE_SCRIPT}
+        injectedJavaScript={NATIVE_BRIDGE_SCRIPT}
         onNavigationStateChange={(state: WebViewNavigation) => setCanGoBack(state.canGoBack)}
         onLoadStart={() => { setLoadProgress(0); setLoading(true); setFailed(false); }}
         onLoadProgress={({ nativeEvent }: { nativeEvent: { progress: number } }) => {
@@ -205,7 +207,11 @@ export default function HomeScreen() {
           setLoadProgress(progress);
           if (progress >= 1) setLoading(false);
         }}
-        onLoadEnd={() => { setLoadProgress(1); setLoading(false); }}
+        onLoadEnd={() => {
+          setLoadProgress(1);
+          setLoading(false);
+          webView.current?.injectJavaScript(NATIVE_BRIDGE_SCRIPT);
+        }}
         onError={handleLoadError}
         onHttpError={({ nativeEvent }: { nativeEvent: { statusCode: number; description?: string; url?: string } }) => {
           if (nativeEvent.statusCode >= 500) {

@@ -100,6 +100,10 @@ test('customer and renter reprints open an in-app preview with close, browser pr
   assert.match(receiptPdf, /receipt\.business\.receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);
   assert.match(mobileApp, /Directory\.pickDirectoryAsync\(\)/);
   assert.match(mobileApp, /file\.write\(request\.base64, \{ encoding: 'base64' \}\)/);
+  assert.match(mobileApp, /injectedJavaScriptBeforeContentLoaded=\{NATIVE_BRIDGE_SCRIPT\}/);
+  assert.match(mobileApp, /injectedJavaScript=\{NATIVE_BRIDGE_SCRIPT\}/);
+  assert.match(mobileApp, /webView\.current\?\.injectJavaScript\(NATIVE_BRIDGE_SCRIPT\)/);
+  assert.match(mobileApp, /nativeEvent\.url && getOrigin\(nativeEvent\.url\) !== BRIDGE_ORIGIN/);
   assert.match(receiptViewer, /handleNativePrinterChoice/);
   assert.match(receiptViewer, /previewOnTrigger \? \(\) => setShowPreview\(true\)/);
   assert.match(thermalPrinter, /export function buildEscPosReceiptCommands\(receipt: ReceiptPreview\)/);
