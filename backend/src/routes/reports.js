@@ -609,11 +609,19 @@ function financialCustomerPaymentRow(payment) {
     branch: branchLabel(payment),
     staff: payment?.staff || "",
     paymentMethod: normalizedPaymentMethod(payment?.paymentMethod),
+    mobileProvider: payment?.mobileProvider || null,
+    phoneNumber: payment?.phoneNumber || null,
+    transactionId: payment?.transactionId || null,
     debit: amount,
     credit: amount,
     amount,
     status: "Received",
-    details: payment?.sale?.receiptNo ? `Applied to ${payment.sale.receiptNo}` : (payment?.notes || "Customer balance reduction"),
+    details: [
+      payment?.sale?.receiptNo ? `Applied to ${payment.sale.receiptNo}` : (payment?.notes || "Customer balance reduction"),
+      payment?.mobileProvider ? `Provider: ${payment.mobileProvider}` : null,
+      payment?.phoneNumber ? `Mobile number: ${payment.phoneNumber}` : null,
+      payment?.transactionId ? `Transaction ID: ${payment.transactionId}` : null,
+    ].filter(Boolean).join(" · "),
   };
 }
 

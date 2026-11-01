@@ -43,6 +43,9 @@ type CustomerHistoryTransaction = {
   balance?: number
   affectsBalance?: boolean
   paymentMethod?: string | null
+  mobileProvider?: string | null
+  phoneNumber?: string | null
+  transactionId?: string | null
   status?: string | null
   branch?: string | null
   staff?: string | null
@@ -355,6 +358,9 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
       : [{ label: 'Refund method', value: row.paymentMethod }, { label: 'Refund amount', value: formatCurrency(amount) }]
       : []),
     ...(!isCreditNote && !isReturn ? [{ label: 'Payment method', value: row.paymentMethod }] : []),
+    ...(isPayment && row.mobileProvider ? [{ label: 'Mobile money provider', value: row.mobileProvider }] : []),
+    ...(isPayment && row.phoneNumber ? [{ label: 'Mobile money number', value: row.phoneNumber }] : []),
+    ...(isPayment && row.transactionId ? [{ label: 'Transaction ID', value: row.transactionId }] : []),
     { label: 'Staff', value: row.staff },
     ...(!isCreditNote && !isReturn ? [
       { label: 'Debit', value: row.debit ? formatCurrency(Number(row.debit)) : '' },
@@ -1009,7 +1015,7 @@ export default function CustomerTransactionHistoryDialog({
                           </details>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 capitalize">{normalizeText(row.paymentMethod) || '-'}</td>
+                      <td className="px-3 py-2 capitalize">{normalizeText(row.paymentMethod) || '-'}{row.mobileProvider && <span className="block text-xs normal-case text-muted-foreground">{row.mobileProvider}{row.phoneNumber ? ` · ${row.phoneNumber}` : ''}</span>}{row.transactionId && <span className="block max-w-[180px] truncate text-xs normal-case text-muted-foreground" title={row.transactionId}>ID: {row.transactionId}</span>}</td>
                       <td className="px-3 py-2">{row.staff || '-'}</td>
                       <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || 0))}</td>
                       <td className="px-3 py-2 text-right">{Number(row.debit || 0) > 0 ? formatCurrency(Number(row.debit)) : '-'}</td>

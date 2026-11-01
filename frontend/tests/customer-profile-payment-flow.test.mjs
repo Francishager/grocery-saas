@@ -19,3 +19,16 @@ test('profile payment posts through the permission-checked receivables endpoint 
   assert.match(paymentDialog, /'Idempotency-Key': idempotencyKey/);
   assert.match(paymentDialog, /canUseOwnCashAccount|canUseSafeAccount|canUseBankAccount/);
 });
+
+test('payment-method and account selectors cannot dismiss the payment dialog through their portals', () => {
+  assert.match(paymentDialog, /onInteractOutside=\{\(event\) => \{/);
+  assert.match(paymentDialog, /data-radix-popper-content-wrapper/);
+  assert.match(paymentDialog, /event\.preventDefault\(\)/);
+});
+
+test('mobile-money payments require and submit provider, phone, and transaction reference', () => {
+  assert.match(paymentDialog, /mobileProvider: method === 'mobile_money' \? mobileProvider/);
+  assert.match(paymentDialog, /phoneNumber: method === 'mobile_money' \? phoneNumber/);
+  assert.match(paymentDialog, /transactionId: \['mobile_money', 'card'\]\.includes\(method\)/);
+  assert.match(paymentDialog, /provider, phone number, and transaction ID/);
+});

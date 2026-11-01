@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
+import { useToast } from '@/hooks/use-toast'
 import { apiFetch } from '@/lib/api'
 import { formatCurrency, getTenantCurrency } from '@/lib/utils'
 
@@ -45,6 +46,7 @@ export default function CustomerPaymentDialog({
 }) {
   const { user, hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
+  const { toast } = useToast()
   const baseCurrency = getTenantCurrency()
   const [amount, setAmount] = useState('')
   const [currency, setCurrency] = useState(baseCurrency)
@@ -167,6 +169,7 @@ export default function CustomerPaymentDialog({
       })
       const result = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(result?.error || result?.message || 'Failed to record payment.')
+      toast({ title: 'Payment recorded', description: `${formatCurrency(numericAmount, currency)} received from ${customer.name || 'customer'}.` })
       onRecorded()
       onOpenChange(false)
     } catch (reason) {
@@ -178,7 +181,15 @@ export default function CustomerPaymentDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!saving) onOpenChange(nextOpen) }}>
-      <DialogContent className="z-[70] max-h-[92dvh] w-[calc(100vw-1rem)] max-w-lg overflow-y-auto p-4 sm:p-6">
+      <DialogContent
+        className="z-[70] max-h-[92dvh] w-[calc(100vw-1rem)] max-w-lg overflow-y-auto p-4 sm:p-6"
+        onInteractOutside={(event) => {
+          const target = event.target
+          if (target instanceof Element && target.closest('[data-radix-popper-content-wrapper]')) {
+            event.preventDefault()
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Record customer payment</DialogTitle>
           <DialogDescription>{customer?.name || 'Customer'} · Balance {formatCurrency(Number(customer?.balance || 0))}</DialogDescription>
@@ -200,10 +211,10 @@ export default function CustomerPaymentDialog({
             </div>
             {method === 'mobile_money' && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2">
               <div><Label htmlFor="profileMobileProvider">Provider</Label><Select value={mobileProvider} onValueChange={setMobileProvider}><SelectTrigger id="profileMobileProvider"><SelectValue placeholder="Select provider" /></SelectTrigger><SelectContent>{['MTN', 'Airtel', 'Zamtel', 'Vodafone', 'M-Pesa', 'Other'].map((provider) => <SelectItem key={provider} value={provider}>{provider}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label htmlFor="profilePaymentPhone">Phone number</Label><Input id="profilePaymentPhone" type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} /></div>
-              <div className="sm:col-span-2"><Label htmlFor="profilePaymentTransaction">Transaction ID</Label><Input id="profilePaymentTransaction" value={transactionId} onChange={(event) => setTransactionId(event.target.value)} /></div>
+              <div><Label htmlFor="profilePaymentPhone">Phone number</Label><Input id="profilePaymentPhone" type="tel" required value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} /></div>
+              <div className="sm:col-span-2"><Label htmlFor="profilePaymentTransaction">Transaction ID</Label><Input id="profilePaymentTransaction" required value={transactionId} onChange={(event) => setTransactionId(event.target.value)} /></div>
             </div>}
-            {method === 'card' && <div><Label htmlFor="profilePaymentTransaction">Transaction ID</Label><Input id="profilePaymentTransaction" value={transactionId} onChange={(event) => setTransactionId(event.target.value)} /></div>}
+            {method === 'card' && <div><Label htmlFor="profilePaymentTransaction">Transaction ID</Label><Input id="profilePaymentTransaction" required value={transactionId} onChange={(event) => setTransactionId(event.target.value)} /></div>}
             <div>
               <Label htmlFor="profilePaymentAccount">Transaction account</Label>
               <Select value={accountId} onValueChange={setAccountId}>

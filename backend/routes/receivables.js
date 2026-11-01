@@ -932,6 +932,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         balanceImpact: -toMoney(payment.amount),
         affectsBalance: true,
         paymentMethod: payment.paymentMethod,
+        mobileProvider: payment.mobileProvider || null,
+        phoneNumber: payment.phoneNumber || null,
+        transactionId: payment.transactionId || null,
         status: 'paid',
         branch: payment.branch?.name || '',
         staff: '',
@@ -2280,6 +2283,15 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
     const paymentRequestKey = rawPaymentRequestKey.replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160)
     const paymentReference = customerPaymentReceiptReference(reference, paymentRequestKey)
     const normalizedTransactionId = String(transactionId || '').trim() || null
+    const normalizedMobileProvider = String(mobileProvider || '').trim() || null
+    const normalizedPhoneNumber = String(phoneNumber || '').trim() || null
+
+    if (resolvedPaymentMethod === 'mobile_money' && (!normalizedMobileProvider || !normalizedPhoneNumber || !normalizedTransactionId)) {
+      return res.status(400).json({ error: 'Mobile money payments require a provider, phone number, and transaction ID.' })
+    }
+    if (resolvedPaymentMethod === 'card' && !normalizedTransactionId) {
+      return res.status(400).json({ error: 'Card payments require a transaction ID.' })
+    }
 
     // Gate payment method by permission
     if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
@@ -2421,8 +2433,8 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           exchangeRateSource: fx.provider,
           allocationMode: 'explicit',
           paymentMethod: resolvedPaymentMethod,
-          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
-          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? normalizedMobileProvider : null,
+          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? normalizedPhoneNumber : null,
           transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? normalizedTransactionId : null,
           reference: paymentReference,
           idempotencyKey: paymentRequestKey || null,
