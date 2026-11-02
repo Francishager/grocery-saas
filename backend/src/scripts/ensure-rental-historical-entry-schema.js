@@ -25,7 +25,9 @@ try {
       IF to_regclass('public.customer_payment_allocations') IS NOT NULL
         AND to_regclass('public.rentals') IS NOT NULL THEN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint WHERE conname = 'customer_payment_allocations_rentalId_fkey'
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = to_regclass('public.customer_payment_allocations')
+            AND lower(conname) = lower('customer_payment_allocations_rentalId_fkey')
         ) THEN
           ALTER TABLE customer_payment_allocations
             ADD CONSTRAINT customer_payment_allocations_rentalId_fkey

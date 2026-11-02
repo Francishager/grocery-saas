@@ -30,7 +30,11 @@ try {
       END IF;
       IF to_regclass('public.rental_charge_lines') IS NOT NULL
         AND to_regclass('public.products') IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'rental_charge_lines_productId_fkey') THEN
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = to_regclass('public.rental_charge_lines')
+            AND lower(conname) = lower('rental_charge_lines_productId_fkey')
+        ) THEN
         ALTER TABLE rental_charge_lines ADD CONSTRAINT rental_charge_lines_productId_fkey
           FOREIGN KEY ("productId") REFERENCES products(id) ON DELETE SET NULL ON UPDATE CASCADE;
       END IF;
