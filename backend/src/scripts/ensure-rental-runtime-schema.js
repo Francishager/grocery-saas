@@ -1,7 +1,7 @@
 import prisma from '../db.js'
 
 try {
-  if (!await prisma.$queryRawUnsafe(`SELECT to_regclass('public.rentals') AS table_name`).then(rows => rows[0]?.table_name)) {
+  if (!await prisma.$queryRawUnsafe(`SELECT to_regclass('public.rentals')::text AS table_name`).then(rows => rows[0]?.table_name)) {
     console.log('Rental base table is not installed; rental runtime schema will be applied after its base migration.')
     process.exitCode = 0
   } else {
