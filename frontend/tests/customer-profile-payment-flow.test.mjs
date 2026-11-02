@@ -99,7 +99,10 @@ test('customer and renter reprints open an in-app preview with close, browser pr
   assert.match(receiptPdf, /link\.download = filename/);
   assert.match(receiptPdf, /receipt\.business\.receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);
   assert.match(mobileApp, /Directory\.pickDirectoryAsync\(\)/);
+  assert.match(mobileApp, /directory\.createFile\(filename, 'application\/pdf'\)/);
+  assert.doesNotMatch(mobileApp, /file\.create\(\{ overwrite: true \}\)/);
   assert.match(mobileApp, /file\.write\(request\.base64, \{ encoding: 'base64' \}\)/);
+  assert.match(mobileApp, /if \(!fileInfo\.exists \|\| !fileInfo\.size\)/);
   assert.match(mobileApp, /injectedJavaScriptBeforeContentLoaded=\{NATIVE_BRIDGE_SCRIPT\}/);
   assert.match(mobileApp, /injectedJavaScript=\{NATIVE_BRIDGE_SCRIPT\}/);
   assert.match(mobileApp, /webView\.current\?\.injectJavaScript\(NATIVE_BRIDGE_SCRIPT\)/);

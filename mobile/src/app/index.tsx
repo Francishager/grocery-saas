@@ -134,9 +134,22 @@ export default function HomeScreen() {
         if (!request.filename || !request.base64) throw new Error('Receipt PDF data is missing.');
         const safeFilename = request.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
         const directory = await Directory.pickDirectoryAsync();
-        const file = directory.createFile(safeFilename, 'application/pdf');
-        file.create({ overwrite: true });
-        await file.write(request.base64, { encoding: 'base64' });
+        const existingNames = new Set(directory.list().map((entry) => entry.name));
+        const extensionIndex = safeFilename.toLowerCase().endsWith('.pdf') ? safeFilename.length - 4 : safeFilename.length;
+        const stem = safeFilename.slice(0, extensionIndex);
+        const extension = safeFilename.slice(extensionIndex) || '.pdf';
+        let filename = safeFilename;
+        let suffix = 2;
+        while (existingNames.has(filename)) filename = `${stem} (${suffix++})${extension}`;
+        const file = directory.createFile(filename, 'application/pdf');
+        try {
+          await file.write(request.base64, { encoding: 'base64' });
+          const fileInfo = file.info();
+          if (!fileInfo.exists || !fileInfo.size) throw new Error('The receipt file was created but no PDF data was written.');
+        } catch (error) {
+          try { file.delete(); } catch { /* Keep the original write error. */ }
+          throw error;
+        }
         response = { ok: true, result: { saved: true } };
       } else if (request.type === 'push.permission' || request.type === 'push.register') {
         let permission = await Notifications.getPermissionsAsync();
