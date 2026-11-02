@@ -1,4 +1,5 @@
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { chartTooltip } from '@/lib/chartTheme'
 import { ArrowDownRight, ArrowUpRight, Minus, TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatCurrency } from '@/lib/utils'
@@ -50,7 +51,7 @@ export default function WeeklySalesCharts({ data }: { data: any }) {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
                   <YAxis yAxisId="money" tickLine={false} axisLine={false} width={78} tickFormatter={(value) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value)} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                  <Tooltip formatter={(value, name) => [money(value), name]} contentStyle={{ borderRadius: 8, borderColor: 'hsl(var(--border))', background: 'hsl(var(--background))' }} />
+                  <Tooltip formatter={(value, name) => [money(value), name]} {...chartTooltip} />
                   <Bar yAxisId="money" dataKey="grossSales" name="Gross sales" fill="#0f9f6e" radius={[4, 4, 0, 0]} maxBarSize={42} />
                   <Line yAxisId="money" type="monotone" dataKey="revenue" name="Net revenue" stroke="#3987d7" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 </ComposedChart>

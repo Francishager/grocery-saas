@@ -8,6 +8,7 @@ import {
   TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
+import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
 import { reportsApiV2, branchesApi, inventoryApi, apiFetch, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -1346,10 +1347,10 @@ function AdvancedSalesSummary({ data }: { data: any }) {
                     <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="label" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="label" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatCurrency(Number(value) || 0)} />
                 <Area type="monotone" dataKey="value" stroke="#2563eb" fill="url(#revenueFill)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
@@ -1365,7 +1366,7 @@ function AdvancedSalesSummary({ data }: { data: any }) {
                   <Cell fill="#f59e0b" />
                   <Cell fill="#10b981" />
                 </Pie>
-                <Tooltip formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatCurrency(Number(value) || 0)} />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
@@ -1390,10 +1391,10 @@ function AdvancedFastMoving({ data }: { data: any }) {
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip formatter={(value: any) => formatNumber(Number(value) || 0)} />
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatNumber(Number(value) || 0)} />
                 <Bar dataKey="quantity" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -1440,10 +1441,10 @@ function AdvancedBranchPerformance({ data }: { data: any }) {
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatCurrency(Number(value) || 0)} />
                 <Bar dataKey="revenue" fill="#0f766e" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -1454,10 +1455,10 @@ function AdvancedBranchPerformance({ data }: { data: any }) {
           <CardContent className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip />
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} />
                 <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} />
                 <Line type="monotone" dataKey="avgSale" stroke="#f59e0b" strokeWidth={2} />
               </LineChart>
@@ -1922,10 +1923,10 @@ function ExecutiveSummaryReport({ data }: { data: any }) {
             <CardContent className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={categoryChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-12} textAnchor="end" height={70} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <CartesianGrid {...chartGrid} />
+                  <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} interval={0} angle={-12} textAnchor="end" height={70} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                  <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                  <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
                   <Bar dataKey="previous" fill="#94a3b8" radius={[3, 3, 0, 0]} name="Previous" />
                   <Bar dataKey="current" fill="#2563eb" radius={[3, 3, 0, 0]} name="Current" />
                 </BarChart>
@@ -1971,7 +1972,7 @@ function ExecutiveSummaryReport({ data }: { data: any }) {
                       <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
                 </PieChart>
               </ResponsiveContainer>
             </CardContent>

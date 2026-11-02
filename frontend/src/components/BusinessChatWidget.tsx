@@ -329,7 +329,7 @@ export function BusinessChatWidget() {
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
       {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : selected ? <>
-        <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 sm:px-4">
+        <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 dark:bg-background sm:px-4">
           {messages.map((message) => {
             const own = message.senderId === user?.id
             const status = message.readAt ? 'Read' : message.deliveredAt ? 'Delivered' : 'Sent; recipient offline'
@@ -351,11 +351,11 @@ export function BusinessChatWidget() {
                 onPointerUp={endMessagePress}
                 onPointerCancel={endMessagePress}
                 onPointerLeave={endMessagePress}
-                className={cn('select-text touch-pan-y px-3 py-2 shadow-sm', own ? 'rounded-2xl rounded-br-sm bg-[#d9fdd3]' : 'rounded-2xl rounded-bl-sm bg-white')}
+                className={cn('select-text touch-pan-y px-3 py-2 shadow-sm', own ? 'rounded-2xl rounded-br-sm bg-[#d9fdd3] dark:bg-emerald-950/80' : 'rounded-2xl rounded-bl-sm bg-white dark:bg-muted')}
               >
-                {message.replyToMessage && <div className="mb-2 border-l-2 border-emerald-700/60 bg-black/5 px-2 py-1"><p className="text-[10px] font-semibold text-emerald-800">{message.replyToMessage.senderId === user?.id ? 'You' : selected?.participant.name}</p><p className="line-clamp-2 whitespace-pre-wrap break-words text-xs text-[#53615a]">{message.replyToMessage.body}</p></div>}
-                <p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b]">{message.body}</p>
-                <div className="mt-1 flex items-center justify-end gap-1"><time className="text-[10px] tabular-nums text-[#667781]">{conversationTime(message.createdAt)}</time>{own && <span className={cn('inline-flex items-center', message.readAt ? 'text-sky-600' : 'text-slate-500')} title={status} aria-label={status}><StatusIcon className="size-3.5" aria-hidden="true" /></span>}</div>
+                {message.replyToMessage && <div className="mb-2 border-l-2 border-emerald-700/60 bg-black/5 px-2 py-1 dark:border-emerald-400/70 dark:bg-white/5"><p className="text-[10px] font-semibold text-emerald-800">{message.replyToMessage.senderId === user?.id ? 'You' : selected?.participant.name}</p><p className="line-clamp-2 whitespace-pre-wrap break-words text-xs text-[#53615a] dark:text-muted-foreground">{message.replyToMessage.body}</p></div>}
+                <p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b] dark:text-foreground">{message.body}</p>
+                <div className="mt-1 flex items-center justify-end gap-1"><time className="text-[10px] tabular-nums text-[#667781] dark:text-muted-foreground">{conversationTime(message.createdAt)}</time>{own && <span className={cn('inline-flex items-center', message.readAt ? 'text-sky-600' : 'text-slate-500')} title={status} aria-label={status}><StatusIcon className="size-3.5" aria-hidden="true" /></span>}</div>
               </div>
               {reactionCounts.size > 0 && <div className={cn('mt-1 flex flex-wrap gap-1', own ? 'justify-end' : 'justify-start')}>{[...reactionCounts].map(([emoji, value]) => <button key={emoji} type="button" onClick={() => void reactToMessage(message, emoji)} aria-label={`${emoji}, ${value.count} reactions`} className={cn('inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-sm shadow-sm', value.mine && 'border-emerald-500 bg-emerald-50')}>{emoji}<span className="text-[11px] text-muted-foreground">{value.count}</span></button>)}</div>}
             </div>
@@ -372,7 +372,7 @@ export function BusinessChatWidget() {
           {newMessageMode && filteredPeople.length === 0 && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No active team members found.</p>}
         </div>
       </>}
-      {error && <div role="alert" className="shrink-0 border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error}</div>}
+      {error && <div role="alert" className="shrink-0 border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200">{error}</div>}
     </section>}
 
     {launcherPosition && <button

@@ -8,6 +8,7 @@ import { displayReference } from '@/lib/displayReference'
 import { buildDailySalesTrend } from '@/lib/salesReportChartData'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { chartTooltip } from '@/lib/chartTheme'
 
 export interface DailyBusinessData {
   header: {
@@ -658,7 +659,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
                   <YAxis tickLine={false} axisLine={false} width={78} tickFormatter={(value) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value)} tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                  <Tooltip formatter={(value, name) => [money(value), name]} contentStyle={{ borderRadius: 8, borderColor: 'hsl(var(--border))', background: 'hsl(var(--background))' }} />
+                  <Tooltip formatter={(value, name) => [money(value), name]} {...chartTooltip} />
                   <Legend />
                   <Bar dataKey="sales" name="Sales" fill="#0f9f6e" radius={[4, 4, 0, 0]} maxBarSize={34} />
                   <Bar dataKey="collections" name="Customer repayments" fill="#e5a11a" radius={[4, 4, 0, 0]} maxBarSize={34} />

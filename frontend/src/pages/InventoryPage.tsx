@@ -1138,7 +1138,7 @@ export default function InventoryPage() {
           className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
-          <p className="mt-1 text-xl font-bold">{formatQty(card.value)}</p>
+          <p className="mt-1 text-xl font-bold text-foreground">{formatQty(card.value)}</p>
           <p className="text-[11px] text-muted-foreground">{movementPeriodLabel}</p>
         </button>
       ))}

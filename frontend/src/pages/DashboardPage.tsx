@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from 'recharts'
+import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
 import { useOnlineStatus } from '@/db/hooks'
 import { SupportContactLinks } from '@/components/SupportContactLinks'
 
@@ -560,7 +561,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold">{k.customerCount}</div>
-            {hasFeature('inventory') && hasPermission('canViewProduct') && <p className="text-xs text-muted-foreground">{k.productCount} products</p>}
+            {hasFeature('inventory') && hasPermission('canViewProduct') && <p className="text-xs"><span className="font-semibold text-foreground">{k.productCount}</span><span className="text-muted-foreground"> products</span></p>}
           </CardContent>
         </Card>
         )}
@@ -605,13 +606,13 @@ export default function DashboardPage() {
                   <stop offset="95%" stopColor="#16a34a" stopOpacity={0.4} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <CartesianGrid {...chartGrid} />
+              <XAxis dataKey="label" tick={{ ...chartAxisTick, fontSize: 11 }} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+              <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={chartAxisLine} tickLine={chartAxisLine} />
               <Tooltip
                 formatter={(value: number, name: string) => [formatCurrency(value), name === 'revenue' ? 'Revenue' : name === 'profit' ? 'Net Profit' : name]}
                 labelFormatter={(label) => `Day ${label}`}
-                contentStyle={{ borderRadius: 8, fontSize: 13 }}
+                contentStyle={{ ...chartTooltip.contentStyle, fontSize: 13 }} labelStyle={chartTooltip.labelStyle} itemStyle={chartTooltip.itemStyle}
               />
             {canViewSalesDashboard && <Bar dataKey="revenue" fill="url(#colorRevBar)" radius={[3, 3, 0, 0]} name="revenue" />}
               {canViewFinancialDashboard && <Bar dataKey="profit" fill="url(#colorProfitBar)" radius={[3, 3, 0, 0]} name="profit" />}
@@ -633,10 +634,10 @@ export default function DashboardPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={salesChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 12 }} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
                 {canViewSalesDashboard && <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Revenue" />}
                 {hasPermission('canViewExpense') && <Line type="monotone" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="7 7" name="Operating Expenses" />}
               </LineChart>
@@ -655,10 +656,10 @@ export default function DashboardPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={profitLossData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 12 }} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 12 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
                 <Line type="monotone" dataKey="gross" stroke="#16a34a" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} name="Gross Profit" />
                 <Line type="monotone" dataKey="net" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="8 8" name="Net Profit" />
               </LineChart>
@@ -683,10 +684,10 @@ export default function DashboardPage() {
             ) : (
               <ResponsiveContainer width="100%" height={250}>
                 <BarChart data={topProducts} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => formatCurrency(v)} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                  <CartesianGrid {...chartGrid} />
+                  <XAxis type="number" tick={{ ...chartAxisTick, fontSize: 12 }} tickFormatter={(v) => formatCurrency(v)} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                  <YAxis type="category" dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} width={100} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                  <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
                   <Bar dataKey="revenue" fill="#2563eb" radius={[0, 4, 4, 0]} name="Revenue" />
                 </BarChart>
               </ResponsiveContainer>
@@ -713,7 +714,7 @@ export default function DashboardPage() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => formatCurrency(value)} contentStyle={{ borderRadius: 8, fontSize: 13 }} />
+                  <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} contentStyle={{ ...chartTooltip.contentStyle, borderRadius: 8, fontSize: 13 }} />
                   <Legend verticalAlign="bottom" height={36} formatter={(value: string, entry: any) => <span style={{ color: entry.color, fontSize: 13, fontWeight: 600 }}>{value}</span>} />
                 </PieChart>
               </ResponsiveContainer>

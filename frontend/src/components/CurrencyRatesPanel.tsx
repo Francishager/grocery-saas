@@ -3,12 +3,11 @@ import { RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { currencyApi, type LiveCurrencyRates } from '@/lib/api'
 
-const DISPLAY_CODES = ['UGX', 'USD', 'KES', 'TZS', 'RWF', 'EUR', 'GBP']
-
 export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
   const [data, setData] = useState<LiveCurrencyRates | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [quoteCurrency, setQuoteCurrency] = useState('')
   const requestId = useRef(0)
   const normalizedBase = String(baseCurrency || 'UGX').toUpperCase()
 
@@ -35,12 +34,12 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
   const rateDate = data?.rateDate ? new Date(data.rateDate) : null
   const isCurrentCurrency = data?.baseCurrency?.toUpperCase() === normalizedBase
   const rates = isCurrentCurrency ? data?.rates || {} : {}
-  const baseToUgx = normalizedBase === 'UGX' ? 1 : Number(rates.UGX || 0)
-  const usdToUgx = normalizedBase === 'USD'
-    ? Number(rates.UGX || 0)
-    : normalizedBase === 'UGX'
-      ? (Number(rates.USD || 0) > 0 ? 1 / Number(rates.USD) : 0)
-      : (Number(rates.USD || 0) > 0 ? Number(rates.UGX || 0) / Number(rates.USD) : 0)
+  const currencyCodes = Object.keys(rates)
+    .filter(code => code.toUpperCase() !== normalizedBase && Number.isFinite(Number(rates[code])) && Number(rates[code]) > 0)
+    .sort()
+  const defaultQuote = currencyCodes.includes('USD') && normalizedBase !== 'USD' ? 'USD' : currencyCodes[0] || ''
+  const displayedQuote = currencyCodes.includes(quoteCurrency) ? quoteCurrency : defaultQuote
+  const quoteRate = Number(rates[displayedQuote] || 0)
   const formatRate = (value: number) => new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(value)
 
   return (
@@ -56,21 +55,24 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
       </div>
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : isCurrentCurrency ? <>
         {data.warning && <p role="status" className="text-xs text-amber-700">{data.warning}</p>}
-        <div className="grid gap-2 min-[420px]:grid-cols-2">
-          <div className="min-w-0 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
-            <span className="block text-xs text-muted-foreground">Selected currency to Uganda shilling</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/20 bg-primary/5 p-3">
+          <div className="min-w-0">
+            <span className="block text-xs text-muted-foreground">Reference conversion</span>
             <strong className="mt-1 block break-words text-sm tabular-nums">
-              {baseToUgx > 0 ? `1 ${normalizedBase} = ${formatRate(baseToUgx)} UGX` : 'Rate unavailable'}
+              {displayedQuote && quoteRate > 0 ? `1 ${normalizedBase} = ${formatRate(quoteRate)} ${displayedQuote}` : 'Rate unavailable'}
             </strong>
           </div>
-          {normalizedBase !== 'USD' && (
-            <div className="min-w-0 rounded-md border px-3 py-2.5">
-              <span className="block text-xs text-muted-foreground">US dollar to Uganda shilling</span>
-              <strong className="mt-1 block break-words text-sm tabular-nums">
-                {usdToUgx > 0 ? `1 USD = ${formatRate(usdToUgx)} UGX` : 'Rate unavailable'}
-              </strong>
-            </div>
-          )}
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Compare with</span>
+            <select
+              aria-label="Compare business currency with"
+              value={displayedQuote}
+              onChange={event => setQuoteCurrency(event.target.value)}
+              className="h-9 max-w-40 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+            >
+              {currencyCodes.map(code => <option key={code} value={code}>{code}</option>)}
+            </select>
+          </label>
         </div>
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full table-fixed text-sm">
@@ -78,7 +80,7 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
               <tr><th className="w-[42%] px-3 py-2 font-medium">Currency pair</th><th className="px-3 py-2 text-right font-medium">Reference rate</th></tr>
             </thead>
             <tbody>
-              {DISPLAY_CODES.filter(code => code !== normalizedBase && rates[code] != null).map(code => (
+              {currencyCodes.map(code => (
                 <tr key={code} className="border-t">
                   <td className="break-words px-3 py-2">{normalizedBase} to {code}</td>
                   <td className="break-words px-3 py-2 text-right tabular-nums">1 {normalizedBase} = {formatRate(Number(rates[code]))} {code}</td>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
 import { CalendarDays, CircleDollarSign, PackageCheck, Search, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -115,10 +116,10 @@ export default function RentalReportView({ reportId, data, columns = [], summary
           <div className="h-[280px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartRows} margin={{ top: 8, right: 12, left: 8, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey={chartNameKey} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 11 }} width={80} />
-                <Tooltip formatter={(value: number) => formatCurrency(numberValue(value))} />
+                <CartesianGrid {...chartGrid} vertical={false} />
+                <XAxis dataKey={chartNameKey} tick={{ ...chartAxisTick, fontSize: 11 }} interval="preserveStartEnd" axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} width={80} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(numberValue(value))} />
                 {reportId === 'rentalsDaily' ? <>
                   <Legend />
                   <Bar dataKey="rentalCharges" name="Rental Charges" fill="#168b82" radius={[3, 3, 0, 0]} />

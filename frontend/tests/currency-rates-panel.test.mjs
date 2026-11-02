@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 
 const panel = readFileSync(fileURLToPath(new URL('../src/components/CurrencyRatesPanel.tsx', import.meta.url)), 'utf8');
 
-test('reference exchange rates follow the selected business currency and retain USD/UGX context', () => {
+test('reference exchange rates use one selectable quote against the business currency', () => {
   assert.match(panel, /currencyApi\.rates\(normalizedBase\)/);
-  assert.match(panel, /1 \$\{normalizedBase\} = \$\{formatRate\(baseToUgx\)\} UGX/);
-  assert.match(panel, /1 USD = \$\{formatRate\(usdToUgx\)\} UGX/);
+  assert.match(panel, /1 \$\{normalizedBase\} = \$\{formatRate\(quoteRate\)\} \$\{displayedQuote\}/);
+  assert.match(panel, /aria-label="Compare business currency with"/);
+  assert.doesNotMatch(panel, /Selected currency|Uganda shilling|USD\/UGX|baseToUgx|usdToUgx/);
   assert.match(panel, /\{normalizedBase\} to \{code\}/);
+  assert.match(panel, /Object\.keys\(rates\)/);
 });
 
 test('exchange-rate table keeps readable wrapped columns on narrow screens', () => {
