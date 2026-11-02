@@ -125,6 +125,12 @@ test('property-management businesses do not get the trade customer-create action
   assert.match(receivablesPage, /tab === 'customers' && !propertyManagementBusiness/);
 });
 
+test('customer tenancy agreements require property-management access, not the separate rentals feature', () => {
+  assert.match(historyDialog, /const canLoadRentalProfile = propertyManagementEnabled && hasPermission\('canViewPropertyStatements'\)/);
+  assert.match(historyDialog, /const canViewTenancyAgreements = canViewRent/);
+  assert.doesNotMatch(historyDialog, /canViewRentalAgreements|hasFeature\('rentals'\)|\/api\/rentals\?customerId=/);
+});
+
 test('configured receipt footer replaces the default text in preview, browser and server printouts', () => {
   for (const sourceText of [receiptSettings, receiptViewer, browserReceiptPrint]) {
     assert.match(sourceText, /receiptFooter\?\.trim\(\) \|\| 'Thank you for your purchase!'/);

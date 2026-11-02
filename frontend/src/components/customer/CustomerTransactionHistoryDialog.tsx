@@ -174,7 +174,6 @@ type RentPromiseTenancy = { id: string; tenantName: string; currency: string; st
 type RentPromise = { id: string; amount: number; dueDate: string; notes?: string | null; createdAt: string; createdByName: string; fulfilledAmount: number; remainingAmount: number; status: string; tenancy: RentPromiseTenancy; allocations: Array<{ id: string; amount: number; fulfilledAmount: number; remainingAmount: number; period: string; rentDueDate: string }> }
 type RentPromiseProfileData = { counts: { total: number; upcoming: number; due_today: number; kept: number; partially_paid: number; partially_kept: number; missed: number; promisedAmount: number; fulfilledAmount: number; remainingAmount: number }; tenancies: RentPromiseTenancy[]; promises: RentPromise[] }
 type RentPaymentAccount = { id: string; name: string; type: string; paymentMethod: string }
-type RentalAgreementDraft = { id: string; rentalNo: string; hireDate: string; expectedReturnDate: string; status: string; bookingState?: string; contractDraft?: string | null; contractGeneratedAt?: string | null }
 
 function escapeAgreementHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
@@ -418,9 +417,6 @@ export default function CustomerTransactionHistoryDialog({
   const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
   const [rentalData, setRentalData] = useState<RentalLedgerResponse | null>(null)
-  const [rentalAgreements, setRentalAgreements] = useState<RentalAgreementDraft[]>([])
-  const [rentalAgreementsLoading, setRentalAgreementsLoading] = useState(false)
-  const [rentalAgreementsError, setRentalAgreementsError] = useState('')
   const [rentPlanData, setRentPlanData] = useState<RentPlanProfileData | null>(null)
   const [rentPlanReload, setRentPlanReload] = useState(0)
   const [rentPromiseData, setRentPromiseData] = useState<RentPromiseProfileData | null>(null)
@@ -451,7 +447,6 @@ export default function CustomerTransactionHistoryDialog({
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const propertyManagementEnabled = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
-  const canViewRentalAgreements = hasFeature('rentals') && hasPermission('canViewRental')
   const canLoadRentalProfile = propertyManagementEnabled && hasPermission('canViewPropertyStatements')
   const canLoadHouseholdProfile = propertyManagementEnabled && (hasPermission('canViewTenantPersonalDetails') || hasPermission('canManageTenantPersonalDetails'))
   const canViewRentPaymentPlans = propertyManagementEnabled && (hasPermission('canViewRentPaymentPlans') || hasPermission('canManageRentPaymentPlans'))
@@ -503,27 +498,6 @@ export default function CustomerTransactionHistoryDialog({
     loadHistory()
     return () => controller.abort()
   }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile])
-
-  useEffect(() => {
-    if (!open || !customer?.id || !canViewRentalAgreements) {
-      setRentalAgreements([])
-      setRentalAgreementsError('')
-      setRentalAgreementsLoading(false)
-      return
-    }
-    const controller = new AbortController()
-    setRentalAgreementsLoading(true)
-    setRentalAgreementsError('')
-    void apiFetch(`/api/rentals?customerId=${encodeURIComponent(customer.id)}&page=1&limit=500`, { signal: controller.signal } as RequestInit)
-      .then(async response => {
-        const payload = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(payload?.error || 'Could not load rental agreements.')
-        if (!controller.signal.aborted) setRentalAgreements(Array.isArray(payload?.rentals) ? payload.rentals : [])
-      })
-      .catch(error => { if (error?.name !== 'AbortError') setRentalAgreementsError(error?.message || 'Could not load rental agreements.') })
-      .finally(() => { if (!controller.signal.aborted) setRentalAgreementsLoading(false) })
-    return () => controller.abort()
-  }, [open, customer?.id, canViewRentalAgreements, rentalReload])
 
   useEffect(() => {
     if (!open || !customer?.id || !canViewRentPaymentPlans) {
@@ -707,7 +681,7 @@ export default function CustomerTransactionHistoryDialog({
   const canViewRent = canLoadRentalProfile
   const canViewTenantHousehold = canLoadHouseholdProfile && householdTenancies.length > 0
   const hasRentalTenancies = Boolean(rentalData?.tenancies.length)
-  const canViewTenancyAgreements = canViewRent || canViewRentalAgreements
+  const canViewTenancyAgreements = canViewRent
   const canEditRentalDetails = hasPermission('canManageTenancies')
   const creditActivity = transactions.filter((row) => [
     'opening_balance', 'receivable_sale', 'property_sale', 'property_sale_payment', 'sale_payment_adjustment', 'customer_payment',
@@ -1092,13 +1066,7 @@ export default function CustomerTransactionHistoryDialog({
                   <div className="rounded-md bg-muted/20 p-3"><RichTextDisplay value={draft} className="space-y-1 text-sm leading-6" /></div>
                 </section>
               })}
-              {canViewRentalAgreements && rentalAgreements.map(rental => <section key={`rental-${rental.id}`} className="space-y-3 rounded-md border p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div><h4 className="font-semibold">Tenancy Agreement · {rental.rentalNo}</h4><p className="mt-1 text-sm text-muted-foreground">{formatDisplayDate(rental.hireDate)} – {formatDisplayDate(rental.expectedReturnDate)} · {normalizeText(rental.bookingState || rental.status)}</p></div>{rental.contractDraft && <div className="flex gap-2"><Button type="button" variant="outline" size="sm" onClick={() => agreementDocumentAction(`Tenancy Agreement ${rental.rentalNo}`, rental.contractDraft || '', 'print')}><Printer className="mr-1.5 h-4 w-4" />Print</Button><Button type="button" variant="outline" size="sm" onClick={() => agreementDocumentAction(`Tenancy Agreement ${rental.rentalNo}`, rental.contractDraft || '', 'download')}><Download className="mr-1.5 h-4 w-4" />Download</Button></div>}</div>
-                {rental.contractDraft ? <div className="max-h-[520px] overflow-y-auto rounded-md bg-muted/20 p-3"><RichTextDisplay value={rental.contractDraft} className="space-y-1 text-sm leading-6" /></div> : <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">No agreement draft has been saved for this rental yet.</p>}
-              </section>)}
-              {rentalAgreementsLoading && <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">Loading rental agreements…</div>}
-              {rentalAgreementsError && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{rentalAgreementsError}</div>}
-              {!rentalAgreementsLoading && !rentalAgreementsError && canViewRentalAgreements && rentalAgreements.length === 0 && (!canViewRent || !rentalData?.tenancies.length) && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No tenancy agreements are linked to this customer.</div>}
+              {!rentalData?.tenancies.length && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No tenancy agreements are linked to this customer.</div>}
             </TabsContent>}
 
             {canViewRentPaymentPlans && <TabsContent value="payment-plans" className="space-y-5">
