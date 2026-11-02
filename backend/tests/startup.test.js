@@ -26,6 +26,7 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(dockerfile, /CMD \["\.\/start\.sh"\]/);
   assert.doesNotMatch(dockerfile, /prisma db push/);
   assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
+  assert.match(startupScript, /ensure-user-theme-schema\.js/);
 });
 
 test('startup repairs all additive rental runtime tables and columns before serving rental and KPI queries', () => {
@@ -102,6 +103,9 @@ test('backend loads every router and serves the Railway healthcheck without a da
     const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(5000) });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: 'ok' });
+    const readiness = await fetch(`http://127.0.0.1:${port}/api/health/ready`, { signal: AbortSignal.timeout(5000) });
+    assert.equal(readiness.status, 503);
+    assert.deepEqual(await readiness.json(), { status: 'not_ready', checks: { database: 'unavailable' } });
   } finally {
     child.kill();
     await closed;

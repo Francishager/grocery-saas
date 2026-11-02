@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { AppFeedback } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
@@ -115,7 +115,7 @@ function App() {
   }, [isAuthenticated, isPlatformUser])
 
   return (
-    <BrowserRouter>
+    <>
       <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center px-4 text-sm text-muted-foreground" role="status">Loading page...</div>}>
       <Routes>
         {/* ========== Public Routes ========== */}
@@ -278,7 +278,7 @@ function App() {
       <PwaRefreshControl />
       <Toaster />
       <AppFeedback />
-    </BrowserRouter>
+    </>
   )
 }
 

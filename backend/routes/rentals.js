@@ -7,7 +7,7 @@ import { requireFeature, requireAnyFeature, hasFeatureAccess } from "../middlewa
 import { requestBusinessAdvice } from "../src/services/businessAdvisor.js";
 import { checkUsageLimit } from "../src/utils/usageLimits.js";
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from "../src/utils/customerIdentity.js";
-import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalMixedRevenueRecognitionLines, rentalConsumableCostLines, allocateRentalLineAmounts, rentalDamageChargeLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
+import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalMixedRevenueRecognitionLines, rentalConsumableCostLines, allocateRentalLineAmounts, rentalDamageChargeLines, rentalCreditNoteLines, rentalCancellationLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
 import { allocateHistoricalPaymentBalances } from "../src/services/rentalHistoricalEntryService.js";
 
 const router = Router();
@@ -17,6 +17,20 @@ const crmCollections = new Set(["leads", "activities", "cases", "campaigns"]);
 const crmStages = new Set(["new", "qualified", "proposal", "won", "lost"]);
 const crmPriorities = new Set(["low", "normal", "high", "urgent"]);
 const crmColors = new Set(["yellow", "pink", "blue", "green", "orange", "purple"]);
+const builtInRentalChargeCategories = new Set(["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"]);
+const rentalCreditNoteReasons = new Set(["cancellation", "price_adjustment", "service_not_provided", "overcharge", "other"]);
+
+async function resolveRentalChargeCategory(tenantId, value) {
+  const name = String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (!name) return null;
+  const key = name.toLowerCase();
+  if (builtInRentalChargeCategories.has(key)) return key;
+  const category = await prisma.category.findFirst({
+    where: { tenantId, categoryType: "rental", name: { equals: name, mode: "insensitive" } },
+    select: { name: true },
+  });
+  return category?.name || null;
+}
 
 function crmCanView(req, permission) {
   return req.userPermissions?.[permission] === true || req.user?.permissions?.includes(permission) || req.user?.permissions?.includes("*");
@@ -33,11 +47,29 @@ function requireCrmPermission(permission, legacyPermission) {
 
 function crmWorkspaceForUser(workspace, req) {
   const data = workspace && typeof workspace === "object" && !Array.isArray(workspace) ? workspace : {};
-  return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Array.isArray(value) && key === "leads" ? value.map(lead => ({
-    ...lead,
+  return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Array.isArray(value) ? value.filter(record => crmRecordVisible(record, req)).map(record => ({
+    ...record,
+    ownerUserId: crmRecordOwner(record),
+    visibility: record.visibility === "restricted" ? "restricted" : "workspace",
+    sharedRole: crmRecordOwner(record) === req.user.id ? "owner" : record.sharedWith?.find(share => share?.userId === req.user.id)?.role || "viewer",
     ...(!crmCanView(req, "canViewCustomerPhone") ? { contactPhone: null } : {}),
     ...(!crmCanView(req, "canViewCustomerEmail") ? { contactEmail: null } : {}),
+    ...(crmRecordOwner(record) !== req.user.id ? { sharedWith: undefined } : {}),
   })) : value]));
+}
+
+function crmRecordOwner(record) {
+  return record?.ownerUserId || record?.createdBy || record?.userId || null;
+}
+
+function crmRecordVisible(record, req) {
+  return record?.visibility !== "restricted" || crmRecordOwner(record) === req.user.id ||
+    (Array.isArray(record.sharedWith) && record.sharedWith.some(share => share?.userId === req.user.id));
+}
+
+function crmRecordCanEdit(record, req) {
+  return record?.visibility !== "restricted" || crmRecordOwner(record) === req.user.id ||
+    (Array.isArray(record.sharedWith) && record.sharedWith.some(share => share?.userId === req.user.id && share?.role === "editor"));
 }
 
 async function mutateCrmWorkspace(tenantId, mutate) {
@@ -84,6 +116,7 @@ async function recordRentalPaymentTx(tx, { req, tenantId, rental, amount, method
   const movement = await recordRentalCashMovement(tx, { tenantId, userId: req.user.id, cashAccount, amount: value, direction: "receipt", reference: receiptNo, description: `${kind.replaceAll("_", " ")} for ${rental.rentalNo}` });
   const isDeposit = kind === "deposit";
   const isAdvance = kind === "rental_advance";
+  const isCancellationFee = kind === "rental_cancellation_fee";
   if (isDeposit && value > Math.max(0, Number(rental.depositAmount || 0) - Number(rental.depositPaid || 0)) + 0.01) throw Object.assign(new Error("Deposit collection cannot exceed the agreed security deposit."), { statusCode: 400 });
   const nextBalance = isDeposit ? Math.max(0, Number(rental.depositAmount || 0) - Number(rental.depositPaid || 0) - value) : Math.max(0, Number(rental.balance || 0) - value);
   const payment = await tx.rentalPayment.create({ data: { tenantId, rentalId: rental.id, cashAccountId: cashAccount.id, userId: req.user.id, kind, receiptNo, idempotencyKey, amount: value, balanceAfter: nextBalance, paymentMethod: method, mobileProvider: mobileProvider || null, phoneNumber: phoneNumber || null, paymentDate, transactionRef: transactionRef || null, notes: notes || null } });
@@ -92,11 +125,11 @@ async function recordRentalPaymentTx(tx, { req, tenantId, rental, amount, method
   const lines = isDeposit
     ? rentalDepositReceiptLines(config, { amount: value, cashAccountId: cashLedger.id, reference: receiptNo })
     : rentalReceiptLines(config, { amount: value, cashAccountId: cashLedger.id, reference: receiptNo, advance: isAdvance });
-  await postRentalJournal(tx, { tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: isDeposit ? "RENTAL_DEPOSIT_RECEIPT" : isAdvance ? "RENTAL_ADVANCE_RECEIPT" : "RENTAL_PAYMENT_RECEIPT", sourceId: payment.id, reference: receiptNo, description: `${kind.replaceAll("_", " ")} ${rental.rentalNo}`, lines });
+  await postRentalJournal(tx, { tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: isDeposit ? "RENTAL_DEPOSIT_RECEIPT" : isAdvance ? "RENTAL_ADVANCE_RECEIPT" : isCancellationFee ? "RENTAL_CANCELLATION_FEE_RECEIPT" : "RENTAL_PAYMENT_RECEIPT", sourceId: payment.id, reference: receiptNo, description: `${kind.replaceAll("_", " ")} ${rental.rentalNo}`, lines });
   if (isDeposit) {
     await tx.rental.update({ where: { id: rental.id }, data: { depositPaid: { increment: value }, depositStatus: "held" } });
   } else {
-    await tx.rental.update({ where: { id: rental.id }, data: { amountPaid: { increment: value }, balance: nextBalance, paymentStatus: nextBalance <= 0 ? "paid" : "partial", paymentMethod: method } });
+    await tx.rental.update({ where: { id: rental.id }, data: { amountPaid: { increment: value }, balance: nextBalance, ...(isCancellationFee ? { cancellationChargeBalance: nextBalance } : {}), paymentStatus: nextBalance <= 0 ? "paid" : "partial", paymentMethod: method } });
   }
   return payment;
 }
@@ -295,10 +328,12 @@ router.get("/receivables", authenticateToken, requirePermission("canViewRental")
     const where = scopedWhere(scope, {
       customerId: { not: null },
       balance: { gt: 0.01 },
-      status: { not: "cancelled" },
       OR: [
-        { isHistoricalReceivable: true },
-        { isHistoricalRecord: false, bookingState: { in: ["checked_out", "returned"] } },
+        { status: { not: "cancelled" }, OR: [
+          { isHistoricalReceivable: true },
+          { isHistoricalRecord: false, bookingState: { in: ["checked_out", "returned"] } },
+        ] },
+        { status: "cancelled", cancellationChargeAmount: { gt: 0 } },
       ],
     });
     const [rentals, total] = await Promise.all([
@@ -372,6 +407,7 @@ router.post("/crm/workspace/:collection", authenticateToken, requireTenant, requ
     } else {
       record = { id, name: title, segment: ["all", "active", "overdue", "loyal", "inactive"].includes(body.segment) ? body.segment : "all", subject: String(body.subject || "").slice(0, 180), content: String(body.content || "").slice(0, 10000), status: "draft", scheduledAt: null, createdAt: now, updatedAt: now, createdBy: req.user.id, branchId: scope.branchId || null };
     }
+    record = { ownerUserId: req.user.id, visibility: "workspace", sharedWith: [], ...record };
     const workspace = await mutateCrmWorkspace(scope.tenantId, (current) => ({ ...current, [collection]: [...(Array.isArray(current[collection]) ? current[collection] : []), record] }));
     res.status(201).json({ record: crmWorkspaceForUser({ [collection]: [record] }, req)[collection][0], workspace: crmWorkspaceForUser(workspace, req) });
   } catch (err) {
@@ -379,6 +415,53 @@ router.post("/crm/workspace/:collection", authenticateToken, requireTenant, requ
     if (err instanceof RangeError || err instanceof TypeError) return res.status(400).json({ error: "Check the CRM entry dates and values." });
     console.error("CRM record create error:", err);
     handleBranchError(res, err, "Could not create CRM record.");
+  }
+});
+
+router.get("/crm/share-users", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canEditCRM", "canEditRental"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const users = await prisma.user.findMany({ where: { tenantId, isActive: true, id: { not: req.user.id } }, select: { id: true, fname: true, lname: true }, orderBy: [{ fname: "asc" }, { lname: "asc" }] });
+    res.json({ users: users.map(user => ({ id: user.id, name: [user.fname, user.lname].filter(Boolean).join(" ") || "Team member" })) });
+  } catch (err) {
+    console.error("CRM sharing users error:", err);
+    res.status(500).json({ error: "Could not load team members." });
+  }
+});
+
+router.post("/crm/workspace/:collection/:id/share", authenticateToken, requireTenant, requireAnyFeature(["crm", "rentals"]), requireCrmPermission("canEditCRM", "canEditRental"), async (req, res) => {
+  try {
+    const { collection, id } = req.params;
+    if (!crmCollections.has(collection)) return res.status(404).json({ error: "CRM record type not found." });
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const tenantId = scope.tenantId;
+    const visibility = req.body?.visibility === "restricted" ? "restricted" : "workspace";
+    const shares = Array.isArray(req.body?.sharedWith) ? req.body.sharedWith : [];
+    if (shares.length > 100) return res.status(400).json({ error: "Share with no more than 100 team members." });
+    const userIds = [...new Set(shares.map(share => String(share?.userId || "").trim()).filter(Boolean))];
+    const members = userIds.length ? await prisma.user.findMany({ where: { tenantId, isActive: true, id: { in: userIds } }, select: { id: true } }) : [];
+    if (members.length !== userIds.length) return res.status(400).json({ error: "One or more selected users are not active members of this business." });
+    const sharedWith = visibility === "restricted" ? userIds.map(userId => ({ userId, role: shares.find(share => String(share?.userId) === userId)?.role === "editor" ? "editor" : "viewer" })) : [];
+    let updatedRecord = null;
+    await mutateCrmWorkspace(tenantId, current => {
+      const records = Array.isArray(current[collection]) ? current[collection] : [];
+      const index = records.findIndex(record => record.id === id && (!scope.branchId || record.branchId === scope.branchId));
+      if (index < 0) return current;
+      const record = records[index];
+      const owner = crmRecordOwner(record);
+      if (owner && owner !== req.user.id) throw Object.assign(new Error("Only the record owner can change its sharing settings."), { statusCode: 403 });
+      updatedRecord = { ...record, ownerUserId: owner || req.user.id, visibility, sharedWith, updatedAt: new Date().toISOString() };
+      const nextRecords = [...records];
+      nextRecords[index] = updatedRecord;
+      return { ...current, [collection]: nextRecords };
+    });
+    if (!updatedRecord) return res.status(404).json({ error: "CRM record not found." });
+    res.json({ record: crmWorkspaceForUser({ [collection]: [updatedRecord] }, req)[collection][0] });
+  } catch (err) {
+    if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry sharing." });
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    console.error("CRM record sharing error:", err);
+    handleBranchError(res, err, "Could not update CRM sharing.");
   }
 });
 
@@ -397,6 +480,8 @@ router.patch("/crm/workspace/:collection/:id", authenticateToken, requireTenant,
       const index = records.findIndex((record) => record.id === id && (!scope.branchId || record.branchId === scope.branchId));
       if (index < 0) return current;
       const old = records[index];
+      if (!crmRecordVisible(old, req)) throw Object.assign(new Error("You do not have access to this CRM record."), { statusCode: 404 });
+      if (!crmRecordCanEdit(old, req)) throw Object.assign(new Error("This CRM record is shared as view-only."), { statusCode: 403 });
       const patch = req.body || {};
       const allowed = collection === "leads"
         ? ["title", "prospectName", "customerId", "contactName", "contactPhone", "contactEmail", "stage", "source", "estimatedValue", "notes", "assignedTo", "nextAction", "nextActionAt"]
@@ -436,6 +521,7 @@ router.patch("/crm/workspace/:collection/:id", authenticateToken, requireTenant,
     res.json({ record: crmWorkspaceForUser({ [collection]: [updatedRecord] }, req)[collection][0], workspace: crmWorkspaceForUser(workspace, req) });
   } catch (err) {
     if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry your action." });
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     if (err instanceof RangeError || err instanceof TypeError) return res.status(400).json({ error: "Check the CRM entry fields and dates." });
     console.error("CRM record update error:", err);
     handleBranchError(res, err, "Could not update CRM record.");
@@ -457,6 +543,8 @@ router.post("/crm/leads/:id/convert", authenticateToken, requireTenant, requireA
       const index = leads.findIndex(lead => lead.id === req.params.id && (!scope.branchId || lead.branchId === scope.branchId));
       if (index < 0) throw Object.assign(new Error("Prospect not found in your permitted business scope."), { statusCode: 404 });
       const lead = leads[index];
+      if (!crmRecordVisible(lead, req)) throw Object.assign(new Error("You do not have access to this prospect."), { statusCode: 404 });
+      if (!crmRecordCanEdit(lead, req)) throw Object.assign(new Error("This prospect is shared as view-only."), { statusCode: 403 });
       if (lead.stage === "lost") throw Object.assign(new Error("A lost opportunity cannot be converted. Reopen it first."), { statusCode: 409 });
 
       let customer;
@@ -509,6 +597,9 @@ router.delete("/crm/workspace/:collection/:id", authenticateToken, requireTenant
     let deleted = false;
     const workspace = await mutateCrmWorkspace(scope.tenantId, (current) => {
       const records = Array.isArray(current[collection]) ? current[collection] : [];
+      const target = records.find(record => record.id === id && (!scope.branchId || record.branchId === scope.branchId));
+      if (target && !crmRecordVisible(target, req)) throw Object.assign(new Error("You do not have access to this CRM record."), { statusCode: 404 });
+      if (target && !crmRecordCanEdit(target, req)) throw Object.assign(new Error("This CRM record is shared as view-only."), { statusCode: 403 });
       const nextRecords = records.filter((record) => !(record.id === id && (!scope.branchId || record.branchId === scope.branchId)));
       deleted = nextRecords.length !== records.length;
       return { ...current, [collection]: nextRecords };
@@ -517,6 +608,7 @@ router.delete("/crm/workspace/:collection/:id", authenticateToken, requireTenant
     res.json({ workspace: crmWorkspaceForUser(workspace, req) });
   } catch (err) {
     if (err.code === "P2034") return res.status(409).json({ error: "CRM was updated at the same time. Retry your action." });
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     console.error("CRM record delete error:", err);
     handleBranchError(res, err, "Could not delete CRM record.");
   }
@@ -752,6 +844,7 @@ router.get("/:id", authenticateToken, requirePermission("canViewRental"), requir
         items: { include: { product: { select: { id: true, name: true, sku: true, rentalPrice: true, replacementValue: true } } } },
         chargeLines: true,
         payments: { where: { status: { in: ["posted", "historical"] } }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
+        ...((req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes("canViewRentalCreditNotes")) ? { creditNotes: { where: { status: { not: "cancelled" } }, include: { user: userSelect, payments: { where: { kind: "rental_credit_refund", status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } } }, orderBy: { createdAt: "desc" } } } : {}),
       },
     });
     if (!rental) return res.status(404).json({ error: "Rental not found" });
@@ -762,13 +855,134 @@ router.get("/:id", authenticateToken, requirePermission("canViewRental"), requir
   }
 });
 
+router.post("/:id/credit-notes", authenticateToken, requirePermission("canCreateRentalCreditNote"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const amount = Math.round(toMoney(req.body?.amount, -1) * 100) / 100;
+    const reason = String(req.body?.reason || "").trim().toLowerCase();
+    const notes = String(req.body?.notes || "").trim().slice(0, 2000) || null;
+    const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim().slice(0, 120);
+    if (!(amount > 0) || !Number.isFinite(amount)) return res.status(400).json({ error: "Enter a positive rental credit amount." });
+    if (!rentalCreditNoteReasons.has(reason)) return res.status(400).json({ error: "Choose a valid rental credit note reason." });
+
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM rentals WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
+      if (!rental || rental.status === "cancelled") throw Object.assign(new Error("Active rental booking not found."), { statusCode: 404 });
+      const prior = await tx.rentalCreditNote.findFirst({ where: { tenantId: scope.tenantId, idempotencyKey } });
+      if (prior) {
+        if (prior.rentalId !== rental.id || Math.abs(Number(prior.amount) - amount) > 0.01 || prior.reason !== reason) throw Object.assign(new Error("This request key was already used for a different rental credit note."), { statusCode: 409 });
+        return { note: prior, balance: Number(rental.balance) };
+      }
+      if (rental.isHistoricalRecord && !rental.isHistoricalReceivable) throw Object.assign(new Error("Add this historical booking to receivables before issuing a credit note."), { statusCode: 409 });
+      if (amount > Number(rental.totalAmount) + 0.01) throw Object.assign(new Error("Credit amount exceeds the remaining booking charge."), { statusCode: 400 });
+      const appliedAmount = Math.min(amount, Math.max(0, Number(rental.balance || 0)));
+      const refundDue = Math.round((amount - appliedAmount) * 100) / 100;
+      const taxAmount = Number(rental.totalAmount) > 0
+        ? Math.round(Math.min(amount, Number(rental.taxAmount || 0) * amount / Number(rental.totalAmount)) * 100) / 100
+        : 0;
+      const noteNo = `RCN-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
+      const note = await tx.rentalCreditNote.create({ data: { tenantId: scope.tenantId, rentalId: rental.id, noteNo, idempotencyKey, amount, taxAmount, appliedAmount, refundDue, reason, notes, userId: req.user.id } });
+      const nextTotal = Math.max(0, Math.round((Number(rental.totalAmount) - amount) * 100) / 100);
+      const nextTax = Math.max(0, Math.round((Number(rental.taxAmount || 0) - taxAmount) * 100) / 100);
+      const nextBalance = Math.max(0, Math.round((Number(rental.balance || 0) - appliedAmount) * 100) / 100);
+      const nextHistoricalReceivable = rental.isHistoricalReceivable ? Math.max(0, Math.round((Number(rental.historicalReceivableAmount || 0) - amount) * 100) / 100) : Number(rental.historicalReceivableAmount || 0);
+      await tx.rental.update({ where: { id: rental.id }, data: { totalAmount: nextTotal, taxAmount: nextTax, balance: nextBalance, historicalReceivableAmount: nextHistoricalReceivable, paymentStatus: nextBalance <= 0.01 ? "paid" : Number(rental.amountPaid) > 0 ? "partial" : "unpaid" } });
+      const config = await ensureRentalAccounting(tx, scope.tenantId);
+      await postRentalJournal(tx, {
+        tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id,
+        sourceType: "RENTAL_CREDIT_NOTE", sourceId: note.id, reference: noteNo,
+        description: `Rental credit note ${noteNo} for booking ${rental.rentalNo}`,
+        lines: rentalCreditNoteLines(config, { amount, taxAmount, appliedAmount, refundDue, earned: rental.status === "returned", historical: rental.isHistoricalRecord, reference: noteNo }),
+      });
+      return { note, balance: nextBalance };
+    }, { isolationLevel: "Serializable" });
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2034") return res.status(409).json({ error: "This rental changed while the credit note was being recorded. Refresh and retry." });
+    handleBranchError(res, err, "Failed to issue rental credit note");
+  }
+});
+
+router.patch("/:id/credit-notes/:creditNoteId/cancel", authenticateToken, requirePermission("canEditRentalCreditNote"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const updated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM rentals WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
+      const note = await tx.rentalCreditNote.findFirst({ where: { id: req.params.creditNoteId, tenantId: scope.tenantId, rentalId: req.params.id, status: "issued" } });
+      if (!rental || !note) throw Object.assign(new Error("Issued rental credit note not found."), { statusCode: 404 });
+      if (Number(note.refundedAmount) > 0) throw Object.assign(new Error("A note with a recorded refund cannot be cancelled. Reverse the refund through an authorized accounting workflow first."), { statusCode: 409 });
+      const original = await tx.journalEntry.findFirst({ where: { tenantId: scope.tenantId, sourceType: "RENTAL_CREDIT_NOTE", sourceId: note.id }, include: { lines: true } });
+      if (!original?.lines?.length) throw Object.assign(new Error("The note has no posted journal entry to reverse."), { statusCode: 409 });
+      await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_CREDIT_NOTE_REVERSAL", sourceId: note.id, reference: `${note.noteNo}-REV`, description: `Cancellation of rental credit note ${note.noteNo}`, lines: original.lines.map(line => ({ accountId: line.accountId, debit: Number(line.credit), credit: Number(line.debit), description: `Reverse ${note.noteNo}: ${line.description || "rental credit"}` })) });
+      const nextTotal = Math.round((Number(rental.totalAmount) + Number(note.amount)) * 100) / 100;
+      const nextTax = Math.round((Number(rental.taxAmount || 0) + Number(note.taxAmount || 0)) * 100) / 100;
+      const nextBalance = Math.round((Number(rental.balance || 0) + Number(note.appliedAmount || 0)) * 100) / 100;
+      const nextHistoricalReceivable = rental.isHistoricalReceivable ? Math.round((Number(rental.historicalReceivableAmount || 0) + Number(note.amount)) * 100) / 100 : Number(rental.historicalReceivableAmount || 0);
+      await tx.rental.update({ where: { id: rental.id }, data: { totalAmount: nextTotal, taxAmount: nextTax, balance: nextBalance, historicalReceivableAmount: nextHistoricalReceivable, paymentStatus: nextBalance <= 0.01 ? "paid" : Number(rental.amountPaid) > 0 ? "partial" : "unpaid" } });
+      return tx.rentalCreditNote.update({ where: { id: note.id }, data: { status: "cancelled" } });
+    }, { isolationLevel: "Serializable" });
+    res.json({ note: updated });
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2034") return res.status(409).json({ error: "This rental changed while the note was being cancelled. Refresh and retry." });
+    handleBranchError(res, err, "Failed to cancel rental credit note");
+  }
+});
+
+router.post("/:id/credit-notes/:creditNoteId/refunds", authenticateToken, requirePermission("canRefundRentalCreditNote"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const amount = Math.round(toMoney(req.body?.amount, -1) * 100) / 100;
+    const method = String(req.body?.paymentMethod || "cash").toLowerCase();
+    const mobileProvider = String(req.body?.mobileProvider || "").trim();
+    const phoneNumber = String(req.body?.phoneNumber || "").trim();
+    const transactionRef = String(req.body?.transactionRef || "").trim();
+    const cashAccountId = String(req.body?.cashAccountId || "");
+    if (!(amount > 0) || !Number.isFinite(amount)) return res.status(400).json({ error: "Enter a positive refund amount." });
+    if (method === "mobile_money" && (!mobileProvider || !phoneNumber || !transactionRef)) return res.status(400).json({ error: "Mobile money refunds require provider, phone, and transaction reference." });
+    if (["card", "bank_transfer", "bank", "cheque"].includes(method) && !transactionRef) return res.status(400).json({ error: "This refund method requires a transaction reference." });
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM rentals WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
+      const note = await tx.rentalCreditNote.findFirst({ where: { id: req.params.creditNoteId, tenantId: scope.tenantId, rentalId: req.params.id, status: "issued" } });
+      if (!rental || !note) throw Object.assign(new Error("Issued rental credit note not found."), { statusCode: 404 });
+      const idempotencyKey = `${String(req.body?.idempotencyKey || randomUUID())}:rental_credit_refund`.slice(0, 120);
+      const prior = await tx.rentalPayment.findUnique({ where: { tenantId_idempotencyKey: { tenantId: scope.tenantId, idempotencyKey } } });
+      if (prior) {
+        if (prior.rentalId !== rental.id || prior.rentalCreditNoteId !== note.id || Math.abs(Number(prior.amount) - amount) > 0.01) throw Object.assign(new Error("This request key was already used for a different transaction."), { statusCode: 409 });
+        return prior;
+      }
+      const outstanding = Math.max(0, Math.round((Number(note.refundDue) - Number(note.refundedAmount)) * 100) / 100);
+      if (amount > outstanding + 0.01) throw Object.assign(new Error(`Refund exceeds the amount still due (${outstanding.toFixed(2)}).`), { statusCode: 400 });
+      const cashAccount = validateRentalPaymentAccount(req, await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true } }), method);
+      const receiptNo = `RNR-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
+      const movement = await recordRentalCashMovement(tx, { tenantId: scope.tenantId, userId: req.user.id, cashAccount, amount, direction: "expense", reference: receiptNo, description: `Refund rental credit note ${note.noteNo}` });
+      const payment = await tx.rentalPayment.create({ data: { tenantId: scope.tenantId, rentalId: rental.id, rentalCreditNoteId: note.id, cashAccountId: cashAccount.id, userId: req.user.id, kind: "rental_credit_refund", receiptNo, idempotencyKey, amount, balanceAfter: Math.max(0, outstanding - amount), paymentMethod: method, mobileProvider: mobileProvider || null, phoneNumber: phoneNumber || null, transactionRef: transactionRef || null, notes: String(req.body?.notes || `Refund for ${note.noteNo}`).trim().slice(0, 500) } });
+      const cashLedger = await ensureRentalCashLedgerAccount(tx, scope.tenantId, movement.cashAccount);
+      const config = await ensureRentalAccounting(tx, scope.tenantId);
+      await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_CREDIT_NOTE_REFUND", sourceId: payment.id, reference: receiptNo, description: `Refund renter credit ${note.noteNo}`, lines: [{ accountId: config.renterCreditPayableAccountId, debit: amount, credit: 0, description: `Settle renter credit note ${note.noteNo}` }, { accountId: cashLedger.id, debit: 0, credit: amount, description: `Refund from ${cashAccount.name} for ${note.noteNo}` }] });
+      await tx.rentalCreditNote.update({ where: { id: note.id }, data: { refundedAmount: { increment: amount } } });
+      return payment;
+    }, { isolationLevel: "Serializable" });
+    res.status(201).json({ payment: result });
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2034") return res.status(409).json({ error: "This rental refund changed at the same time. Refresh and retry." });
+    handleBranchError(res, err, "Failed to refund rental credit note");
+  }
+});
+
 router.post("/:id/payments", authenticateToken, requireAnyPermission(["canRecordRentalPayment", "canCreateRental"]), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const { amount, paymentMethod = "cash", cashAccountId, transactionRef, mobileProvider, phoneNumber, notes } = req.body;
     const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
     if (!rental) return res.status(404).json({ error: "Rental not found." });
-    if (rental.status === "cancelled") return res.status(409).json({ error: "Cancelled rentals cannot receive payments." });
+    const isCancellationFee = rental.status === "cancelled" && Number(rental.cancellationChargeBalance || 0) > 0;
+    if (rental.status === "cancelled" && !isCancellationFee) return res.status(409).json({ error: "This cancelled booking has no outstanding cancellation fee." });
     if (rental.isHistoricalRecord && !rental.isHistoricalReceivable) return res.status(409).json({ error: "Add this past booking's unpaid balance to customer receivables before recording a current payment." });
     const value = toMoney(amount, -1);
     if (value <= 0 || value > Number(rental.balance) + 0.01) return res.status(400).json({ error: "Enter a positive payment no greater than the rental balance." });
@@ -777,9 +991,10 @@ router.post("/:id/payments", authenticateToken, requireAnyPermission(["canRecord
     const account = validateRentalPaymentAccount(req, await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true } }), paymentMethod);
     const payment = await prisma.$transaction(async tx => {
       const locked = await tx.rental.findFirst({ where: { id: rental.id, tenantId: scope.tenantId } });
-      if (!locked || value > Number(locked.balance) + 0.01) throw Object.assign(new Error("The rental balance changed. Refresh and enter an amount within the current balance."), { statusCode: 409 });
-      if (locked.bookingState === "checked_out") await ensureLegacyRentalOpeningEntry(tx, { tenantId: scope.tenantId, rental: locked, userId: req.user.id });
-      return recordRentalPaymentTx(tx, { req, tenantId: scope.tenantId, rental: locked, amount: value, method: paymentMethod, cashAccountId: account.id, kind: locked.bookingState === "checked_out" ? "rental_payment" : "rental_advance", transactionRef, mobileProvider, phoneNumber, notes });
+      const cancellationFee = Boolean(locked && locked.status === "cancelled" && Number(locked.cancellationChargeBalance || 0) > 0);
+      if (!locked || value > Number(locked.balance) + 0.01 || (cancellationFee && value > Number(locked.cancellationChargeBalance) + 0.01)) throw Object.assign(new Error("The rental balance changed. Refresh and enter an amount within the current balance."), { statusCode: 409 });
+      if (!cancellationFee && locked.bookingState === "checked_out") await ensureLegacyRentalOpeningEntry(tx, { tenantId: scope.tenantId, rental: locked, userId: req.user.id });
+      return recordRentalPaymentTx(tx, { req, tenantId: scope.tenantId, rental: locked, amount: value, method: paymentMethod, cashAccountId: account.id, kind: cancellationFee ? "rental_cancellation_fee" : locked.bookingState === "checked_out" ? "rental_payment" : "rental_advance", transactionRef, mobileProvider, phoneNumber, notes });
     }, { isolationLevel: "Serializable" });
     res.status(201).json({ payment });
   } catch (err) {
@@ -799,9 +1014,10 @@ router.post("/:id/deposit-refunds", authenticateToken, requireAnyPermission(["ca
     const account = validateRentalPaymentAccount(req, await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true } }), paymentMethod);
     const refund = await prisma.$transaction(async tx => {
       const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
-      if (!rental || rental.status === "cancelled") throw Object.assign(new Error("Rental not found or cancelled."), { statusCode: 404 });
+      if (!rental) throw Object.assign(new Error("Rental not found."), { statusCode: 404 });
       const isUnissuedReservation = rental.status === "active" && rental.bookingState !== "checked_out";
-      if (rental.status !== "returned" && !isUnissuedReservation) throw Object.assign(new Error("Security deposits can only be refunded after return inspection, or before checkout when cancelling a reservation."), { statusCode: 409 });
+      const cancelledReservation = rental.status === "cancelled" && rental.bookingState === "cancelled";
+      if (rental.status !== "returned" && !isUnissuedReservation && !cancelledReservation) throw Object.assign(new Error("Security deposits can only be refunded after return inspection or on a cancelled reservation."), { statusCode: 409 });
       const held = heldRentalDeposit(rental);
       const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).slice(0, 120);
       const prior = await tx.rentalPayment.findUnique({ where: { tenantId_idempotencyKey: { tenantId: scope.tenantId, idempotencyKey } } });
@@ -839,27 +1055,36 @@ router.post("/:id/advance-refunds", authenticateToken, requireAnyPermission(["ca
     const account = validateRentalPaymentAccount(req, await prisma.cashAccount.findFirst({ where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true } }), paymentMethod);
     const refund = await prisma.$transaction(async tx => {
       const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
-      if (!rental || rental.status !== "active" || rental.bookingState === "checked_out") throw Object.assign(new Error("Only an active reservation can refund an unearned advance."), { statusCode: 409 });
+      if (!rental || (rental.status !== "active" && rental.status !== "cancelled") || rental.bookingState === "checked_out") throw Object.assign(new Error("Only a reservation or its cancellation can refund an unearned advance."), { statusCode: 409 });
+      const cancelledReservation = rental.status === "cancelled";
       const [advances, refunds] = await Promise.all([
         tx.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, rentalId: rental.id, status: "posted", kind: "rental_advance" }, _sum: { amount: true } }),
         tx.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, rentalId: rental.id, status: "posted", kind: "rental_advance_refund" }, _sum: { amount: true } }),
       ]);
       const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).slice(0, 120);
+      const refundKind = cancelledReservation ? "rental_cancellation_refund" : "rental_advance_refund";
       const prior = await tx.rentalPayment.findUnique({ where: { tenantId_idempotencyKey: { tenantId: scope.tenantId, idempotencyKey } } });
       if (prior) {
-        if (prior.rentalId !== rental.id || prior.kind !== "rental_advance_refund") throw Object.assign(new Error("This request key was already used for a different rental payment."), { statusCode: 409 });
+        if (prior.rentalId !== rental.id || prior.kind !== refundKind) throw Object.assign(new Error("This request key was already used for a different rental payment."), { statusCode: 409 });
         return prior;
       }
-      const refundable = Math.max(0, Number(advances._sum.amount || 0) - Number(refunds._sum.amount || 0));
+      const refundableAdvances = Math.max(0, Number(advances._sum.amount || 0) - Number(refunds._sum.amount || 0));
+      const refundable = cancelledReservation
+        ? Math.min(refundableAdvances, Math.max(0, Number(rental.cancellationRefundDue || 0) - Number(rental.cancellationRefundedAmount || 0)))
+        : refundableAdvances;
       if (value <= 0 || value > refundable + 0.01) throw Object.assign(new Error("Refund cannot exceed unrefunded reservation advances."), { statusCode: 400 });
-      const receiptNo = `RNT-ADV-REF-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
-      const movement = await recordRentalCashMovement(tx, { tenantId: scope.tenantId, userId: req.user.id, cashAccount: account, amount: value, direction: "expense", reference: receiptNo, description: `Reservation advance refund for ${rental.rentalNo}` });
-      const payment = await tx.rentalPayment.create({ data: { tenantId: scope.tenantId, rentalId: rental.id, cashAccountId: account.id, userId: req.user.id, kind: "rental_advance_refund", receiptNo, idempotencyKey, amount: value, balanceAfter: refundable - value, paymentMethod, mobileProvider: mobileProvider || null, phoneNumber: phoneNumber || null, transactionRef: transactionRef || null, notes: notes || null } });
+      const receiptNo = `${cancelledReservation ? 'RNT-CAN-REF' : 'RNT-ADV-REF'}-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
+      const movement = await recordRentalCashMovement(tx, { tenantId: scope.tenantId, userId: req.user.id, cashAccount: account, amount: value, direction: "expense", reference: receiptNo, description: `${cancelledReservation ? 'Cancellation refund' : 'Reservation advance refund'} for ${rental.rentalNo}` });
+      const payment = await tx.rentalPayment.create({ data: { tenantId: scope.tenantId, rentalId: rental.id, cashAccountId: account.id, userId: req.user.id, kind: refundKind, receiptNo, idempotencyKey, amount: value, balanceAfter: refundable - value, paymentMethod, mobileProvider: mobileProvider || null, phoneNumber: phoneNumber || null, transactionRef: transactionRef || null, notes: notes || null } });
       const cashLedger = await ensureRentalCashLedgerAccount(tx, scope.tenantId, movement.cashAccount);
       const config = await ensureRentalAccounting(tx, scope.tenantId);
-      await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_ADVANCE_REFUND", sourceId: payment.id, reference: receiptNo, description: `Reservation advance refund ${rental.rentalNo}`, lines: [{ accountId: config.deferredRevenueAccountId, debit: value, credit: 0, description: `Release refunded rental advance ${receiptNo}` }, { accountId: cashLedger.id, debit: 0, credit: value, description: `Refund unearned rental advance ${receiptNo}` }] });
-      const newPaid = Math.max(0, Number(rental.amountPaid || 0) - value);
-      await tx.rental.update({ where: { id: rental.id }, data: { amountPaid: newPaid, balance: Math.max(0, Number(rental.totalAmount) - newPaid), paymentStatus: newPaid >= Number(rental.totalAmount) ? "paid" : newPaid > 0 ? "partial" : "unpaid" } });
+      await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: cancelledReservation ? "RENTAL_CANCELLATION_REFUND" : "RENTAL_ADVANCE_REFUND", sourceId: payment.id, reference: receiptNo, description: `${cancelledReservation ? 'Cancellation refund' : 'Reservation advance refund'} ${rental.rentalNo}`, lines: [{ accountId: cancelledReservation ? config.renterCreditPayableAccountId : config.deferredRevenueAccountId, debit: value, credit: 0, description: `${cancelledReservation ? 'Settle cancellation refund payable' : 'Release refunded rental advance'} ${receiptNo}` }, { accountId: cashLedger.id, debit: 0, credit: value, description: `Refund from ${cashAccount.name} ${receiptNo}` }] });
+      if (cancelledReservation) {
+        await tx.rental.update({ where: { id: rental.id }, data: { cancellationRefundedAmount: { increment: value } } });
+      } else {
+        const newPaid = Math.max(0, Number(rental.amountPaid || 0) - value);
+        await tx.rental.update({ where: { id: rental.id }, data: { amountPaid: newPaid, balance: Math.max(0, Number(rental.totalAmount) - newPaid), paymentStatus: newPaid >= Number(rental.totalAmount) ? "paid" : newPaid > 0 ? "partial" : "unpaid" } });
+      }
       return payment;
     }, { isolationLevel: "Serializable" });
     res.status(201).json({ payment: refund });
@@ -975,7 +1200,7 @@ router.post("/historical", authenticateToken, requirePermission("canCreateRental
       const totalAmount = Math.round(quantity * periods * unitHirePrice * 100) / 100;
       return { productId: product.id, quantity, periods, unitHirePrice, rentalPeriod, totalAmount, conditionOut, conditionReturn, notes: item.notes || null };
     });
-    const chargeLines = additionalCharges.map(line => {
+    const chargeLines = await Promise.all(additionalCharges.map(async line => {
       const lineType = String(line?.lineType || "service").toLowerCase();
       const productId = String(line?.productId || "").trim() || null;
       const product = productId ? chargesById.get(productId) : null;
@@ -983,13 +1208,13 @@ router.post("/historical", authenticateToken, requirePermission("canCreateRental
       const quantity = Number(line?.quantity ?? 1);
       const unitPrice = toMoney(line?.unitPrice, Number(product?.price ?? -1));
       const unitCost = toMoney(line?.unitCost, 0);
-      const category = String(line?.category || "service").trim().toLowerCase();
-      if (!label || label.length > 120 || !["service", "consumable"].includes(lineType) || !["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"].includes(category) || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0 || unitCost < 0) throw Object.assign(new Error("Historical service or goods details are invalid."), { statusCode: 400 });
+      const category = await resolveRentalChargeCategory(scope.tenantId, line?.category || "service");
+      if (!label || label.length > 120 || !["service", "consumable"].includes(lineType) || !category || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0 || unitCost < 0) throw Object.assign(new Error("Historical service or goods details are invalid. Choose a standard or saved rental category."), { statusCode: 400 });
       if (productId && !product) throw Object.assign(new Error("A selected historical charge item was not found."), { statusCode: 400 });
       if (lineType === "consumable" && (!product || product.itemType !== "product" || !Number.isInteger(quantity))) throw Object.assign(new Error("Historical goods lines require a catalog product and whole-unit quantity."), { statusCode: 400 });
       if (productId && lineType === "service" && product.itemType !== "service") throw Object.assign(new Error("Catalog-linked service lines must use a saved service item."), { statusCode: 400 });
       return { lineType, productId, unitCost, label, category, quantity, unitPrice, totalAmount: Math.round(quantity * unitPrice * 100) / 100 };
-    });
+    }));
     const grossTotal = [...rentalLines, ...chargeLines].reduce((sum, line) => sum + line.totalAmount, 0);
     const discountAmount = toMoney(discount, -1);
     const rate = toMoney(taxRate, -1);
@@ -1216,16 +1441,16 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
     }) : [];
     if (chargeProducts.length !== chargeProductIds.length) return res.status(400).json({ error: "A selected service or consumable item was not found in this business or branch." });
     const chargeProductsById = new Map(chargeProducts.map(product => [product.id, product]));
-    const chargeLines = additionalCharges.map((charge) => {
+    const chargeLines = await Promise.all(additionalCharges.map(async (charge) => {
       const lineType = String(charge?.lineType || "service").trim().toLowerCase();
       const productId = String(charge?.productId || "").trim() || null;
       const product = productId ? chargeProductsById.get(productId) : null;
       const label = String(charge?.label || product?.name || "").trim();
-      const category = String(charge?.category || "service").trim().toLowerCase();
+      const category = await resolveRentalChargeCategory(scope.tenantId, charge?.category || "service");
       const quantity = Number(charge?.quantity ?? 1);
       const unitPrice = toMoney(charge?.unitPrice, product?.price ?? -1);
-      if (!label || label.length > 120 || !["service", "consumable"].includes(lineType) || !["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"].includes(category) || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0) {
-        throw Object.assign(new Error("Check the additional service/charge lines. Names, categories, quantity, or prices are invalid."), { statusCode: 400 });
+      if (!label || label.length > 120 || !["service", "consumable"].includes(lineType) || !category || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0) {
+        throw Object.assign(new Error("Check the additional service/charge lines. Choose a standard or saved rental category and valid names, quantities, or prices."), { statusCode: 400 });
       }
       if (lineType === "consumable" && (!product || product.itemType !== "product" || !Number.isInteger(quantity) || Number(product.cost) <= 0)) {
         throw Object.assign(new Error("Consumable lines must use an active stocked product with a whole quantity and a saved cost price."), { statusCode: 400 });
@@ -1237,7 +1462,7 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
         throw Object.assign(new Error(`Not enough stock for “${product?.name}”. Reduce the quantity or restock before check-out.`), { statusCode: 409 });
       }
       return { lineType, productId, unitCost: lineType === "consumable" ? Number(product.cost) : 0, label, category, quantity, unitPrice, totalAmount: Math.round(quantity * unitPrice * 100) / 100 };
-    });
+    }));
     const chargeTotal = chargeLines.reduce((sum, line) => sum + line.totalAmount, 0);
     const grossSubtotal = subtotal + chargeTotal;
     const discountAmount = toMoney(discount);
@@ -1503,30 +1728,71 @@ router.put("/:id", authenticateToken, requirePermission("canEditRental"), requir
   }
 });
 
-// Cancel reservations only. Checked-out items must pass through the return flow.
-router.delete("/:id", authenticateToken, requireAnyPermission(["canCancelRental", "canDeleteRental"]), requireTenant, requireFeature("rentals"), async (req, res) => {
+async function cancelRentalReservation(req, res) {
   try {
-    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
-    const { id } = req.params;
-
-    const rental = await prisma.rental.findFirst({
-      where: scopedWhere(scope, { id }),
-      include: { items: true },
+    const scope = await resolveBranchScope(prisma, req, { source: req.method === "DELETE" ? "query" : "body", allowOwnerAll: true });
+    const percentInput = req.body?.chargePercent ?? 0;
+    const chargePercent = Number(percentInput);
+    const reason = String(req.body?.reason || (req.method === "DELETE" ? "Cancelled through legacy cancellation action" : "")).trim().slice(0, 500);
+    if (!Number.isFinite(chargePercent) || chargePercent < 0 || chargePercent > 100) return res.status(400).json({ error: "Cancellation charge must be between 0 and 100 percent." });
+    if (reason.length < 3) return res.status(400).json({ error: "Enter a cancellation reason (at least 3 characters)." });
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM rentals WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
+      if (!rental) throw Object.assign(new Error("Rental not found."), { statusCode: 404 });
+      if (rental.status === "cancelled") throw Object.assign(new Error("This booking is already cancelled."), { statusCode: 409 });
+      if (rental.status === "returned") throw Object.assign(new Error("A returned booking cannot be cancelled."), { statusCode: 409 });
+      if (rental.bookingState === "checked_out") throw Object.assign(new Error("Checked-out items must go through the return inspection before cancellation."), { statusCode: 409 });
+      if (rental.isHistoricalRecord) throw Object.assign(new Error("Historical bookings cannot be cancelled as current transactions."), { statusCode: 409 });
+      const issuedCreditNotes = await tx.rentalCreditNote.count({ where: { tenantId: scope.tenantId, rentalId: rental.id, status: "issued" } });
+      if (issuedCreditNotes) throw Object.assign(new Error("Cancel or settle issued rental credit notes before cancelling this booking."), { statusCode: 409 });
+      const [advances, advanceRefunds] = await Promise.all([
+        tx.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, rentalId: rental.id, status: "posted", kind: "rental_advance" }, _sum: { amount: true } }),
+        tx.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, rentalId: rental.id, status: "posted", kind: "rental_advance_refund" }, _sum: { amount: true } }),
+      ]);
+      const advanceAmount = Math.max(0, Math.round((Number(advances._sum.amount || 0) - Number(advanceRefunds._sum.amount || 0)) * 100) / 100);
+      const feeAmount = Math.round(Number(rental.totalAmount || 0) * chargePercent) / 100;
+      const feeTax = Number(rental.totalAmount) > 0
+        ? Math.round(Math.min(feeAmount, Number(rental.taxAmount || 0) * feeAmount / Number(rental.totalAmount)) * 100) / 100
+        : 0;
+      const advanceApplied = Math.min(feeAmount, advanceAmount);
+      const refundDue = Math.round(Math.max(0, advanceAmount - advanceApplied) * 100) / 100;
+      const feeReceivable = Math.round(Math.max(0, feeAmount - advanceApplied) * 100) / 100;
+      if (advanceAmount > 0 || feeAmount > 0) {
+        const config = await ensureRentalAccounting(tx, scope.tenantId);
+        await postRentalJournal(tx, {
+          tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id,
+          sourceType: "RENTAL_CANCELLATION", sourceId: rental.id, reference: rental.rentalNo,
+          description: `Booking cancellation · ${reason}`,
+          lines: rentalCancellationLines(config, { advanceAmount, feeAmount, taxAmount: feeTax, refundDue, feeReceivable, reference: rental.rentalNo }),
+        });
+      }
+      const updated = await tx.rental.update({
+        where: { id: rental.id },
+        data: {
+          status: "cancelled", bookingState: "cancelled", cancellationChargePercent: chargePercent,
+          cancellationChargeAmount: feeAmount, cancellationTaxAmount: feeTax, cancellationChargeBalance: feeReceivable,
+          cancellationRefundDue: refundDue, cancellationRefundedAmount: 0, cancellationReason: reason,
+          cancelledAt: new Date(), cancelledById: req.user.id, balance: feeReceivable,
+          paymentStatus: feeReceivable <= 0.01 ? "paid" : "unpaid",
+        },
+      });
+      return { rental: updated, advanceAmount, feeAmount, feeTax, refundDue, feeReceivable };
+    }, { isolationLevel: "Serializable" });
+    return res.json({
+      message: "Booking cancelled. Any fee due remains in receivables; any refund due is tracked separately from cash until paid.",
+      cancellation: result,
     });
-    if (!rental) return res.status(404).json({ error: "Rental not found" });
-    if (rental.status === "returned") return res.status(400).json({ error: "Cannot cancel a returned rental." });
-    if (rental.bookingState === "checked_out") return res.status(409).json({ error: "Checked-out items must be returned before the rental can be closed." });
-
-    if (Number(rental.amountPaid) > 0 || heldRentalDeposit(rental) > 0) return res.status(409).json({ error: "Refund any reservation advance and collected security deposit through the payment workflow before cancelling. This preserves the cash and general-ledger audit trail." });
-
-    await prisma.rental.update({ where: { id }, data: { status: "cancelled", bookingState: "cancelled" } });
-
-    res.json({ message: "Reservation cancelled. Stock was not changed because it had not been checked out." });
   } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2034") return res.status(409).json({ error: "The booking changed while cancellation was being recorded. Refresh and retry." });
     console.error("Cancel rental error:", err);
     handleBranchError(res, err, "Failed to cancel rental");
   }
-});
+}
+
+router.post("/:id/cancel", authenticateToken, requireAnyPermission(["canCancelRental", "canDeleteRental"]), requireTenant, requireFeature("rentals"), cancelRentalReservation);
+router.delete("/:id", authenticateToken, requireAnyPermission(["canCancelRental", "canDeleteRental"]), requireTenant, requireFeature("rentals"), cancelRentalReservation);
 
 // Rentals summary/report
 router.get("/report/summary", authenticateToken, requirePermission("canViewReportRentalsSummary"), requireTenant, requireFeature("rentals"), async (req, res) => {

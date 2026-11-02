@@ -22,6 +22,7 @@ node src/scripts/ensure-property-tenancy-alternate-phone-schema.js
 node src/scripts/ensure-property-rent-rate-history-schema.js
 node src/scripts/ensure-property-rent-promises-schema.js
 node src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js
+node src/scripts/ensure-user-theme-schema.js
 run_rental_schema_step src/scripts/ensure-rental-runtime-schema.js
 run_rental_schema_step src/scripts/ensure-rental-mixed-booking-schema.js
 run_rental_schema_step src/scripts/ensure-rental-historical-entry-schema.js

@@ -64,6 +64,7 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     fname: user.fname,
     lname: user.lname,
     preferredLanguage: supportedLanguages.has(user.preferredLanguage) ? user.preferredLanguage : "en",
+    theme: user.theme === "dark" || user.theme === "light" ? user.theme : null,
     avatar: user.avatar || null,
     role: user.role,
     tenantId: user.tenantId,
@@ -289,7 +290,7 @@ router.post("/reset-password", resetIpLimiter, resetIdentityLimiter, async (req,
 // Update profile (name, phone, avatar)
 router.put("/profile", authenticateToken, async (req, res) => {
   try {
-    const { fname, lname, phone, avatar, preferredLanguage } = req.body;
+    const { fname, lname, phone, avatar, preferredLanguage, theme } = req.body;
     const data = {};
     const isBusinessOwner = req.user?.role === "owner";
     if (!isBusinessOwner && fname !== undefined) data.fname = fname;
@@ -301,6 +302,10 @@ router.put("/profile", authenticateToken, async (req, res) => {
         return res.status(400).json({ error: "Unsupported language" });
       }
       data.preferredLanguage = String(preferredLanguage);
+    }
+    if (theme !== undefined) {
+      if (!['light', 'dark'].includes(String(theme))) return res.status(400).json({ error: "Unsupported theme" });
+      data.theme = String(theme);
     }
 
     const user = await prisma.user.update({

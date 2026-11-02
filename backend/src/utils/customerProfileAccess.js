@@ -56,6 +56,7 @@ export function customerProfilePayload(customer, access) {
     ...(access.recordPayment && { branchId: customer.branchId || null }),
     name: customer.name,
     ...(access.phone && { phone: customer.phone }),
+    ...(access.phone && { alternatePhone: customer.alternatePhone }),
     ...(!access.phone && { maskedPhone: maskCustomerPhone(customer.phone) }),
     ...(access.email && { email: customer.email }),
     ...(!access.email && { maskedEmail: maskCustomerEmail(customer.email) }),

@@ -11,6 +11,7 @@ export interface User {
   lname?: string
   phone?: string
   preferredLanguage?: string
+  theme?: 'light' | 'dark' | null
   role: string
   permissions: string[]
   workingHoursAccess?: { restricted: boolean; allowed?: boolean; timezone?: string }

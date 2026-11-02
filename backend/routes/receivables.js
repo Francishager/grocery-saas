@@ -680,6 +680,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           User: userSelect,
           items: { include: { product: { select: { name: true, sku: true } } } },
           payments: { where: { status: { in: ['posted', 'historical'] } }, include: { user: userSelect }, orderBy: { paymentDate: 'asc' } },
+          ...((req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes('canViewRentalCreditNotes'))
+            ? { creditNotes: { where: { status: 'issued' }, include: { payments: { where: { kind: 'rental_credit_refund', status: 'posted' }, include: { user: userSelect } }, user: userSelect }, orderBy: { createdAt: 'asc' } } }
+            : { creditNotes: { where: { status: 'issued' }, select: { amount: true, refundDue: true, refundedAmount: true }, orderBy: { createdAt: 'asc' } } }),
         },
         orderBy: { hireDate: 'asc' },
         take: limit,
@@ -1123,20 +1126,37 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 
     rentals.forEach((rental) => {
       const historicalCollectible = rental.isHistoricalReceivable === true
-      const collectible = historicalCollectible || (!rental.isHistoricalRecord && Boolean(rental.customerId) && ['checked_out', 'returned'].includes(rental.bookingState))
-      const receivableAmount = historicalCollectible ? toMoney(rental.historicalReceivableAmount) : collectible ? toMoney(rental.totalAmount) : 0
+      const cancellationCollectible = rental.status === 'cancelled' && toMoney(rental.cancellationChargeAmount) > 0
+      const collectible = historicalCollectible || cancellationCollectible || (!rental.isHistoricalRecord && Boolean(rental.customerId) && ['checked_out', 'returned'].includes(rental.bookingState))
+      const canViewRentalNotes = Boolean(req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes('canViewRentalCreditNotes'))
+      const creditNotes = rental.creditNotes || []
+      const activeCreditAmount = creditNotes.reduce((sum, note) => sum + toMoney(note.amount), 0)
+      const postedRentalPayments = (rental.payments || []).reduce((sum, payment) => (
+        payment.status === 'posted' && ['rental_payment', 'rental_advance'].includes(payment.kind)
+          ? sum + toMoney(payment.amount)
+          : sum
+      ), 0)
+      const outstandingCreditRefund = creditNotes.reduce((sum, note) => sum + Math.max(0, toMoney(note.refundDue) - toMoney(note.refundedAmount)), 0)
+      const currentReceivable = historicalCollectible ? toMoney(rental.historicalReceivableAmount) : cancellationCollectible ? toMoney(rental.cancellationChargeAmount) : toMoney(rental.totalAmount)
+      const receivableAmount = !collectible ? 0 : canViewRentalNotes
+        ? currentReceivable + activeCreditAmount
+        : Math.max(0, toMoney(rental.balance) + outstandingCreditRefund + postedRentalPayments)
       const reference = rental.historicalReference || rental.rentalNo
       rows.push({
         id: rental.id, source: collectible ? 'rental_receivable' : 'customer_activity',
-        type: collectible ? historicalCollectible ? 'Historical Rental Receivable' : 'Rental Receivable' : 'Rental', date: rental.hireDate,
+        type: collectible ? historicalCollectible ? 'Historical Rental Receivable' : cancellationCollectible ? 'Rental Cancellation Fee' : 'Rental Receivable' : 'Rental', date: cancellationCollectible ? rental.cancelledAt || rental.hireDate : rental.hireDate,
         dueDate: rental.expectedReturnDate, reference,
         originalReference: rental.rentalNo,
-        description: historicalCollectible
+        description: cancellationCollectible
+          ? `Cancellation fee · ${rental.cancellationChargePercent}%${rental.cancellationReason ? ` · ${rental.cancellationReason}` : ''}`
+          : !canViewRentalNotes && activeCreditAmount > 0
+          ? 'Rental receivable · net of booking adjustments'
+          : historicalCollectible
           ? `Unpaid balance brought forward from rental dated ${new Date(rental.hireDate).toLocaleDateString('en-GB')}`
           : collectible ? `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · rental charge` : `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`,
         debit: collectible ? receivableAmount : toMoney(rental.totalAmount), credit: 0,
         amount: collectible ? receivableAmount : toMoney(rental.totalAmount),
-        amountPaid: collectible ? Math.max(0, receivableAmount - toMoney(rental.balance)) : toMoney(rental.amountPaid),
+        amountPaid: collectible ? Math.max(0, currentReceivable - toMoney(rental.balance)) : toMoney(rental.amountPaid),
         remainingBalance: collectible ? toMoney(rental.balance) : toMoney(rental.balance),
         balanceImpact: collectible ? receivableAmount : 0, affectsBalance: collectible,
         paymentMethod: rental.paymentMethod, status: collectible ? (rental.balance <= 0 ? 'paid' : rental.balance < receivableAmount ? 'partial' : 'unpaid') : rental.paymentStatus,
@@ -1161,11 +1181,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           })
           continue
         }
-        const posted = payment.status === 'posted' && payment.kind === 'rental_payment'
+        const posted = payment.status === 'posted' && ['rental_payment', 'rental_cancellation_fee'].includes(payment.kind)
         const historical = payment.status === 'historical' && payment.kind === 'rental_payment'
         if (!posted && !historical) continue
         rows.push({
-          id: payment.id, source: 'rental_payment', type: historical ? 'Historical Rental Payment' : 'Rental Payment',
+          id: payment.id, source: 'rental_payment', type: historical ? 'Historical Rental Payment' : payment.kind === 'rental_cancellation_fee' ? 'Rental Cancellation Fee Payment' : 'Rental Payment',
           date: payment.paymentDate, reference: payment.receiptNo, originalReference: reference,
           description: `${historical ? 'Historical receipt copy' : 'Payment'} for rental ${reference}${payment.transactionRef ? ` · Ref ${payment.transactionRef}` : ''}`,
           debit: 0, credit: collectible && posted ? toMoney(payment.amount) : 0, amount: toMoney(payment.amount),
@@ -1173,6 +1193,27 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           affectsBalance: collectible && posted, paymentMethod: payment.paymentMethod,
           status: historical ? 'historical' : 'posted', branch: rental.branch?.name || '', staff: userName(payment.user),
           items: [], sortOrder: 61,
+        })
+      }
+      for (const note of canViewRentalNotes ? creditNotes : []) {
+        rows.push({
+          id: note.id, source: 'rental_credit_note', type: 'Rental Credit Note', date: note.createdAt,
+          reference: note.noteNo, originalReference: rental.rentalNo,
+          description: `${String(note.reason).replaceAll('_', ' ')}${note.notes ? ` · ${note.notes}` : ''}`,
+          debit: 0, credit: toMoney(note.amount), amount: toMoney(note.amount),
+          refundDue: Math.max(0, toMoney(note.refundDue) - toMoney(note.refundedAmount)),
+          balanceImpact: collectible ? -toMoney(note.amount) : 0, affectsBalance: collectible,
+          paymentMethod: null, status: note.status, branch: rental.branch?.name || '', staff: userName(note.user),
+          items: [], sortOrder: 62,
+        })
+        for (const refund of note.payments || []) rows.push({
+          id: refund.id, source: 'rental_credit_refund', type: 'Rental Credit Refund', date: refund.paymentDate,
+          reference: refund.receiptNo, originalReference: note.noteNo,
+          description: `Refund paid for rental credit note ${note.noteNo}${refund.transactionRef ? ` · Ref ${refund.transactionRef}` : ''}`,
+          debit: toMoney(refund.amount), credit: 0, amount: toMoney(refund.amount), balanceImpact: collectible ? toMoney(refund.amount) : 0,
+          affectsBalance: collectible, paymentMethod: refund.paymentMethod, mobileProvider: refund.mobileProvider || null,
+          phoneNumber: refund.phoneNumber || null, transactionId: refund.transactionRef || null,
+          notes: refund.notes || null, status: 'posted', branch: rental.branch?.name || '', staff: userName(refund.user), items: [], sortOrder: 63,
         })
       }
     })
@@ -1367,10 +1408,13 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       allowOwnerAll: true
     })
     console.log('POST /customers - Scope resolved:', scope)
-    const { name, email, phone, address, creditLimit, notes, openingBalanceNote } = req.body
+    const { name, email, phone, alternatePhone, address, creditLimit, notes, openingBalanceNote } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })
     }
+    const normalizedPhone = String(phone || '').replace(/\D/g, '')
+    const normalizedAlternatePhone = String(alternatePhone || '').replace(/\D/g, '')
+    if (normalizedPhone && normalizedPhone === normalizedAlternatePhone) return res.status(400).json({ error: 'Use a different number for the alternate phone.' })
 
     if (creditLimit !== undefined) {
       const features = await getTenantFeatures(scope.tenantId)
@@ -1407,7 +1451,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       customerRaw = await prisma.$transaction(async (tx) => {
         const identityConflict = await findCustomerIdentityConflict(tx, {
           tenantId: scope.tenantId,
-          identity: { name, email, phone },
+          identity: { name, email, phone, alternatePhone },
         })
         if (identityConflict) {
           const error = new Error(customerIdentityConflictMessage(identityConflict.field))
@@ -1421,6 +1465,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
             name: name.trim(),
             email: email?.trim() || null,
             phone: phone?.trim() || null,
+            alternatePhone: alternatePhone?.trim() || null,
             address,
             creditLimit: creditLimitCheck.amount,
             balance: openingBalance,
@@ -1469,7 +1514,7 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params
-    const { name, email, phone, address, creditLimit, status, notes, branchId, openingBalanceNote } = req.body
+    const { name, email, phone, alternatePhone, address, creditLimit, status, notes, branchId, openingBalanceNote } = req.body
 
     // Check if customer belongs to tenant
     const existingCustomer = await prisma.customer.findFirst({
@@ -1479,6 +1524,12 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
     if (!existingCustomer) {
       return res.status(404).json({ error: 'Customer not found' })
     }
+    if (alternatePhone !== undefined && !(req.userPermissions?.canViewCustomerPhone || req.user?.permissions?.includes('canViewCustomerPhone') || req.user?.permissions?.includes('*'))) {
+      return res.status(403).json({ error: 'You do not have permission to manage customer phone numbers.' })
+    }
+    const normalizedPrimaryPhone = String(phone === undefined ? existingCustomer.phone || '' : phone || '').replace(/\D/g, '')
+    const normalizedAlternatePhone = String(alternatePhone === undefined ? existingCustomer.alternatePhone || '' : alternatePhone || '').replace(/\D/g, '')
+    if (normalizedPrimaryPhone && normalizedPrimaryPhone === normalizedAlternatePhone) return res.status(400).json({ error: 'Use a different number for the alternate phone.' })
 
     if (creditLimit !== undefined) {
       const features = await getTenantFeatures(scope.tenantId)
@@ -1547,6 +1598,7 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
       name,
       email,
       phone,
+      alternatePhone: alternatePhone !== undefined ? (String(alternatePhone || '').trim() || null) : undefined,
       address,
       creditLimit: creditLimit !== undefined ? creditLimitCheck.amount : undefined,
       status,
@@ -1570,6 +1622,7 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
           name: data.name ?? existingCustomer.name,
           email: data.email ?? existingCustomer.email,
           phone: data.phone ?? existingCustomer.phone,
+          alternatePhone: data.alternatePhone ?? existingCustomer.alternatePhone,
         },
         previousIdentity: existingCustomer,
         excludeCustomerId: id,
@@ -2502,17 +2555,16 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
             tenantId: scope.tenantId,
             customerId,
             balance: { gt: 0 },
-            status: { not: 'cancelled' },
             AND: [
               { OR: [
-                { isHistoricalReceivable: true },
-                { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } },
+                { status: { not: 'cancelled' }, OR: [{ isHistoricalReceivable: true }, { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } }] },
+                { status: 'cancelled', cancellationChargeAmount: { gt: 0 } },
               ] },
               ...(scope.branchId ? [{ OR: [{ branchId: scope.branchId }, { branchId: null }] }] : []),
             ],
           },
           orderBy: [{ hireDate: 'asc' }, { id: 'asc' }],
-          select: { id: true, rentalNo: true, branchId: true, balance: true },
+          select: { id: true, rentalNo: true, branchId: true, balance: true, status: true },
         })
         : []
       const rentalAllocations = []
@@ -2521,13 +2573,13 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
         await tx.$queryRaw`SELECT "id" FROM "rentals" WHERE "id" = ${openRental.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
         const currentRental = await tx.rental.findFirst({
           where: {
-            id: openRental.id, tenantId: scope.tenantId, customerId, status: { not: 'cancelled' },
+            id: openRental.id, tenantId: scope.tenantId, customerId,
             OR: [
-              { isHistoricalReceivable: true },
-              { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } },
+              { status: { not: 'cancelled' }, OR: [{ isHistoricalReceivable: true }, { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } }] },
+              { status: 'cancelled', cancellationChargeAmount: { gt: 0 } },
             ],
           },
-          select: { id: true, rentalNo: true, branchId: true, balance: true, amountPaid: true },
+          select: { id: true, rentalNo: true, branchId: true, balance: true, amountPaid: true, status: true },
         })
         if (!currentRental) continue
         const currentAllocation = allocateCustomerReceiptToRentals(rentalUnallocated, [currentRental])
@@ -2596,7 +2648,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
             rentalId: allocation.rental.id,
             cashAccountId: accountToUse.id,
             userId: req.user.id,
-            kind: 'rental_payment',
+            kind: allocation.rental.status === 'cancelled' ? 'rental_cancellation_fee' : 'rental_payment',
             receiptNo,
             idempotencyKey,
             amount: allocation.amount,
@@ -2615,6 +2667,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           data: {
             amountPaid: { increment: allocation.amount },
             balance: nextBalance,
+            ...(allocation.rental.status === 'cancelled' ? { cancellationChargeBalance: nextBalance } : {}),
             paymentStatus: nextBalance <= 0.01 ? 'paid' : 'partial',
             paymentMethod: resolvedPaymentMethod,
           },

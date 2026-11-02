@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import { registerSW } from 'virtual:pwa-register'
 import App from './App.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
@@ -31,11 +32,13 @@ setPwaUpdateServiceWorker(updateServiceWorker)
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppErrorBoundary>
-      <ThemeProvider>
-        <JWTAuthProvider apiEndpoint={`${API_URL}/api/auth`}>
-          <LanguageProvider><App /></LanguageProvider>
-        </JWTAuthProvider>
-      </ThemeProvider>
+      <JWTAuthProvider apiEndpoint={`${API_URL}/api/auth`}>
+        <BrowserRouter>
+          <ThemeProvider>
+            <LanguageProvider><App /></LanguageProvider>
+          </ThemeProvider>
+        </BrowserRouter>
+      </JWTAuthProvider>
     </AppErrorBoundary>
   </StrictMode>,
 )

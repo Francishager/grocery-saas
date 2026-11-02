@@ -54,6 +54,8 @@ const roles = [
   ['deferredRevenueAccountId', 'Unearned Rental Revenue', 'RNT-2300', 'liability', 'current_liability'],
   ['depositLiabilityAccountId', 'Rental Security Deposits Payable', 'RNT-2310', 'liability', 'current_liability'],
   ['taxPayableAccountId', 'Rental Tax Payable', 'RNT-2200', 'liability', 'current_liability'],
+  ['renterCreditPayableAccountId', 'Rental Customer Credits Payable', 'RNT-2320', 'liability', 'current_liability'],
+  ['cancellationFeeRevenueAccountId', 'Rental Cancellation Fee Revenue', 'RNT-4490', 'revenue', 'operating_revenue'],
   ['openingEquityAccountId', 'Rental Legacy Opening Balance Equity', 'RNT-3905', 'equity', 'opening_balance'],
 ]
 
@@ -217,6 +219,46 @@ export function rentalDamageChargeLines(config, { amount, reference }) {
   return [
     { accountId: config.receivableAccountId, debit: money(amount), credit: 0, description: `Damage charge receivable ${reference}` },
     { accountId: config.revenueAccountId, debit: 0, credit: money(amount), description: `Rental damage charge ${reference}` },
+  ]
+}
+
+export function rentalCreditNoteLines(config, { amount, taxAmount = 0, appliedAmount = 0, refundDue = 0, earned = false, historical = false, reference }) {
+  const total = money(amount)
+  const tax = Math.min(total, money(taxAmount))
+  const applied = Math.min(total, money(appliedAmount))
+  const refund = Math.max(0, money(refundDue))
+  if (Math.abs(total - applied - refund) > 0.01) throw Object.assign(new Error('Rental credit note allocation does not balance.'), { statusCode: 409 })
+  const incomeAccountId = historical ? config.openingEquityAccountId : earned ? config.revenueAccountId : config.deferredRevenueAccountId
+  if (historical) {
+    return [
+      { accountId: incomeAccountId, debit: total, credit: 0, description: `Historical rental balance adjustment ${reference}` },
+      ...(applied > 0 ? [{ accountId: config.receivableAccountId, debit: 0, credit: applied, description: `Reduce historical rental receivable ${reference}` }] : []),
+      ...(refund > 0 ? [{ accountId: config.renterCreditPayableAccountId, debit: 0, credit: refund, description: `Refund payable to renter ${reference}` }] : []),
+    ]
+  }
+  return [
+    ...(total - tax > 0 ? [{ accountId: incomeAccountId, debit: money(total - tax), credit: 0, description: `Rental credit adjustment ${reference}` }] : []),
+    ...(tax > 0 ? [{ accountId: config.taxPayableAccountId, debit: tax, credit: 0, description: `Reverse rental output tax ${reference}` }] : []),
+    ...(applied > 0 ? [{ accountId: config.receivableAccountId, debit: 0, credit: applied, description: `Reduce rental receivable ${reference}` }] : []),
+    ...(refund > 0 ? [{ accountId: config.renterCreditPayableAccountId, debit: 0, credit: refund, description: `Refund payable to renter ${reference}` }] : []),
+  ]
+}
+
+export function rentalCancellationLines(config, { advanceAmount = 0, feeAmount = 0, taxAmount = 0, refundDue = 0, feeReceivable = 0, reference }) {
+  const advances = money(advanceAmount)
+  const fee = money(feeAmount)
+  const tax = Math.min(fee, money(taxAmount))
+  const refund = money(refundDue)
+  const receivable = money(feeReceivable)
+  if (Math.abs(advances + receivable - fee - refund) > 0.01) {
+    throw Object.assign(new Error('Rental cancellation allocation does not balance.'), { statusCode: 409 })
+  }
+  return [
+    ...(advances > 0 ? [{ accountId: config.deferredRevenueAccountId, debit: advances, credit: 0, description: `Release reservation advance on cancellation ${reference}` }] : []),
+    ...(receivable > 0 ? [{ accountId: config.receivableAccountId, debit: receivable, credit: 0, description: `Cancellation fee receivable ${reference}` }] : []),
+    ...(fee - tax > 0 ? [{ accountId: config.cancellationFeeRevenueAccountId, debit: 0, credit: money(fee - tax), description: `Cancellation fee revenue ${reference}` }] : []),
+    ...(tax > 0 ? [{ accountId: config.taxPayableAccountId, debit: 0, credit: tax, description: `Output tax on cancellation fee ${reference}` }] : []),
+    ...(refund > 0 ? [{ accountId: config.renterCreditPayableAccountId, debit: 0, credit: refund, description: `Refund payable for cancelled booking ${reference}` }] : []),
   ]
 }
 

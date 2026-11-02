@@ -51,26 +51,26 @@
   }
 
   .dark {
-    --background: 220 20% 18%;
-    --foreground: 220 15% 88%;
+    --background: 222 20% 11%;
+    --foreground: 210 20% 96%;
 
-    --card: 220 18% 22%;
-    --card-foreground: 220 15% 90%;
+    --card: 222 18% 15%;
+    --card-foreground: 210 20% 96%;
 
-    --popover: 220 18% 22%;
-    --popover-foreground: 220 15% 90%;
+    --popover: 222 18% 16%;
+    --popover-foreground: 210 20% 96%;
 
     --primary: 217 91% 65%;
-    --primary-foreground: 220 20% 18%;
+    --primary-foreground: 222 20% 11%;
 
-    --secondary: 220 14% 28%;
-    --secondary-foreground: 220 15% 90%;
+    --secondary: 220 14% 23%;
+    --secondary-foreground: 210 20% 96%;
 
-    --muted: 220 14% 26%;
-    --muted-foreground: 220 10% 62%;
+    --muted: 220 14% 20%;
+    --muted-foreground: 215 16% 75%;
 
-    --accent: 190 40% 30%;
-    --accent-foreground: 220 15% 90%;
+    --accent: 190 38% 25%;
+    --accent-foreground: 210 20% 96%;
 
     --destructive: 0 72% 58%;
     --destructive-foreground: 0 0% 100%;
@@ -91,6 +91,42 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+
+  .dark :is(.text-black, .text-gray-950, .text-gray-900, .text-gray-800, .text-slate-950, .text-slate-900, .text-slate-800, .text-zinc-950, .text-zinc-900, .text-zinc-800, .text-stone-950, .text-stone-900, .text-stone-800, .text-neutral-950, .text-neutral-900, .text-neutral-800) {
+    color: hsl(var(--foreground)) !important;
+  }
+
+  .dark :is(.text-gray-700, .text-slate-700, .text-zinc-700, .text-stone-700, .text-neutral-700, .text-gray-600, .text-slate-600, .text-zinc-600, .text-stone-600, .text-neutral-600, .text-gray-500, .text-slate-500, .text-zinc-500, .text-stone-500, .text-neutral-500) {
+    color: hsl(var(--muted-foreground)) !important;
+  }
+
+  .dark [class~="bg-white"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-gray-50"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-slate-50"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-zinc-50"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-stone-50"]:not([class*="dark:bg-"]) {
+    background-color: hsl(var(--card)) !important;
+  }
+
+  .dark [class~="bg-gray-100"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-slate-100"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-zinc-100"]:not([class*="dark:bg-"]),
+  .dark [class~="bg-stone-100"]:not([class*="dark:bg-"]) {
+    background-color: hsl(var(--muted)) !important;
+  }
+
+  .dark [class~="border-gray-100"]:not([class*="dark:border-"]),
+  .dark [class~="border-gray-200"]:not([class*="dark:border-"]),
+  .dark [class~="border-gray-300"]:not([class*="dark:border-"]),
+  .dark [class~="border-slate-100"]:not([class*="dark:border-"]),
+  .dark [class~="border-slate-200"]:not([class*="dark:border-"]),
+  .dark [class~="border-slate-300"]:not([class*="dark:border-"]),
+  .dark [class~="border-stone-100"]:not([class*="dark:border-"]),
+  .dark [class~="border-stone-200"]:not([class*="dark:border-"]),
+  .dark [class~="border-zinc-100"]:not([class*="dark:border-"]),
+  .dark [class~="border-zinc-200"]:not([class*="dark:border-"]) {
+    border-color: hsl(var(--border)) !important;
   }
 
   html {

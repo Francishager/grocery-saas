@@ -164,6 +164,7 @@ model Tenant {
   expenses                        Expense[]
   cashTransactions                CashTransaction[]
   rentals                         Rental[]
+  rentalCreditNotes               RentalCreditNote[]
   crmWorkspace                    TenantCRMWorkspace?
   rentalPayments                  RentalPayment[]
   rentalAccountingConfig          RentalAccountingConfig?
@@ -485,6 +486,7 @@ model User {
   phone              String?
   avatar             String?
   preferredLanguage  String             @default("en")
+  theme              String?
   role               UserRole           @default(attendant)
   discountPermission DiscountPermission @default(none)
 
@@ -536,6 +538,7 @@ model User {
   expenses                  Expense[]
   cashTransactions          CashTransaction[]
   rentals                   Rental[]
+  rentalCreditNotes         RentalCreditNote[]
   rentalPayments            RentalPayment[]
   saleReturns               SaleReturn[]
   journalEntries            JournalEntry[]
@@ -949,6 +952,10 @@ model UserPermission {
   canRecordRentalPayment                 Boolean  @default(false)
   canRefundRentalDeposit                 Boolean  @default(false)
   canRefundRentalAdvance                 Boolean  @default(false)
+  canViewRentalCreditNotes               Boolean  @default(false)
+  canCreateRentalCreditNote              Boolean  @default(false)
+  canEditRentalCreditNote                Boolean  @default(false)
+  canRefundRentalCreditNote              Boolean  @default(false)
   canForfeitRentalDeposit                Boolean  @default(false)
   canProcessRentalReturn                 Boolean  @default(false)
   canViewRentalReport                    Boolean  @default(false)
@@ -1499,6 +1506,7 @@ model Customer {
   name               String
   email              String?
   phone              String?
+  alternatePhone     String?
   nin                String?
   address            String?
   tenantId           String
@@ -2665,10 +2673,20 @@ model Rental {
   historicalReference        String?
   isHistoricalReceivable     Boolean                     @default(false)
   historicalReceivableAmount Float                       @default(0)
+  cancellationChargePercent Float                       @default(0)
+  cancellationChargeAmount  Float                       @default(0)
+  cancellationTaxAmount     Float                       @default(0)
+  cancellationChargeBalance Float                       @default(0)
+  cancellationRefundDue     Float                       @default(0)
+  cancellationRefundedAmount Float                      @default(0)
+  cancellationReason        String?                     @db.Text
+  cancelledAt               DateTime?
+  cancelledById             String?
   notes                      String?
   items                      RentalItem[]
   chargeLines                RentalChargeLine[]
   payments                   RentalPayment[]
+  creditNotes                RentalCreditNote[]
   customerPaymentAllocations CustomerPaymentAllocation[]
   depositRefunded            Float                       @default(0)
   depositPaid                Float                       @default(0)
@@ -2757,6 +2775,8 @@ model RentalAccountingConfig {
   taxPayableAccount         Account  @relation("RentalTaxPayableAccount", fields: [taxPayableAccountId], references: [id])
   openingEquityAccountId    String
   openingEquityAccount      Account  @relation("RentalOpeningEquityAccount", fields: [openingEquityAccountId], references: [id])
+  renterCreditPayableAccountId String?
+  cancellationFeeRevenueAccountId String?
   inventoryAccountId        String?
   costOfGoodsSoldAccountId  String?
   salesRevenueAccountId     String?
@@ -2774,6 +2794,8 @@ model RentalPayment {
   tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rentalId       String
   rental         Rental       @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  rentalCreditNoteId String?
+  rentalCreditNote RentalCreditNote? @relation(fields: [rentalCreditNoteId], references: [id], onDelete: Restrict)
   cashAccountId  String?
   cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
   userId         String
@@ -2799,6 +2821,34 @@ model RentalPayment {
   @@index([rentalId, paymentDate])
   @@index([cashAccountId, paymentDate])
   @@map("rental_payments")
+}
+
+model RentalCreditNote {
+  id             String         @id @default(cuid())
+  tenantId       String
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rentalId       String
+  rental         Rental          @relation(fields: [rentalId], references: [id], onDelete: Restrict)
+  noteNo         String
+  idempotencyKey String?
+  amount         Float
+  taxAmount      Float           @default(0)
+  appliedAmount  Float           @default(0)
+  refundDue      Float           @default(0)
+  refundedAmount Float           @default(0)
+  reason         String
+  notes          String?         @db.Text
+  status         String          @default("issued")
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  payments       RentalPayment[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([tenantId, noteNo])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, rentalId, createdAt])
+  @@map("rental_credit_notes")
 }
 
 // Property management is distinct from equipment hire (Rental / RentalItem).

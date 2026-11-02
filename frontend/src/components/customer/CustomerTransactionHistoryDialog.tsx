@@ -18,6 +18,7 @@ export type CustomerHistoryTarget = {
   branchId?: string | null
   name?: string | null
   phone?: string | null
+  alternatePhone?: string | null
   email?: string | null
   maskedPhone?: string
   maskedEmail?: string
@@ -788,6 +789,7 @@ export default function CustomerTransactionHistoryDialog({
               <dl className="mt-3 divide-y">
                 <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Name</dt><dd className="font-medium">{data.customer.name}</dd></div>
                 <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Phone</dt><dd className="font-medium">{data.access.phone ? data.customer.phone || 'Not provided' : data.customer.maskedPhone || '07xxxxxx'}</dd></div>
+                {data.access.phone && data.customer.alternatePhone && <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Second phone</dt><dd className="font-medium">{data.customer.alternatePhone}</dd></div>}
                 <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Email</dt><dd className="break-all text-right font-medium">{data.access.email ? data.customer.email || 'Not provided' : data.customer.maskedEmail || 'x******@*****'}</dd></div>
                 <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Address</dt><dd className="max-w-[70%] text-right font-medium">{data.access.address ? data.customer.address || 'Not provided' : data.customer.maskedAddress || '******'}</dd></div>
                 <div className="flex flex-wrap justify-between gap-2 py-2 text-sm"><dt className="text-muted-foreground">Status</dt><dd><Badge variant="outline">{data.customer.status || 'active'}</Badge></dd></div>
@@ -844,6 +846,7 @@ export default function CustomerTransactionHistoryDialog({
                 </div>
                 <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                   <p>{data.access.phone ? data.customer.phone || 'No phone on file' : data.customer.maskedPhone || '07xxxxxx'}</p>
+                  {data.access.phone && data.customer.alternatePhone && <p>Second phone · {data.customer.alternatePhone}</p>}
                   <p className="break-words">{data.access.email ? data.customer.email || 'No email on file' : data.customer.maskedEmail || 'x******@*****'}</p>
                   <p className="break-words">{data.access.address ? data.customer.address || 'No address on file' : data.customer.maskedAddress || '******'}</p>
                 </div>

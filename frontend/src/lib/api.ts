@@ -251,7 +251,7 @@ export const authApi = {
   logout: () =>
     api.post<{ message: string }>('/api/auth/logout'),
 
-  updateProfile: (data: { fname?: string; lname?: string; phone?: string; preferredLanguage?: string }) =>
+  updateProfile: (data: { fname?: string; lname?: string; phone?: string; preferredLanguage?: string; theme?: 'light' | 'dark' }) =>
     api.put<{ message: string; user: any }>('/api/auth/profile', { body: data }),
 
   changePassword: (currentPassword: string, newPassword: string) =>
@@ -472,6 +472,9 @@ export const rentalsApi = {
   crmOverview: async (params: { from: string; to: string; page?: number; limit?: number; search?: string }) =>
     api.get<any>('/api/rentals/crm/overview', { params }),
   crmWorkspace: () => api.get<any>('/api/rentals/crm/workspace'),
+  crmShareUsers: () => api.get<{ users: Array<{ id: string; name: string }> }>('/api/rentals/crm/share-users'),
+  crmShare: (collection: 'leads' | 'activities' | 'cases' | 'campaigns', id: string, data: { visibility: 'workspace' | 'restricted'; sharedWith: Array<{ userId: string; role: 'viewer' | 'editor' }> }) =>
+    api.post<any>(`/api/rentals/crm/workspace/${collection}/${id}/share`, { body: data }),
   crmCreate: (collection: 'leads' | 'activities' | 'cases' | 'campaigns', data: any) =>
     api.post<any>(`/api/rentals/crm/workspace/${collection}`, { body: data }),
   crmUpdate: (collection: 'leads' | 'activities' | 'cases' | 'campaigns', id: string, data: any) =>
@@ -506,6 +509,13 @@ export const rentalsApi = {
   makeHistoricalReceivable: (id: string, data: { customerId?: string; historicalReference?: string }) =>
     api.post<any>(`/api/rentals/${id}/historical-receivable`, { body: data }),
 
+  issueCreditNote: (id: string, data: { amount: number; reason: string; notes?: string; idempotencyKey?: string }) =>
+    api.post<any>(`/api/rentals/${id}/credit-notes`, { body: data }),
+  cancelCreditNote: (id: string, noteId: string) =>
+    api.patch<any>(`/api/rentals/${id}/credit-notes/${noteId}/cancel`, { body: {} }),
+  refundCreditNote: (id: string, noteId: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
+    api.post<any>(`/api/rentals/${id}/credit-notes/${noteId}/refunds`, { body: data }),
+
   paymentAccounts: async (paymentMethod = 'cash', branchId?: string) => {
     const data = await api.get<any>('/api/rentals/payment-accounts', { params: { paymentMethod, branchId } })
     return Array.isArray(data?.accounts) ? data.accounts : []
@@ -532,8 +542,8 @@ export const rentalsApi = {
   update: (id: string, data: any) =>
     api.put<any>(`/api/rentals/${id}`, { body: data }),
 
-  cancel: (id: string) =>
-    api.delete<any>(`/api/rentals/${id}`),
+  cancel: (id: string, data: { chargePercent?: number; reason: string }) =>
+    api.post<any>(`/api/rentals/${id}/cancel`, { body: data }),
 
   summary: () =>
     api.get<any>('/api/rentals/report/summary'),
@@ -557,6 +567,12 @@ export const rentalsApi = {
 export const plannerApi = {
   list: () => api.get<any>('/api/widgets/planner'),
   save: (items: any[]) => api.put<any>('/api/widgets/planner', { body: { items } }),
+  createEntry: (item: Record<string, unknown>) => api.post<any>('/api/widgets/planner/entry', { body: item }),
+  shareUsers: () => api.get<{ users: Array<{ id: string; name: string }> }>('/api/widgets/planner/share-users'),
+  share: (id: string, data: { visibility: 'workspace' | 'restricted'; sharedWith: Array<{ userId: string; role: 'viewer' | 'editor' }> }) =>
+    api.post<any>(`/api/widgets/planner/${encodeURIComponent(id)}/share`, { body: data }),
+  updateShared: (id: string, data: Record<string, unknown>) => api.patch<any>(`/api/widgets/planner/${encodeURIComponent(id)}`, { body: data }),
+  deleteEntry: (id: string) => api.delete<any>(`/api/widgets/planner/${encodeURIComponent(id)}`),
 }
 
 // Sales endpoints
@@ -647,7 +663,7 @@ export const categoriesApi = {
         ...category,
         id: String(category.id),
         name: String(category.name),
-      })) as Array<{ id: string; name: string; slug?: string }>
+      })) as Array<{ id: string; name: string; slug?: string; categoryType?: 'product' | 'service' | 'rental' }>
   },
   create: (data: { name: string; slug?: string; categoryType: 'product' | 'service' | 'rental' }) =>
     api.post<{ category: { id: string; name: string; categoryType: 'product' | 'service' | 'rental' } }>('/api/inventory/categories', { body: data }),

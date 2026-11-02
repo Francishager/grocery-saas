@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, CalendarDays, Check, ChevronLeft, ChevronRight, Circle, Clock3, Flag, ListTodo, NotebookPen, Pencil, Plus, Search, Target, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertCircle, CalendarDays, Check, ChevronLeft, ChevronRight, Circle, Clock3, Flag, ListTodo, NotebookPen, Pencil, Plus, Search, Share2, Target, Trash2 } from 'lucide-react'
 import { plannerApi } from '@/lib/api'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { AIWritingAssist } from '@/components/AIWritingAssist'
+import { RecordShareDialog, type RecordShare, type SharePerson } from '@/components/RecordShareDialog'
 
 type PlannerKind = 'task' | 'appointment' | 'goal' | 'note' | 'habit'
 type PlannerPriority = 'low' | 'normal' | 'high'
@@ -32,6 +33,12 @@ type PlannerEntry = {
   completed: boolean
   createdAt: string
   updatedAt: string
+  ownerUserId?: string
+  ownerName?: string
+  isOwner?: boolean
+  sharedRole?: 'owner' | 'viewer' | 'editor'
+  visibility?: 'workspace' | 'restricted'
+  sharedWith?: RecordShare[]
 }
 
 const colors: Record<PlannerColor, { bg: string; edge: string; dot: string; name: string }> = {
@@ -60,15 +67,13 @@ const blankForm = () => ({ kind: 'task' as PlannerKind, title: '', details: '', 
 
 export default function RentalPlannerPage() {
   const { toast } = useToast()
-  const { hasPermission } = useJWTAuth()
+  const { hasPermission, user } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const canManage = hasPermission('canManagePlanner') || (hasFeature('rentals') && hasPermission('canViewRental'))
   const [entries, setEntries] = useState<PlannerEntry[]>([])
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const [openCalendar, setOpenCalendar] = useState(false)
   const [calendarEntry, setCalendarEntry] = useState<PlannerEntry | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
@@ -78,6 +83,10 @@ export default function RentalPlannerPage() {
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(blankForm)
+  const [shareTarget, setShareTarget] = useState<PlannerEntry | null>(null)
+  const [sharePeople, setSharePeople] = useState<SharePerson[]>([])
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareSaving, setShareSaving] = useState(false)
 
   const load = useCallback(async () => {
     setLoadError(false)
@@ -92,30 +101,6 @@ export default function RentalPlannerPage() {
   }, [toast])
 
   useEffect(() => { void load() }, [load])
-
-  const saveEntries = useCallback((next: PlannerEntry[]) => {
-    setEntries(next)
-    if (!loaded) return
-    setSaving(true)
-    setSaveError(false)
-    saveQueueRef.current = saveQueueRef.current.catch(() => undefined).then(() => plannerApi.save(next)).then(() => {
-      setSaving(false)
-    }).catch((error: any) => {
-      setSaving(false)
-      setSaveError(true)
-      toast({ title: 'Planner changes not saved', description: error?.message || 'Check your connection and retry.', variant: 'destructive' })
-    })
-  }, [loaded, toast])
-
-  const retrySave = () => {
-    setSaving(true)
-    setSaveError(false)
-    saveQueueRef.current = saveQueueRef.current.catch(() => undefined).then(() => plannerApi.save(entries)).then(() => setSaving(false)).catch((error: any) => {
-      setSaving(false)
-      setSaveError(true)
-      toast({ title: 'Planner changes not saved', description: error?.message || 'Check your connection and retry.', variant: 'destructive' })
-    })
-  }
 
   const monthDays = useMemo(() => {
     const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1)
@@ -152,12 +137,13 @@ export default function RentalPlannerPage() {
   }
 
   const beginEdit = (entry: PlannerEntry) => {
+    if (!canManage || (entry.isOwner === false && entry.sharedRole !== 'editor')) return
     setEditingId(entry.id)
     setForm({ kind: entry.kind, title: entry.title, details: entry.details, startAt: toDateTimeInput(entry.startAt), endAt: toDateTimeInput(entry.endAt), dueAt: toDateTimeInput(entry.dueAt), reminderAt: toDateTimeInput(entry.reminderAt), goalId: entry.goalId || '', priority: entry.priority, color: entry.color })
     setFormOpen(true)
   }
 
-  const saveForm = (event: React.FormEvent) => {
+  const saveForm = async (event: React.FormEvent) => {
     event.preventDefault()
     const title = form.title.trim()
     if (!title) return
@@ -168,13 +154,59 @@ export default function RentalPlannerPage() {
       startAt: fromDateTimeInput(form.startAt), endAt: fromDateTimeInput(form.endAt), dueAt: fromDateTimeInput(form.dueAt), reminderAt: fromDateTimeInput(form.reminderAt),
       goalId: form.goalId || null, priority: form.priority, color: form.color, completed: existing?.completed || false, createdAt: existing?.createdAt || now, updatedAt: now,
     }
-    saveEntries([entry, ...entries.filter(item => item.id !== editingId)])
-    setFormOpen(false)
-    toast({ title: editingId ? 'Planner entry updated' : 'Added to planner', description: title })
+    setSaving(true)
+    try {
+      if (existing) {
+        const result = await plannerApi.updateShared(existing.id, entry)
+        setEntries(current => current.map(item => item.id === existing.id ? { ...item, ...result.item, ownerName: existing.ownerName, isOwner: existing.isOwner, sharedRole: existing.sharedRole } : item))
+      } else {
+        const result = await plannerApi.createEntry(entry)
+        setEntries(current => [result.item, ...current])
+      }
+      setFormOpen(false)
+      toast({ title: editingId ? 'Planner entry updated' : 'Added to planner', description: title })
+    } catch (error: any) {
+      toast({ title: 'Planner item not saved', description: error?.message || 'Retry the change.', variant: 'destructive' })
+    } finally { setSaving(false) }
   }
 
-  const toggleComplete = (id: string) => saveEntries(entries.map(item => item.id === id ? { ...item, completed: !item.completed, updatedAt: new Date().toISOString() } : item))
-  const deleteEntry = (id: string) => saveEntries(entries.filter(item => item.id !== id).map(item => item.goalId === id ? { ...item, goalId: null } : item))
+  const toggleComplete = async (id: string) => {
+    const entry = entries.find(item => item.id === id)
+    if (!entry) return
+    const updated = { ...entry, completed: !entry.completed, updatedAt: new Date().toISOString() }
+    setSaving(true)
+    try {
+      await plannerApi.updateShared(id, { completed: updated.completed, title: updated.title })
+      setEntries(current => current.map(item => item.id === id ? updated : item))
+    } catch (error: any) { toast({ title: 'Planner item not updated', description: error?.message || 'Retry the change.', variant: 'destructive' }) }
+    finally { setSaving(false) }
+  }
+  const deleteEntry = async (id: string) => {
+    setSaving(true)
+    try {
+      await plannerApi.deleteEntry(id)
+      setEntries(current => current.filter(item => item.id !== id).map(item => item.goalId === id ? { ...item, goalId: null } : item))
+    } catch (error: any) { toast({ title: 'Planner item not deleted', description: error?.message || 'Retry the change.', variant: 'destructive' }) }
+    finally { setSaving(false) }
+  }
+  const openShare = async (entry: PlannerEntry) => {
+    setShareTarget(entry)
+    setShareLoading(true)
+    try { const result = await plannerApi.shareUsers(); setSharePeople(result.users || []) }
+    catch (error: any) { toast({ title: 'Team could not load', description: error?.message || 'Try again.', variant: 'destructive' }) }
+    finally { setShareLoading(false) }
+  }
+  const saveSharing = async (visibility: 'workspace' | 'restricted', sharedWith: RecordShare[]) => {
+    if (!shareTarget) return
+    setShareSaving(true)
+    try {
+      const result = await plannerApi.share(shareTarget.id, { visibility, sharedWith })
+      setEntries(current => current.map(item => item.id === shareTarget.id ? { ...item, ...result.item, ownerUserId: user?.id, ownerName: user?.name, isOwner: true, sharedRole: 'owner' } : item))
+      setShareTarget(null)
+      toast({ title: 'Planner sharing updated' })
+    } catch (error: any) { toast({ title: 'Sharing was not updated', description: error?.message || 'Retry the change.', variant: 'destructive' }) }
+    finally { setShareSaving(false) }
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-6 p-4 sm:p-6">
@@ -198,16 +230,15 @@ export default function RentalPlannerPage() {
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.7fr)]">
         <div className="min-w-0 space-y-4">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <div><h2 className="text-lg font-semibold">{dateFilter ? `Plan for ${prettyDate(`${dateFilter}T12:00:00`, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}` : 'Your planner'}</h2><p className="text-sm text-muted-foreground">{saving ? 'Saving…' : saveError ? 'Changes need saving' : loaded ? 'All changes saved' : 'Loading your planner…'}</p></div>
+            <div><h2 className="text-lg font-semibold">{dateFilter ? `Plan for ${prettyDate(`${dateFilter}T12:00:00`, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}` : 'Your planner'}</h2><p className="text-sm text-muted-foreground">{saving ? 'Saving…' : loaded ? 'All changes saved' : 'Loading your planner…'}</p></div>
             {dateFilter && <Button variant="ghost" size="sm" onClick={() => setDateFilter('')}>Show all dates</Button>}
-            {saveError && <Button variant="outline" size="sm" onClick={retrySave}>Retry save</Button>}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" placeholder="Search tasks, goals, and notes" value={query} onChange={event => setQuery(event.target.value)} /></div>
             <select value={kindFilter} onChange={event => setKindFilter(event.target.value as any)} className="h-10 rounded-md border border-input bg-background px-3 text-sm sm:w-44"><option value="all">All planner items</option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}s</option>)}</select>
           </div>
           <div className="space-y-3">
-            {!loaded ? <div className="rounded-lg border p-10 text-center text-sm text-muted-foreground">{loadError ? <><p>Planner data could not be loaded, so nothing has been overwritten.</p><Button className="mt-3" variant="outline" onClick={() => void load()}>Retry loading</Button></> : 'Loading planner…'}</div> : visibleEntries.length === 0 ? <div className="rounded-lg border border-dashed p-10 text-center"><NotebookPen className="mx-auto mb-3 h-7 w-7 text-muted-foreground" /><p className="font-medium">Nothing on this list yet</p><p className="mt-1 text-sm text-muted-foreground">{canManage ? 'Add a task, appointment, goal, habit, or note to get started.' : 'There are no planner entries to show.'}</p>{canManage && <Button className="mt-4" onClick={() => beginCreate()}><Plus className="mr-2 h-4 w-4" />Create an entry</Button>}</div> : visibleEntries.map(entry => <PlannerCard key={entry.id} entry={entry} canManage={canManage} linkedGoalTitle={entries.find(goal => goal.id === entry.goalId)?.title} onToggle={() => toggleComplete(entry.id)} onEdit={() => beginEdit(entry)} onDelete={() => deleteEntry(entry.id)} />)}
+            {!loaded ? <div className="rounded-lg border p-10 text-center text-sm text-muted-foreground">{loadError ? <><p>Planner data could not be loaded, so nothing has been overwritten.</p><Button className="mt-3" variant="outline" onClick={() => void load()}>Retry loading</Button></> : 'Loading planner…'}</div> : visibleEntries.length === 0 ? <div className="rounded-lg border border-dashed p-10 text-center"><NotebookPen className="mx-auto mb-3 h-7 w-7 text-muted-foreground" /><p className="font-medium">Nothing on this list yet</p><p className="mt-1 text-sm text-muted-foreground">{canManage ? 'Add a task, appointment, goal, habit, or note to get started.' : 'There are no planner entries to show.'}</p>{canManage && <Button className="mt-4" onClick={() => beginCreate()}><Plus className="mr-2 h-4 w-4" />Create an entry</Button>}</div> : visibleEntries.map(entry => <PlannerCard key={`${entry.ownerUserId || user?.id}-${entry.id}`} entry={entry} canManage={canManage && (entry.isOwner !== false || entry.sharedRole === 'editor')} canShare={canManage && entry.isOwner !== false} onShare={() => void openShare(entry)} linkedGoalTitle={entries.find(goal => goal.id === entry.goalId)?.title} onToggle={() => toggleComplete(entry.id)} onEdit={() => beginEdit(entry)} onDelete={() => deleteEntry(entry.id)} />)}
           </div>
         </div>
 
@@ -218,7 +249,7 @@ export default function RentalPlannerPage() {
           </Card>
           <Card>
             <div className="border-b p-4"><h2 className="font-semibold">Today</h2><p className="text-sm text-muted-foreground">A short view of today's commitments.</p></div>
-            <CardContent className="space-y-2 p-4">{todayEntries.length ? todayEntries.slice(0, 6).map(item => <button key={item.id} onClick={() => canManage && beginEdit(item)} className="flex w-full items-start gap-2 rounded-md p-2 text-left hover:bg-muted/50"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[item.color].dot }} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="text-xs text-muted-foreground">{kindLabels[item.kind]}{item.startAt ? ` · ${prettyDate(item.startAt, { hour: '2-digit', minute: '2-digit' })}` : ''}</span></span></button>) : <p className="py-4 text-center text-sm text-muted-foreground">Your day is clear. Capture a task or plan when ready.</p>}</CardContent>
+            <CardContent className="space-y-2 p-4">{todayEntries.length ? todayEntries.slice(0, 6).map(item => <button key={`${item.ownerUserId || user?.id}-${item.id}`} onClick={() => canManage && (item.isOwner !== false || item.sharedRole === 'editor') && beginEdit(item)} className="flex w-full items-start gap-2 rounded-md p-2 text-left hover:bg-muted/50"><span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[item.color].dot }} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="text-xs text-muted-foreground">{kindLabels[item.kind]}{item.startAt ? ` · ${prettyDate(item.startAt, { hour: '2-digit', minute: '2-digit' })}` : ''}{item.isOwner === false ? ` · Shared by ${item.ownerName || 'team member'}` : ''}</span></span></button>) : <p className="py-4 text-center text-sm text-muted-foreground">Your day is clear. Capture a task or plan when ready.</p>}</CardContent>
           </Card>
         </aside>
       </section>
@@ -229,7 +260,7 @@ export default function RentalPlannerPage() {
           <div className="flex items-center justify-between"><Button variant="outline" size="icon" aria-label="Previous month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))}><ChevronLeft className="h-4 w-4" /></Button><p className="font-medium">{new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(calendarMonth)}</p><Button variant="outline" size="icon" aria-label="Next month" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))}><ChevronRight className="h-4 w-4" /></Button></div>
           <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border bg-border text-center text-xs">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => <div key={`${day}-${index}`} className="bg-muted py-2 font-medium text-muted-foreground">{day}</div>)}{monthDays.map(date => { const key = todayKey(date); const dayEntries = entriesByDate.get(key) || []; return <div key={key} className={cn('min-h-20 bg-background p-1 text-left sm:min-h-24', date.getMonth() !== calendarMonth.getMonth() && 'bg-muted/30')}>
             <button type="button" onClick={() => { setDateFilter(key); setOpenCalendar(false) }} aria-label={`${prettyDate(`${key}T12:00:00`, { weekday: 'long', day: 'numeric', month: 'long' })}${dayEntries.length ? `, ${dayEntries.length} planner entries` : ''}`} className={cn('flex h-6 min-w-6 items-center justify-center rounded px-1 text-xs hover:bg-muted', key === today && 'font-semibold ring-1 ring-primary', key === dateFilter && 'bg-primary text-primary-foreground hover:bg-primary')}>{date.getDate()}</button>
-            <div className="mt-1 space-y-1">{dayEntries.slice(0, 2).map(entry => <button key={`${entry.id}-${key}`} type="button" title={`${entry.title}${entry.details ? `\n${entry.details}` : ''}`} aria-label={`Open ${kindLabels[entry.kind]}: ${entry.title}`} onClick={() => setCalendarEntry(entry)} className="block w-full truncate rounded-sm border-l-2 px-1 py-0.5 text-left text-[10px] leading-4 hover:brightness-95 sm:text-xs" style={{ backgroundColor: colors[entry.color].bg, borderColor: colors[entry.color].dot, color: colors[entry.color].dot }}>{entry.title}</button>)}{dayEntries.length > 2 && <button type="button" onClick={() => { setDateFilter(key); setOpenCalendar(false) }} className="px-1 text-[10px] font-medium text-muted-foreground hover:underline">+{dayEntries.length - 2} more</button>}</div>
+            <div className="mt-1 space-y-1">{dayEntries.slice(0, 2).map(entry => <button key={`${entry.ownerUserId || user?.id}-${entry.id}-${key}`} type="button" title={`${entry.title}${entry.details ? `\n${entry.details}` : ''}`} aria-label={`Open ${kindLabels[entry.kind]}: ${entry.title}`} onClick={() => setCalendarEntry(entry)} className="block w-full truncate rounded-sm border-l-2 px-1 py-0.5 text-left text-[10px] leading-4 hover:brightness-95 sm:text-xs" style={{ backgroundColor: colors[entry.color].bg, borderColor: colors[entry.color].dot, color: colors[entry.color].dot }}>{entry.title}</button>)}{dayEntries.length > 2 && <button type="button" onClick={() => { setDateFilter(key); setOpenCalendar(false) }} className="px-1 text-[10px] font-medium text-muted-foreground hover:underline">+{dayEntries.length - 2} more</button>}</div>
           </div>})}</div>
           <div className="flex justify-between gap-2"><Button variant="ghost" onClick={() => { setDateFilter(''); setOpenCalendar(false) }}>All planner items</Button><Button variant="outline" onClick={() => { setCalendarMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); setDateFilter(today); setOpenCalendar(false) }}>Today</Button></div>
         </DialogContent>
@@ -239,7 +270,7 @@ export default function RentalPlannerPage() {
         <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
           <DialogHeader><DialogTitle>{calendarEntry?.title}</DialogTitle><DialogDescription>{calendarEntry && `${kindLabels[calendarEntry.kind]} · ${calendarEntry.startAt ? prettyDate(calendarEntry.startAt) : calendarEntry.dueAt ? `Due ${prettyDate(calendarEntry.dueAt)}` : calendarEntry.reminderAt ? `Reminder ${prettyDate(calendarEntry.reminderAt)}` : 'Planner item'}`}</DialogDescription></DialogHeader>
           {calendarEntry?.details ? <RichTextDisplay value={calendarEntry.details} className="max-h-72 overflow-y-auto rounded-md border p-3 text-sm leading-6" /> : <p className="text-sm text-muted-foreground">No additional details.</p>}
-          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setCalendarEntry(null)}>Close</Button>{canManage && calendarEntry && <Button type="button" onClick={() => { const entry = calendarEntry; setCalendarEntry(null); setOpenCalendar(false); beginEdit(entry) }}>Edit item</Button>}</div>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setCalendarEntry(null)}>Close</Button>{canManage && calendarEntry && (calendarEntry.isOwner !== false || calendarEntry.sharedRole === 'editor') && <Button type="button" onClick={() => { const entry = calendarEntry; setCalendarEntry(null); setOpenCalendar(false); beginEdit(entry) }}>Edit item</Button>}</div>
         </DialogContent>
       </Dialog>
 
@@ -255,25 +286,28 @@ export default function RentalPlannerPage() {
             <div className="space-y-2"><Label htmlFor="planner-reminder">Reminder</Label><Input id="planner-reminder" type="datetime-local" value={form.reminderAt} onChange={event => setForm(current => ({ ...current, reminderAt: event.target.value }))} /><p className="text-xs text-muted-foreground">A reminder pops up in JibuSales while you are signed in.</p></div>
             <div className="space-y-2"><div className="flex items-center gap-2"><Label htmlFor="planner-details">Notes / details</Label><AIWritingAssist module="planner" field="planner notes" onUse={text => setForm(current => ({ ...current, details: text }))} /></div><RichTextArea id="planner-details" value={form.details} onChange={text => setForm(current => ({ ...current, details: text }))} maxLength={5000} placeholder="Add details, checklist items, or meeting notes…" /></div>
             <div className="space-y-2"><Label>Note color</Label><div className="flex flex-wrap gap-2">{Object.entries(colors).map(([color, value]) => <button type="button" key={color} title={value.name} aria-label={`${value.name} color`} aria-pressed={form.color === color} onClick={() => setForm(current => ({ ...current, color: color as PlannerColor }))} className={cn('h-8 w-8 rounded-full border transition-transform hover:scale-110', form.color === color && 'ring-2 ring-offset-2')} style={{ background: value.bg, borderColor: value.edge, outlineColor: value.dot }} />)}</div></div>
-            <div className="flex justify-end gap-2 border-t pt-3"><Button type="button" variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button><Button type="submit" disabled={!form.title.trim()}>{editingId ? 'Save changes' : 'Add entry'}</Button></div>
+            <div className="flex justify-end gap-2 border-t pt-3"><Button type="button" variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button><Button type="submit" disabled={saving || !form.title.trim()}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Add entry'}</Button></div>
           </form>
         </DialogContent>
       </Dialog>
+      <RecordShareDialog open={Boolean(shareTarget)} onOpenChange={open => !open && setShareTarget(null)} title="planner item" people={sharePeople} loading={shareLoading} saving={shareSaving} initialVisibility={shareTarget?.visibility === 'restricted' ? 'restricted' : 'workspace'} initialShares={shareTarget?.sharedWith || []} onSave={saveSharing} />
     </div>
   )
 }
 
-function PlannerCard({ entry, linkedGoalTitle, canManage, onToggle, onEdit, onDelete }: { entry: PlannerEntry; linkedGoalTitle?: string; canManage: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
+function PlannerCard({ entry, linkedGoalTitle, canManage, canShare, onShare, onToggle, onEdit, onDelete }: { entry: PlannerEntry; linkedGoalTitle?: string; canManage: boolean; canShare: boolean; onShare: () => void; onToggle: () => void; onEdit: () => void; onDelete: () => void }) {
+  const [detailsExpanded, setDetailsExpanded] = useState(false)
   const paper = colors[entry.color] || colors.yellow
   const Icon = kindIcons[entry.kind]
+  const hasLongDetails = entry.details.length > 240
   return <article className="overflow-hidden rounded-md border shadow-sm" style={{ borderColor: paper.edge, borderLeftWidth: 4, background: paper.bg, color: '#1c1917' }}>
     <div className="flex items-start gap-3 p-4">
       {(entry.kind === 'task' || entry.kind === 'habit' || entry.kind === 'goal') ? <button type="button" disabled={!canManage} onClick={onToggle} aria-label={entry.completed ? 'Mark incomplete' : 'Mark complete'} className={cn('mt-0.5 rounded-full', entry.completed ? 'text-emerald-600' : 'text-muted-foreground hover:text-foreground')}>{entry.completed ? <Check className="h-5 w-5" /> : <Circle className="h-5 w-5" />}</button> : <span className="mt-0.5 rounded-md p-2" style={{ color: paper.dot, background: paper.bg }}><Icon className="h-4 w-4" /></span>}
-      <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className={cn('font-semibold', entry.completed && 'text-muted-foreground line-through')}>{entry.title}</h3><span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: paper.dot, background: paper.bg }}>{kindLabels[entry.kind]}</span>{entry.priority === 'high' && <span className="inline-flex items-center gap-1 text-xs text-red-700 dark:text-red-400"><Flag className="h-3 w-3" />High priority</span>}</div>
-        {entry.details && <RichTextDisplay value={entry.details} className="mt-2 text-sm leading-6 text-stone-700" />}
+      <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className={cn('line-clamp-2 min-w-0 break-words font-semibold', entry.completed && 'text-muted-foreground line-through')}>{entry.title}</h3><span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ color: paper.dot, background: paper.bg }}>{kindLabels[entry.kind]}</span>{entry.priority === 'high' && <span className="inline-flex items-center gap-1 text-xs text-red-700 dark:text-red-400"><Flag className="h-3 w-3" />High priority</span>}{entry.isOwner === false && <span className="text-xs text-muted-foreground">Shared by {entry.ownerName || 'team member'}</span>}</div>
+        {entry.details && <><div className={cn('mt-2 break-words text-sm leading-6 text-stone-700', hasLongDetails && !detailsExpanded && 'max-h-[5.5rem] overflow-hidden', detailsExpanded && 'max-h-80 overflow-y-auto pr-1')}><RichTextDisplay value={entry.details} /></div>{hasLongDetails && <button type="button" className="mt-1 text-xs font-medium text-primary underline-offset-4 hover:underline" aria-expanded={detailsExpanded} onClick={() => setDetailsExpanded(value => !value)}>{detailsExpanded ? 'Show less' : 'Read full details'}</button>}</>}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-700">{entry.startAt && <span className="inline-flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />{prettyDate(entry.startAt)}</span>}{entry.dueAt && <span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />Due {prettyDate(entry.dueAt)}</span>}{entry.reminderAt && !entry.completed && <span className="inline-flex items-center gap-1"><AlertCircle className="h-3.5 w-3.5" />Reminder {prettyDate(entry.reminderAt)}</span>}{linkedGoalTitle && <span className="inline-flex items-center gap-1"><Target className="h-3.5 w-3.5" />Goal: {linkedGoalTitle}</span>}</div>
       </div>
-      {canManage && <div className="flex shrink-0 items-center gap-1"><Button variant="ghost" size="icon" title="Edit entry" aria-label="Edit entry" onClick={onEdit}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" title="Delete entry" aria-label="Delete entry" onClick={onDelete}><Trash2 className="h-4 w-4" /></Button></div>}
+      <div className="flex shrink-0 items-center gap-1">{canShare && <Button variant="ghost" size="icon" title="Share planner item" aria-label="Share planner item" onClick={onShare}><Share2 className="h-4 w-4" /></Button>}{canManage && <><Button variant="ghost" size="icon" title="Edit entry" aria-label="Edit entry" onClick={onEdit}><Pencil className="h-4 w-4" /></Button>{entry.isOwner !== false && <Button variant="ghost" size="icon" title="Delete entry" aria-label="Delete entry" onClick={onDelete}><Trash2 className="h-4 w-4" /></Button>}</>}</div>
     </div>
   </article>
 }

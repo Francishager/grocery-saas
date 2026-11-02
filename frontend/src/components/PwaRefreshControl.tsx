@@ -45,8 +45,18 @@ export function PwaRefreshControl() {
     if (refreshing) return
     setRefreshing(true)
     try {
-      if (updateAvailable) await applyPwaUpdate()
-      else window.location.reload()
+      if (updateAvailable) {
+        const fallbackReload = window.setTimeout(() => window.location.reload(), 8000)
+        try {
+          await applyPwaUpdate()
+        } catch {
+          window.location.reload()
+        } finally {
+          window.clearTimeout(fallbackReload)
+        }
+      } else {
+        window.location.reload()
+      }
     } finally {
       setRefreshing(false)
     }
@@ -126,7 +136,7 @@ export function PwaRefreshControl() {
           className={`h-10 shadow-none ${updateAvailable ? 'gap-2 bg-emerald-700 px-4 text-white hover:bg-emerald-800' : 'w-10 rounded-full p-0'}`}
         >
           {updateAvailable
-            ? <><Download className="h-5 w-5" /><span>Update ready</span></>
+            ? <>{refreshing ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}<span>{refreshing ? 'Updating…' : 'Update ready'}</span></>
             : <RefreshCw className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} />}
         </Button>
       </div>

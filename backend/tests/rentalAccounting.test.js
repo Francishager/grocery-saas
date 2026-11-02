@@ -11,6 +11,8 @@ import {
   rentalConsumableCostLines,
   allocateRentalLineAmounts,
   rentalDamageChargeLines,
+  rentalCreditNoteLines,
+  rentalCancellationLines,
   heldRentalDeposit,
 } from '../src/services/rentalAccountingService.js'
 
@@ -20,6 +22,9 @@ const config = {
   deferredRevenueAccountId: 'unearned-rent',
   depositLiabilityAccountId: 'deposit-liability',
   taxPayableAccountId: 'tax-payable',
+  renterCreditPayableAccountId: 'renter-credit-payable',
+  openingEquityAccountId: 'rental-opening-equity',
+  cancellationFeeRevenueAccountId: 'cancellation-fee-revenue',
 }
 
 function assertBalanced(lines) {
@@ -71,6 +76,37 @@ test('earned rent and assessed damage charges post as balanced entries', () => {
   assert.equal(damage[0].accountId, config.receivableAccountId)
   assertBalanced(earned)
   assertBalanced(damage)
+})
+
+test('rental credit notes reverse earned income and split receivable credit from refund payable', () => {
+  const lines = rentalCreditNoteLines(config, { amount: 118, taxAmount: 18, appliedAmount: 70, refundDue: 48, earned: true, reference: 'RCN-1' })
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['rental-income', 100, 0], ['tax-payable', 18, 0], ['rental-ar', 0, 70], ['renter-credit-payable', 0, 48],
+  ])
+  assertBalanced(lines)
+})
+
+test('rental credit notes against historical opening receivables do not fabricate current revenue reversals', () => {
+  const lines = rentalCreditNoteLines(config, { amount: 50, taxAmount: 7.63, appliedAmount: 50, historical: true, reference: 'RCN-OLD' })
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['rental-opening-equity', 50, 0], ['rental-ar', 0, 50],
+  ])
+  assertBalanced(lines)
+})
+
+test('rental cancellation allocates advances to fee, unpaid fee to receivable, and excess to refund payable', () => {
+  const feePaidByAdvance = rentalCancellationLines(config, { advanceAmount: 50, feeAmount: 80, taxAmount: 12.2, refundDue: 0, feeReceivable: 30, reference: 'RNT-CAN-1' })
+  assert.deepEqual(feePaidByAdvance.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['unearned-rent', 50, 0],
+    ['rental-ar', 30, 0],
+    ['cancellation-fee-revenue', 0, 67.8],
+    ['tax-payable', 0, 12.2],
+  ])
+  assertBalanced(feePaidByAdvance)
+
+  const excessAdvance = rentalCancellationLines(config, { advanceAmount: 100, feeAmount: 30, taxAmount: 4.58, refundDue: 70, feeReceivable: 0, reference: 'RNT-CAN-2' })
+  assert.equal(excessAdvance.find(line => line.accountId === 'renter-credit-payable').credit, 70)
+  assertBalanced(excessAdvance)
 })
 
 test('mixed booking line allocation preserves booking discount, tax, and net totals to the cent', () => {

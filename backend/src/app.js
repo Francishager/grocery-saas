@@ -197,6 +197,15 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+app.get("/api/health/ready", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.status(200).json({ status: "ready", checks: { database: "ok" } });
+  } catch {
+    return res.status(503).json({ status: "not_ready", checks: { database: "unavailable" } });
+  }
+});
+
 // Keep service-module schema preparation isolated. A service migration issue must
 // not take authentication, billing, dashboards, or unrelated tenant APIs offline.
 const ensureServiceModuleSchema = async (req, res, next) => {
