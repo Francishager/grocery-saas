@@ -1144,6 +1144,7 @@ router.post("/historical", authenticateToken, requirePermission("canCreateRental
       historicalImportKey, customerId, customerName, customerPhone, items = [], additionalCharges = [],
       hireDate, expectedReturnDate, actualReturnDate, depositAmount = 0, discount = 0,
       taxRate = 0, payments = [], notes, bookingPurpose, historicalReference, collectUnpaidBalance = false,
+      deliveryAddress, deliveryFee = 0,
     } = req.body;
     const importKey = String(historicalImportKey || "").trim();
     if (importKey.length < 10 || importKey.length > 80) return res.status(400).json({ error: "A valid historical-entry request key is required." });
@@ -1153,6 +1154,10 @@ router.post("/historical", authenticateToken, requirePermission("canCreateRental
       return res.status(400).json({ error: "Historical booking lines or payments are invalid or exceed the supported limit." });
     }
     if (!items.length && !additionalCharges.length) return res.status(400).json({ error: "Add at least one historical hire item, service, or goods line." });
+    const normalizedDeliveryAddress = String(deliveryAddress || "").trim().slice(0, 500);
+    const normalizedDeliveryFee = Math.round(toMoney(deliveryFee, -1) * 100) / 100;
+    if (normalizedDeliveryFee < 0 || (normalizedDeliveryFee > 0 && !normalizedDeliveryAddress)) return res.status(400).json({ error: "Enter a delivery destination for a delivery charge, and use a non-negative fee." });
+    if (normalizedDeliveryFee > 0 && additionalCharges.some(line => String(line?.category || "").toLowerCase() === "delivery")) return res.status(400).json({ error: "Enter the delivery fee either in the delivery field or as a delivery charge line, not both." });
     const dateValue = (value, label, endOfDay = false) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) throw Object.assign(new Error(`${label} must be a valid date.`), { statusCode: 400 });
       const date = new Date(`${value}T00:00:00.000Z`);
@@ -1200,7 +1205,10 @@ router.post("/historical", authenticateToken, requirePermission("canCreateRental
       const totalAmount = Math.round(quantity * periods * unitHirePrice * 100) / 100;
       return { productId: product.id, quantity, periods, unitHirePrice, rentalPeriod, totalAmount, conditionOut, conditionReturn, notes: item.notes || null };
     });
-    const chargeLines = await Promise.all(additionalCharges.map(async line => {
+    const historicalChargeDrafts = normalizedDeliveryFee > 0
+      ? [...additionalCharges, { lineType: "service", label: "Delivery charge", category: "delivery", quantity: 1, unitPrice: normalizedDeliveryFee }]
+      : additionalCharges;
+    const chargeLines = await Promise.all(historicalChargeDrafts.map(async line => {
       const lineType = String(line?.lineType || "service").toLowerCase();
       const productId = String(line?.productId || "").trim() || null;
       const product = productId ? chargesById.get(productId) : null;
@@ -1250,6 +1258,7 @@ router.post("/historical", authenticateToken, requirePermission("canCreateRental
           depositPaid, depositRefunded, amountPaid, balance, paymentStatus: balance <= 0 ? "paid" : amountPaid > 0 ? "partial" : "unpaid",
           paymentMethod: normalizedPayments[0]?.paymentMethod || "historical", discount: discountAmount, taxRate: rate, taxAmount,
           status: "returned", bookingState: "returned", bookingPurpose: String(bookingPurpose || "").trim().slice(0, 500) || null,
+          deliveryAddress: normalizedDeliveryAddress || null, deliveryFee: normalizedDeliveryFee,
           isHistoricalRecord: true, historicalImportKey: importKey,
           historicalReference: originalReference,
           isHistoricalReceivable: Boolean(collectUnpaidBalance),
@@ -1368,11 +1377,17 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
       cashAccountId,
       bookingMode = "checkout",
       bookingPurpose,
+      deliveryAddress,
+      deliveryFee = 0,
     } = req.body;
 
     if (!Array.isArray(items)) return res.status(400).json({ error: "Rental items must be a list." });
     if (!Array.isArray(additionalCharges) || additionalCharges.length > 50) return res.status(400).json({ error: "Enter no more than 50 additional service or fee lines." });
     if (items.length === 0 && additionalCharges.length === 0) return res.status(400).json({ error: "Add a rental asset or at least one service/venue charge." });
+    const normalizedDeliveryAddress = String(deliveryAddress || "").trim().slice(0, 500);
+    const normalizedDeliveryFee = Math.round(toMoney(deliveryFee, -1) * 100) / 100;
+    if (normalizedDeliveryFee < 0 || (normalizedDeliveryFee > 0 && !normalizedDeliveryAddress)) return res.status(400).json({ error: "Enter a delivery destination for a delivery charge, and use a non-negative fee." });
+    if (normalizedDeliveryFee > 0 && additionalCharges.some(charge => String(charge?.category || "").toLowerCase() === "delivery")) return res.status(400).json({ error: "Enter the delivery fee either in the delivery field or as a delivery charge line, not both." });
     if (!expectedReturnDate) return res.status(400).json({ error: "Expected return date is required" });
     const startDate = bookingMode === "checkout" ? new Date() : hireDate ? new Date(hireDate) : new Date();
     const endDate = new Date(expectedReturnDate);
@@ -1441,7 +1456,10 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
     }) : [];
     if (chargeProducts.length !== chargeProductIds.length) return res.status(400).json({ error: "A selected service or consumable item was not found in this business or branch." });
     const chargeProductsById = new Map(chargeProducts.map(product => [product.id, product]));
-    const chargeLines = await Promise.all(additionalCharges.map(async (charge) => {
+    const chargeDrafts = normalizedDeliveryFee > 0
+      ? [...additionalCharges, { lineType: "service", label: "Delivery charge", category: "delivery", quantity: 1, unitPrice: normalizedDeliveryFee }]
+      : additionalCharges;
+    const chargeLines = await Promise.all(chargeDrafts.map(async (charge) => {
       const lineType = String(charge?.lineType || "service").trim().toLowerCase();
       const productId = String(charge?.productId || "").trim() || null;
       const product = productId ? chargeProductsById.get(productId) : null;
@@ -1526,6 +1544,8 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
           status: "active",
           bookingState: bookingMode === "reserve" ? "reserved" : "checked_out",
           bookingPurpose: String(bookingPurpose || "").trim().slice(0, 500) || null,
+          deliveryAddress: normalizedDeliveryAddress || null,
+          deliveryFee: normalizedDeliveryFee,
           notes,
           items: {
             create: pricedRentalItems.map(({ ...rest }) => rest),

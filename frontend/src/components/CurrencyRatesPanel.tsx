@@ -8,6 +8,7 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [quoteCurrency, setQuoteCurrency] = useState('')
+  const [showAllRates, setShowAllRates] = useState(false)
   const requestId = useRef(0)
   const normalizedBase = String(baseCurrency || 'UGX').toUpperCase()
 
@@ -27,6 +28,7 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
 
   useEffect(() => {
     setData(null)
+    setShowAllRates(false)
     void refresh()
     return () => { requestId.current += 1 }
   }, [refresh])
@@ -39,6 +41,7 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
     .sort()
   const defaultQuote = currencyCodes.includes('USD') && normalizedBase !== 'USD' ? 'USD' : currencyCodes[0] || ''
   const displayedQuote = currencyCodes.includes(quoteCurrency) ? quoteCurrency : defaultQuote
+  const visibleCurrencyCodes = showAllRates ? currencyCodes : currencyCodes.slice(0, 5)
   const quoteRate = Number(rates[displayedQuote] || 0)
   const formatRate = (value: number) => new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(value)
 
@@ -74,21 +77,26 @@ export function CurrencyRatesPanel({ baseCurrency }: { baseCurrency: string }) {
             </select>
           </label>
         </div>
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full table-fixed text-sm">
-            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-              <tr><th className="w-[42%] px-3 py-2 font-medium">Currency pair</th><th className="px-3 py-2 text-right font-medium">Reference rate</th></tr>
-            </thead>
-            <tbody>
-              {currencyCodes.map(code => (
-                <tr key={code} className="border-t">
-                  <td className="break-words px-3 py-2">{normalizedBase} to {code}</td>
+        {currencyCodes.length > 0 && <div className="space-y-2">
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full table-fixed text-sm">
+              <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                <tr><th className="w-[38%] px-3 py-2 font-medium">Currency</th><th className="px-3 py-2 text-right font-medium">Reference rate</th></tr>
+              </thead>
+              <tbody>
+                {visibleCurrencyCodes.map(code => <tr key={code} className="border-t">
+                  <td className="px-3 py-2">{code}</td>
                   <td className="break-words px-3 py-2 text-right tabular-nums">1 {normalizedBase} = {formatRate(Number(rates[code]))} {code}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+          {currencyCodes.length > 5 && <div className="flex justify-center">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowAllRates(value => !value)}>
+              {showAllRates ? 'Show fewer rates' : `Load more rates (${currencyCodes.length - 5} more)`}
+            </Button>
+          </div>}
+        </div>}
         {rateDate && <p className="text-xs text-muted-foreground">Rates updated {rateDate.toLocaleString()}. These are single reference conversion rates, not separate buy and sell prices.</p>}
       </> : <p className="text-sm text-muted-foreground">{loading ? 'Loading rates…' : 'No rates loaded.'}</p>}
     </section>

@@ -273,7 +273,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
         where,
         skip,
         take: Number(limit),
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
         include: {
           _count: { select: customerHistoryCounts },
           procurementCounterpartyLink: { select: { id: true } },
@@ -679,6 +679,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           branch: { select: { name: true } },
           User: userSelect,
           items: { include: { product: { select: { name: true, sku: true } } } },
+          chargeLines: true,
           payments: { where: { status: { in: ['posted', 'historical'] } }, include: { user: userSelect }, orderBy: { paymentDate: 'asc' } },
           ...((req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes('canViewRentalCreditNotes'))
             ? { creditNotes: { where: { status: 'issued' }, include: { payments: { where: { kind: 'rental_credit_refund', status: 'posted' }, include: { user: userSelect } }, user: userSelect }, orderBy: { createdAt: 'asc' } } }
@@ -1142,18 +1143,19 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         ? currentReceivable + activeCreditAmount
         : Math.max(0, toMoney(rental.balance) + outstandingCreditRefund + postedRentalPayments)
       const reference = rental.historicalReference || rental.rentalNo
+      const rentalDescription = cancellationCollectible
+        ? `Cancellation fee · ${rental.cancellationChargePercent}%${rental.cancellationReason ? ` · ${rental.cancellationReason}` : ''}`
+        : !canViewRentalNotes && activeCreditAmount > 0
+          ? 'Rental receivable · net of booking adjustments'
+          : historicalCollectible
+            ? `Unpaid balance brought forward from rental dated ${new Date(rental.hireDate).toLocaleDateString('en-GB')}`
+            : collectible ? `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · rental charge` : `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`
       rows.push({
         id: rental.id, source: collectible ? 'rental_receivable' : 'customer_activity',
         type: collectible ? historicalCollectible ? 'Historical Rental Receivable' : cancellationCollectible ? 'Rental Cancellation Fee' : 'Rental Receivable' : 'Rental', date: cancellationCollectible ? rental.cancelledAt || rental.hireDate : rental.hireDate,
         dueDate: rental.expectedReturnDate, reference,
         originalReference: rental.rentalNo,
-        description: cancellationCollectible
-          ? `Cancellation fee · ${rental.cancellationChargePercent}%${rental.cancellationReason ? ` · ${rental.cancellationReason}` : ''}`
-          : !canViewRentalNotes && activeCreditAmount > 0
-          ? 'Rental receivable · net of booking adjustments'
-          : historicalCollectible
-          ? `Unpaid balance brought forward from rental dated ${new Date(rental.hireDate).toLocaleDateString('en-GB')}`
-          : collectible ? `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · rental charge` : `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`,
+        description: `${rentalDescription}${rental.deliveryAddress ? ` · Delivery to ${rental.deliveryAddress}` : ''}`,
         debit: collectible ? receivableAmount : toMoney(rental.totalAmount), credit: 0,
         amount: collectible ? receivableAmount : toMoney(rental.totalAmount),
         amountPaid: collectible ? Math.max(0, currentReceivable - toMoney(rental.balance)) : toMoney(rental.amountPaid),
@@ -1161,10 +1163,16 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         balanceImpact: collectible ? receivableAmount : 0, affectsBalance: collectible,
         paymentMethod: rental.paymentMethod, status: collectible ? (rental.balance <= 0 ? 'paid' : rental.balance < receivableAmount ? 'partial' : 'unpaid') : rental.paymentStatus,
         branch: rental.branch?.name || '', staff: userName(rental.User),
-        items: rental.items.map((item) => ({
-          productName: item.product?.name || 'Rental item', sku: item.product?.sku || '', quantity: item.quantity,
-          unitPrice: item.unitHirePrice, total: item.totalAmount,
-        })), sortOrder: 60,
+        items: [
+          ...rental.items.map((item) => ({
+            productName: item.product?.name || 'Rental item', sku: item.product?.sku || '', quantity: item.quantity,
+            unitPrice: item.unitHirePrice, total: item.totalAmount,
+          })),
+          ...(rental.chargeLines || []).map((line) => ({
+            productName: line.label, sku: '', quantity: line.quantity,
+            unitPrice: line.unitPrice, total: line.totalAmount,
+          })),
+        ], sortOrder: 60,
       })
       for (const payment of rental.payments || []) {
         if (String(payment.idempotencyKey || '').startsWith('customer-payment:')) continue

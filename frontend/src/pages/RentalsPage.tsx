@@ -100,6 +100,8 @@ interface Rental {
   status: string
   bookingState?: string
   bookingPurpose?: string | null
+  deliveryAddress?: string | null
+  deliveryFee?: number
   contractDraft?: string | null
   contractGeneratedAt?: string | null
   notes?: string | null
@@ -200,6 +202,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [selectedItems, setSelectedItems] = useState<{ productId: string; quantity: number; unitHirePrice: number; rentalPeriod: string; periods: number; conditionOut: string }[]>([])
   const [additionalCharges, setAdditionalCharges] = useState<RentalChargeDraft[]>([])
   const [bookingPurpose, setBookingPurpose] = useState('')
+  const [deliveryRequired, setDeliveryRequired] = useState(false)
+  const [deliveryAddress, setDeliveryAddress] = useState('')
+  const [deliveryFee, setDeliveryFee] = useState(0)
   const [availabilityByProduct, setAvailabilityByProduct] = useState<Record<string, number>>({})
   const [generatingContract, setGeneratingContract] = useState(false)
   const [contractDraftValue, setContractDraftValue] = useState('')
@@ -437,6 +442,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setCustomerOptions([])
     setManualRenter(false)
     setBookingPurpose('')
+    setDeliveryRequired(false)
+    setDeliveryAddress('')
+    setDeliveryFee(0)
     loadRentalItems()
   }
 
@@ -534,7 +542,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
 
   const hireSubtotal = selectedItems.reduce((sum, si) => sum + si.unitHirePrice * si.quantity * si.periods, 0)
   const chargesSubtotal = additionalCharges.reduce((sum, charge) => sum + charge.quantity * charge.unitPrice, 0)
-  const subtotal = hireSubtotal + chargesSubtotal
+  const subtotal = hireSubtotal + chargesSubtotal + (deliveryRequired ? Math.max(0, Number(deliveryFee) || 0) : 0)
   const taxableAmount = Math.max(0, subtotal - discount)
   const taxAmount = historicalMode
     ? Math.round(taxableAmount * historicalTaxRate / 100 * 100) / 100
@@ -565,6 +573,14 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       toast({ title: 'Description required', description: 'Complete each historical service or goods line.', variant: 'destructive' })
       return
     }
+    if (deliveryRequired && !deliveryAddress.trim()) {
+      toast({ title: 'Delivery destination required', description: 'Enter where this rental booking should be delivered.', variant: 'destructive' })
+      return
+    }
+    if (deliveryRequired && (!Number.isFinite(Number(deliveryFee)) || Number(deliveryFee) < 0)) {
+      toast({ title: 'Invalid delivery fee', description: 'Enter a valid non-negative delivery fee.', variant: 'destructive' })
+      return
+    }
     if (branches.length && !branchId) {
       toast({ title: 'Branch required', description: 'Select the branch associated with the historical booking.', variant: 'destructive' })
       return
@@ -591,6 +607,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
         customerPhone: customerPhone || undefined,
         items: selectedItems.map(item => ({ ...item, conditionReturn: 'good' })),
         additionalCharges,
+        deliveryAddress: deliveryRequired ? deliveryAddress.trim() : undefined,
+        deliveryFee: deliveryRequired ? Number(deliveryFee) || 0 : 0,
         hireDate,
         expectedReturnDate,
         actualReturnDate,
@@ -663,6 +681,14 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       toast({ title: 'Charge description required', description: 'Add a description for each extra service or charge.', variant: 'destructive' })
       return
     }
+    if (deliveryRequired && !deliveryAddress.trim()) {
+      toast({ title: 'Delivery destination required', description: 'Enter where this rental booking should be delivered.', variant: 'destructive' })
+      return
+    }
+    if (deliveryRequired && (!Number.isFinite(Number(deliveryFee)) || Number(deliveryFee) < 0)) {
+      toast({ title: 'Invalid delivery fee', description: 'Enter a valid non-negative delivery fee.', variant: 'destructive' })
+      return
+    }
     if ((amountPaid > 0 || depositAmount > 0) && !cashAccountId) {
       toast({ title: 'Payment account required', description: 'Select an account for the amount paid or deposit, or set both amounts to zero.', variant: 'destructive' })
       return
@@ -701,6 +727,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
         customerPhone: customerPhone || undefined,
         items: selectedItems,
         additionalCharges,
+        deliveryAddress: deliveryRequired ? deliveryAddress.trim() : undefined,
+        deliveryFee: deliveryRequired ? Number(deliveryFee) || 0 : 0,
         hireDate: bookingMode === 'checkout' ? new Date().toISOString() : hireDate,
         expectedReturnDate,
         depositAmount,
@@ -841,7 +869,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       if (!popup) return toast({ title: 'Print blocked', description: 'Allow pop-ups to print rental receipts.', variant: 'destructive' })
       popup.opener = null
       const historicalNotice = payment.status === 'historical' ? `<p style="padding:12px;border:1px solid #c58b20;background:#fff7df"><b>HISTORICAL RECEIPT COPY</b><br>Payment date supplied from prior records: ${safe(new Date(payment.paymentDate).toLocaleString())}. Entered in JibuSales: ${safe(payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'today')}. This is a historical record copy; no funds were processed and no cash or ledger movement was created in JibuSales.</p>` : ''
-      popup.document.write(`<html><head><title>Rental receipt ${safe(payment.receiptNo)}</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}header{text-align:center;border-bottom:1px solid #bbb;padding-bottom:14px}h1{font-size:20px;margin:4px}table{width:100%;border-collapse:collapse;margin:20px 0}td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}.amount{text-align:right;font-size:18px;font-weight:bold}</style></head><body><header><h1>${safe(business?.name || 'Business')}</h1><div>${safe(business?.address || '')}</div><div>${safe(business?.phone || '')} ${safe(business?.email || '')}</div><h2>${payment.status === 'historical' ? 'Historical rental payment record' : 'Rental payment receipt'}</h2></header>${historicalNotice}<p><b>Receipt:</b> ${safe(payment.receiptNo)}<br><b>Date:</b> ${safe(new Date(payment.paymentDate).toLocaleString())}<br><b>Renter:</b> ${safe(rental.customer?.name || rental.customerName || 'Renter')}<br><b>Rental:</b> ${safe(rental.rentalNo)}<br><b>Payment type:</b> ${safe(payment.kind.replaceAll('_', ' '))}<br><b>Method/account:</b> ${safe(payment.paymentMethod || 'Non-cash settlement')} / ${safe(payment.cashAccount?.name || (payment.status === 'historical' ? 'Not posted to a transaction account' : 'N/A'))}<br><b>Mobile provider:</b> ${safe(payment.mobileProvider || '—')}<br><b>Payment phone:</b> ${safe(payment.phoneNumber || '—')}</p><table><thead><tr><th>Item</th><th>Type</th><th>Qty</th><th>Value</th></tr></thead><tbody>${itemRows}</tbody></table><p class="amount">${safe(formatCurrency(payment.amount))}</p><p>Rental total: ${safe(formatCurrency(rental.totalAmount))}<br>Outstanding after record: ${safe(formatCurrency(payment.balanceAfter))}<br>Reference: ${safe(payment.transactionRef || '—')}<br>Note: ${safe(payment.notes || '—')}</p><footer>Powered by JibuSales</footer><script>window.onload=()=>window.print()</script></body></html>`)
+      popup.document.write(`<html><head><title>Rental receipt ${safe(payment.receiptNo)}</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}header{text-align:center;border-bottom:1px solid #bbb;padding-bottom:14px}h1{font-size:20px;margin:4px}table{width:100%;border-collapse:collapse;margin:20px 0}td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}.amount{text-align:right;font-size:18px;font-weight:bold}</style></head><body><header><h1>${safe(business?.name || 'Business')}</h1><div>${safe(business?.address || '')}</div><div>${safe(business?.phone || '')} ${safe(business?.email || '')}</div><h2>${payment.status === 'historical' ? 'Historical rental payment record' : 'Rental payment receipt'}</h2></header>${historicalNotice}<p><b>Receipt:</b> ${safe(payment.receiptNo)}<br><b>Date:</b> ${safe(new Date(payment.paymentDate).toLocaleString())}<br><b>Renter:</b> ${safe(rental.customer?.name || rental.customerName || 'Renter')}<br><b>Rental:</b> ${safe(rental.rentalNo)}<br>${rental.deliveryAddress ? `<b>Delivery destination:</b> ${safe(rental.deliveryAddress)}<br>` : ''}<b>Payment type:</b> ${safe(payment.kind.replaceAll('_', ' '))}<br><b>Method/account:</b> ${safe(payment.paymentMethod || 'Non-cash settlement')} / ${safe(payment.cashAccount?.name || (payment.status === 'historical' ? 'Not posted to a transaction account' : 'N/A'))}<br><b>Mobile provider:</b> ${safe(payment.mobileProvider || '—')}<br><b>Payment phone:</b> ${safe(payment.phoneNumber || '—')}</p><table><thead><tr><th>Item</th><th>Type</th><th>Qty</th><th>Value</th></tr></thead><tbody>${itemRows}</tbody></table><p class="amount">${safe(formatCurrency(payment.amount))}</p><p>Rental total: ${safe(formatCurrency(rental.totalAmount))}<br>Outstanding after record: ${safe(formatCurrency(payment.balanceAfter))}<br>Reference: ${safe(payment.transactionRef || '—')}<br>Note: ${safe(payment.notes || '—')}</p><footer>Powered by JibuSales</footer><script>window.onload=()=>window.print()</script></body></html>`)
       popup.document.close()
     } catch (err: any) { toast({ title: 'Receipt unavailable', description: err.message || 'Could not load receipt.', variant: 'destructive' }) }
   }
@@ -1417,6 +1445,17 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 <Label htmlFor="bookingPurpose">Purpose or event</Label>
                 <Input id="bookingPurpose" value={bookingPurpose} maxLength={500} onChange={event => setBookingPurpose(event.target.value)} placeholder="Optional: wedding, conference, production, site work…" />
               </div>
+
+              <section className="space-y-3 rounded-md border p-3">
+                <label className="flex cursor-pointer items-center gap-3 text-sm font-medium">
+                  <input type="checkbox" className="h-4 w-4" checked={deliveryRequired} onChange={event => setDeliveryRequired(event.target.checked)} />
+                  Deliver this booking
+                </label>
+                {deliveryRequired && <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2"><Label htmlFor="rentalDeliveryAddress">Delivery destination *</Label><Input id="rentalDeliveryAddress" value={deliveryAddress} maxLength={500} onChange={event => setDeliveryAddress(event.target.value)} placeholder="Address, venue, or delivery instructions" required /></div>
+                  <div className="space-y-2"><Label htmlFor="rentalDeliveryFee">Delivery charge</Label><Input id="rentalDeliveryFee" type="number" min="0" step="any" value={deliveryFee} onChange={event => setDeliveryFee(Number(event.target.value) || 0)} /></div>
+                </div>}
+              </section>
 
               {/* Branch */}
               {branches.length > 0 && (

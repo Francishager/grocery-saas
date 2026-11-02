@@ -10,14 +10,18 @@ test('reference exchange rates use one selectable quote against the business cur
   assert.match(panel, /1 \$\{normalizedBase\} = \$\{formatRate\(quoteRate\)\} \$\{displayedQuote\}/);
   assert.match(panel, /aria-label="Compare business currency with"/);
   assert.doesNotMatch(panel, /Selected currency|Uganda shilling|USD\/UGX|baseToUgx|usdToUgx/);
-  assert.match(panel, /\{normalizedBase\} to \{code\}/);
   assert.match(panel, /Object\.keys\(rates\)/);
+  assert.match(panel, /Compare with/);
+  assert.match(panel, /currencyCodes\.slice\(0, 5\)/);
+  assert.match(panel, /Load more rates/);
+  assert.match(panel, /Show fewer rates/);
 });
 
-test('exchange-rate table keeps readable wrapped columns on narrow screens', () => {
+test('exchange rates render one comparison card and a short expandable rate list', () => {
+  assert.match(panel, /rounded-md border border-primary\/20 bg-primary\/5 p-3/);
+  assert.match(panel, /aria-label="Compare business currency with"/);
   assert.match(panel, /overflow-x-auto rounded-md border/);
-  assert.match(panel, /w-full table-fixed text-sm/);
-  assert.match(panel, /break-words px-3 py-2 text-right tabular-nums/);
+  assert.match(panel, /visibleCurrencyCodes\.map/);
 });
 
 test('out-of-order rate responses cannot overwrite the latest selected currency', () => {

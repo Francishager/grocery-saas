@@ -397,12 +397,16 @@ export default function ReceivablesPage() {
         if (Array.isArray(data.warnings) && data.warnings.length) {
           toast({ title: 'Customer data loaded with a warning', description: data.warnings.join(' '), variant: 'destructive' })
         }
-        rows = data.customers || []
+        rows = (data.customers || []).slice().sort((a: Customer, b: Customer) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        )
         total = Number(data.pagination?.total ?? rows.length)
       } else {
         const local = await getLocalReceivableCustomers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
         total = local.length
-        rows = local.slice((page - 1) * customerPageSize, page * customerPageSize)
+        rows = local.slice().sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        ).slice((page - 1) * customerPageSize, page * customerPageSize)
       }
       if (requestId !== customerRequestId.current) return
       setCustomers(rows)
@@ -2120,7 +2124,9 @@ export default function ReceivablesPage() {
           setEditingCustomer(null)
         }}
         onSuccess={(customer) => {
-          setCustomers((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
+          setCustomers((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)].sort((a, b) =>
+            a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+          ))
           setCustomerOptions((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
           setEditingCustomer(null)
           if (activeTab === 'customers') loadCustomers()

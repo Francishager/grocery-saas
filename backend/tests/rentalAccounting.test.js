@@ -123,6 +123,20 @@ test('mixed booking line allocation preserves booking discount, tax, and net tot
   assert.equal(allocation.chargeLines[1].lineType, 'consumable')
 })
 
+test('delivery fees are separately visible booking lines and reconcile into rental totals and tax', () => {
+  const allocation = allocateRentalLineAmounts(
+    [{ totalAmount: 100 }],
+    [{ label: 'Delivery charge', category: 'delivery', lineType: 'service', totalAmount: 20 }],
+    0,
+    18,
+  )
+  const lines = [...allocation.items, ...allocation.chargeLines]
+  assert.equal(lines.reduce((sum, line) => sum + line.totalAmount, 0), 120)
+  assert.equal(allocation.taxAmount, 21.6)
+  assert.equal(allocation.chargeLines[0].category, 'delivery')
+  assert.equal(lines.reduce((sum, line) => sum + line.totalAmount, 0) + allocation.taxAmount, 141.6)
+})
+
 test('consumable stock cost and mixed revenue post to separate mapped accounts', () => {
   const mixedConfig = { ...config, salesRevenueAccountId: 'goods-revenue', inventoryAccountId: 'inventory', costOfGoodsSoldAccountId: 'consumables-cogs' }
   const recognition = rentalMixedRevenueRecognitionLines(mixedConfig, { amount: 120, goodsAmount: 35, reference: 'HIRE-2' })

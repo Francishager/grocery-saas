@@ -11,6 +11,8 @@ try {
         ADD COLUMN IF NOT EXISTS "customerPhone" TEXT,
         ADD COLUMN IF NOT EXISTS "bookingState" TEXT NOT NULL DEFAULT 'checked_out',
         ADD COLUMN IF NOT EXISTS "bookingPurpose" TEXT,
+        ADD COLUMN IF NOT EXISTS "deliveryAddress" TEXT,
+        ADD COLUMN IF NOT EXISTS "deliveryFee" DOUBLE PRECISION NOT NULL DEFAULT 0,
         ADD COLUMN IF NOT EXISTS "contractDraft" TEXT,
         ADD COLUMN IF NOT EXISTS "contractGeneratedAt" TIMESTAMP(3),
         ADD COLUMN IF NOT EXISTS "depositPaid" DOUBLE PRECISION NOT NULL DEFAULT 0,

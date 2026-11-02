@@ -2666,6 +2666,8 @@ model Rental {
   status                     RentalStatus                @default(active)
   bookingState               String                      @default("checked_out") // reserved, confirmed, checked_out
   bookingPurpose             String?
+  deliveryAddress            String?
+  deliveryFee                Float                       @default(0)
   contractDraft              String?                     @db.Text
   contractGeneratedAt        DateTime?
   isHistoricalRecord         Boolean                     @default(false)
