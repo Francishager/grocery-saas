@@ -26,7 +26,16 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(dockerfile, /CMD \["\.\/start\.sh"\]/);
   assert.doesNotMatch(dockerfile, /prisma db push/);
   assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
+  assert.match(startupScript, /ensure-customer-credit-applications-schema\.js/);
+  assert.match(startupScript, /ensure-customer-alternate-phone-schema\.js/);
   assert.match(startupScript, /ensure-user-theme-schema\.js/);
+  for (const migration of [
+    'ensure-rental-credit-notes-schema.js',
+    'ensure-rental-credit-note-permissions-schema.js',
+    'ensure-rental-cancellation-schema.js',
+  ]) {
+    assert.ok(startupScript.indexOf(migration) < startupScript.indexOf('=== Starting Node App ==='));
+  }
 });
 
 test('startup repairs all additive rental runtime tables and columns before serving rental and KPI queries', () => {
