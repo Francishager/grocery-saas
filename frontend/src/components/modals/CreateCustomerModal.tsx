@@ -279,7 +279,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               {(!initialData?.id || canViewCustomerEmail) ? <Input
@@ -290,8 +290,19 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
                 placeholder="Enter email address"
               /> : <Input id="email" value="" readOnly placeholder={initialData.maskedEmail || 'x******@*****'} aria-label="Email masked by your permissions" />}
             </div>
-            
-            {canManageCustomerCreditLimit && <div className="space-y-2">
+            <div className="space-y-2">
+              <Label htmlFor="alternatePhone">Second phone (optional)</Label>
+              {(!initialData?.id || canViewCustomerPhone) ? <Input
+                id="alternatePhone"
+                type="tel"
+                value={formData.alternatePhone || ''}
+                onChange={(e) => handleInputChange('alternatePhone', e.target.value)}
+                placeholder="Enter an alternate contact number"
+              /> : <Input id="alternatePhone" value="" readOnly placeholder="Phone restricted" aria-label="Alternate phone masked by your permissions" />}
+            </div>
+          </div>
+
+          {canManageCustomerCreditLimit && <div className="space-y-2">
               <Label htmlFor="creditLimit">Credit limit (optional)</Label>
               <Input
                 id="creditLimit"
@@ -304,18 +315,6 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
               />
               <p className="text-xs text-muted-foreground">Set a limit only when you authorize this customer to buy on credit. Credit sales are checked against it.</p>
             </div>}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="alternatePhone">Second phone (optional)</Label>
-            {(!initialData?.id || canViewCustomerPhone) ? <Input
-              id="alternatePhone"
-              type="tel"
-              value={formData.alternatePhone || ''}
-              onChange={(e) => handleInputChange('alternatePhone', e.target.value)}
-              placeholder="Enter an alternate contact number"
-            /> : <Input id="alternatePhone" value="" readOnly placeholder="Phone restricted" aria-label="Alternate phone masked by your permissions" />}
-          </div>
 
           <div className="space-y-2">
             <Label htmlFor="address">Address</Label>
