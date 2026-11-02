@@ -1570,7 +1570,7 @@ router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true, chargeLines: true } });
     if (!rental) return res.status(404).json({ error: "Rental not found." });
-    if (rental.status !== "active" || rental.bookingState === "checked_out") return res.status(409).json({ error: "Only an active reservation can be checked out." });
+    if (rental.status !== "active" || !["reserved", "confirmed"].includes(rental.bookingState) || rental.isHistoricalRecord) return res.status(409).json({ error: "Only an active, uncompleted reservation can be checked out." });
     if (!rental.customerId && Number(rental.totalAmount) - Number(rental.amountPaid || 0) > 0.01) {
       return res.status(409).json({ error: "Link this renter to an existing customer before check-out so any unpaid rental balance can be tracked and collected." });
     }

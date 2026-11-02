@@ -138,6 +138,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [searchingHistoricalCustomers, setSearchingHistoricalCustomers] = useState(false)
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returningRental, setReturningRental] = useState<Rental | null>(null)
+  const [checkingOutRental, setCheckingOutRental] = useState<Rental | null>(null)
+  const [savingCheckout, setSavingCheckout] = useState(false)
   const [selectedRental, setSelectedRental] = useState<Rental | null>(null)
   const [cancellingRental, setCancellingRental] = useState<Rental | null>(null)
   const [cancellationChargePercent, setCancellationChargePercent] = useState(0)
@@ -861,13 +863,22 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   }
 
   const handleCheckout = async (rental: Rental) => {
+    setCheckingOutRental(rental)
+  }
+
+  const confirmCheckout = async () => {
+    if (!checkingOutRental || savingCheckout) return
+    setSavingCheckout(true)
     try {
-      const updated = await rentalsApi.checkout(rental.id, branchId || undefined)
+      const updated = await rentalsApi.checkout(checkingOutRental.id, checkingOutRental.branch?.id)
       setRentals(current => current.map(row => row.id === updated.id ? updated : row))
       toast({ title: 'Checked out', description: 'Availability was confirmed and stock has been issued.' })
+      setCheckingOutRental(null)
       loadRentals()
     } catch (err: any) {
       toast({ title: 'Could not check out', description: err.message || 'Availability may have changed.', variant: 'destructive' })
+    } finally {
+      setSavingCheckout(false)
     }
   }
 
@@ -980,6 +991,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       ...rental.items.map(item => item.product?.name)]
       .some(value => String(value || '').toLowerCase().includes(query))
   })
+  const checkoutCandidates = rentals.filter(rental =>
+    rental.status === 'active' && ['reserved', 'confirmed'].includes(String(rental.bookingState)) && !rental.isHistoricalRecord
+  )
   const { paginatedItems: paginatedRentals, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(visibleRentals, 10)
   const rentalReceivableTotal = visibleRentals.reduce((sum, rental) => sum + Math.max(0, Number(rental.balance) || 0), 0)
   const historicalReceivableCount = visibleRentals.filter(rental => rental.isHistoricalReceivable).length
@@ -1154,10 +1168,11 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
           <p className="text-muted-foreground">{section === 'returns' ? 'Review checked-out assets due back and complete their return.' : section === 'receivables' ? 'Track unpaid new bookings and past rental balances, then collect through the linked customer account.' : 'Reserve hire assets, check them out, and follow each booking.'}</p>
         </div>
         {(section === 'bookings' || section === 'receivables') && canCreateRental && <div className="flex flex-wrap gap-2">
-          {section === 'receivables' && canSelectExistingCustomer && <Button variant="outline" onClick={openHistoricalForm}><Clock className="mr-2 h-4 w-4" />Record Past Rental</Button>}
+          {(section === 'bookings' || canSelectExistingCustomer) && <Button variant="outline" onClick={openHistoricalForm}><Clock className="mr-2 h-4 w-4" />{section === 'receivables' ? 'Record Past Rental' : 'Record Past Booking'}</Button>}
           {(section !== 'receivables' || canSelectExistingCustomer) && <Button onClick={openNewForm}><Plus className="mr-2 h-4 w-4" />{section === 'receivables' ? 'New Credit Rental' : 'New Hire'}</Button>}
         </div>}
       </div>
+      {section === 'bookings' && canCreateRental && <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">Use <span className="font-medium text-foreground">Record Past Booking</span> for completed hires from before JibuSales. Enter the original dates and any documented payments; this preserves history without recreating past cash or stock movements.</p>}
       {section === 'receivables' && !canSelectExistingCustomer && <p className="rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">Customer access is required to create collectible rental balances. Ask an administrator to grant customer viewing permission.</p>}
       {section === 'receivables' && canSelectExistingCustomer && <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">New credit rentals are checked out and posted to the selected customer. Past balances can be brought forward with their original reference. To collect, open the customer and use <span className="font-medium text-foreground">Record Payment</span>; receipts and allocations stay in the customer ledger.</p>}
       {section === 'receivables' && <div className="grid gap-3 sm:grid-cols-3">
@@ -1301,7 +1316,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-1">
                           {section === 'receivables' && rental.customerId && hasPermission('canViewCustomer') && <Link to={`/tenant/receivables/customers/${encodeURIComponent(rental.customerId)}`} className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted">Open customer</Link>}
-                          {section !== 'receivables' && rental.status === 'active' && rental.bookingState && rental.bookingState !== 'checked_out' && hasPermission('canEditRental') && (
+                          {section !== 'receivables' && rental.status === 'active' && ['reserved', 'confirmed'].includes(String(rental.bookingState)) && !rental.isHistoricalRecord && hasPermission('canEditRental') && (
                             <Button variant="outline" size="sm" onClick={() => handleCheckout(rental)}>
                               <CalendarCheck className="mr-1 h-3.5 w-3.5" />Check out
                             </Button>
@@ -1768,6 +1783,64 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             </form>
           </CardContent>
         </Card>
+        </DialogContent>}
+      </Dialog>
+
+      <Dialog open={Boolean(checkingOutRental)} onOpenChange={open => { if (!open && !savingCheckout) setCheckingOutRental(null) }}>
+        {checkingOutRental && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Check out a reservation</DialogTitle>
+            <DialogDescription>Select an existing reservation. Its saved customer, dates, items, charges, and advance are carried through; checkout time is recorded now.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="checkout-reservation">Reserved booking</Label>
+              <select
+                id="checkout-reservation"
+                value={checkingOutRental.id}
+                onChange={event => {
+                  const next = checkoutCandidates.find(rental => rental.id === event.target.value)
+                  if (next) setCheckingOutRental(next)
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {checkoutCandidates.map(rental => <option key={rental.id} value={rental.id}>
+                  {rental.rentalNo} · {rental.customer?.name || rental.customerName || 'Walk-in'} · {new Date(rental.hireDate).toLocaleDateString()} to {new Date(rental.expectedReturnDate).toLocaleDateString()}
+                </option>)}
+              </select>
+            </div>
+            <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2">
+              <div><p className="text-xs text-muted-foreground">Customer</p><p className="font-medium">{checkingOutRental.customer?.name || checkingOutRental.customerName || 'Walk-in'}</p></div>
+              <div><p className="text-xs text-muted-foreground">Branch</p><p className="font-medium">{checkingOutRental.branch?.name || 'Default branch'}</p></div>
+              <div><p className="text-xs text-muted-foreground">Reserved start</p><p className="font-medium">{new Date(checkingOutRental.hireDate).toLocaleString()}</p></div>
+              <div><p className="text-xs text-muted-foreground">Expected return</p><p className="font-medium">{new Date(checkingOutRental.expectedReturnDate).toLocaleString()}</p></div>
+              <div><p className="text-xs text-muted-foreground">Booking total</p><p className="font-medium tabular-nums">{formatCurrency(checkingOutRental.totalAmount)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Paid / advance</p><p className="font-medium tabular-nums">{formatCurrency(checkingOutRental.amountPaid)}</p></div>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Reserved items and services</h3>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b bg-muted/40 text-left"><th className="p-2">Item</th><th className="p-2 text-right">Qty</th><th className="p-2">Condition reserved</th></tr></thead>
+                  <tbody>
+                    {checkingOutRental.items.map(item => <tr key={item.id} className="border-b last:border-0">
+                      <td className="p-2">{item.product?.name || 'Rental item'}</td><td className="p-2 text-right tabular-nums">{item.quantity}</td><td className="p-2 capitalize">{item.conditionOut || 'good'}</td>
+                    </tr>)}
+                    {(checkingOutRental.chargeLines || []).map(line => <tr key={line.id} className="border-b last:border-0">
+                      <td className="p-2">{line.label}</td><td className="p-2 text-right tabular-nums">{line.quantity}</td><td className="p-2 capitalize">{line.category}</td>
+                    </tr>)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="rounded-md bg-muted/40 p-3 text-sm text-muted-foreground">Confirming checkout issues the reserved stock, records the actual checkout time, and posts the rental accounting entries. The reserved return date remains attached to this booking.</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" disabled={savingCheckout} onClick={() => setCheckingOutRental(null)}>Cancel</Button>
+              <Button type="button" disabled={savingCheckout || !online || !checkoutCandidates.some(rental => rental.id === checkingOutRental.id)} onClick={() => void confirmCheckout()}>
+                <CalendarCheck className="mr-2 h-4 w-4" />{savingCheckout ? 'Checking out…' : 'Confirm check-out'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>}
       </Dialog>
 
