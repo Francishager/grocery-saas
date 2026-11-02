@@ -28,6 +28,17 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
 });
 
+test('startup repairs all additive rental runtime tables and columns before serving rental and KPI queries', () => {
+  assert.match(startupScript, /ensure-rental-runtime-schema\.js/);
+  assert.ok(startupScript.indexOf('ensure-rental-runtime-schema.js') < startupScript.indexOf('=== Starting Node App ==='));
+  const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-rental-runtime-schema.js'), 'utf8');
+  for (const fragment of ['"bookingState"', '"depositPaid"', '"isHistoricalReceivable"', 'rental_charge_lines', 'rental_payments', 'rental_accounting_configs']) {
+    assert.match(ensureScript, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS/);
+  assert.doesNotMatch(ensureScript, /DROP TABLE|TRUNCATE|force-reset/i);
+});
+
 test('startup applies the additive alternate renter phone column before serving tenancy queries', () => {
   assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
   const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-property-tenancy-alternate-phone-schema.js'), 'utf8');

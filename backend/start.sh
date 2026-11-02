@@ -12,5 +12,8 @@ node src/scripts/ensure-property-tenancy-alternate-phone-schema.js
 node src/scripts/ensure-property-rent-rate-history-schema.js
 node src/scripts/ensure-property-rent-promises-schema.js
 node src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js
+node src/scripts/ensure-rental-runtime-schema.js
+node src/scripts/ensure-rental-mixed-booking-schema.js
+node src/scripts/ensure-rental-historical-entry-schema.js
 echo "=== Starting Node App ==="
 exec node --trace-warnings src/app.js
