@@ -4919,14 +4919,23 @@ router.get("/service-business/work-orders", authenticateToken, async (req,res) =
 router.get("/rentals/summary", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const where = scopedWhere(s, df(req, "hireDate"));
-    const [agg, count, activeCount, returnedCount, cancelledCount] = await Promise.all([
+    const reportDateScope = df(req, "hireDate");
+    const where = scopedWhere(s, { ...reportDateScope, isHistoricalRecord: false });
+    const historicalWhere = scopedWhere(s, { ...reportDateScope, isHistoricalRecord: true });
+    const [agg, count, activeCount, returnedCount, cancelledCount, bookingLines, historicalCount, historicalAmountNotPosted, historicalReceivableOutstanding] = await Promise.all([
       prisma.rental.aggregate({ where, _sum: { totalAmount: true, depositAmount: true, amountPaid: true, balance: true, discount: true, taxAmount: true } }),
       prisma.rental.count({ where }),
       prisma.rental.count({ where: { ...where, status: "active" } }),
       prisma.rental.count({ where: { ...where, status: "returned" } }),
       prisma.rental.count({ where: { ...where, status: "cancelled" } }),
+      prisma.rental.findMany({ where, select: { totalAmount: true, taxAmount: true, items: { select: { netAmount: true } }, chargeLines: { select: { lineType: true, quantity: true, unitCost: true, netAmount: true, taxAmount: true, stockConsumedAt: true } } } }),
+      prisma.rental.count({ where: historicalWhere }),
+      prisma.rental.aggregate({ where: { ...historicalWhere, isHistoricalReceivable: false }, _sum: { totalAmount: true } }),
+      prisma.rental.aggregate({ where: { ...historicalWhere, isHistoricalReceivable: true }, _sum: { balance: true } }),
     ]);
+    const goodsBookedAmount = bookingLines.reduce((sum, rental) => sum + rental.chargeLines.filter(line => line.lineType === "consumable").reduce((lineSum, line) => lineSum + Number(line.netAmount || 0) + Number(line.taxAmount || 0), 0), 0);
+    const totalBookedAmount = bookingLines.reduce((sum, rental) => sum + Number(rental.totalAmount || 0), 0);
+    const consumablesIssuedCost = bookingLines.reduce((sum, rental) => sum + rental.chargeLines.filter(line => line.lineType === "consumable" && line.stockConsumedAt).reduce((lineSum, line) => lineSum + Number(line.unitCost || 0) * Number(line.quantity || 0), 0), 0);
     res.json({
       count,
       totalRevenue: agg._sum.totalAmount || 0,
@@ -4935,6 +4944,12 @@ router.get("/rentals/summary", authenticateToken, async (req, res) => {
       totalBalance: agg._sum.balance || 0,
       totalDiscount: agg._sum.discount || 0,
       totalTax: agg._sum.taxAmount || 0,
+      goodsBookedAmount,
+      serviceAndHireBookedAmount: Math.max(0, totalBookedAmount - goodsBookedAmount),
+      consumablesIssuedCost,
+      historicalCount,
+      historicalAmountNotPosted: historicalAmountNotPosted._sum.totalAmount || 0,
+      historicalReceivableOutstanding: historicalReceivableOutstanding._sum.balance || 0,
       activeCount,
       returnedCount,
       cancelledCount,
@@ -4946,7 +4961,7 @@ router.get("/rentals/list", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const rentals = await prisma.rental.findMany({
-      where: scopedWhere(s, df(req, "hireDate")),
+      where: scopedWhere(s, { ...df(req, "hireDate"), isHistoricalRecord: false }),
       include: { customer: { select: { name: true, phone: true } }, branch: { select: { name: true } }, items: { include: { product: { select: { name: true } } } } },
       orderBy: { hireDate: "desc" },
     });
@@ -4975,7 +4990,7 @@ router.get("/rentals/by-item", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const rentals = await prisma.rental.findMany({
-      where: scopedWhere(s, df(req, "hireDate")),
+      where: scopedWhere(s, { ...df(req, "hireDate"), isHistoricalRecord: false }),
       include: { items: { include: { product: { select: { name: true } } } } },
     });
     const map = {};
@@ -4996,7 +5011,7 @@ router.get("/rentals/by-customer", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const rentals = await prisma.rental.findMany({
-      where: scopedWhere(s, df(req, "hireDate")),
+      where: scopedWhere(s, { ...df(req, "hireDate"), isHistoricalRecord: false }),
       include: { customer: { select: { name: true } } },
     });
     const map = {};
@@ -5016,7 +5031,7 @@ router.get("/rentals/by-branch", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const rentals = await prisma.rental.findMany({
-      where: scopedWhere(s, df(req, "hireDate")),
+      where: scopedWhere(s, { ...df(req, "hireDate"), isHistoricalRecord: false }),
       include: { branch: { select: { name: true } } },
     });
     const map = {};
@@ -5035,7 +5050,7 @@ router.get("/rentals/active", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const rentals = await prisma.rental.findMany({
-      where: scopedWhere(s, { status: "active" }),
+      where: scopedWhere(s, { isHistoricalRecord: false, status: "active" }),
       include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true } } } } },
       orderBy: { expectedReturnDate: "asc" },
     });
@@ -5060,7 +5075,7 @@ router.get("/rentals/overdue", authenticateToken, async (req, res) => {
     const s = await getScope(req);
     const now = new Date();
     const rentals = await prisma.rental.findMany({
-      where: { ...scopedWhere(s, { status: "active" }), expectedReturnDate: { lt: now } },
+      where: { ...scopedWhere(s, { isHistoricalRecord: false, status: "active" }), expectedReturnDate: { lt: now } },
       include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true } } } } },
       orderBy: { expectedReturnDate: "asc" },
     });
@@ -5083,7 +5098,7 @@ router.get("/rentals/returns", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const rentals = await prisma.rental.findMany({
-      where: scopedWhere(s, { ...df(req, "actualReturnDate"), status: "returned" }),
+      where: scopedWhere(s, { ...df(req, "actualReturnDate"), isHistoricalRecord: false, status: "returned" }),
       include: { customer: { select: { name: true } }, items: true },
       orderBy: { actualReturnDate: "desc" },
     });
@@ -5114,7 +5129,7 @@ router.get("/rentals/daily", authenticateToken, async (req, res) => {
     const returnDateRange = { gte: start, lte: end };
     const [rentals, payments, returns] = await Promise.all([
       prisma.rental.findMany({
-        where: scopedWhere(s, hireRange),
+        where: scopedWhere(s, { ...hireRange, isHistoricalRecord: false }),
         include: { customer: { select: { name: true } }, branch: { select: { name: true } }, User: { select: { fname: true, lname: true } }, items: { include: { product: { select: { name: true } } } } },
         orderBy: { hireDate: "asc" },
       }),
@@ -5124,7 +5139,7 @@ router.get("/rentals/daily", authenticateToken, async (req, res) => {
         orderBy: { paymentDate: "asc" },
       }),
       prisma.rental.findMany({
-        where: scopedWhere(s, { status: "returned", actualReturnDate: { ...returnDateRange, not: null } }),
+        where: scopedWhere(s, { isHistoricalRecord: false, status: "returned", actualReturnDate: { ...returnDateRange, not: null } }),
         include: { customer: { select: { name: true } }, branch: { select: { name: true } }, User: { select: { fname: true, lname: true } }, items: { include: { product: { select: { name: true } } } } },
         orderBy: { actualReturnDate: "asc" },
       }),
@@ -5195,7 +5210,7 @@ router.get("/rentals/daily", authenticateToken, async (req, res) => {
 router.get("/rentals/monthly", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const rentals = await prisma.rental.findMany({ where: scopedWhere(s, df(req, "hireDate")), orderBy: { hireDate: "asc" } });
+    const rentals = await prisma.rental.findMany({ where: scopedWhere(s, { ...df(req, "hireDate"), isHistoricalRecord: false }), orderBy: { hireDate: "asc" } });
     const map = {};
     rentals.forEach((r) => {
       const m = new Date(r.hireDate).toISOString().slice(0, 7);

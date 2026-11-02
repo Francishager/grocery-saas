@@ -82,6 +82,12 @@ const CATEGORIES: ReportCategory[] = [
         summaryKeys: [
           { key: 'count', label: 'Total Sales', format: 'number' },
           { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'serviceAndHireBookedAmount', label: 'Service & Hire Bookings', format: 'currency' },
+          { key: 'goodsBookedAmount', label: 'Goods in Bookings', format: 'currency' },
+          { key: 'consumablesIssuedCost', label: 'Consumables Issued Cost', format: 'currency' },
+          { key: 'historicalCount', label: 'Historical Records', format: 'number' },
+          { key: 'historicalAmountNotPosted', label: 'Historical Value Not Added to Current Operations', format: 'currency' },
+          { key: 'historicalReceivableOutstanding', label: 'Collectible Historical Rental Receivables', format: 'currency' },
           { key: 'totalSubtotal', label: 'Subtotal', format: 'currency' },
           { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
           { key: 'totalTax', label: 'Total Tax', format: 'currency' },

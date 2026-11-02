@@ -335,18 +335,20 @@ function transactionTone(row: CustomerHistoryTransaction) {
 function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?: string | null) {
   const isCreditNote = row.source === 'credit_note'
   const isReturn = row.source === 'sale_return'
-  const isPayment = row.source === 'customer_payment' || row.source === 'property_sale_payment'
+  const isPayment = ['customer_payment', 'property_sale_payment', 'rental_payment'].includes(row.source)
+  const isHistoricalRentalReceivable = row.source === 'historical_rental_receivable'
   const amount = Number(row.amount || row.debit || row.credit || 0)
   const title = isCreditNote
     ? 'Customer Credit Note'
     : isReturn
       ? row.paymentMethod === 'credit' ? 'Sales Return Credit Receipt' : 'Sales Return Refund Receipt'
       : isPayment
-        ? 'Customer Payment Receipt'
-      : `${row.type || 'Customer transaction'} receipt`
+        ? row.source === 'rental_payment' ? 'Rental Payment Receipt' : 'Customer Payment Receipt'
+      : isHistoricalRentalReceivable ? 'Historical Rental Receivable' : `${row.type || 'Customer transaction'} receipt`
   const fields = [
     { label: 'Transaction type', value: row.type },
-    ...(row.originalReference && !isPayment ? [{ label: 'Original sale', value: row.originalReference }] : []),
+    ...(row.originalReference && !isPayment ? [{ label: row.source === 'historical_rental_receivable' ? 'JibuSales rental record' : 'Original sale', value: row.originalReference }] : []),
+    ...(isHistoricalRentalReceivable ? [{ label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
     ...(row.reason ? [{ label: 'Reason', value: row.reason }] : []),
     ...(isPayment ? [{ label: 'Payment applied to', value: row.originalReference || 'Customer account' }] : []),
     ...(isCreditNote ? [
@@ -376,7 +378,7 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
     reference: displayReference(row.reference, row.id, row.type || 'Transaction'),
     date: row.date || new Date(),
     amount,
-    amountLabel: isPayment ? 'Payment received' : undefined,
+    amountLabel: isPayment ? 'Payment received' : isHistoricalRentalReceivable ? 'Opening balance brought forward' : undefined,
     partyLabel: 'Customer',
     partyName: customerName || undefined,
     itemsLabel: isPayment && row.items?.length ? 'Items on linked invoice' : undefined,
@@ -709,11 +711,12 @@ export default function CustomerTransactionHistoryDialog({
   const canEditRentalDetails = hasPermission('canManageTenancies')
   const creditActivity = transactions.filter((row) => [
     'opening_balance', 'receivable_sale', 'property_sale', 'property_sale_payment', 'sale_payment_adjustment', 'customer_payment',
-    'customer_credit_application', 'credit_note', 'sale_return', 'customer_withdrawal',
+    'customer_credit_application', 'credit_note', 'sale_return', 'customer_withdrawal', 'historical_rental_receivable', 'rental_payment',
   ].includes(row.source))
   const commercialActivity = transactions.filter(row => {
-    if (['receivable_sale', 'property_sale', 'pos_sale', 'customer_invoice'].includes(row.source)) return data?.access.sales
-    if (['customer_payment', 'property_sale_payment', 'sale_payment_adjustment'].includes(row.source)) return data?.access.payments
+    if (['receivable_sale', 'property_sale', 'pos_sale', 'customer_invoice', 'historical_rental_receivable'].includes(row.source)) return data?.access.sales || (row.source === 'historical_rental_receivable' && data?.access.businessActivity)
+    if (['customer_payment', 'property_sale_payment', 'sale_payment_adjustment', 'rental_payment'].includes(row.source)) return data?.access.payments || (row.source === 'rental_payment' && data?.access.businessActivity)
+    if (row.source === 'customer_activity') return data?.access.businessActivity
     if (row.source === 'customer_withdrawal') return data?.access.withdrawals
     if (row.source === 'credit_note') return data?.access.creditNotes
     if (row.source === 'sale_return') return data?.access.returns
@@ -1024,7 +1027,7 @@ export default function CustomerTransactionHistoryDialog({
                       <td className="px-3 py-2 text-right">{Number(row.credit || 0) > 0 ? formatCurrency(Number(row.credit)) : '-'}</td>
                       <td className={cn('px-3 py-2 text-right font-semibold', data.access.balance ? transactionTone(row) : 'text-muted-foreground')}>{data.access.balance ? formatCurrency(Number(row.balance || 0)) : '******'}</td>
                       <td className="px-3 py-2">
-                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton label={['customer_payment', 'property_sale_payment'].includes(row.source) ? 'Print payment receipt' : 'Print transaction'} data={customerActivityReceipt(row, data.customer.name)} />)}
+                        {data.access.printReceipts && (row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : !['credit_note', 'sale_return'].includes(row.source) && !/opening balance|system adjustment/i.test(`${row.type} ${row.source}`) && <TransactionReceiptButton label={['customer_payment', 'property_sale_payment', 'rental_payment'].includes(row.source) ? 'Print payment receipt' : 'Print transaction'} data={customerActivityReceipt(row, data.customer.name)} />)}
                       </td>
                     </tr>
                   )) : (
@@ -1221,12 +1224,12 @@ export default function CustomerTransactionHistoryDialog({
                         <td className="px-3 py-2 font-mono text-xs">{displayReference(row.reference, row.id, row.type || 'Transaction')}</td>
                         <td className="px-3 py-2">{row.description || '-'}</td>
                         <td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.amount || row.debit || row.credit || 0))}</td>
-                        {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'property_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'property_sale_payment'].includes(row.source) && <TransactionReceiptButton
-                          label={['customer_payment', 'property_sale_payment'].includes(row.source) || row.source === 'pos_sale' ? 'Reprint receipt' : 'Reprint invoice'}
-                          data={['customer_payment', 'property_sale_payment'].includes(row.source)
+                        {data.access.printReceipts && <td className="px-3 py-2 text-right">{row.receiptStatus ? <Badge variant={row.receiptStatus === 'cancelled' ? 'destructive' : 'outline'}>{row.receiptStatus === 'cancelled' ? 'Cancelled' : 'Adjusted'}</Badge> : ['receivable_sale', 'property_sale', 'pos_sale', 'customer_invoice', 'customer_payment', 'property_sale_payment', 'historical_rental_receivable', 'rental_payment'].includes(row.source) && <TransactionReceiptButton
+                          label={['customer_payment', 'property_sale_payment', 'rental_payment'].includes(row.source) || row.source === 'pos_sale' ? 'Reprint receipt' : 'Reprint invoice'}
+                          data={['customer_payment', 'property_sale_payment', 'rental_payment'].includes(row.source)
                             ? customerActivityReceipt(row, data.customer.name)
                             : {
-                              title: row.source === 'property_sale' ? 'Plot Sale Agreement / Invoice' : row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
+                              title: row.source === 'historical_rental_receivable' ? 'Historical Rental Receivable' : row.source === 'property_sale' ? 'Plot Sale Agreement / Invoice' : row.source === 'pos_sale' ? 'Sales Receipt' : 'Sales Invoice',
                         reference: displayReference(row.reference, row.id, row.type || 'Transaction'),
                               date: row.date || new Date(),
                               amount: Number(row.amount || row.debit || row.credit || 0),
@@ -1238,7 +1241,7 @@ export default function CustomerTransactionHistoryDialog({
                               })),
                               fields: [
                                 { label: 'Payment status', value: row.status },
-                                ...(row.source === 'receivable_sale' || row.source === 'property_sale' || row.source === 'customer_invoice' ? [{ label: 'Paid to date', value: formatCurrency(Number(row.amountPaid || 0)) }, { label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
+                                ...(row.source === 'receivable_sale' || row.source === 'property_sale' || row.source === 'customer_invoice' || row.source === 'historical_rental_receivable' ? [{ label: 'Paid to date', value: formatCurrency(Number(row.amountPaid || 0)) }, { label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
                                 { label: 'Payment method', value: row.paymentMethod }, { label: 'Served by', value: row.staff },
                               ],
                             }}

@@ -7,7 +7,8 @@ import { requireFeature, requireAnyFeature, hasFeatureAccess } from "../middlewa
 import { requestBusinessAdvice } from "../src/services/businessAdvisor.js";
 import { checkUsageLimit } from "../src/utils/usageLimits.js";
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from "../src/utils/customerIdentity.js";
-import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalRevenueRecognitionLines, rentalDamageChargeLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
+import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalMixedRevenueRecognitionLines, rentalConsumableCostLines, allocateRentalLineAmounts, rentalDamageChargeLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
+import { allocateHistoricalPaymentBalances } from "../src/services/rentalHistoricalEntryService.js";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -100,6 +101,38 @@ async function recordRentalPaymentTx(tx, { req, tenantId, rental, amount, method
   return payment;
 }
 
+async function consumeRentalChargeStockTx(tx, { tenantId, rental, userId }) {
+  const lines = await tx.rentalChargeLine.findMany({ where: { rentalId: rental.id, lineType: "consumable", stockConsumedAt: null } });
+  if (!lines.length) return;
+  const config = await ensureRentalAccounting(tx, tenantId);
+  for (const line of lines) {
+    if (!line.productId || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) <= 0) {
+      throw Object.assign(new Error(`Consumable line “${line.label}” needs a valid catalog item and whole quantity before check-out.`), { statusCode: 409 });
+    }
+    const branchFilter = rental.branchId ? { OR: [{ branchId: rental.branchId }, { branchId: null }] } : {};
+    const product = await tx.product.findFirst({ where: { id: line.productId, tenantId, itemType: "product", isActive: true, ...branchFilter }, select: { id: true, name: true, cost: true } });
+    if (!product || Number(product.cost) <= 0) throw Object.assign(new Error(`Set a valid cost price for stocked item “${line.label}” before check-out so inventory cost is recorded correctly.`), { statusCode: 409 });
+    const moved = await tx.product.updateMany({
+      where: { id: line.productId, tenantId, itemType: "product", isActive: true, ...branchFilter, quantity: { gte: Number(line.quantity) } },
+      data: { quantity: { decrement: Number(line.quantity) } },
+    });
+    if (moved.count !== 1) throw Object.assign(new Error(`Not enough stock for “${product.name}”. Restock it or reduce the booking quantity before check-out.`), { statusCode: 409 });
+    const unitCost = Number(product.cost);
+    const cost = Math.round(unitCost * Number(line.quantity) * 100) / 100;
+    await postRentalJournal(tx, {
+      tenantId,
+      branchId: rental.branchId,
+      userId,
+      sourceType: "RENTAL_CONSUMABLE_COGS",
+      sourceId: line.id,
+      reference: rental.rentalNo,
+      description: `Consumables issued for booking ${rental.rentalNo}`,
+      lines: rentalConsumableCostLines(config, { amount: cost, reference: rental.rentalNo }),
+    });
+    await tx.rentalChargeLine.update({ where: { id: line.id }, data: { unitCost, stockConsumedAt: new Date() } });
+  }
+}
+
 const withUser = (record) => {
   if (!record) return record;
   const { User, ...rest } = record;
@@ -152,17 +185,17 @@ router.get("/dashboard/summary", authenticateToken, requirePermission("canViewRe
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const openRentals = await prisma.rental.findMany({
-      where: scopedWhere(scope, { status: "active", bookingState: "checked_out" }),
+      where: scopedWhere(scope, { isHistoricalRecord: false, status: "active", bookingState: "checked_out" }),
       select: { expectedReturnDate: true, balance: true, items: { select: { quantity: true } } },
     });
     const [activeCount, reservations, overdueCount, openBalance, heldDeposits, collections, returnedToday] = await Promise.all([
-      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: "checked_out" }) }),
-      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: { in: ["reserved", "confirmed"] } }) }),
-      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: "checked_out", expectedReturnDate: { lt: now } }) }),
-      prisma.rental.aggregate({ where: scopedWhere(scope, { status: { notIn: ["cancelled"] }, balance: { gt: 0 } }), _sum: { balance: true } }),
-      prisma.rental.findMany({ where: scopedWhere(scope, { status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositPaid: true, depositAmount: true, depositRefunded: true, depositStatus: true } }),
+      prisma.rental.count({ where: scopedWhere(scope, { isHistoricalRecord: false, status: "active", bookingState: "checked_out" }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { isHistoricalRecord: false, status: "active", bookingState: { in: ["reserved", "confirmed"] } }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { isHistoricalRecord: false, status: "active", bookingState: "checked_out", expectedReturnDate: { lt: now } }) }),
+      prisma.rental.aggregate({ where: scopedWhere(scope, { isHistoricalRecord: false, status: { notIn: ["cancelled"] }, balance: { gt: 0 } }), _sum: { balance: true } }),
+      prisma.rental.findMany({ where: scopedWhere(scope, { isHistoricalRecord: false, status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositPaid: true, depositAmount: true, depositRefunded: true, depositStatus: true } }),
       prisma.rentalPayment.aggregate({ where: { tenantId: scope.tenantId, status: "posted", kind: { in: ["rental_payment", "rental_advance"] }, paymentDate: { gte: monthStart }, ...(scope.branchId ? { rental: { branchId: scope.branchId } } : {}) }, _sum: { amount: true }, _count: true }),
-      prisma.rental.count({ where: scopedWhere(scope, { status: "returned", actualReturnDate: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { isHistoricalRecord: false, status: "returned", actualReturnDate: { gte: new Date(now.getFullYear(), now.getMonth(), now.getDate()) } }) }),
     ]);
     const overdue = openRentals.filter(rental => rental.expectedReturnDate < now);
     res.json({
@@ -180,6 +213,20 @@ router.get("/dashboard/summary", authenticateToken, requirePermission("canViewRe
     });
   } catch (err) {
     handleBranchError(res, err, "Failed to load rental dashboard summary.");
+  }
+});
+
+router.get("/catalog", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const items = await prisma.product.findMany({
+      where: scopedWhere(scope, { itemType: { in: ["rental", "service", "product"] }, isActive: true }),
+      select: { id: true, name: true, sku: true, itemType: true, price: true, rentalPrice: true, rentalPeriod: true, baseUnit: true, quantity: true, serviceCategory: true },
+      orderBy: { name: "asc" },
+    });
+    res.json({ items });
+  } catch (err) {
+    handleBranchError(res, err, "Failed to load rental and service catalog.");
   }
 });
 
@@ -223,7 +270,7 @@ router.get("/", authenticateToken, requirePermission("canViewRental"), requireTe
           User: userSelect,
           items: { include: { product: { select: { id: true, name: true, sku: true } } } },
           chargeLines: true,
-          payments: { where: { status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
+          payments: { where: { status: { in: ["posted", "historical"] } }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -237,6 +284,44 @@ router.get("/", authenticateToken, requirePermission("canViewRental"), requireTe
   } catch (err) {
     console.error("Rentals list error:", err);
     handleBranchError(res, err, "Failed to fetch rentals");
+  }
+});
+
+router.get("/receivables", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(250, Math.max(1, Number.parseInt(String(req.query.limit || "100"), 10) || 100));
+    const where = scopedWhere(scope, {
+      customerId: { not: null },
+      balance: { gt: 0.01 },
+      status: { not: "cancelled" },
+      OR: [
+        { isHistoricalReceivable: true },
+        { isHistoricalRecord: false, bookingState: { in: ["checked_out", "returned"] } },
+      ],
+    });
+    const [rentals, total] = await Promise.all([
+      prisma.rental.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: [{ hireDate: "asc" }, { id: "asc" }],
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          branch: { select: { id: true, name: true } },
+          User: userSelect,
+          items: { include: { product: { select: { id: true, name: true, sku: true } } } },
+          chargeLines: true,
+          payments: { where: { status: { in: ["posted", "historical"] } }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
+        },
+      }),
+      prisma.rental.count({ where }),
+    ]);
+    res.json({ rentals: rentals.map(withUser), pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  } catch (err) {
+    console.error("Rental receivables list error:", err);
+    handleBranchError(res, err, "Failed to load rental receivables");
   }
 });
 
@@ -666,7 +751,7 @@ router.get("/:id", authenticateToken, requirePermission("canViewRental"), requir
         User: userSelect,
         items: { include: { product: { select: { id: true, name: true, sku: true, rentalPrice: true, replacementValue: true } } } },
         chargeLines: true,
-        payments: { where: { status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
+        payments: { where: { status: { in: ["posted", "historical"] } }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
       },
     });
     if (!rental) return res.status(404).json({ error: "Rental not found" });
@@ -684,6 +769,7 @@ router.post("/:id/payments", authenticateToken, requireAnyPermission(["canRecord
     const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
     if (!rental) return res.status(404).json({ error: "Rental not found." });
     if (rental.status === "cancelled") return res.status(409).json({ error: "Cancelled rentals cannot receive payments." });
+    if (rental.isHistoricalRecord && !rental.isHistoricalReceivable) return res.status(409).json({ error: "Add this past booking's unpaid balance to customer receivables before recording a current payment." });
     const value = toMoney(amount, -1);
     if (value <= 0 || value > Number(rental.balance) + 0.01) return res.status(400).json({ error: "Enter a positive payment no greater than the rental balance." });
     if (paymentMethod === "mobile_money" && (!mobileProvider || !phoneNumber || !transactionRef)) return res.status(400).json({ error: "Mobile money requires provider, phone number, and transaction reference." });
@@ -817,11 +903,217 @@ router.post("/:id/deposit-forfeitures", authenticateToken, requireAnyPermission(
 router.get("/:id/payments/:paymentId/receipt", authenticateToken, requirePermission("canViewRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
-    const payment = await prisma.rentalPayment.findFirst({ where: { tenantId: scope.tenantId, rentalId: req.params.id, id: req.params.paymentId, status: "posted" }, include: { rental: { include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true, sku: true } } } }, chargeLines: true } }, cashAccount: { select: { name: true, type: true } }, tenant: { select: { name: true, address: true, phone: true, email: true, logo: true, currency: true } } } });
+    const payment = await prisma.rentalPayment.findFirst({ where: { tenantId: scope.tenantId, rentalId: req.params.id, id: req.params.paymentId, status: { in: ["posted", "historical"] } }, include: { rental: { include: { customer: { select: { name: true, phone: true } }, items: { include: { product: { select: { name: true, sku: true } } } }, chargeLines: true } }, cashAccount: { select: { name: true, type: true } }, tenant: { select: { name: true, address: true, phone: true, email: true, logo: true, currency: true } } } });
     if (!payment) return res.status(404).json({ error: "Rental receipt not found." });
     res.json({ payment });
   } catch (err) {
     handleBranchError(res, err, "Could not load rental receipt.");
+  }
+});
+
+// Historical records are operational history only: no current stock, cash, or GL movement is inferred.
+router.post("/historical", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", requireBranch: true, allowOwnerAll: false });
+    const {
+      historicalImportKey, customerId, customerName, customerPhone, items = [], additionalCharges = [],
+      hireDate, expectedReturnDate, actualReturnDate, depositAmount = 0, discount = 0,
+      taxRate = 0, payments = [], notes, bookingPurpose, historicalReference, collectUnpaidBalance = false,
+    } = req.body;
+    const importKey = String(historicalImportKey || "").trim();
+    if (importKey.length < 10 || importKey.length > 80) return res.status(400).json({ error: "A valid historical-entry request key is required." });
+    const existing = await prisma.rental.findFirst({ where: { tenantId: scope.tenantId, historicalImportKey: importKey }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true, payments: { where: { status: "historical" }, orderBy: { paymentDate: "asc" } } } });
+    if (existing) return res.json(withUser(existing));
+    if (!Array.isArray(items) || !Array.isArray(additionalCharges) || !Array.isArray(payments) || payments.length > 100 || additionalCharges.length > 50) {
+      return res.status(400).json({ error: "Historical booking lines or payments are invalid or exceed the supported limit." });
+    }
+    if (!items.length && !additionalCharges.length) return res.status(400).json({ error: "Add at least one historical hire item, service, or goods line." });
+    const dateValue = (value, label, endOfDay = false) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) throw Object.assign(new Error(`${label} must be a valid date.`), { statusCode: 400 });
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw Object.assign(new Error(`${label} must be a valid date.`), { statusCode: 400 });
+      if (endOfDay) date.setUTCHours(23, 59, 59, 999);
+      return date;
+    };
+    const hireAt = dateValue(hireDate, "Hire date");
+    const expectedAt = dateValue(expectedReturnDate, "Expected return date", true);
+    const returnedAt = dateValue(actualReturnDate, "Actual return date", true);
+    const now = new Date();
+    const todayParts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Kampala", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+    const todayBusinessDate = `${todayParts.find(part => part.type === "year")?.value}-${todayParts.find(part => part.type === "month")?.value}-${todayParts.find(part => part.type === "day")?.value}`;
+    if ([hireDate, expectedReturnDate, actualReturnDate].some(value => value > todayBusinessDate) || expectedAt < hireAt || returnedAt < hireAt) return res.status(400).json({ error: "Historical dates must not be in the future, with return dates on or after the hire date." });
+    if (!customerId && !String(customerName || "").trim()) return res.status(400).json({ error: "Select an existing customer or enter the customer name." });
+    if (collectUnpaidBalance && !customerId) return res.status(400).json({ error: "Select an existing customer before adding the unpaid historical amount to receivables." });
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: customerId }), select: { id: true } });
+      if (!customer) return res.status(404).json({ error: "Customer not found in this business or branch." });
+    }
+    if (scope.branchId && !scope.tenantId) return res.status(400).json({ error: "Business scope is unavailable." });
+
+    const rentalProductIds = [...new Set(items.map(item => String(item?.productId || "").trim()).filter(Boolean))];
+    const chargeProductIds = [...new Set(additionalCharges.map(line => String(line?.productId || "").trim()).filter(Boolean))];
+    const [rentalProducts, chargeProducts] = await Promise.all([
+      rentalProductIds.length ? prisma.product.findMany({ where: scopedWhere(scope, { id: { in: rentalProductIds }, isActive: { not: false } }), select: { id: true, name: true, itemType: true, rentalPrice: true, price: true, rentalPeriod: true } }) : [],
+      chargeProductIds.length ? prisma.product.findMany({ where: scopedWhere(scope, { id: { in: chargeProductIds }, isActive: true }), select: { id: true, name: true, itemType: true, cost: true, price: true } }) : [],
+    ]);
+    if (rentalProducts.length !== rentalProductIds.length || rentalProducts.some(product => product.itemType !== "rental")) return res.status(400).json({ error: "Every hire asset must be an active Rental Item from this business." });
+    if (chargeProducts.length !== chargeProductIds.length) return res.status(400).json({ error: "A selected service or goods item was not found in this business." });
+    const rentalsById = new Map(rentalProducts.map(product => [product.id, product]));
+    const chargesById = new Map(chargeProducts.map(product => [product.id, product]));
+    const rentalLines = items.map(item => {
+      const product = rentalsById.get(String(item.productId));
+      const quantity = Number(item.quantity);
+      const periods = Number(item.periods || 1);
+      const unitHirePrice = toMoney(item.unitHirePrice, Number(product?.rentalPrice || product?.price || -1));
+      if (!product || !Number.isInteger(quantity) || quantity <= 0 || quantity > 10000 || !Number.isInteger(periods) || periods <= 0 || unitHirePrice < 0) throw Object.assign(new Error("Historical hire item quantity, periods, or saved rate is invalid."), { statusCode: 400 });
+      const conditionReturn = String(item.conditionReturn || "good");
+      if (!["good", "fair", "damaged", "broken"].includes(conditionReturn)) throw Object.assign(new Error("Choose a valid historical return condition."), { statusCode: 400 });
+      const conditionOut = String(item.conditionOut || "good");
+      if (!["good", "fair", "damaged", "broken"].includes(conditionOut)) throw Object.assign(new Error("Choose a valid historical handover condition."), { statusCode: 400 });
+      const rentalPeriod = String(item.rentalPeriod || product.rentalPeriod || "daily");
+      if (!["hourly", "daily", "weekly", "weekend", "monthly", "custom"].includes(rentalPeriod)) throw Object.assign(new Error("Choose a valid historical hire period."), { statusCode: 400 });
+      const totalAmount = Math.round(quantity * periods * unitHirePrice * 100) / 100;
+      return { productId: product.id, quantity, periods, unitHirePrice, rentalPeriod, totalAmount, conditionOut, conditionReturn, notes: item.notes || null };
+    });
+    const chargeLines = additionalCharges.map(line => {
+      const lineType = String(line?.lineType || "service").toLowerCase();
+      const productId = String(line?.productId || "").trim() || null;
+      const product = productId ? chargesById.get(productId) : null;
+      const label = String(line?.label || product?.name || "").trim();
+      const quantity = Number(line?.quantity ?? 1);
+      const unitPrice = toMoney(line?.unitPrice, Number(product?.price ?? -1));
+      const unitCost = toMoney(line?.unitCost, 0);
+      const category = String(line?.category || "service").trim().toLowerCase();
+      if (!label || label.length > 120 || !["service", "consumable"].includes(lineType) || !["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"].includes(category) || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0 || unitCost < 0) throw Object.assign(new Error("Historical service or goods details are invalid."), { statusCode: 400 });
+      if (productId && !product) throw Object.assign(new Error("A selected historical charge item was not found."), { statusCode: 400 });
+      if (lineType === "consumable" && (!product || product.itemType !== "product" || !Number.isInteger(quantity))) throw Object.assign(new Error("Historical goods lines require a catalog product and whole-unit quantity."), { statusCode: 400 });
+      if (productId && lineType === "service" && product.itemType !== "service") throw Object.assign(new Error("Catalog-linked service lines must use a saved service item."), { statusCode: 400 });
+      return { lineType, productId, unitCost, label, category, quantity, unitPrice, totalAmount: Math.round(quantity * unitPrice * 100) / 100 };
+    });
+    const grossTotal = [...rentalLines, ...chargeLines].reduce((sum, line) => sum + line.totalAmount, 0);
+    const discountAmount = toMoney(discount, -1);
+    const rate = toMoney(taxRate, -1);
+    const deposit = toMoney(depositAmount, -1);
+    if (discountAmount < 0 || discountAmount > grossTotal + 0.01 || rate < 0 || rate > 100 || deposit < 0) return res.status(400).json({ error: "Historical discount, tax rate, or deposit is invalid." });
+    const lineAmounts = allocateRentalLineAmounts(rentalLines, chargeLines, discountAmount, rate);
+    const taxAmount = lineAmounts.taxAmount;
+    const totalAmount = Math.max(0, Math.round((grossTotal - discountAmount + taxAmount) * 100) / 100);
+    const normalizedPayments = payments.map((payment, index) => {
+      const kind = String(payment?.kind || "rental_payment");
+      const amount = toMoney(payment?.amount, -1);
+      const paymentMethod = String(payment?.paymentMethod || "").toLowerCase();
+      const paymentDate = dateValue(payment?.paymentDate, `Payment ${index + 1} date`);
+      if (String(payment?.paymentDate || "") > todayBusinessDate || !["rental_payment", "deposit", "deposit_refund"].includes(kind) || amount <= 0 || !["cash", "safe", "mobile_money", "bank_transfer", "card", "cheque", "other"].includes(paymentMethod)) throw Object.assign(new Error(`Historical payment ${index + 1} needs a valid past date, amount, type, and payment method.`), { statusCode: 400 });
+      if (paymentMethod === "mobile_money" && (!payment.mobileProvider || !payment.phoneNumber || !payment.transactionRef)) throw Object.assign(new Error(`Historical mobile-money payment ${index + 1} requires its provider, phone, and transaction reference.`), { statusCode: 400 });
+      if (["card", "bank_transfer", "cheque"].includes(paymentMethod) && !payment.transactionRef) throw Object.assign(new Error(`Historical ${paymentMethod.replaceAll("_", " ")} payment ${index + 1} requires its transaction reference.`), { statusCode: 400 });
+      return { kind, amount, paymentMethod, paymentDate, mobileProvider: payment.mobileProvider || null, phoneNumber: payment.phoneNumber || null, transactionRef: payment.transactionRef || null, notes: payment.notes || null, index };
+    }).sort((a, b) => a.paymentDate - b.paymentDate || a.index - b.index);
+    const paymentTotals = allocateHistoricalPaymentBalances(totalAmount, deposit, normalizedPayments);
+    const { payments: balancedPayments, amountPaid, depositPaid, depositRefunded, balance } = paymentTotals;
+    if (collectUnpaidBalance && balance <= 0) return res.status(400).json({ error: "This historical booking has no unpaid amount to add to receivables." });
+    const originalReference = String(historicalReference || "").trim().slice(0, 120) || null;
+    const rentalNo = `HIST-${hireAt.toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const created = await prisma.$transaction(async tx => {
+      const prior = await tx.rental.findFirst({ where: { tenantId: scope.tenantId, historicalImportKey: importKey } });
+      if (prior) return tx.rental.findUnique({ where: { id: prior.id }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true, payments: { where: { status: "historical" }, orderBy: { paymentDate: "asc" } } } });
+      const rental = await tx.rental.create({
+        data: {
+          rentalNo, tenantId: scope.tenantId, branchId: scope.branchId, customerId: customerId || null,
+          customerName: String(customerName || "").trim() || null, customerPhone: String(customerPhone || "").trim() || null,
+          userId: req.user.id, hireDate: hireAt, expectedReturnDate: expectedAt, actualReturnDate: returnedAt,
+          totalAmount, depositAmount: deposit, depositStatus: paymentTotals.heldDeposit > 0 ? "held" : depositPaid ? "refunded" : "not_required",
+          depositPaid, depositRefunded, amountPaid, balance, paymentStatus: balance <= 0 ? "paid" : amountPaid > 0 ? "partial" : "unpaid",
+          paymentMethod: normalizedPayments[0]?.paymentMethod || "historical", discount: discountAmount, taxRate: rate, taxAmount,
+          status: "returned", bookingState: "returned", bookingPurpose: String(bookingPurpose || "").trim().slice(0, 500) || null,
+          isHistoricalRecord: true, historicalImportKey: importKey,
+          historicalReference: originalReference,
+          isHistoricalReceivable: Boolean(collectUnpaidBalance),
+          historicalReceivableAmount: collectUnpaidBalance ? balance : 0,
+          notes: [collectUnpaidBalance
+            ? "Historical rental documented. Its unpaid balance was added to customer receivables against rental opening equity; no historical revenue, cash, or stock movement was recreated."
+            : "Historical booking record; no current stock, cash, customer-control, or general-ledger movement was created.", String(notes || "").trim()].filter(Boolean).join("\n"),
+          items: { create: lineAmounts.items.map(item => ({ ...item, conditionOut: item.conditionOut || "good" })) },
+          chargeLines: { create: lineAmounts.chargeLines },
+        },
+      });
+      if (collectUnpaidBalance) {
+        const config = await ensureRentalAccounting(tx, scope.tenantId);
+        const reference = originalReference || rentalNo;
+        await postRentalJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: "RENTAL_HISTORICAL_RECEIVABLE", sourceId: rental.id,
+          reference,
+          description: `Historical rental receivable cutover for ${reference}; original hire date ${hireAt.toISOString().slice(0, 10)}. No historical revenue or cash is recreated.`,
+          lines: [
+            { accountId: config.receivableAccountId, debit: balance, credit: 0, description: `Collectible historical rental balance ${reference}` },
+            { accountId: config.openingEquityAccountId, debit: 0, credit: balance, description: `Historical rental opening control ${reference}` },
+          ],
+        });
+      }
+      for (const payment of balancedPayments) {
+        const receiptNo = `RNT-H-${hireAt.toISOString().slice(0, 10).replaceAll("-", "")}-${randomUUID().slice(0, 8).toUpperCase()}`;
+        await tx.rentalPayment.create({ data: {
+          tenantId: scope.tenantId, rentalId: rental.id, userId: req.user.id, kind: payment.kind,
+          receiptNo, idempotencyKey: `historical:${importKey}:${payment.index}`.slice(0, 120), amount: payment.amount,
+          balanceAfter: payment.balanceAfter,
+          paymentMethod: payment.paymentMethod, mobileProvider: payment.mobileProvider, phoneNumber: payment.phoneNumber,
+          paymentDate: payment.paymentDate, transactionRef: payment.transactionRef,
+          notes: ["Historical receipt copy; no new funds were received or paid in JibuSales.", payment.notes].filter(Boolean).join(" "), status: "historical",
+        } });
+      }
+      return tx.rental.findUnique({ where: { id: rental.id }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true, payments: { where: { status: "historical" }, orderBy: { paymentDate: "asc" } } } });
+    }, { isolationLevel: "Serializable" });
+    res.status(201).json(withUser(created));
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2002") return res.status(409).json({ error: "This historical booking was already saved. Refresh the booking list before retrying." });
+    if (err.code === "P2034") return res.status(409).json({ error: "Another update happened at the same time. Refresh and retry." });
+    handleBranchError(res, err, "Failed to record historical booking.");
+  }
+});
+
+router.post("/:id/historical-receivable", authenticateToken, requirePermission("canCreateRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", requireBranch: false, allowOwnerAll: true });
+    const customerId = String(req.body?.customerId || "").trim();
+    const historicalReference = String(req.body?.historicalReference || "").trim().slice(0, 120) || null;
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM rentals WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id, isHistoricalRecord: true }) });
+      if (!rental) throw Object.assign(new Error("Historical rental record not found."), { statusCode: 404 });
+      if (rental.isHistoricalReceivable) return rental;
+      const resolvedCustomerId = customerId || rental.customerId;
+      if (!resolvedCustomerId) throw Object.assign(new Error("Select an existing customer to make this historical balance collectible."), { statusCode: 400 });
+      const customer = await tx.customer.findFirst({ where: scopedWhere(scope, { id: resolvedCustomerId }), select: { id: true } });
+      if (!customer) throw Object.assign(new Error("Customer was not found in this business or permitted branch."), { statusCode: 404 });
+      const outstanding = Math.round(Number(rental.balance || 0) * 100) / 100;
+      if (!(outstanding > 0)) throw Object.assign(new Error("This historical booking has no unpaid balance to add to receivables."), { statusCode: 400 });
+      const reference = historicalReference || rental.historicalReference || rental.rentalNo;
+      const updated = await tx.rental.update({ where: { id: rental.id }, data: {
+        customerId: resolvedCustomerId,
+        isHistoricalReceivable: true,
+        historicalReceivableAmount: outstanding,
+        historicalReference: historicalReference || rental.historicalReference || null,
+      } });
+      const config = await ensureRentalAccounting(tx, scope.tenantId);
+      await postRentalJournal(tx, {
+        tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id,
+        sourceType: "RENTAL_HISTORICAL_RECEIVABLE", sourceId: rental.id,
+        reference,
+        description: `Historical rental receivable cutover for ${reference}; original hire date ${rental.hireDate.toISOString().slice(0, 10)}. No historical revenue or cash is recreated.`,
+        lines: [
+          { accountId: config.receivableAccountId, debit: outstanding, credit: 0, description: `Collectible historical rental balance ${reference}` },
+          { accountId: config.openingEquityAccountId, debit: 0, credit: outstanding, description: `Historical rental opening control ${reference}` },
+        ],
+      });
+      return updated;
+    }, { isolationLevel: "Serializable" });
+    res.json({ rental: result });
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2002") return res.status(409).json({ error: "This historical balance was already added to receivables." });
+    if (err.code === "P2034") return res.status(409).json({ error: "Another update happened at the same time. Refresh and retry." });
+    handleBranchError(res, err, "Failed to add historical rental balance to receivables.");
   }
 });
 
@@ -917,31 +1209,57 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
     });
 
     const subtotal = rentalItems.reduce((sum, i) => sum + i.totalAmount, 0);
+    const chargeProductIds = [...new Set(additionalCharges.map(charge => String(charge?.productId || "").trim()).filter(Boolean))];
+    const chargeProducts = chargeProductIds.length ? await prisma.product.findMany({
+      where: scopedWhere(scope, { id: { in: chargeProductIds }, isActive: true }),
+      select: { id: true, name: true, itemType: true, cost: true, price: true, quantity: true },
+    }) : [];
+    if (chargeProducts.length !== chargeProductIds.length) return res.status(400).json({ error: "A selected service or consumable item was not found in this business or branch." });
+    const chargeProductsById = new Map(chargeProducts.map(product => [product.id, product]));
     const chargeLines = additionalCharges.map((charge) => {
-      const label = String(charge?.label || "").trim();
+      const lineType = String(charge?.lineType || "service").trim().toLowerCase();
+      const productId = String(charge?.productId || "").trim() || null;
+      const product = productId ? chargeProductsById.get(productId) : null;
+      const label = String(charge?.label || product?.name || "").trim();
       const category = String(charge?.category || "service").trim().toLowerCase();
       const quantity = Number(charge?.quantity ?? 1);
-      const unitPrice = toMoney(charge?.unitPrice, -1);
-      if (!label || label.length > 120 || !["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"].includes(category) || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0) {
+      const unitPrice = toMoney(charge?.unitPrice, product?.price ?? -1);
+      if (!label || label.length > 120 || !["service", "consumable"].includes(lineType) || !["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"].includes(category) || !Number.isFinite(quantity) || quantity <= 0 || quantity > 10000 || unitPrice < 0) {
         throw Object.assign(new Error("Check the additional service/charge lines. Names, categories, quantity, or prices are invalid."), { statusCode: 400 });
       }
-      return { label, category, quantity, unitPrice, totalAmount: Math.round(quantity * unitPrice * 100) / 100 };
+      if (lineType === "consumable" && (!product || product.itemType !== "product" || !Number.isInteger(quantity) || Number(product.cost) <= 0)) {
+        throw Object.assign(new Error("Consumable lines must use an active stocked product with a whole quantity and a saved cost price."), { statusCode: 400 });
+      }
+      if (productId && lineType === "service" && product?.itemType !== "service") {
+        throw Object.assign(new Error("Catalog-linked service lines must select an item classified as a service."), { statusCode: 400 });
+      }
+      if (lineType === "consumable" && bookingMode === "checkout" && Number(product?.quantity || 0) < quantity) {
+        throw Object.assign(new Error(`Not enough stock for “${product?.name}”. Reduce the quantity or restock before check-out.`), { statusCode: 409 });
+      }
+      return { lineType, productId, unitCost: lineType === "consumable" ? Number(product.cost) : 0, label, category, quantity, unitPrice, totalAmount: Math.round(quantity * unitPrice * 100) / 100 };
     });
     const chargeTotal = chargeLines.reduce((sum, line) => sum + line.totalAmount, 0);
     const grossSubtotal = subtotal + chargeTotal;
     const discountAmount = toMoney(discount);
+    if (discountAmount > grossSubtotal + 0.01) return res.status(400).json({ error: "Discount cannot exceed the booking subtotal." });
     const taxableAmount = Math.max(0, grossSubtotal - discountAmount);
 
     // Fetch tenant tax settings
     const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
     const taxRate = (tenant?.taxEnabled && tenant?.taxRate) ? tenant.taxRate / 100 : 0;
-    const taxAmount = Math.round(taxableAmount * taxRate * 100) / 100;
+    const lineAmounts = allocateRentalLineAmounts(rentalItems, chargeLines, discountAmount, taxRate * 100);
+    const pricedRentalItems = lineAmounts.items;
+    const pricedChargeLines = lineAmounts.chargeLines;
+    const taxAmount = lineAmounts.taxAmount;
     const totalAmount = Math.max(0, taxableAmount + taxAmount);
 
     const deposit = toMoney(depositAmount);
     if (deposit < 0 || discountAmount < 0 || toMoney(amountPaid) < 0) return res.status(400).json({ error: "Discount, deposit, and payment amounts cannot be negative." });
     if (toMoney(amountPaid) > totalAmount + 0.01) return res.status(400).json({ error: "Payment exceeds the rental charge. Record any excess as a separately approved customer advance rather than hiding it in this rental." });
     const paid = Math.min(toMoney(amountPaid), totalAmount);
+    if (bookingMode === "checkout" && totalAmount - paid > 0.01 && !customerId) {
+      return res.status(400).json({ error: "Link the renter to an existing customer before recording an unpaid rental balance. This is required to track and collect the receivable." });
+    }
     if ((paid > 0 || deposit > 0) && !cashAccountId) return res.status(400).json({ error: "Select the transaction account receiving rental payments and deposits." });
     const balance = totalAmount;
     const paymentStatus = totalAmount > 0 ? "unpaid" : "paid";
@@ -985,9 +1303,9 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
           bookingPurpose: String(bookingPurpose || "").trim().slice(0, 500) || null,
           notes,
           items: {
-            create: rentalItems.map(({ ...rest }) => rest),
+            create: pricedRentalItems.map(({ ...rest }) => rest),
           },
-          chargeLines: { create: chargeLines },
+          chargeLines: { create: pricedChargeLines },
         },
         include: {
           customer: true,
@@ -1006,6 +1324,7 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
         const config = await ensureRentalAccounting(tx, scope.tenantId);
         await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id, sourceType: "RENTAL_ISSUE", sourceId: created.id, reference: rentalNo, description: `Rental invoice ${rentalNo}`, lines: rentalInvoiceLines(config, { total: totalAmount, tax: taxAmount, reference: rentalNo }) });
       }
+      if (bookingMode === "checkout") await consumeRentalChargeStockTx(tx, { tenantId: scope.tenantId, rental: created, userId: req.user.id });
       if (paid > 0) await recordRentalPaymentTx(tx, { req, tenantId: scope.tenantId, rental: created, amount: paid, method: paymentMethod, cashAccountId, kind: bookingMode === "reserve" ? "rental_advance" : "rental_payment", transactionRef: transactionId, mobileProvider, phoneNumber });
       if (deposit > 0) await recordRentalPaymentTx(tx, { req, tenantId: scope.tenantId, rental: created, amount: deposit, method: paymentMethod, cashAccountId, kind: "deposit", transactionRef: transactionId, mobileProvider, phoneNumber, notes: "Refundable security deposit" });
 
@@ -1024,15 +1343,19 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
 router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
-    const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true } });
+    const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true, chargeLines: true } });
     if (!rental) return res.status(404).json({ error: "Rental not found." });
     if (rental.status !== "active" || rental.bookingState === "checked_out") return res.status(409).json({ error: "Only an active reservation can be checked out." });
+    if (!rental.customerId && Number(rental.totalAmount) - Number(rental.amountPaid || 0) > 0.01) {
+      return res.status(409).json({ error: "Link this renter to an existing customer before check-out so any unpaid rental balance can be tracked and collected." });
+    }
     const updated = await prisma.$transaction(async (tx) => {
       const checkoutStart = new Date();
       if (new Date(rental.expectedReturnDate) <= checkoutStart) throw Object.assign(new Error("The reserved return date has passed. Update the reservation before check-out."), { statusCode: 409 });
       const availability = await getRentalAvailability(tx, scope, rental.items.map((item) => item.productId), checkoutStart, rental.expectedReturnDate, rental.id);
       for (const item of rental.items) if ((availability.find((row) => row.productId === item.productId)?.available || 0) < item.quantity) throw Object.assign(new Error("Availability changed since reservation. Adjust the reservation before check-out."), { statusCode: 409 });
       for (const item of rental.items) await tx.product.update({ where: { id: item.productId }, data: { quantity: { decrement: item.quantity } } });
+      await consumeRentalChargeStockTx(tx, { tenantId: scope.tenantId, rental, userId: req.user.id });
       const checkedOut = await tx.rental.update({ where: { id: rental.id }, data: { bookingState: "checked_out", hireDate: new Date() }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true } });
       if (Number(checkedOut.totalAmount) > 0) {
         const config = await ensureRentalAccounting(tx, scope.tenantId);
@@ -1060,7 +1383,7 @@ router.post("/:id/return", authenticateToken, requirePermission("canProcessRenta
 
     const rental = await prisma.rental.findFirst({
       where: scopedWhere(scope, { id }),
-      include: { items: { include: { product: true } }, customer: true },
+      include: { items: { include: { product: true } }, chargeLines: true, customer: true },
     });
 
     if (!rental) return res.status(404).json({ error: "Rental not found" });
@@ -1129,7 +1452,8 @@ router.post("/:id/return", authenticateToken, requirePermission("canProcessRenta
       const issued = await tx.journalEntry.findFirst({ where: { tenantId: scope.tenantId, sourceType: "RENTAL_ISSUE", sourceId: rental.id } });
       if (issued && Number(rental.totalAmount) - Number(rental.taxAmount || 0) > 0) {
         const config = await ensureRentalAccounting(tx, scope.tenantId);
-        await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_EARNED_REVENUE", sourceId: rental.id, reference: rental.rentalNo, description: `Recognize earned rental charges ${rental.rentalNo}`, lines: rentalRevenueRecognitionLines(config, { amount: Math.max(0, Number(rental.totalAmount) - Number(rental.taxAmount || 0)), reference: rental.rentalNo }) });
+        const goodsNet = rental.chargeLines.filter(line => line.lineType === "consumable").reduce((sum, line) => sum + Number(line.netAmount || 0), 0);
+        await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_EARNED_REVENUE", sourceId: rental.id, reference: rental.rentalNo, description: `Recognize earned booking income ${rental.rentalNo}`, lines: rentalMixedRevenueRecognitionLines(config, { amount: Math.max(0, Number(rental.totalAmount) - Number(rental.taxAmount || 0)), goodsAmount: goodsNet, reference: rental.rentalNo }) });
       }
       if (totalDamageFee > 0) {
         const config = await ensureRentalAccounting(tx, scope.tenantId);
@@ -1210,20 +1534,21 @@ router.get("/report/summary", authenticateToken, requirePermission("canViewRepor
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
 
     const [activeRentals, reservedRentals, overdueRentals, totalRevenue, depositRows] = await Promise.all([
-      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: "checked_out" }) }),
-      prisma.rental.count({ where: scopedWhere(scope, { status: "active", bookingState: { in: ["reserved", "confirmed"] } }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { isHistoricalRecord: false, status: "active", bookingState: "checked_out" }) }),
+      prisma.rental.count({ where: scopedWhere(scope, { isHistoricalRecord: false, status: "active", bookingState: { in: ["reserved", "confirmed"] } }) }),
       prisma.rental.count({
         where: scopedWhere(scope, {
+          isHistoricalRecord: false,
           status: "active",
           bookingState: "checked_out",
           expectedReturnDate: { lt: new Date() },
         }),
       }),
       prisma.rental.aggregate({
-        where: scopedWhere(scope, { status: "returned" }),
+        where: scopedWhere(scope, { isHistoricalRecord: false, status: "returned" }),
         _sum: { totalAmount: true },
       }),
-      prisma.rental.findMany({ where: scopedWhere(scope, { status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositAmount: true, depositPaid: true, depositRefunded: true } }),
+      prisma.rental.findMany({ where: scopedWhere(scope, { isHistoricalRecord: false, status: { not: "cancelled" }, depositStatus: { in: ["collected", "held"] } }), select: { depositAmount: true, depositPaid: true, depositRefunded: true } }),
     ]);
 
     res.json({

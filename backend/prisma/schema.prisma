@@ -23,57 +23,57 @@ model Branch {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  users                UserBranch[]
-  products             Product[]
-  accounts             Account[]
-  cashAccounts         CashAccount[]
-  sales                Sale[]
-  purchases            Purchase[]
-  customers            Customer[]
-  saleRecords          SaleRecord[]
-  customerPayments     CustomerPayment[]
-  customerWithdrawals  CustomerWithdrawal[]
-  invoices             Invoice[]
-  suppliers            Supplier[]
-  supplierPurchases    SupplierPurchase[]
-  supplierPayments     SupplierPayment[]
-  expenses             Expense[]
-  rentals              Rental[]
-  saleReturns          SaleReturn[]
-  journalEntries       JournalEntry[]
-  employees            Employee[]
-  payrolls             Payroll[]
-  stockTransfersFrom   StockTransfer[]       @relation("TransferFrom")
-  stockTransfersTo     StockTransfer[]       @relation("TransferTo")
-  restaurantTables     RestaurantTable[]
+  users                 UserBranch[]
+  products              Product[]
+  accounts              Account[]
+  cashAccounts          CashAccount[]
+  sales                 Sale[]
+  purchases             Purchase[]
+  customers             Customer[]
+  saleRecords           SaleRecord[]
+  customerPayments      CustomerPayment[]
+  customerWithdrawals   CustomerWithdrawal[]
+  invoices              Invoice[]
+  suppliers             Supplier[]
+  supplierPurchases     SupplierPurchase[]
+  supplierPayments      SupplierPayment[]
+  expenses              Expense[]
+  rentals               Rental[]
+  saleReturns           SaleReturn[]
+  journalEntries        JournalEntry[]
+  employees             Employee[]
+  payrolls              Payroll[]
+  stockTransfersFrom    StockTransfer[]       @relation("TransferFrom")
+  stockTransfersTo      StockTransfer[]       @relation("TransferTo")
+  restaurantTables      RestaurantTable[]
   restaurantMenuEntries RestaurantMenuEntry[]
-  restaurantOrders     RestaurantOrder[]
-  reservations         Reservation[]
-  fuelPumps            FuelPump[]
-  fuelTanks            FuelTank[]
-  fuelDeliveries       FuelDelivery[]
-  fuelShiftReports     FuelShiftReport[]
-  fuelSales            FuelSale[]
-  fuelDipstickReadings FuelDipstickReading[]
-  fuelPricing          FuelPricing[]
-  fuelCompliance       FuelCompliance[]
-  productionOrders     ProductionOrder[]
-  farmFields           FarmField[]
-  livestock            Livestock[]
-  harvests             Harvest[]
-  farmExpenses         FarmExpense[]
-  appointments         Appointment[]
-  workOrders           WorkOrder[]
-  serviceContracts     ServiceContract[]
-  serviceJobCards      ServiceJobCard[]
-  serviceFeedback      ServiceFeedback[]
-  serviceTechnicians   ServiceTechnician[]
-  assets               Asset[]
-  fuelCards            FuelCard[]
-  fuelCardTransactions FuelCardTransaction[]
-  taxPayments          TaxPayment[]
-  creditNotes          CreditNote[]
-  debitNotes           DebitNote[]
+  restaurantOrders      RestaurantOrder[]
+  reservations          Reservation[]
+  fuelPumps             FuelPump[]
+  fuelTanks             FuelTank[]
+  fuelDeliveries        FuelDelivery[]
+  fuelShiftReports      FuelShiftReport[]
+  fuelSales             FuelSale[]
+  fuelDipstickReadings  FuelDipstickReading[]
+  fuelPricing           FuelPricing[]
+  fuelCompliance        FuelCompliance[]
+  productionOrders      ProductionOrder[]
+  farmFields            FarmField[]
+  livestock             Livestock[]
+  harvests              Harvest[]
+  farmExpenses          FarmExpense[]
+  appointments          Appointment[]
+  workOrders            WorkOrder[]
+  serviceContracts      ServiceContract[]
+  serviceJobCards       ServiceJobCard[]
+  serviceFeedback       ServiceFeedback[]
+  serviceTechnicians    ServiceTechnician[]
+  assets                Asset[]
+  fuelCards             FuelCard[]
+  fuelCardTransactions  FuelCardTransaction[]
+  taxPayments           TaxPayment[]
+  creditNotes           CreditNote[]
+  debitNotes            DebitNote[]
 
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
@@ -170,18 +170,18 @@ model Tenant {
   propertyOwners                  PropertyOwner[]
   managedProperties               ManagedProperty[]
   propertyTenancies               PropertyTenancy[]
-  propertyTenantIdentities         PropertyTenantIdentity[]
+  propertyTenantIdentities        PropertyTenantIdentity[]
   rentCharges                     RentCharge[]
   propertyRentPayments            PropertyRentPayment[]
   rentPaymentPlans                PropertyRentPaymentPlan[]
-  rentPromises                   PropertyRentPromise[]
+  rentPromises                    PropertyRentPromise[]
   rentReminders                   PropertyRentReminder[]
-  propertyAccountingConfig       PropertyAccountingConfig?
+  propertyAccountingConfig        PropertyAccountingConfig?
   propertyOwnerPayouts            PropertyOwnerPayout[]
   propertySales                   PropertySale[]
   propertySalePayments            PropertySalePayment[]
   propertyLandPurchases           PropertyLandPurchase[]
-  propertyRentRateHistory        PropertyRentRateHistory[]
+  propertyRentRateHistory         PropertyRentRateHistory[]
   propertyLandPurchasePayments    PropertyLandPurchasePayment[]
   saleReturns                     SaleReturn[]
   accounts                        Account[]
@@ -201,7 +201,7 @@ model Tenant {
   payablesAccountingConfig        PayablesAccountingConfig?
   receivablesGlMigrationBatches   ReceivablesGlMigrationBatch[]
   accountingCutover               TenantAccountingCutover?
-  financialYearCloses              FinancialYearClose[]
+  financialYearCloses             FinancialYearClose[]
   hrAuditLogs                     HRAuditLog[]
 
   // =====================
@@ -217,24 +217,24 @@ model Tenant {
   employmentHistories EmploymentHistory[] @relation("TenantEmploymentHistory")
   hrModuleFeatures    HRModuleFeature[]   @relation("TenantHRFeatures")
 
-  stockTransfers       StockTransfer[]
-  notifications        Notification[]
-  marketplaceFollowing MarketplaceSellerFollow[] @relation("MarketplaceFollowTenant")
-  marketplaceFollowers MarketplaceSellerFollow[] @relation("MarketplaceFollowSeller")
-  businessConversations BusinessConversation[]
-  businessMessages     BusinessMessage[]
+  stockTransfers           StockTransfer[]
+  notifications            Notification[]
+  marketplaceFollowing     MarketplaceSellerFollow[] @relation("MarketplaceFollowTenant")
+  marketplaceFollowers     MarketplaceSellerFollow[] @relation("MarketplaceFollowSeller")
+  businessConversations    BusinessConversation[]
+  businessMessages         BusinessMessage[]
   businessMessageReactions BusinessMessageReaction[]
-  pushTokens           PushToken[]
-  integrations         IntegrationConfig[]
-  restaurantTables     RestaurantTable[]
-  restaurantMenuEntries RestaurantMenuEntry[]
-  restaurantOrders     RestaurantOrder[]
-  reservations         Reservation[]
-  recipes              Recipe[]
-  waiters              Waiter[]
-  happyHourRules       HappyHourRule[]
-  comboMeals           ComboMeal[]
-  deliveries           Delivery[]
+  pushTokens               PushToken[]
+  integrations             IntegrationConfig[]
+  restaurantTables         RestaurantTable[]
+  restaurantMenuEntries    RestaurantMenuEntry[]
+  restaurantOrders         RestaurantOrder[]
+  reservations             Reservation[]
+  recipes                  Recipe[]
+  waiters                  Waiter[]
+  happyHourRules           HappyHourRule[]
+  comboMeals               ComboMeal[]
+  deliveries               Delivery[]
 
   // =====================
   // FUEL STATION
@@ -427,10 +427,10 @@ model Plan {
 }
 
 model SubscriptionPayment {
-  id                   String    @id @default(cuid())
+  id                   String                      @id @default(cuid())
   tenantId             String
-  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  amount               Decimal   @db.Decimal(18, 2)
+  tenant               Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  amount               Decimal                     @db.Decimal(18, 2)
   currency             String
   paymentMethod        String
   reference            String?
@@ -438,11 +438,11 @@ model SubscriptionPayment {
   paidAt               DateTime?
   recordedById         String?
   recordedByEmail      String?
-  status               String    @default("completed")
+  status               String                      @default("completed")
   provider             String?
   gatewayPaymentMethod String?
-  merchantReference    String?   @unique
-  gatewayTrackingId    String?   @unique
+  merchantReference    String?                     @unique
+  gatewayTrackingId    String?                     @unique
   checkoutUrl          String?
   checkoutReturnPath   String?
   payerName            String?
@@ -453,23 +453,23 @@ model SubscriptionPayment {
   cancelledByEmail     String?
   cancellationReason   String?
   refunds              SubscriptionPaymentRefund[]
-  createdAt            DateTime  @default(now())
+  createdAt            DateTime                    @default(now())
 
   @@index([tenantId, paidAt])
   @@map("subscription_payments")
 }
 
 model SubscriptionPaymentRefund {
-  id               String             @id @default(cuid())
-  paymentId        String
-  payment          SubscriptionPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  amount           Decimal            @db.Decimal(18, 2)
-  currency         String
-  reason           String
-  refundedAt       DateTime           @default(now())
-  recordedById     String?
-  recordedByEmail  String?
-  createdAt        DateTime           @default(now())
+  id              String              @id @default(cuid())
+  paymentId       String
+  payment         SubscriptionPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount          Decimal             @db.Decimal(18, 2)
+  currency        String
+  reason          String
+  refundedAt      DateTime            @default(now())
+  recordedById    String?
+  recordedByEmail String?
+  createdAt       DateTime            @default(now())
 
   @@index([paymentId, refundedAt])
   @@map("subscription_payment_refunds")
@@ -499,23 +499,23 @@ model User {
   // =========================
   ownedTenant Tenant? @relation("TenantOwner")
 
-  isActive               Boolean      @default(true)
-  workingHours           Json?
-  lastLogin              DateTime?
-  teamMessagingLastSeenAt DateTime?
-  otpCode                String?
-  otpExpires             DateTime?
-  hasCompletedOnboarding Boolean      @default(false) // Tenant onboarding guide completion status
-  onboardingCompletedAt  DateTime? // When user completed the onboarding guide
-  cashAccountId          String? // Assigned cash account for cash handling accountability
-  cashAccount            CashAccount? @relation("UserCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
-  propertyOwnerPayouts   PropertyOwnerPayout[] @relation("PropertyOwnerPayoutCreator")
-  propertySalesCreated  PropertySale[] @relation("PropertySaleCreator")
-  propertySalePaymentsCreated PropertySalePayment[] @relation("PropertySalePaymentCreator")
-  propertyLandPurchasesCreated PropertyLandPurchase[] @relation("PropertyLandPurchaseCreator")
+  isActive                            Boolean                       @default(true)
+  workingHours                        Json?
+  lastLogin                           DateTime?
+  teamMessagingLastSeenAt             DateTime?
+  otpCode                             String?
+  otpExpires                          DateTime?
+  hasCompletedOnboarding              Boolean                       @default(false) // Tenant onboarding guide completion status
+  onboardingCompletedAt               DateTime? // When user completed the onboarding guide
+  cashAccountId                       String? // Assigned cash account for cash handling accountability
+  cashAccount                         CashAccount?                  @relation("UserCashAccount", fields: [cashAccountId], references: [id], onDelete: SetNull)
+  propertyOwnerPayouts                PropertyOwnerPayout[]         @relation("PropertyOwnerPayoutCreator")
+  propertySalesCreated                PropertySale[]                @relation("PropertySaleCreator")
+  propertySalePaymentsCreated         PropertySalePayment[]         @relation("PropertySalePaymentCreator")
+  propertyLandPurchasesCreated        PropertyLandPurchase[]        @relation("PropertyLandPurchaseCreator")
   propertyLandPurchasePaymentsCreated PropertyLandPurchasePayment[] @relation("PropertyLandPurchasePaymentCreator")
-  rentPaymentPlansCreated PropertyRentPaymentPlan[] @relation("PropertyRentPaymentPlanCreator")
-  rentPromisesCreated    PropertyRentPromise[] @relation("PropertyRentPromiseCreator")
+  rentPaymentPlansCreated             PropertyRentPaymentPlan[]     @relation("PropertyRentPaymentPlanCreator")
+  rentPromisesCreated                 PropertyRentPromise[]         @relation("PropertyRentPromiseCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -568,10 +568,10 @@ model User {
   advisorCollections       AdvisorCollection[]
   advisorConversations     AdvisorConversation[]
   marketplaceSellerFollows MarketplaceSellerFollow[] @relation("MarketplaceFollowUser")
-  businessConversationsOne BusinessConversation[] @relation("BusinessConversationParticipantOne")
-  businessConversationsTwo BusinessConversation[] @relation("BusinessConversationParticipantTwo")
-  businessMessagesSent    BusinessMessage[]       @relation("BusinessMessageSender")
-  businessMessagesReceived BusinessMessage[]      @relation("BusinessMessageRecipient")
+  businessConversationsOne BusinessConversation[]    @relation("BusinessConversationParticipantOne")
+  businessConversationsTwo BusinessConversation[]    @relation("BusinessConversationParticipantTwo")
+  businessMessagesSent     BusinessMessage[]         @relation("BusinessMessageSender")
+  businessMessagesReceived BusinessMessage[]         @relation("BusinessMessageRecipient")
   businessMessageReactions BusinessMessageReaction[]
 
   @@map("users")
@@ -681,442 +681,442 @@ enum DiscountPermission {
 
 // Granular user permissions
 model UserPermission {
-  id                                String   @id @default(cuid())
-  userId                            String
-  user                              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  platformPermissions               Json?
+  id                                     String   @id @default(cuid())
+  userId                                 String
+  user                                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platformPermissions                    Json?
   // Dashboard
-  canViewDashboard                  Boolean  @default(false)
-  canUseBusinessAI                  Boolean  @default(false)
+  canViewDashboard                       Boolean  @default(false)
+  canUseBusinessAI                       Boolean  @default(false)
   // Sales
-  canCreateSale                     Boolean  @default(false)
-  canViewSale                       Boolean  @default(false)
-  canEditSale                       Boolean  @default(false)
-  canDeleteSale                     Boolean  @default(false)
-  canRefundSale                     Boolean  @default(false)
+  canCreateSale                          Boolean  @default(false)
+  canViewSale                            Boolean  @default(false)
+  canEditSale                            Boolean  @default(false)
+  canDeleteSale                          Boolean  @default(false)
+  canRefundSale                          Boolean  @default(false)
   // Inventory
-  canCreateProduct                  Boolean  @default(false)
-  canViewProduct                    Boolean  @default(false)
-  canViewPriceHistory               Boolean  @default(false)
-  canEditProduct                    Boolean  @default(false)
-  canDeleteProduct                  Boolean  @default(false)
-  canAdjustStock                    Boolean  @default(false)
-  canTransferStock                  Boolean  @default(false)
+  canCreateProduct                       Boolean  @default(false)
+  canViewProduct                         Boolean  @default(false)
+  canViewPriceHistory                    Boolean  @default(false)
+  canEditProduct                         Boolean  @default(false)
+  canDeleteProduct                       Boolean  @default(false)
+  canAdjustStock                         Boolean  @default(false)
+  canTransferStock                       Boolean  @default(false)
   // Purchases / Payables
-  canCreatePurchase                 Boolean  @default(false)
-  canViewPurchase                   Boolean  @default(false)
-  canEditPurchase                   Boolean  @default(false)
-  canDeletePurchase                 Boolean  @default(false)
-  canCreatePayable                  Boolean  @default(false)
-  canViewPayable                    Boolean  @default(false)
-  canEditPayable                    Boolean  @default(false)
-  canDeletePayable                  Boolean  @default(false)
+  canCreatePurchase                      Boolean  @default(false)
+  canViewPurchase                        Boolean  @default(false)
+  canEditPurchase                        Boolean  @default(false)
+  canDeletePurchase                      Boolean  @default(false)
+  canCreatePayable                       Boolean  @default(false)
+  canViewPayable                         Boolean  @default(false)
+  canEditPayable                         Boolean  @default(false)
+  canDeletePayable                       Boolean  @default(false)
   // Expenses
-  canCreateExpense                  Boolean  @default(false)
-  canViewExpense                    Boolean  @default(false)
-  canEditExpense                    Boolean  @default(false)
-  canDeleteExpense                  Boolean  @default(false)
-  canViewStaffTillSheet             Boolean  @default(false)
+  canCreateExpense                       Boolean  @default(false)
+  canViewExpense                         Boolean  @default(false)
+  canEditExpense                         Boolean  @default(false)
+  canDeleteExpense                       Boolean  @default(false)
+  canViewStaffTillSheet                  Boolean  @default(false)
   // Customers / Receivables
-  canCreateCustomer                 Boolean  @default(false)
-  canViewCustomer                   Boolean  @default(false)
-  canViewCustomerPhone               Boolean  @default(false)
-  canViewCustomerEmail               Boolean  @default(false)
-  canViewCustomerIdentity            Boolean  @default(false)
-  canViewCustomerAddress              Boolean  @default(false)
-  canViewCustomerBalance              Boolean  @default(false)
-  canViewCustomerCreditLimit          Boolean  @default(false)
-  canManageCustomerCreditLimit        Boolean  @default(false)
-  canViewCustomerSalesHistory         Boolean  @default(false)
-  canViewCustomerPaymentsHistory      Boolean  @default(false)
-  canViewCustomerReturnsHistory       Boolean  @default(false)
-  canViewCustomerCreditNotesHistory   Boolean  @default(false)
-  canViewCustomerWithdrawalsHistory   Boolean  @default(false)
-  canViewCustomerBusinessActivity     Boolean  @default(false)
-  canViewCustomerNotes                Boolean  @default(false)
-  canRecordCustomerPayment            Boolean  @default(false)
-  canPrintCustomerReceipts            Boolean  @default(false)
-  canEditCustomer                   Boolean  @default(false)
-  canDeleteCustomer                 Boolean  @default(false)
-  canCreateReceivable               Boolean  @default(false)
-  canViewReceivable                 Boolean  @default(false)
-  canEditReceivable                 Boolean  @default(false)
-  canDeleteReceivable               Boolean  @default(false)
-  canViewReceivableReconciliation   Boolean  @default(false)
-  canReviewReceivableReconciliation Boolean  @default(false)
-  canApplyReceivableReconciliation  Boolean  @default(false)
+  canCreateCustomer                      Boolean  @default(false)
+  canViewCustomer                        Boolean  @default(false)
+  canViewCustomerPhone                   Boolean  @default(false)
+  canViewCustomerEmail                   Boolean  @default(false)
+  canViewCustomerIdentity                Boolean  @default(false)
+  canViewCustomerAddress                 Boolean  @default(false)
+  canViewCustomerBalance                 Boolean  @default(false)
+  canViewCustomerCreditLimit             Boolean  @default(false)
+  canManageCustomerCreditLimit           Boolean  @default(false)
+  canViewCustomerSalesHistory            Boolean  @default(false)
+  canViewCustomerPaymentsHistory         Boolean  @default(false)
+  canViewCustomerReturnsHistory          Boolean  @default(false)
+  canViewCustomerCreditNotesHistory      Boolean  @default(false)
+  canViewCustomerWithdrawalsHistory      Boolean  @default(false)
+  canViewCustomerBusinessActivity        Boolean  @default(false)
+  canViewCustomerNotes                   Boolean  @default(false)
+  canRecordCustomerPayment               Boolean  @default(false)
+  canPrintCustomerReceipts               Boolean  @default(false)
+  canEditCustomer                        Boolean  @default(false)
+  canDeleteCustomer                      Boolean  @default(false)
+  canCreateReceivable                    Boolean  @default(false)
+  canViewReceivable                      Boolean  @default(false)
+  canEditReceivable                      Boolean  @default(false)
+  canDeleteReceivable                    Boolean  @default(false)
+  canViewReceivableReconciliation        Boolean  @default(false)
+  canReviewReceivableReconciliation      Boolean  @default(false)
+  canApplyReceivableReconciliation       Boolean  @default(false)
   // Suppliers
-  canCreateSupplier                 Boolean  @default(false)
-  canViewSupplier                   Boolean  @default(false)
-  canEditSupplier                   Boolean  @default(false)
-  canDeleteSupplier                 Boolean  @default(false)
-  canViewProcurement                Boolean  @default(false)
-  canFollowMarketplaceSellers       Boolean  @default(false)
-  canManageSupplierNetwork          Boolean  @default(false)
-  canManageMarketplaceCatalogue     Boolean  @default(false)
-  canCreateMarketplaceListing       Boolean  @default(false)
-  canChangeMarketplacePrice         Boolean  @default(false)
-  canCreateMarketplacePromotion     Boolean  @default(false)
-  canRunMarketplaceAds              Boolean  @default(false)
-  canManageMarketplacePromotions    Boolean  @default(false)
-  canCreateProcurementRFQ           Boolean  @default(false)
-  canRespondToProcurementRFQ        Boolean  @default(false)
-  canManageProcurementQuotes        Boolean  @default(false)
-  canCreateProcurementOrder         Boolean  @default(false)
-  canApproveProcurementOrder        Boolean  @default(false)
-  canAcknowledgeProcurementOrder    Boolean  @default(false)
-  canReceiveProcurementGoods        Boolean  @default(false)
-  canSubmitProcurementInvoice       Boolean  @default(false)
-  canReviewProcurementInvoice       Boolean  @default(false)
-  canApproveProcurementPayment      Boolean  @default(false)
-  canRecordProcurementPayment       Boolean  @default(false)
+  canCreateSupplier                      Boolean  @default(false)
+  canViewSupplier                        Boolean  @default(false)
+  canEditSupplier                        Boolean  @default(false)
+  canDeleteSupplier                      Boolean  @default(false)
+  canViewProcurement                     Boolean  @default(false)
+  canFollowMarketplaceSellers            Boolean  @default(false)
+  canManageSupplierNetwork               Boolean  @default(false)
+  canManageMarketplaceCatalogue          Boolean  @default(false)
+  canCreateMarketplaceListing            Boolean  @default(false)
+  canChangeMarketplacePrice              Boolean  @default(false)
+  canCreateMarketplacePromotion          Boolean  @default(false)
+  canRunMarketplaceAds                   Boolean  @default(false)
+  canManageMarketplacePromotions         Boolean  @default(false)
+  canCreateProcurementRFQ                Boolean  @default(false)
+  canRespondToProcurementRFQ             Boolean  @default(false)
+  canManageProcurementQuotes             Boolean  @default(false)
+  canCreateProcurementOrder              Boolean  @default(false)
+  canApproveProcurementOrder             Boolean  @default(false)
+  canAcknowledgeProcurementOrder         Boolean  @default(false)
+  canReceiveProcurementGoods             Boolean  @default(false)
+  canSubmitProcurementInvoice            Boolean  @default(false)
+  canReviewProcurementInvoice            Boolean  @default(false)
+  canApproveProcurementPayment           Boolean  @default(false)
+  canRecordProcurementPayment            Boolean  @default(false)
   // Staff
-  canCreateStaff                    Boolean  @default(false)
-  canViewStaff                      Boolean  @default(false)
-  canEditStaff                      Boolean  @default(false)
-  canDeleteStaff                    Boolean  @default(false)
+  canCreateStaff                         Boolean  @default(false)
+  canViewStaff                           Boolean  @default(false)
+  canEditStaff                           Boolean  @default(false)
+  canDeleteStaff                         Boolean  @default(false)
   // HR Management
-  canViewHR                         Boolean  @default(false)
-  canViewHREmployeesForAttendance   Boolean  @default(false)
-  canCreateHREmployee               Boolean  @default(false)
-  canEditHREmployee                 Boolean  @default(false)
-  canDeleteHREmployee               Boolean  @default(false)
-  canManageHRStructure              Boolean  @default(false)
-  canViewHRContracts                Boolean  @default(false)
-  canManageHRContracts              Boolean  @default(false)
-  canViewHRDocuments                Boolean  @default(false)
-  canManageHRDocuments              Boolean  @default(false)
-  canViewHRSalaries                 Boolean  @default(false)
-  canManageHRSalaries               Boolean  @default(false)
-  canViewHRAttendance               Boolean  @default(false)
-  canRecordHRAttendance             Boolean  @default(false)
-  canRecordOwnHRAttendance          Boolean  @default(false)
-  canManageHRAttendance             Boolean  @default(false)
-  canEditHRAttendance               Boolean  @default(false)
-  canDeleteHRAttendance             Boolean  @default(false)
-  canImportHRAttendance             Boolean  @default(false)
-  canConfigureHRAttendance          Boolean  @default(false)
-  canApproveHRAttendance            Boolean  @default(false)
-  canViewHRShifts                   Boolean  @default(false)
-  canManageHRShifts                 Boolean  @default(false)
-  canAssignHRShifts                 Boolean  @default(false)
-  canApproveHRShifts                Boolean  @default(false)
-  canViewHRLeave                    Boolean  @default(false)
-  canRequestHRLeave                 Boolean  @default(false)
-  canManageHRLeaveTypes             Boolean  @default(false)
-  canApproveHRLeave                 Boolean  @default(false)
-  canViewHRPayroll                  Boolean  @default(false)
-  canCreateHRPayroll                Boolean  @default(false)
-  canApproveHRPayroll               Boolean  @default(false)
-  canPostHRPayroll                  Boolean  @default(false)
-  canPayHRPayroll                   Boolean  @default(false)
-  canManageHRPayrollSettings        Boolean  @default(false)
-  canManageHRPayroll                Boolean  @default(false)
+  canViewHR                              Boolean  @default(false)
+  canViewHREmployeesForAttendance        Boolean  @default(false)
+  canCreateHREmployee                    Boolean  @default(false)
+  canEditHREmployee                      Boolean  @default(false)
+  canDeleteHREmployee                    Boolean  @default(false)
+  canManageHRStructure                   Boolean  @default(false)
+  canViewHRContracts                     Boolean  @default(false)
+  canManageHRContracts                   Boolean  @default(false)
+  canViewHRDocuments                     Boolean  @default(false)
+  canManageHRDocuments                   Boolean  @default(false)
+  canViewHRSalaries                      Boolean  @default(false)
+  canManageHRSalaries                    Boolean  @default(false)
+  canViewHRAttendance                    Boolean  @default(false)
+  canRecordHRAttendance                  Boolean  @default(false)
+  canRecordOwnHRAttendance               Boolean  @default(false)
+  canManageHRAttendance                  Boolean  @default(false)
+  canEditHRAttendance                    Boolean  @default(false)
+  canDeleteHRAttendance                  Boolean  @default(false)
+  canImportHRAttendance                  Boolean  @default(false)
+  canConfigureHRAttendance               Boolean  @default(false)
+  canApproveHRAttendance                 Boolean  @default(false)
+  canViewHRShifts                        Boolean  @default(false)
+  canManageHRShifts                      Boolean  @default(false)
+  canAssignHRShifts                      Boolean  @default(false)
+  canApproveHRShifts                     Boolean  @default(false)
+  canViewHRLeave                         Boolean  @default(false)
+  canRequestHRLeave                      Boolean  @default(false)
+  canManageHRLeaveTypes                  Boolean  @default(false)
+  canApproveHRLeave                      Boolean  @default(false)
+  canViewHRPayroll                       Boolean  @default(false)
+  canCreateHRPayroll                     Boolean  @default(false)
+  canApproveHRPayroll                    Boolean  @default(false)
+  canPostHRPayroll                       Boolean  @default(false)
+  canPayHRPayroll                        Boolean  @default(false)
+  canManageHRPayrollSettings             Boolean  @default(false)
+  canManageHRPayroll                     Boolean  @default(false)
   // Branches
-  canCreateBranch                   Boolean  @default(false)
-  canViewBranch                     Boolean  @default(false)
-  canEditBranch                     Boolean  @default(false)
-  canDeleteBranch                   Boolean  @default(false)
+  canCreateBranch                        Boolean  @default(false)
+  canViewBranch                          Boolean  @default(false)
+  canEditBranch                          Boolean  @default(false)
+  canDeleteBranch                        Boolean  @default(false)
   // Reports (granular)
-  canViewSalesReport                Boolean  @default(false)
-  canViewReportSalesSummary          Boolean  @default(false)
-  canViewReportSalesDaily            Boolean  @default(false)
-  canViewReportSalesWeekly           Boolean  @default(false)
-  canViewReportSalesMonthly          Boolean  @default(false)
-  canViewReportSalesByProduct        Boolean  @default(false)
-  canViewReportSalesByCategory       Boolean  @default(false)
-  canViewReportSalesByCustomer       Boolean  @default(false)
-  canViewReportSalesByUser           Boolean  @default(false)
-  canViewReportSalesServiceJobs      Boolean  @default(false)
-  canViewReportSalesByBranch         Boolean  @default(false)
-  canViewReportSalesDiscounts        Boolean  @default(false)
-  canViewReportSalesReturns          Boolean  @default(false)
-  canViewReportInventoryStock Boolean @default(false)
-  canViewReportInventoryValuation Boolean @default(false)
-  canViewReportInventoryLowStock Boolean @default(false)
-  canViewReportInventoryOutOfStock Boolean @default(false)
-  canViewReportInventoryStockMovement Boolean @default(false)
-  canViewReportInventoryAdjustments Boolean @default(false)
-  canViewReportInventoryExpiry Boolean @default(false)
-  canViewReportInventoryDamaged Boolean @default(false)
-  canViewReportInventoryFastMoving Boolean @default(false)
-  canViewReportInventorySlowMoving Boolean @default(false)
-  canViewReportInventoryProductLedger Boolean @default(false)
-  canViewReportFinancialProfitLoss Boolean @default(false)
-  canViewReportFinancialIncome Boolean @default(false)
-  canViewReportFinancialExpense Boolean @default(false)
-  canViewReportFinancialCashFlow Boolean @default(false)
-  canViewReportFinancialTrialBalance Boolean @default(false)
-  canViewReportFinancialBalanceSheet Boolean @default(false)
-  canViewReportFinancialGeneralLedger Boolean @default(false)
-  canViewReportFinancialBankTransactions Boolean @default(false)
-  canViewReportFinancialTax Boolean @default(false)
-  canViewReportCustomersList Boolean @default(false)
-  canViewReportCustomersSales Boolean @default(false)
-  canViewReportCustomersBalance Boolean @default(false)
-  canViewReportCustomersReceivables Boolean @default(false)
-  canViewReportCustomersTop Boolean @default(false)
-  canViewReportCustomersLedger Boolean @default(false)
-  canViewReportCustomersStatement Boolean @default(false)
-  canViewReportCustomersCreditNotes Boolean @default(false)
-  canViewReportSuppliersList Boolean @default(false)
-  canViewReportSuppliersPurchases Boolean @default(false)
-  canViewReportSuppliersPayables Boolean @default(false)
-  canViewReportSuppliersBalance Boolean @default(false)
-  canViewReportSuppliersStatement Boolean @default(false)
-  canViewReportSuppliersDebitNotes Boolean @default(false)
-  canViewReportSuppliersLedger Boolean @default(false)
-  canViewReportReceivablesOutstanding Boolean @default(false)
-  canViewReportReceivablesAging Boolean @default(false)
-  canViewReportReceivablesCollection Boolean @default(false)
-  canViewReportReceivablesOverdue Boolean @default(false)
-  canViewReportReceivablesCreditNotes Boolean @default(false)
-  canViewReportPayablesOutstanding Boolean @default(false)
-  canViewReportPayablesAging Boolean @default(false)
-  canViewReportPayablesPaymentHistory Boolean @default(false)
-  canViewReportPayablesOverdue Boolean @default(false)
-  canViewReportPayablesDebitNotes Boolean @default(false)
-  canViewReportPerformanceBranch Boolean @default(false)
-  canViewReportPerformanceProduct Boolean @default(false)
-  canViewReportPerformanceCategory Boolean @default(false)
-  canViewReportPerformanceUserActivity Boolean @default(false)
-  canViewReportPerformanceTopProducts Boolean @default(false)
-  canViewReportPerformanceLeastProducts Boolean @default(false)
-  canViewReportServicesSummary Boolean @default(false)
-  canViewReportServicesList Boolean @default(false)
-  canViewReportServicesSales Boolean @default(false)
-  canViewReportServicesByCategory Boolean @default(false)
-  canViewReportServicesByBranch Boolean @default(false)
-  canViewReportServicesTop Boolean @default(false)
-  canViewReportRentalsSummary Boolean @default(false)
-  canViewReportRentalsList Boolean @default(false)
-  canViewReportRentalsByItem Boolean @default(false)
-  canViewReportRentalsByCustomer Boolean @default(false)
-  canViewReportRentalsByBranch Boolean @default(false)
-  canViewReportRentalsActive Boolean @default(false)
-  canViewReportRentalsOverdue Boolean @default(false)
-  canViewReportRentalsReturns Boolean @default(false)
-  canViewReportRentalsDaily Boolean @default(false)
-  canViewReportRentalsMonthly Boolean @default(false)
-  canViewReportFuelSalesSummary Boolean @default(false)
-  canViewReportFuelByPump Boolean @default(false)
-  canViewReportFuelByTank Boolean @default(false)
-  canViewReportFuelDeliveries Boolean @default(false)
-  canViewReportFuelShiftSummary Boolean @default(false)
-  canViewReportFuelLubricantSales Boolean @default(false)
-  canViewReportFuelCarWash Boolean @default(false)
-  canViewReportFuelMeterReadings Boolean @default(false)
-  canViewReportMfgProductionSummary Boolean @default(false)
-  canViewReportMfgByProduct Boolean @default(false)
-  canViewReportMfgWasteReport Boolean @default(false)
-  canViewReportMfgCostAnalysis Boolean @default(false)
-  canViewReportMfgBOMReport Boolean @default(false)
-  canViewReportExecutiveSummary Boolean @default(false)
-  canViewInventoryReport            Boolean  @default(false)
-  canViewFinancialReport            Boolean  @default(false)
-  canViewCustomerReport             Boolean  @default(false)
-  canViewSupplierReport             Boolean  @default(false)
-  canViewReceivablesReport          Boolean  @default(false)
-  canViewPayablesReport             Boolean  @default(false)
-  canViewPerformanceReport          Boolean  @default(false)
-  canViewAuditReport                Boolean  @default(false)
-  canExportReport                   Boolean  @default(false)
+  canViewSalesReport                     Boolean  @default(false)
+  canViewReportSalesSummary              Boolean  @default(false)
+  canViewReportSalesDaily                Boolean  @default(false)
+  canViewReportSalesWeekly               Boolean  @default(false)
+  canViewReportSalesMonthly              Boolean  @default(false)
+  canViewReportSalesByProduct            Boolean  @default(false)
+  canViewReportSalesByCategory           Boolean  @default(false)
+  canViewReportSalesByCustomer           Boolean  @default(false)
+  canViewReportSalesByUser               Boolean  @default(false)
+  canViewReportSalesServiceJobs          Boolean  @default(false)
+  canViewReportSalesByBranch             Boolean  @default(false)
+  canViewReportSalesDiscounts            Boolean  @default(false)
+  canViewReportSalesReturns              Boolean  @default(false)
+  canViewReportInventoryStock            Boolean  @default(false)
+  canViewReportInventoryValuation        Boolean  @default(false)
+  canViewReportInventoryLowStock         Boolean  @default(false)
+  canViewReportInventoryOutOfStock       Boolean  @default(false)
+  canViewReportInventoryStockMovement    Boolean  @default(false)
+  canViewReportInventoryAdjustments      Boolean  @default(false)
+  canViewReportInventoryExpiry           Boolean  @default(false)
+  canViewReportInventoryDamaged          Boolean  @default(false)
+  canViewReportInventoryFastMoving       Boolean  @default(false)
+  canViewReportInventorySlowMoving       Boolean  @default(false)
+  canViewReportInventoryProductLedger    Boolean  @default(false)
+  canViewReportFinancialProfitLoss       Boolean  @default(false)
+  canViewReportFinancialIncome           Boolean  @default(false)
+  canViewReportFinancialExpense          Boolean  @default(false)
+  canViewReportFinancialCashFlow         Boolean  @default(false)
+  canViewReportFinancialTrialBalance     Boolean  @default(false)
+  canViewReportFinancialBalanceSheet     Boolean  @default(false)
+  canViewReportFinancialGeneralLedger    Boolean  @default(false)
+  canViewReportFinancialBankTransactions Boolean  @default(false)
+  canViewReportFinancialTax              Boolean  @default(false)
+  canViewReportCustomersList             Boolean  @default(false)
+  canViewReportCustomersSales            Boolean  @default(false)
+  canViewReportCustomersBalance          Boolean  @default(false)
+  canViewReportCustomersReceivables      Boolean  @default(false)
+  canViewReportCustomersTop              Boolean  @default(false)
+  canViewReportCustomersLedger           Boolean  @default(false)
+  canViewReportCustomersStatement        Boolean  @default(false)
+  canViewReportCustomersCreditNotes      Boolean  @default(false)
+  canViewReportSuppliersList             Boolean  @default(false)
+  canViewReportSuppliersPurchases        Boolean  @default(false)
+  canViewReportSuppliersPayables         Boolean  @default(false)
+  canViewReportSuppliersBalance          Boolean  @default(false)
+  canViewReportSuppliersStatement        Boolean  @default(false)
+  canViewReportSuppliersDebitNotes       Boolean  @default(false)
+  canViewReportSuppliersLedger           Boolean  @default(false)
+  canViewReportReceivablesOutstanding    Boolean  @default(false)
+  canViewReportReceivablesAging          Boolean  @default(false)
+  canViewReportReceivablesCollection     Boolean  @default(false)
+  canViewReportReceivablesOverdue        Boolean  @default(false)
+  canViewReportReceivablesCreditNotes    Boolean  @default(false)
+  canViewReportPayablesOutstanding       Boolean  @default(false)
+  canViewReportPayablesAging             Boolean  @default(false)
+  canViewReportPayablesPaymentHistory    Boolean  @default(false)
+  canViewReportPayablesOverdue           Boolean  @default(false)
+  canViewReportPayablesDebitNotes        Boolean  @default(false)
+  canViewReportPerformanceBranch         Boolean  @default(false)
+  canViewReportPerformanceProduct        Boolean  @default(false)
+  canViewReportPerformanceCategory       Boolean  @default(false)
+  canViewReportPerformanceUserActivity   Boolean  @default(false)
+  canViewReportPerformanceTopProducts    Boolean  @default(false)
+  canViewReportPerformanceLeastProducts  Boolean  @default(false)
+  canViewReportServicesSummary           Boolean  @default(false)
+  canViewReportServicesList              Boolean  @default(false)
+  canViewReportServicesSales             Boolean  @default(false)
+  canViewReportServicesByCategory        Boolean  @default(false)
+  canViewReportServicesByBranch          Boolean  @default(false)
+  canViewReportServicesTop               Boolean  @default(false)
+  canViewReportRentalsSummary            Boolean  @default(false)
+  canViewReportRentalsList               Boolean  @default(false)
+  canViewReportRentalsByItem             Boolean  @default(false)
+  canViewReportRentalsByCustomer         Boolean  @default(false)
+  canViewReportRentalsByBranch           Boolean  @default(false)
+  canViewReportRentalsActive             Boolean  @default(false)
+  canViewReportRentalsOverdue            Boolean  @default(false)
+  canViewReportRentalsReturns            Boolean  @default(false)
+  canViewReportRentalsDaily              Boolean  @default(false)
+  canViewReportRentalsMonthly            Boolean  @default(false)
+  canViewReportFuelSalesSummary          Boolean  @default(false)
+  canViewReportFuelByPump                Boolean  @default(false)
+  canViewReportFuelByTank                Boolean  @default(false)
+  canViewReportFuelDeliveries            Boolean  @default(false)
+  canViewReportFuelShiftSummary          Boolean  @default(false)
+  canViewReportFuelLubricantSales        Boolean  @default(false)
+  canViewReportFuelCarWash               Boolean  @default(false)
+  canViewReportFuelMeterReadings         Boolean  @default(false)
+  canViewReportMfgProductionSummary      Boolean  @default(false)
+  canViewReportMfgByProduct              Boolean  @default(false)
+  canViewReportMfgWasteReport            Boolean  @default(false)
+  canViewReportMfgCostAnalysis           Boolean  @default(false)
+  canViewReportMfgBOMReport              Boolean  @default(false)
+  canViewReportExecutiveSummary          Boolean  @default(false)
+  canViewInventoryReport                 Boolean  @default(false)
+  canViewFinancialReport                 Boolean  @default(false)
+  canViewCustomerReport                  Boolean  @default(false)
+  canViewSupplierReport                  Boolean  @default(false)
+  canViewReceivablesReport               Boolean  @default(false)
+  canViewPayablesReport                  Boolean  @default(false)
+  canViewPerformanceReport               Boolean  @default(false)
+  canViewAuditReport                     Boolean  @default(false)
+  canExportReport                        Boolean  @default(false)
   // Settings
-  canViewSettings                   Boolean  @default(false)
-  canEditSettings                   Boolean  @default(false)
-  canPaySubscriptionInvoice         Boolean  @default(false)
+  canViewSettings                        Boolean  @default(false)
+  canEditSettings                        Boolean  @default(false)
+  canPaySubscriptionInvoice              Boolean  @default(false)
   // Receipts
-  canViewReceipt                    Boolean  @default(false)
-  canCreateReceipt                  Boolean  @default(false)
+  canViewReceipt                         Boolean  @default(false)
+  canCreateReceipt                       Boolean  @default(false)
   // Discounts
-  canGiveDiscount                   Boolean  @default(false)
+  canGiveDiscount                        Boolean  @default(false)
   // Tax
-  canViewTax                        Boolean  @default(false)
-  canManageTax                      Boolean  @default(false)
+  canViewTax                             Boolean  @default(false)
+  canManageTax                           Boolean  @default(false)
   // Services
-  canViewService                    Boolean  @default(false)
-  canCreateService                  Boolean  @default(false)
-  canEditService                    Boolean  @default(false)
-  canDeleteService                  Boolean  @default(false)
-  canManageServiceCategory          Boolean  @default(false)
-  canViewServiceReport              Boolean  @default(false)
+  canViewService                         Boolean  @default(false)
+  canCreateService                       Boolean  @default(false)
+  canEditService                         Boolean  @default(false)
+  canDeleteService                       Boolean  @default(false)
+  canManageServiceCategory               Boolean  @default(false)
+  canViewServiceReport                   Boolean  @default(false)
   // Rentals / Hire
-  canViewRental                     Boolean  @default(false)
-  canCreateRental                   Boolean  @default(false)
-  canEditRental                     Boolean  @default(false)
-  canDeleteRental                   Boolean  @default(false)
-  canCancelRental                   Boolean  @default(false)
-  canRecordRentalPayment            Boolean  @default(false)
-  canRefundRentalDeposit            Boolean  @default(false)
-  canRefundRentalAdvance            Boolean  @default(false)
-  canForfeitRentalDeposit           Boolean  @default(false)
-  canProcessRentalReturn            Boolean  @default(false)
-  canViewRentalReport               Boolean  @default(false)
-  canGenerateRentalContract         Boolean  @default(false)
-  canViewPlanner                    Boolean  @default(false)
-  canManagePlanner                  Boolean  @default(false)
-  canViewCRM                        Boolean  @default(false)
-  canCreateCRM                      Boolean  @default(false)
-  canEditCRM                        Boolean  @default(false)
-  canDeleteCRM                      Boolean  @default(false)
+  canViewRental                          Boolean  @default(false)
+  canCreateRental                        Boolean  @default(false)
+  canEditRental                          Boolean  @default(false)
+  canDeleteRental                        Boolean  @default(false)
+  canCancelRental                        Boolean  @default(false)
+  canRecordRentalPayment                 Boolean  @default(false)
+  canRefundRentalDeposit                 Boolean  @default(false)
+  canRefundRentalAdvance                 Boolean  @default(false)
+  canForfeitRentalDeposit                Boolean  @default(false)
+  canProcessRentalReturn                 Boolean  @default(false)
+  canViewRentalReport                    Boolean  @default(false)
+  canGenerateRentalContract              Boolean  @default(false)
+  canViewPlanner                         Boolean  @default(false)
+  canManagePlanner                       Boolean  @default(false)
+  canViewCRM                             Boolean  @default(false)
+  canCreateCRM                           Boolean  @default(false)
+  canEditCRM                             Boolean  @default(false)
+  canDeleteCRM                           Boolean  @default(false)
   // Property Management
-  canViewPropertyManagement         Boolean  @default(false)
-  canViewPropertyPortfolio          Boolean  @default(false)
-  canViewPropertyCollections        Boolean  @default(false)
-  canViewPropertyStatements         Boolean  @default(false)
-  canViewTenantPersonalDetails      Boolean  @default(false)
-  canManageTenantPersonalDetails    Boolean  @default(false)
-  canManagePropertyOwners           Boolean  @default(false)
-  canManageProperties               Boolean  @default(false)
-  canManagePropertyUnits            Boolean  @default(false)
-  canCreateTenancies                Boolean  @default(false)
-  canEndTenancies                   Boolean  @default(false)
-  canReactivateTenancies            Boolean  @default(false)
-  canManageTenancies                Boolean  @default(false)
-  canEditRentPeriods                Boolean  @default(false)
-  canRecordRentPayment              Boolean  @default(false)
-  canRecordTenantDeposit            Boolean  @default(false)
-  canRefundTenantDeposit            Boolean  @default(false)
-  canApplyTenantDepositToRent       Boolean  @default(false)
-  canVoidRentPayment                Boolean  @default(false)
-  canManageRentPayment              Boolean  @default(false)
-  canViewRentPaymentPlans           Boolean  @default(false)
-  canManageRentPaymentPlans         Boolean  @default(false)
-  canViewRentPromises                Boolean  @default(false)
-  canManageRentPromises              Boolean  @default(false)
-  canViewPropertyReports            Boolean  @default(false)
-  canRecordOwnerPayout              Boolean  @default(false)
-  canViewPropertySales               Boolean  @default(false)
-  canCreatePropertySale              Boolean  @default(false)
-  canRecordPropertySalePayment       Boolean  @default(false)
-  canVoidPropertySalePayment         Boolean  @default(false)
-  canCancelPropertySale              Boolean  @default(false)
-  canManagePropertyLandInventory     Boolean  @default(false)
-  canViewPropertyLandPurchases       Boolean  @default(false)
-  canCreatePropertyLandPurchase      Boolean  @default(false)
-  canRecordPropertyLandPurchasePayment Boolean @default(false)
+  canViewPropertyManagement              Boolean  @default(false)
+  canViewPropertyPortfolio               Boolean  @default(false)
+  canViewPropertyCollections             Boolean  @default(false)
+  canViewPropertyStatements              Boolean  @default(false)
+  canViewTenantPersonalDetails           Boolean  @default(false)
+  canManageTenantPersonalDetails         Boolean  @default(false)
+  canManagePropertyOwners                Boolean  @default(false)
+  canManageProperties                    Boolean  @default(false)
+  canManagePropertyUnits                 Boolean  @default(false)
+  canCreateTenancies                     Boolean  @default(false)
+  canEndTenancies                        Boolean  @default(false)
+  canReactivateTenancies                 Boolean  @default(false)
+  canManageTenancies                     Boolean  @default(false)
+  canEditRentPeriods                     Boolean  @default(false)
+  canRecordRentPayment                   Boolean  @default(false)
+  canRecordTenantDeposit                 Boolean  @default(false)
+  canRefundTenantDeposit                 Boolean  @default(false)
+  canApplyTenantDepositToRent            Boolean  @default(false)
+  canVoidRentPayment                     Boolean  @default(false)
+  canManageRentPayment                   Boolean  @default(false)
+  canViewRentPaymentPlans                Boolean  @default(false)
+  canManageRentPaymentPlans              Boolean  @default(false)
+  canViewRentPromises                    Boolean  @default(false)
+  canManageRentPromises                  Boolean  @default(false)
+  canViewPropertyReports                 Boolean  @default(false)
+  canRecordOwnerPayout                   Boolean  @default(false)
+  canViewPropertySales                   Boolean  @default(false)
+  canCreatePropertySale                  Boolean  @default(false)
+  canRecordPropertySalePayment           Boolean  @default(false)
+  canVoidPropertySalePayment             Boolean  @default(false)
+  canCancelPropertySale                  Boolean  @default(false)
+  canManagePropertyLandInventory         Boolean  @default(false)
+  canViewPropertyLandPurchases           Boolean  @default(false)
+  canCreatePropertyLandPurchase          Boolean  @default(false)
+  canRecordPropertyLandPurchasePayment   Boolean  @default(false)
   // Restaurant & Bar
-  canViewRestaurant                 Boolean  @default(false)
-  canCreateRestaurant               Boolean  @default(false)
-  canEditRestaurant                 Boolean  @default(false)
-  canDeleteRestaurant               Boolean  @default(false)
-  canViewRestaurantReport           Boolean  @default(false)
+  canViewRestaurant                      Boolean  @default(false)
+  canCreateRestaurant                    Boolean  @default(false)
+  canEditRestaurant                      Boolean  @default(false)
+  canDeleteRestaurant                    Boolean  @default(false)
+  canViewRestaurantReport                Boolean  @default(false)
   // Fuel Station
-  canViewFuelStation                Boolean  @default(false)
-  canCreateFuelStation              Boolean  @default(false)
-  canEditFuelStation                Boolean  @default(false)
-  canDeleteFuelStation              Boolean  @default(false)
-  canViewFuelStationReport          Boolean  @default(false)
+  canViewFuelStation                     Boolean  @default(false)
+  canCreateFuelStation                   Boolean  @default(false)
+  canEditFuelStation                     Boolean  @default(false)
+  canDeleteFuelStation                   Boolean  @default(false)
+  canViewFuelStationReport               Boolean  @default(false)
   // Manufacturing
-  canViewManufacturing              Boolean  @default(false)
-  canCreateManufacturing            Boolean  @default(false)
-  canEditManufacturing              Boolean  @default(false)
-  canDeleteManufacturing            Boolean  @default(false)
-  canViewManufacturingReport        Boolean  @default(false)
+  canViewManufacturing                   Boolean  @default(false)
+  canCreateManufacturing                 Boolean  @default(false)
+  canEditManufacturing                   Boolean  @default(false)
+  canDeleteManufacturing                 Boolean  @default(false)
+  canViewManufacturingReport             Boolean  @default(false)
   // Agriculture
-  canViewAgriculture                Boolean  @default(false)
-  canCreateAgriculture              Boolean  @default(false)
-  canEditAgriculture                Boolean  @default(false)
-  canDeleteAgriculture              Boolean  @default(false)
-  canViewAgricultureReport          Boolean  @default(false)
+  canViewAgriculture                     Boolean  @default(false)
+  canCreateAgriculture                   Boolean  @default(false)
+  canEditAgriculture                     Boolean  @default(false)
+  canDeleteAgriculture                   Boolean  @default(false)
+  canViewAgricultureReport               Boolean  @default(false)
   // Service Business (appointments, work orders, contracts)
-  canViewServiceBusiness            Boolean  @default(false)
-  canCreateServiceBusiness          Boolean  @default(false)
-  canEditServiceBusiness            Boolean  @default(false)
-  canDeleteServiceBusiness          Boolean  @default(false)
-  canViewServiceBusinessReport      Boolean  @default(false)
-  servicePermissionsMigrated        Boolean  @default(true)
-  canViewServiceAppointment         Boolean  @default(false)
-  canCreateServiceAppointment       Boolean  @default(false)
-  canEditServiceAppointment         Boolean  @default(false)
-  canDeleteServiceAppointment       Boolean  @default(false)
-  canUpdateServiceAppointmentStatus Boolean  @default(false)
-  canAssignServiceAppointment       Boolean  @default(false)
-  canViewServiceAppointmentReport   Boolean  @default(false)
-  canViewServiceWorkOrder           Boolean  @default(false)
-  canCreateServiceWorkOrder         Boolean  @default(false)
-  canEditServiceWorkOrder           Boolean  @default(false)
-  canDeleteServiceWorkOrder         Boolean  @default(false)
-  canUpdateServiceWorkOrderStatus   Boolean  @default(false)
-  canAssignServiceWorkOrder         Boolean  @default(false)
-  canViewServiceWorkOrderReport     Boolean  @default(false)
-  canViewServiceContract            Boolean  @default(false)
-  canCreateServiceContract          Boolean  @default(false)
-  canEditServiceContract            Boolean  @default(false)
-  canDeleteServiceContract          Boolean  @default(false)
-  canUpdateServiceContractStatus    Boolean  @default(false)
-  canViewServiceContractReport      Boolean  @default(false)
-  canViewServiceTechnician          Boolean  @default(false)
-  canCreateServiceTechnician        Boolean  @default(false)
-  canEditServiceTechnician          Boolean  @default(false)
-  canDeleteServiceTechnician        Boolean  @default(false)
-  canViewServiceTechnicianReport    Boolean  @default(false)
-  canViewServiceJobCard             Boolean  @default(false)
-  canCreateServiceJobCard           Boolean  @default(false)
-  canEditServiceJobCard             Boolean  @default(false)
-  canDeleteServiceJobCard           Boolean  @default(false)
-  canUpdateServiceJobCardStatus     Boolean  @default(false)
-  canAssignServiceJobCard           Boolean  @default(false)
-  canCheckServiceJobCardQuality     Boolean  @default(false)
-  canViewServiceJobCardReport       Boolean  @default(false)
-  canViewServiceFeedback            Boolean  @default(false)
-  canCreateServiceFeedback          Boolean  @default(false)
-  canRespondServiceFeedback         Boolean  @default(false)
-  canModerateServiceFeedback        Boolean  @default(false)
-  canDeleteServiceFeedback          Boolean  @default(false)
-  canGenerateServiceFeedbackQR      Boolean  @default(false)
-  canViewServiceFeedbackReport      Boolean  @default(false)
-  canViewServiceCarWash             Boolean  @default(false)
-  canCreateServiceCarWash           Boolean  @default(false)
-  canEditServiceCarWash             Boolean  @default(false)
-  canDeleteServiceCarWash           Boolean  @default(false)
-  canViewServiceGarage              Boolean  @default(false)
-  canCreateServiceGarage            Boolean  @default(false)
-  canEditServiceGarage              Boolean  @default(false)
-  canDeleteServiceGarage            Boolean  @default(false)
-  canUpdateServiceGarageStatus      Boolean  @default(false)
+  canViewServiceBusiness                 Boolean  @default(false)
+  canCreateServiceBusiness               Boolean  @default(false)
+  canEditServiceBusiness                 Boolean  @default(false)
+  canDeleteServiceBusiness               Boolean  @default(false)
+  canViewServiceBusinessReport           Boolean  @default(false)
+  servicePermissionsMigrated             Boolean  @default(true)
+  canViewServiceAppointment              Boolean  @default(false)
+  canCreateServiceAppointment            Boolean  @default(false)
+  canEditServiceAppointment              Boolean  @default(false)
+  canDeleteServiceAppointment            Boolean  @default(false)
+  canUpdateServiceAppointmentStatus      Boolean  @default(false)
+  canAssignServiceAppointment            Boolean  @default(false)
+  canViewServiceAppointmentReport        Boolean  @default(false)
+  canViewServiceWorkOrder                Boolean  @default(false)
+  canCreateServiceWorkOrder              Boolean  @default(false)
+  canEditServiceWorkOrder                Boolean  @default(false)
+  canDeleteServiceWorkOrder              Boolean  @default(false)
+  canUpdateServiceWorkOrderStatus        Boolean  @default(false)
+  canAssignServiceWorkOrder              Boolean  @default(false)
+  canViewServiceWorkOrderReport          Boolean  @default(false)
+  canViewServiceContract                 Boolean  @default(false)
+  canCreateServiceContract               Boolean  @default(false)
+  canEditServiceContract                 Boolean  @default(false)
+  canDeleteServiceContract               Boolean  @default(false)
+  canUpdateServiceContractStatus         Boolean  @default(false)
+  canViewServiceContractReport           Boolean  @default(false)
+  canViewServiceTechnician               Boolean  @default(false)
+  canCreateServiceTechnician             Boolean  @default(false)
+  canEditServiceTechnician               Boolean  @default(false)
+  canDeleteServiceTechnician             Boolean  @default(false)
+  canViewServiceTechnicianReport         Boolean  @default(false)
+  canViewServiceJobCard                  Boolean  @default(false)
+  canCreateServiceJobCard                Boolean  @default(false)
+  canEditServiceJobCard                  Boolean  @default(false)
+  canDeleteServiceJobCard                Boolean  @default(false)
+  canUpdateServiceJobCardStatus          Boolean  @default(false)
+  canAssignServiceJobCard                Boolean  @default(false)
+  canCheckServiceJobCardQuality          Boolean  @default(false)
+  canViewServiceJobCardReport            Boolean  @default(false)
+  canViewServiceFeedback                 Boolean  @default(false)
+  canCreateServiceFeedback               Boolean  @default(false)
+  canRespondServiceFeedback              Boolean  @default(false)
+  canModerateServiceFeedback             Boolean  @default(false)
+  canDeleteServiceFeedback               Boolean  @default(false)
+  canGenerateServiceFeedbackQR           Boolean  @default(false)
+  canViewServiceFeedbackReport           Boolean  @default(false)
+  canViewServiceCarWash                  Boolean  @default(false)
+  canCreateServiceCarWash                Boolean  @default(false)
+  canEditServiceCarWash                  Boolean  @default(false)
+  canDeleteServiceCarWash                Boolean  @default(false)
+  canViewServiceGarage                   Boolean  @default(false)
+  canCreateServiceGarage                 Boolean  @default(false)
+  canEditServiceGarage                   Boolean  @default(false)
+  canDeleteServiceGarage                 Boolean  @default(false)
+  canUpdateServiceGarageStatus           Boolean  @default(false)
   // Communication
-  canViewCommunication              Boolean  @default(false)
-  canCreateCommunication            Boolean  @default(false)
-  canEditCommunication              Boolean  @default(false)
-  canDeleteCommunication            Boolean  @default(false)
-  canViewTeamMessaging              Boolean  @default(false)
-  canSendTeamMessages               Boolean  @default(false)
+  canViewCommunication                   Boolean  @default(false)
+  canCreateCommunication                 Boolean  @default(false)
+  canEditCommunication                   Boolean  @default(false)
+  canDeleteCommunication                 Boolean  @default(false)
+  canViewTeamMessaging                   Boolean  @default(false)
+  canSendTeamMessages                    Boolean  @default(false)
   // Accounting
-  canViewAccounting                 Boolean  @default(false)
-  canCreateAccounting               Boolean  @default(false)
-  canEditAccounting                 Boolean  @default(false)
-  canManageFinancialYearClose       Boolean  @default(false)
-  canSignOffFinancialYearClose      Boolean  @default(false)
-  canReopenFinancialYearClose       Boolean  @default(false)
-  canDeleteAccounting               Boolean  @default(false)
-  canReverseAccountingEntry         Boolean  @default(false)
-  canViewChartOfAccounts            Boolean  @default(false)
-  canCreateChartOfAccounts          Boolean  @default(false)
-  canEditChartOfAccounts            Boolean  @default(false)
+  canViewAccounting                      Boolean  @default(false)
+  canCreateAccounting                    Boolean  @default(false)
+  canEditAccounting                      Boolean  @default(false)
+  canManageFinancialYearClose            Boolean  @default(false)
+  canSignOffFinancialYearClose           Boolean  @default(false)
+  canReopenFinancialYearClose            Boolean  @default(false)
+  canDeleteAccounting                    Boolean  @default(false)
+  canReverseAccountingEntry              Boolean  @default(false)
+  canViewChartOfAccounts                 Boolean  @default(false)
+  canCreateChartOfAccounts               Boolean  @default(false)
+  canEditChartOfAccounts                 Boolean  @default(false)
   // Transaction Accounts & Cash Movements
-  canViewTransactionAccount         Boolean  @default(false)
-  canUseAnyTransactionAccount       Boolean  @default(false)
-  canUseOtherCashAccount            Boolean  @default(false)
-  canUseOwnCashAccount              Boolean  @default(false)
-  canUseOtherStaffCashAccount       Boolean  @default(false)
-  canUseSafeAccount                 Boolean  @default(false)
-  canUseBankAccount                 Boolean  @default(false)
-  canUseMobileMoneyAccount          Boolean  @default(false)
-  canUseCardAccount                 Boolean  @default(false)
-  canCreateTransactionAccount       Boolean  @default(false)
-  canEditTransactionAccount         Boolean  @default(false)
-  canDeleteTransactionAccount       Boolean  @default(false)
-  canCreateWithdrawal               Boolean  @default(false)
+  canViewTransactionAccount              Boolean  @default(false)
+  canUseAnyTransactionAccount            Boolean  @default(false)
+  canUseOtherCashAccount                 Boolean  @default(false)
+  canUseOwnCashAccount                   Boolean  @default(false)
+  canUseOtherStaffCashAccount            Boolean  @default(false)
+  canUseSafeAccount                      Boolean  @default(false)
+  canUseBankAccount                      Boolean  @default(false)
+  canUseMobileMoneyAccount               Boolean  @default(false)
+  canUseCardAccount                      Boolean  @default(false)
+  canCreateTransactionAccount            Boolean  @default(false)
+  canEditTransactionAccount              Boolean  @default(false)
+  canDeleteTransactionAccount            Boolean  @default(false)
+  canCreateWithdrawal                    Boolean  @default(false)
   // Payment Methods (for spending — expenses, payables)
-  canUseCash                        Boolean  @default(false)
-  canUseMobileMoney                 Boolean  @default(false)
-  canUseBank                        Boolean  @default(false)
-  canUseCard                        Boolean  @default(false)
+  canUseCash                             Boolean  @default(false)
+  canUseMobileMoney                      Boolean  @default(false)
+  canUseBank                             Boolean  @default(false)
+  canUseCard                             Boolean  @default(false)
   // Data Import
-  canImportInventory                Boolean  @default(false)
-  createdAt                         DateTime @default(now())
-  updatedAt                         DateTime @updatedAt
+  canImportInventory                     Boolean  @default(false)
+  createdAt                              DateTime @default(now())
+  updatedAt                              DateTime @updatedAt
 
   @@unique([userId])
   @@map("user_permissions")
@@ -1209,6 +1209,7 @@ model Product {
   supplierPurchaseItems         SupplierPurchaseItem[]
   units                         ProductUnit[]
   rentalItems                   RentalItem[]
+  rentalChargeLines             RentalChargeLine[]
   saleReturnItems               SaleReturnItem[]
   stockTransferItems            StockTransferItem[]
   stockTransferDestinationItems StockTransferItem[]      @relation("TransferDestinationProduct")
@@ -1383,38 +1384,38 @@ model Category {
 
 // Sales/Orders
 model Sale {
-  id              String           @id @default(cuid())
-  receiptNo       String
-  tenantId        String
-  branchId        String?
-  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  userId          String
-  user            User             @relation(fields: [userId], references: [id])
-  total           Float
-  subtotal        Float
-  tax             Float            @default(0)
-  discount        Float            @default(0)
-  cashDiscount    Float            @default(0) // Invoice-level cash discount
-  paymentMethod   String
-  mobileProvider  String?
-  phoneNumber     String?
-  transactionId   String?
-  customerName    String?
-  servedBy        String?
-  amountPaid      Float? // Amount customer paid (for cash change calculation)
-  changeGiven     Float? // Change given back to customer
-  currency                 String?
-  foreignTotal             Float?
-  exchangeRateToBase       Float?
-  exchangeRateAsOf         String?
-  exchangeRateSource       String?
-  status          SaleStatus       @default(completed)
-  notes           String?
-  items           SaleItem[]
-  saleReturns     SaleReturn[]
-  serviceJobCards ServiceJobCard[]
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id                 String           @id @default(cuid())
+  receiptNo          String
+  tenantId           String
+  branchId           String?
+  branch             Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  userId             String
+  user               User             @relation(fields: [userId], references: [id])
+  total              Float
+  subtotal           Float
+  tax                Float            @default(0)
+  discount           Float            @default(0)
+  cashDiscount       Float            @default(0) // Invoice-level cash discount
+  paymentMethod      String
+  mobileProvider     String?
+  phoneNumber        String?
+  transactionId      String?
+  customerName       String?
+  servedBy           String?
+  amountPaid         Float? // Amount customer paid (for cash change calculation)
+  changeGiven        Float? // Change given back to customer
+  currency           String?
+  foreignTotal       Float?
+  exchangeRateToBase Float?
+  exchangeRateAsOf   String?
+  exchangeRateSource String?
+  status             SaleStatus       @default(completed)
+  notes              String?
+  items              SaleItem[]
+  saleReturns        SaleReturn[]
+  serviceJobCards    ServiceJobCard[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
 
   @@unique([tenantId, receiptNo])
   @@index([tenantId, branchId])
@@ -1517,7 +1518,7 @@ model Customer {
   sales                           SaleRecord[]
   payments                        CustomerPayment[]
   paymentAllocations              CustomerPaymentAllocation[]
-  creditApplications               CustomerCreditApplication[]
+  creditApplications              CustomerCreditApplication[]
   receivableReconciliationReviews CustomerReceivableReconciliationReview[]
   withdrawals                     CustomerWithdrawal[]
   invoices                        Invoice[]
@@ -1535,7 +1536,7 @@ model Customer {
   procurementCounterpartyLink     ProcurementCustomerLink?
   procurementSellerInvoices       ProcurementInvoice[]                     @relation("ProcurementInvoiceSellerCustomer")
   propertyTenancies               PropertyTenancy[]
-  propertySales                    PropertySale[]
+  propertySales                   PropertySale[]
 
   creditNotes CreditNote[]
 
@@ -1583,7 +1584,7 @@ model SaleRecord {
   items                           SaleRecordItem[]
   payments                        CustomerPayment[]
   paymentAllocations              CustomerPaymentAllocation[]
-  creditApplications               CustomerCreditApplication[]
+  creditApplications              CustomerCreditApplication[]
   receivableReconciliationReviews CustomerReceivableReconciliationReview[]
   creditNotes                     CreditNote[]
   createdAt                       DateTime                                 @default(now())
@@ -1692,32 +1693,36 @@ model CustomerPaymentAllocation {
   targetType  String          @default("sale")
   saleId      String?
   sale        SaleRecord?     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  rentalId    String?
+  rental      Rental?         @relation(fields: [rentalId], references: [id], onDelete: Restrict)
   amount      Decimal         @db.Decimal(18, 2)
   createdById String
   createdBy   User            @relation("ReceiptAllocationCreator", fields: [createdById], references: [id], onDelete: Restrict)
   createdAt   DateTime        @default(now())
 
   @@unique([paymentId, saleId])
+  @@unique([paymentId, rentalId])
   @@index([tenantId, saleId, createdAt])
+  @@index([tenantId, rentalId, createdAt])
   @@index([tenantId, customerId, createdAt])
   @@map("customer_payment_allocations")
 }
 
 model CustomerCreditApplication {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branchId    String?
   customerId  String
-  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer    Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   saleId      String
   sale        SaleRecord @relation(fields: [saleId], references: [id], onDelete: Restrict)
   sourceType  String
   sourceId    String
-  amount      Decimal  @db.Decimal(18, 2)
+  amount      Decimal    @db.Decimal(18, 2)
   createdById String
-  createdBy   User     @relation("CustomerCreditApplicationCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt   DateTime @default(now())
+  createdBy   User       @relation("CustomerCreditApplicationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime   @default(now())
 
   @@unique([tenantId, sourceType, sourceId, saleId])
   @@index([tenantId, customerId, createdAt])
@@ -1851,22 +1856,22 @@ enum FuelCardStatus {
 }
 
 model FuelCardTransaction {
-  id           String   @id @default(cuid())
-  cardId       String
-  card         FuelCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  tenantId     String
-  branchId     String?
-  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  type         String // reload, purchase, adjustment
-  amount       Float
-  balanceAfter Float
+  id                 String   @id @default(cuid())
+  cardId             String
+  card               FuelCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  tenantId           String
+  branchId           String?
+  branch             Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  type               String // reload, purchase, adjustment
+  amount             Float
+  balanceAfter       Float
   currency           String?
   foreignAmount      Float?
   exchangeRateToBase Float?
   exchangeRateAsOf   String?
-  reference    String?
-  notes        String?
-  createdAt    DateTime @default(now())
+  reference          String?
+  notes              String?
+  createdAt          DateTime @default(now())
 
   @@index([tenantId, branchId])
   @@map("fuel_card_transactions")
@@ -1895,12 +1900,12 @@ model Supplier {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 
-  purchases SupplierPurchase[]
-  payments  SupplierPayment[]
-  propertyLandPurchases PropertyLandPurchase[]
+  purchases                    SupplierPurchase[]
+  payments                     SupplierPayment[]
+  propertyLandPurchases        PropertyLandPurchase[]
   propertyLandPurchasePayments PropertyLandPurchasePayment[]
-  fuelDeliveries FuelDelivery[]
-  Tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  fuelDeliveries               FuelDelivery[]
+  Tenant                       Tenant                        @relation(fields: [tenantId], references: [id])
 
   debitNotes DebitNote[]
 
@@ -1917,32 +1922,32 @@ enum SupplierStatus {
 
 // Supplier Purchases
 model SupplierPurchase {
-  id            String                 @id @default(cuid())
-  refNo         String?
-  tenantId      String
-  branchId      String?
-  branch        Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  supplierId    String
-  supplier      Supplier               @relation(fields: [supplierId], references: [id])
-  userId        String
-  total         Float
-  amountPaid    Float                  @default(0)
-  balance       Float                  @default(0)
-  paymentStatus PaymentStatus          @default(unpaid)
-  currency      String?
-  foreignTotal  Float?
+  id                 String                 @id @default(cuid())
+  refNo              String?
+  tenantId           String
+  branchId           String?
+  branch             Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplierId         String
+  supplier           Supplier               @relation(fields: [supplierId], references: [id])
+  userId             String
+  total              Float
+  amountPaid         Float                  @default(0)
+  balance            Float                  @default(0)
+  paymentStatus      PaymentStatus          @default(unpaid)
+  currency           String?
+  foreignTotal       Float?
   exchangeRateToBase Float?
-  exchangeRateAsOf String?
+  exchangeRateAsOf   String?
   exchangeRateSource String?
-  dueDate       DateTime?
-  notes         String?
-  items         SupplierPurchaseItem[]
-  payments      SupplierPayment[]
-  debitNotes    DebitNote[]
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
-  User          User                   @relation(fields: [userId], references: [id])
-  fuelDelivery  FuelDelivery?
+  dueDate            DateTime?
+  notes              String?
+  items              SupplierPurchaseItem[]
+  payments           SupplierPayment[]
+  debitNotes         DebitNote[]
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  User               User                   @relation(fields: [userId], references: [id])
+  fuelDelivery       FuelDelivery?
 
   @@index([tenantId, branchId])
   @@map("supplier_purchases")
@@ -2227,18 +2232,18 @@ model ProcurementMessage {
 }
 
 model BusinessConversation {
-  id                   String           @id @default(cuid())
-  tenantId             String
-  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  participantOneId     String
-  participantOne       User             @relation("BusinessConversationParticipantOne", fields: [participantOneId], references: [id], onDelete: Cascade)
-  participantTwoId     String
-  participantTwo       User             @relation("BusinessConversationParticipantTwo", fields: [participantTwoId], references: [id], onDelete: Cascade)
+  id                     String            @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  participantOneId       String
+  participantOne         User              @relation("BusinessConversationParticipantOne", fields: [participantOneId], references: [id], onDelete: Cascade)
+  participantTwoId       String
+  participantTwo         User              @relation("BusinessConversationParticipantTwo", fields: [participantTwoId], references: [id], onDelete: Cascade)
   participantOneTypingAt DateTime?
   participantTwoTypingAt DateTime?
-  messages             BusinessMessage[]
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  messages               BusinessMessage[]
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
   @@unique([tenantId, participantOneId, participantTwoId])
   @@index([tenantId, updatedAt])
@@ -2248,23 +2253,23 @@ model BusinessConversation {
 }
 
 model BusinessMessage {
-  id             String             @id @default(cuid())
-  tenantId       String
-  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  conversationId String
-  conversation   BusinessConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderId       String
-  sender         User               @relation("BusinessMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  recipientId    String
-  recipient      User               @relation("BusinessMessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  body           String
+  id               String                    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId   String
+  conversation     BusinessConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId         String
+  sender           User                      @relation("BusinessMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId      String
+  recipient        User                      @relation("BusinessMessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  body             String
   replyToMessageId String?
-  replyToMessage BusinessMessage?   @relation("BusinessMessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
-  replies        BusinessMessage[] @relation("BusinessMessageReplies")
-  reactions      BusinessMessageReaction[]
-  deliveredAt    DateTime?
-  readAt         DateTime?
-  createdAt      DateTime           @default(now())
+  replyToMessage   BusinessMessage?          @relation("BusinessMessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies          BusinessMessage[]         @relation("BusinessMessageReplies")
+  reactions        BusinessMessageReaction[]
+  deliveredAt      DateTime?
+  readAt           DateTime?
+  createdAt        DateTime                  @default(now())
 
   @@index([conversationId, createdAt])
   @@index([tenantId, recipientId, readAt])
@@ -2272,15 +2277,15 @@ model BusinessMessage {
 }
 
 model BusinessMessageReaction {
-  id             String           @id @default(cuid())
-  tenantId       String
-  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  messageId      String
-  message        BusinessMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  emoji          String
-  createdAt      DateTime          @default(now())
+  id        String          @id @default(cuid())
+  tenantId  String
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messageId String
+  message   BusinessMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime        @default(now())
 
   @@unique([messageId, userId])
   @@index([tenantId, messageId])
@@ -2449,33 +2454,33 @@ model ProcurementInvoiceLine {
 // =====================================================
 
 model Expense {
-  id             String       @id @default(cuid())
-  tenantId       String
-  branchId       String?
-  branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  category       String // rent, transport, salaries, utilities, etc.
-  description    String
-  amount         Float
-  currency       String?
-  foreignAmount  Float?
+  id                 String       @id @default(cuid())
+  tenantId           String
+  branchId           String?
+  branch             Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  category           String // rent, transport, salaries, utilities, etc.
+  description        String
+  amount             Float
+  currency           String?
+  foreignAmount      Float?
   exchangeRateToBase Float?
-  exchangeRateAsOf String?
+  exchangeRateAsOf   String?
   exchangeRateSource String?
-  balanceAfter   Float?
-  paymentMethod  String
-  cashAccountId  String? // Which cash account this expense was paid from
-  cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
-  mobileProvider String?
-  phoneNumber    String?
-  transactionId  String?
-  reference      String?
-  notes          String?
-  userId         String // Who recorded it
-  date           DateTime     @default(now())
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  Tenant         Tenant       @relation(fields: [tenantId], references: [id])
-  User           User         @relation(fields: [userId], references: [id])
+  balanceAfter       Float?
+  paymentMethod      String
+  cashAccountId      String? // Which cash account this expense was paid from
+  cashAccount        CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  mobileProvider     String?
+  phoneNumber        String?
+  transactionId      String?
+  reference          String?
+  notes              String?
+  userId             String // Who recorded it
+  date               DateTime     @default(now())
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  Tenant             Tenant       @relation(fields: [tenantId], references: [id])
+  User               User         @relation(fields: [userId], references: [id])
 
   @@index([tenantId, branchId])
   @@map("expenses")
@@ -2486,31 +2491,31 @@ model Expense {
 // =====================================================
 
 model CashAccount {
-  id              String               @id @default(cuid())
-  tenantId        String
-  branchId        String?
-  branch          Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  name            String // "Cash Box", "MTN Mobile Money", "Stanbic Bank"
-  type            String // cash, mobile_money, bank, card
-  accountNumber   String? // Phone number for mobile money, account number for bank
-  bankName        String? // Bank name (bank type only)
-  accountHolder   String? // Name of the account holder
-  branchName      String? // Bank branch (bank type only)
-  balance         Float                @default(0)
-  currency        String               @default("UGX")
-  isActive        Boolean              @default(true)
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  Tenant          Tenant               @relation(fields: [tenantId], references: [id])
-  CashTransaction CashTransaction[]
-  Expense         Expense[]
-  withdrawals     CustomerWithdrawal[]
-  AssignedUsers   User[]               @relation("UserCashAccount")
-  propertyRentPayments PropertyRentPayment[]
-  rentalPayments      RentalPayment[]
-  propertySalePayments PropertySalePayment[]
+  id                           String                        @id @default(cuid())
+  tenantId                     String
+  branchId                     String?
+  branch                       Branch?                       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name                         String // "Cash Box", "MTN Mobile Money", "Stanbic Bank"
+  type                         String // cash, mobile_money, bank, card
+  accountNumber                String? // Phone number for mobile money, account number for bank
+  bankName                     String? // Bank name (bank type only)
+  accountHolder                String? // Name of the account holder
+  branchName                   String? // Bank branch (bank type only)
+  balance                      Float                         @default(0)
+  currency                     String                        @default("UGX")
+  isActive                     Boolean                       @default(true)
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
+  Tenant                       Tenant                        @relation(fields: [tenantId], references: [id])
+  CashTransaction              CashTransaction[]
+  Expense                      Expense[]
+  withdrawals                  CustomerWithdrawal[]
+  AssignedUsers                User[]                        @relation("UserCashAccount")
+  propertyRentPayments         PropertyRentPayment[]
+  rentalPayments               RentalPayment[]
+  propertySalePayments         PropertySalePayment[]
   propertyLandPurchasePayments PropertyLandPurchasePayment[]
-  propertyOwnerPayouts PropertyOwnerPayout[]
+  propertyOwnerPayouts         PropertyOwnerPayout[]
 
   @@unique([tenantId, name])
   @@index([tenantId, branchId])
@@ -2518,24 +2523,24 @@ model CashAccount {
 }
 
 model CashTransaction {
-  id           String      @id @default(cuid())
-  tenantId     String
-  accountId    String
-  account      CashAccount @relation(fields: [accountId], references: [id])
-  type         String // income, expense, transfer
-  amount       Float
-  balanceAfter Float
-  currency     String?
-  foreignAmount Float?
+  id                 String      @id @default(cuid())
+  tenantId           String
+  accountId          String
+  account            CashAccount @relation(fields: [accountId], references: [id])
+  type               String // income, expense, transfer
+  amount             Float
+  balanceAfter       Float
+  currency           String?
+  foreignAmount      Float?
   exchangeRateToBase Float?
-  exchangeRateAsOf String?
+  exchangeRateAsOf   String?
   exchangeRateSource String?
-  reference    String? // Sale ID, Purchase ID, etc.
-  description  String?
-  userId       String
-  createdAt    DateTime    @default(now())
-  Tenant       Tenant      @relation(fields: [tenantId], references: [id])
-  User         User        @relation(fields: [userId], references: [id])
+  reference          String? // Sale ID, Purchase ID, etc.
+  description        String?
+  userId             String
+  createdAt          DateTime    @default(now())
+  Tenant             Tenant      @relation(fields: [tenantId], references: [id])
+  User               User        @relation(fields: [userId], references: [id])
 
   @@map("cash_transactions")
 }
@@ -2620,51 +2625,58 @@ model UsageLimit {
 // =====================================================
 
 model Rental {
-  id                 String       @id @default(cuid())
-  rentalNo           String // e.g. HIRE-1234567890
-  tenantId           String
-  branchId           String?
-  branch             Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customerId         String?
-  customer           Customer?    @relation(fields: [customerId], references: [id])
-  customerName       String?
-  customerPhone      String?
-  userId             String
-  User               User         @relation(fields: [userId], references: [id])
-  hireDate           DateTime     @default(now()) // When items go out
-  expectedReturnDate DateTime // When items should come back
-  actualReturnDate   DateTime? // When items actually returned
-  totalAmount        Float        @default(0) // Total hire charge
-  depositAmount      Float        @default(0) // Security deposit collected
-  depositStatus      String       @default("collected") // collected, refunded, forfeited
-  amountPaid         Float        @default(0) // Hire charge paid so far
-  balance            Float        @default(0) // Outstanding hire charge
-  paymentStatus      String       @default("unpaid") // paid, partial, unpaid
-  paymentMethod      String?      @default("cash")
-  mobileProvider     String?
-  phoneNumber        String?
-  transactionId      String?
-  discount           Float        @default(0)
-  taxRate            Float        @default(0)
-  taxAmount          Float        @default(0)
-  guarantorName      String?
-  guarantorPhone     String?
-  customerNin        String?
-  status             RentalStatus @default(active)
-  bookingState       String       @default("checked_out") // reserved, confirmed, checked_out
-  bookingPurpose     String?
-  contractDraft      String?      @db.Text
-  contractGeneratedAt DateTime?
-  notes              String?
-  items              RentalItem[]
-  chargeLines        RentalChargeLine[]
-  payments           RentalPayment[]
-  depositRefunded    Float        @default(0)
-  depositPaid        Float        @default(0)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
-  Tenant             Tenant       @relation(fields: [tenantId], references: [id])
+  id                         String                      @id @default(cuid())
+  rentalNo                   String // e.g. HIRE-1234567890
+  tenantId                   String
+  branchId                   String?
+  branch                     Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId                 String?
+  customer                   Customer?                   @relation(fields: [customerId], references: [id])
+  customerName               String?
+  customerPhone              String?
+  userId                     String
+  User                       User                        @relation(fields: [userId], references: [id])
+  hireDate                   DateTime                    @default(now()) // When items go out
+  expectedReturnDate         DateTime // When items should come back
+  actualReturnDate           DateTime? // When items actually returned
+  totalAmount                Float                       @default(0) // Total hire charge
+  depositAmount              Float                       @default(0) // Security deposit collected
+  depositStatus              String                      @default("collected") // collected, refunded, forfeited
+  amountPaid                 Float                       @default(0) // Hire charge paid so far
+  balance                    Float                       @default(0) // Outstanding hire charge
+  paymentStatus              String                      @default("unpaid") // paid, partial, unpaid
+  paymentMethod              String?                     @default("cash")
+  mobileProvider             String?
+  phoneNumber                String?
+  transactionId              String?
+  discount                   Float                       @default(0)
+  taxRate                    Float                       @default(0)
+  taxAmount                  Float                       @default(0)
+  guarantorName              String?
+  guarantorPhone             String?
+  customerNin                String?
+  status                     RentalStatus                @default(active)
+  bookingState               String                      @default("checked_out") // reserved, confirmed, checked_out
+  bookingPurpose             String?
+  contractDraft              String?                     @db.Text
+  contractGeneratedAt        DateTime?
+  isHistoricalRecord         Boolean                     @default(false)
+  historicalImportKey        String?
+  historicalReference        String?
+  isHistoricalReceivable     Boolean                     @default(false)
+  historicalReceivableAmount Float                       @default(0)
+  notes                      String?
+  items                      RentalItem[]
+  chargeLines                RentalChargeLine[]
+  payments                   RentalPayment[]
+  customerPaymentAllocations CustomerPaymentAllocation[]
+  depositRefunded            Float                       @default(0)
+  depositPaid                Float                       @default(0)
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+  Tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
 
+  @@unique([tenantId, historicalImportKey])
   @@index([tenantId, branchId])
   @@index([customerId])
   @@map("rentals")
@@ -2681,6 +2693,9 @@ model RentalItem {
   rentalPeriod    RentalPeriod   @default(daily)
   periods         Int            @default(1) // Number of periods (e.g. 3 days)
   totalAmount     Float          @default(0) // quantity * unitHirePrice * periods
+  discountAmount  Float          @default(0)
+  taxAmount       Float          @default(0)
+  netAmount       Float          @default(0)
   conditionOut    ItemCondition  @default(good) // Condition when hired out
   conditionReturn ItemCondition? // Condition when returned (null if not yet returned)
   damageFee       Float? // Fee charged if item returned damaged
@@ -2693,17 +2708,26 @@ model RentalItem {
 }
 
 model RentalChargeLine {
-  id          String   @id @default(cuid())
-  rentalId    String
-  rental      Rental   @relation(fields: [rentalId], references: [id], onDelete: Cascade)
-  label       String
-  category    String   @default("service") // service, delivery, setup, staffing, venue, cleaning, other
-  quantity    Float    @default(1)
-  unitPrice   Float    @default(0)
-  totalAmount Float    @default(0)
-  createdAt   DateTime @default(now())
+  id              String    @id @default(cuid())
+  rentalId        String
+  rental          Rental    @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  lineType        String    @default("service") // service, consumable
+  label           String
+  category        String    @default("service") // service, delivery, setup, staffing, venue, cleaning, other
+  quantity        Float     @default(1)
+  unitPrice       Float     @default(0)
+  unitCost        Float     @default(0)
+  totalAmount     Float     @default(0)
+  discountAmount  Float     @default(0)
+  taxAmount       Float     @default(0)
+  netAmount       Float     @default(0)
+  stockConsumedAt DateTime?
+  createdAt       DateTime  @default(now())
 
   @@index([rentalId])
+  @@index([productId])
   @@map("rental_charge_lines")
 }
 
@@ -2733,6 +2757,9 @@ model RentalAccountingConfig {
   taxPayableAccount         Account  @relation("RentalTaxPayableAccount", fields: [taxPayableAccountId], references: [id])
   openingEquityAccountId    String
   openingEquityAccount      Account  @relation("RentalOpeningEquityAccount", fields: [openingEquityAccountId], references: [id])
+  inventoryAccountId        String?
+  costOfGoodsSoldAccountId  String?
+  salesRevenueAccountId     String?
   isEnabled                 Boolean  @default(true)
   isSystemManaged           Boolean  @default(true)
   createdAt                 DateTime @default(now())
@@ -2742,30 +2769,30 @@ model RentalAccountingConfig {
 }
 
 model RentalPayment {
-  id             String      @id @default(cuid())
+  id             String       @id @default(cuid())
   tenantId       String
-  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rentalId       String
-  rental         Rental      @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  rental         Rental       @relation(fields: [rentalId], references: [id], onDelete: Cascade)
   cashAccountId  String?
   cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
   userId         String
-  user           User        @relation(fields: [userId], references: [id])
-  kind           String      @default("rental_payment") // rental_payment, rental_advance, deposit, deposit_refund, deposit_forfeiture
+  user           User         @relation(fields: [userId], references: [id])
+  kind           String       @default("rental_payment") // rental_payment, rental_advance, deposit, deposit_refund, deposit_forfeiture
   receiptNo      String
   idempotencyKey String
   amount         Float
-  balanceAfter   Float       @default(0)
+  balanceAfter   Float        @default(0)
   paymentMethod  String?
   mobileProvider String?
   phoneNumber    String?
-  paymentDate    DateTime    @default(now())
+  paymentDate    DateTime     @default(now())
   transactionRef String?
   notes          String?
-  status         String      @default("posted") // posted, void
+  status         String       @default("posted") // posted, void
   voidReason     String?
   voidedAt       DateTime?
-  createdAt      DateTime    @default(now())
+  createdAt      DateTime     @default(now())
 
   @@unique([tenantId, receiptNo])
   @@unique([tenantId, idempotencyKey])
@@ -2776,75 +2803,75 @@ model RentalPayment {
 
 // Property management is distinct from equipment hire (Rental / RentalItem).
 model PropertyOwner {
-  id          String            @id @default(cuid())
-  tenantId    String
-  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String
-  email       String?
-  phone       String?
-  address     String?
-  notes       String?
-  isActive    Boolean           @default(true)
-  properties  ManagedProperty[]
-  payouts     PropertyOwnerPayout[]
+  id            String                @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  email         String?
+  phone         String?
+  address       String?
+  notes         String?
+  isActive      Boolean               @default(true)
+  properties    ManagedProperty[]
+  payouts       PropertyOwnerPayout[]
   propertySales PropertySale[]
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 
   @@index([tenantId, name])
   @@map("property_owners")
 }
 
 model ManagedProperty {
-  id             String           @id @default(cuid())
-  tenantId       String
-  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  ownerId        String?
-  owner          PropertyOwner?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
-  name           String
-  propertyType   String           @default("residential")
-  address        String
-  city           String?
-  notes          String?
-  status         String           @default("active")
-  units          PropertyUnit[]
-  propertySales  PropertySale[]
-  landPurchases  PropertyLandPurchase[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id            String                 @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerId       String?
+  owner         PropertyOwner?         @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  name          String
+  propertyType  String                 @default("residential")
+  address       String
+  city          String?
+  notes         String?
+  status        String                 @default("active")
+  units         PropertyUnit[]
+  propertySales PropertySale[]
+  landPurchases PropertyLandPurchase[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
 
   @@index([tenantId, ownerId, status])
   @@map("managed_properties")
 }
 
 model PropertyUnit {
-  id             String           @id @default(cuid())
-  propertyId     String
-  property       ManagedProperty  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  unitCode       String
-  unitType       String?
-  areaSize       Float?
-  areaUnit       String?
-  frontage       Float?
-  depth          Float?
-  dimensionUnit  String?
-  plotNumber     String?
-  blockNumber    String?
-  titleReference String?
-  landTenure     String?
-  bedrooms       Int?
-  bathrooms      Int?
-  rentAmount     Float            @default(0)
-  acquisitionCost Float           @default(0)
-  currency       String           @default("UGX")
-  status         String           @default("vacant")
-  notes          String?
-  tenancies      PropertyTenancy[]
-  propertySales  PropertySale[]
-  landPurchase   PropertyLandPurchase?
+  id              String                    @id @default(cuid())
+  propertyId      String
+  property        ManagedProperty           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unitCode        String
+  unitType        String?
+  areaSize        Float?
+  areaUnit        String?
+  frontage        Float?
+  depth           Float?
+  dimensionUnit   String?
+  plotNumber      String?
+  blockNumber     String?
+  titleReference  String?
+  landTenure      String?
+  bedrooms        Int?
+  bathrooms       Int?
+  rentAmount      Float                     @default(0)
+  acquisitionCost Float                     @default(0)
+  currency        String                    @default("UGX")
+  status          String                    @default("vacant")
+  notes           String?
+  tenancies       PropertyTenancy[]
+  propertySales   PropertySale[]
+  landPurchase    PropertyLandPurchase?
   rentRateHistory PropertyRentRateHistory[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
 
   @@unique([propertyId, unitCode])
   @@index([propertyId, status])
@@ -2852,42 +2879,42 @@ model PropertyUnit {
 }
 
 model PropertyTenancy {
-  id                String                 @id @default(cuid())
-  agreementRef      String?
-  tenantId          String
-  tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  unitId            String
-  unit              PropertyUnit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  tenantName        String
-  customerId        String?
-  customer          Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  email             String?
-  phone             String?
-  alternatePhone    String?
-  nationalId        String?
-  maritalStatus     String?
-  spouseNames       String?
-  childrenCount     Int?
-  householdSize     Int?
-  placeOfOrigin     String?
-  startDate         DateTime
-  endDate           DateTime?
-  dueDay            Int                    @default(1)
-  rentAmount        Float
-  currency          String                 @default("UGX")
-  depositRequired   Float                  @default(0)
-  depositHeld       Float                  @default(0)
-  status            String                 @default("active")
-  agreementNotes    String?
-  charges           RentCharge[]
-  payments          PropertyRentPayment[]
-  paymentPlans      PropertyRentPaymentPlan[]
-  promises          PropertyRentPromise[]
-  identity          PropertyTenantIdentity?
-  reminders         PropertyRentReminder[]
-  rentRateHistory   PropertyRentRateHistory[]
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
+  id              String                    @id @default(cuid())
+  agreementRef    String?
+  tenantId        String
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unitId          String
+  unit            PropertyUnit              @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  tenantName      String
+  customerId      String?
+  customer        Customer?                 @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  email           String?
+  phone           String?
+  alternatePhone  String?
+  nationalId      String?
+  maritalStatus   String?
+  spouseNames     String?
+  childrenCount   Int?
+  householdSize   Int?
+  placeOfOrigin   String?
+  startDate       DateTime
+  endDate         DateTime?
+  dueDay          Int                       @default(1)
+  rentAmount      Float
+  currency        String                    @default("UGX")
+  depositRequired Float                     @default(0)
+  depositHeld     Float                     @default(0)
+  status          String                    @default("active")
+  agreementNotes  String?
+  charges         RentCharge[]
+  payments        PropertyRentPayment[]
+  paymentPlans    PropertyRentPaymentPlan[]
+  promises        PropertyRentPromise[]
+  identity        PropertyTenantIdentity?
+  reminders       PropertyRentReminder[]
+  rentRateHistory PropertyRentRateHistory[]
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
 
   @@index([tenantId, status, dueDay])
   @@index([unitId, status])
@@ -2896,38 +2923,38 @@ model PropertyTenancy {
 }
 
 model PropertyTenantIdentity {
-  id                String          @id @default(cuid())
-  tenantId          String
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenancyId         String          @unique
-  tenancy           PropertyTenancy @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
-  profilePhotoUrl   String?
+  id                 String          @id @default(cuid())
+  tenantId           String
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId          String          @unique
+  tenancy            PropertyTenancy @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  profilePhotoUrl    String?
   nationalIdFrontUrl String?
   nationalIdBackUrl  String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   @@index([tenantId])
   @@map("property_tenant_identities")
 }
 
 model RentCharge {
-  id             String                 @id @default(cuid())
-  tenantId       String
-  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenancyId      String
-  tenancy        PropertyTenancy        @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
-  period         String
-  dueDate        DateTime
-  description    String                 @default("Monthly rent")
-  amount         Float
-  amountPaid     Float                  @default(0)
-  status         String                 @default("unpaid")
-  allocations    RentPaymentAllocation[]
-  planAllocations RentPaymentPlanChargeAllocation[]
+  id                 String                                @id @default(cuid())
+  tenantId           String
+  tenant             Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId          String
+  tenancy            PropertyTenancy                       @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  period             String
+  dueDate            DateTime
+  description        String                                @default("Monthly rent")
+  amount             Float
+  amountPaid         Float                                 @default(0)
+  status             String                                @default("unpaid")
+  allocations        RentPaymentAllocation[]
+  planAllocations    RentPaymentPlanChargeAllocation[]
   promiseAllocations PropertyRentPromiseChargeAllocation[]
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  createdAt          DateTime                              @default(now())
+  updatedAt          DateTime                              @updatedAt
 
   @@unique([tenancyId, period])
   @@index([tenantId, dueDate, status])
@@ -2936,21 +2963,21 @@ model RentCharge {
 }
 
 model PropertyRentRateHistory {
-  id              String          @id @default(cuid())
-  sequence        Int             @unique @default(autoincrement())
+  id              String           @id @default(cuid())
+  sequence        Int              @unique @default(autoincrement())
   tenantId        String
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   unitId          String
-  unit            PropertyUnit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  unit            PropertyUnit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
   tenancyId       String?
   tenancy         PropertyTenancy? @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
   previousAmount  Float
   newAmount       Float
   effectivePeriod String
   changedById     String
-  changeSource    String          @default("unit_edit")
+  changeSource    String           @default("unit_edit")
   note            String?
-  createdAt       DateTime        @default(now())
+  createdAt       DateTime         @default(now())
 
   @@index([tenantId, unitId, effectivePeriod], map: "property_rent_rate_history_tenant_unit_period_idx")
   @@index([tenancyId, effectivePeriod], map: "property_rent_rate_history_tenancy_period_idx")
@@ -2958,34 +2985,34 @@ model PropertyRentRateHistory {
 }
 
 model PropertyRentPayment {
-  id               String                 @id @default(cuid())
-  tenantId         String
-  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenancyId        String
-  tenancy          PropertyTenancy        @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
-  cashAccountId    String?
-  cashAccount      CashAccount?            @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
-  receiptNo        String
-  idempotencyKey   String?
-  amount           Float
-  advanceAmount    Float                  @default(0)
-  rentMonths       Int?
-  arrearsMonths    Int?
-  paymentDate      DateTime               @default(now())
-  paymentMethod    String                 @default("cash")
-  mobileProvider   String?
-  phoneNumber      String?
-  transactionRef   String?
-  notes            String?
-  status           String                 @default("posted")
-  paymentType      String                 @default("rent")
-  voidReason       String?
-  voidedAt         DateTime?
-  allocations      RentPaymentAllocation[]
-  rentPaymentPlanId String?
-  rentPaymentPlan   PropertyRentPaymentPlan? @relation(fields: [rentPaymentPlanId], references: [id], onDelete: Restrict)
+  id                         String                                 @id @default(cuid())
+  tenantId                   String
+  tenant                     Tenant                                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId                  String
+  tenancy                    PropertyTenancy                        @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  cashAccountId              String?
+  cashAccount                CashAccount?                           @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  receiptNo                  String
+  idempotencyKey             String?
+  amount                     Float
+  advanceAmount              Float                                  @default(0)
+  rentMonths                 Int?
+  arrearsMonths              Int?
+  paymentDate                DateTime                               @default(now())
+  paymentMethod              String                                 @default("cash")
+  mobileProvider             String?
+  phoneNumber                String?
+  transactionRef             String?
+  notes                      String?
+  status                     String                                 @default("posted")
+  paymentType                String                                 @default("rent")
+  voidReason                 String?
+  voidedAt                   DateTime?
+  allocations                RentPaymentAllocation[]
+  rentPaymentPlanId          String?
+  rentPaymentPlan            PropertyRentPaymentPlan?               @relation(fields: [rentPaymentPlanId], references: [id], onDelete: Restrict)
   planInstallmentAllocations RentPlanInstallmentPaymentAllocation[]
-  createdAt        DateTime               @default(now())
+  createdAt                  DateTime                               @default(now())
 
   @@unique([tenantId, receiptNo])
   @@unique([tenantId, idempotencyKey])
@@ -2996,27 +3023,27 @@ model PropertyRentPayment {
 }
 
 model PropertyRentPaymentPlan {
-  id                 String                         @id @default(cuid())
-  tenantId           String
-  tenant             Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenancyId          String
-  tenancy            PropertyTenancy                @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
-  createdById        String
-  createdBy          User                           @relation("PropertyRentPaymentPlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  planNo             String
-  idempotencyKey     String?
-  status             String                         @default("active")
-  totalAmount        Float
-  amountPaid         Float                          @default(0)
-  installmentCount   Int
-  frequency          String
-  startDate          DateTime
-  notes              String?
-  chargeAllocations  RentPaymentPlanChargeAllocation[]
-  installments       RentPaymentPlanInstallment[]
-  payments           PropertyRentPayment[]
-  createdAt          DateTime                       @default(now())
-  updatedAt          DateTime                       @updatedAt
+  id                String                            @id @default(cuid())
+  tenantId          String
+  tenant            Tenant                            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId         String
+  tenancy           PropertyTenancy                   @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  createdById       String
+  createdBy         User                              @relation("PropertyRentPaymentPlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  planNo            String
+  idempotencyKey    String?
+  status            String                            @default("active")
+  totalAmount       Float
+  amountPaid        Float                             @default(0)
+  installmentCount  Int
+  frequency         String
+  startDate         DateTime
+  notes             String?
+  chargeAllocations RentPaymentPlanChargeAllocation[]
+  installments      RentPaymentPlanInstallment[]
+  payments          PropertyRentPayment[]
+  createdAt         DateTime                          @default(now())
+  updatedAt         DateTime                          @updatedAt
 
   @@unique([tenantId, planNo])
   @@unique([tenantId, idempotencyKey])
@@ -3025,23 +3052,23 @@ model PropertyRentPaymentPlan {
 }
 
 model PropertyRentPromise {
-  id          String                             @id @default(cuid())
-  tenantId    String
-  tenant      Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenancyId   String
-  tenancy     PropertyTenancy                    @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
-  createdById String
-  createdBy   User                               @relation("PropertyRentPromiseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  id             String                                @id @default(cuid())
+  tenantId       String
+  tenant         Tenant                                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId      String
+  tenancy        PropertyTenancy                       @relation(fields: [tenancyId], references: [id], onDelete: Restrict)
+  createdById    String
+  createdBy      User                                  @relation("PropertyRentPromiseCreator", fields: [createdById], references: [id], onDelete: Restrict)
   idempotencyKey String?
-  amount      Float
-  dueDate     DateTime
-  notes       String?
-  allocations PropertyRentPromiseChargeAllocation[]
-  createdAt   DateTime                           @default(now())
+  amount         Float
+  dueDate        DateTime
+  notes          String?
+  allocations    PropertyRentPromiseChargeAllocation[]
+  createdAt      DateTime                              @default(now())
 
+  @@unique([tenantId, idempotencyKey])
   @@index([tenantId, tenancyId, createdAt])
   @@index([tenantId, dueDate])
-  @@unique([tenantId, idempotencyKey])
   @@map("property_rent_promises")
 }
 
@@ -3073,17 +3100,17 @@ model RentPaymentPlanChargeAllocation {
 }
 
 model RentPaymentPlanInstallment {
-  id                 String                            @id @default(cuid())
+  id                 String                                 @id @default(cuid())
   planId             String
-  plan               PropertyRentPaymentPlan           @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan               PropertyRentPaymentPlan                @relation(fields: [planId], references: [id], onDelete: Cascade)
   sequence           Int
   dueDate            DateTime
   amount             Float
-  amountPaid         Float                             @default(0)
-  status             String                            @default("unpaid")
+  amountPaid         Float                                  @default(0)
+  status             String                                 @default("unpaid")
   paymentAllocations RentPlanInstallmentPaymentAllocation[]
-  createdAt          DateTime                          @default(now())
-  updatedAt          DateTime                          @updatedAt
+  createdAt          DateTime                               @default(now())
+  updatedAt          DateTime                               @updatedAt
 
   @@unique([planId, sequence])
   @@index([planId, dueDate, status])
@@ -3131,54 +3158,54 @@ model PropertyOwnerPayout {
 }
 
 model PropertyAccountingConfig {
-  id                        String   @id @default(cuid())
-  tenantId                  String   @unique
-  tenant                    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  rentReceivableAccountId   String
-  rentReceivableAccount     Account  @relation("PropertyRentReceivableAccount", fields: [rentReceivableAccountId], references: [id], onDelete: Restrict)
-  rentIncomeAccountId       String
-  rentIncomeAccount         Account  @relation("PropertyRentIncomeAccount", fields: [rentIncomeAccountId], references: [id], onDelete: Restrict)
-  ownerPayableAccountId     String
-  ownerPayableAccount       Account  @relation("PropertyOwnerPayableAccount", fields: [ownerPayableAccountId], references: [id], onDelete: Restrict)
-  depositLiabilityAccountId String
-  depositLiabilityAccount   Account  @relation("PropertyDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id], onDelete: Restrict)
-  depositOpeningEquityAccountId String
-  depositOpeningEquityAccount Account @relation("PropertyDepositOpeningEquityAccount", fields: [depositOpeningEquityAccountId], references: [id], onDelete: Restrict)
-  rentPlanReceivableAccountId String?
-  rentPlanReceivableAccount Account? @relation("PropertyRentPlanReceivableAccount", fields: [rentPlanReceivableAccountId], references: [id], onDelete: Restrict)
-  landSaleReceivableAccountId String?
-  landSaleReceivableAccount Account? @relation("PropertyLandSaleReceivableAccount", fields: [landSaleReceivableAccountId], references: [id], onDelete: Restrict)
-  landSaleRevenueAccountId String?
-  landSaleRevenueAccount Account? @relation("PropertyLandSaleRevenueAccount", fields: [landSaleRevenueAccountId], references: [id], onDelete: Restrict)
-  landInventoryAccountId String?
-  landInventoryAccount Account? @relation("PropertyLandInventoryAccount", fields: [landInventoryAccountId], references: [id], onDelete: Restrict)
-  landCostOfSalesAccountId String?
-  landCostOfSalesAccount Account? @relation("PropertyLandCostOfSalesAccount", fields: [landCostOfSalesAccountId], references: [id], onDelete: Restrict)
-  saleCommissionRevenueAccountId String?
-  saleCommissionRevenueAccount Account? @relation("PropertySaleCommissionRevenueAccount", fields: [saleCommissionRevenueAccountId], references: [id], onDelete: Restrict)
-  saleOwnerPayableAccountId String?
-  saleOwnerPayableAccount Account? @relation("PropertySaleOwnerPayableAccount", fields: [saleOwnerPayableAccountId], references: [id], onDelete: Restrict)
-  saleCustomerAdvanceAccountId String?
-  saleCustomerAdvanceAccount Account? @relation("PropertySaleCustomerAdvanceAccount", fields: [saleCustomerAdvanceAccountId], references: [id], onDelete: Restrict)
+  id                                  String   @id @default(cuid())
+  tenantId                            String   @unique
+  tenant                              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rentReceivableAccountId             String
+  rentReceivableAccount               Account  @relation("PropertyRentReceivableAccount", fields: [rentReceivableAccountId], references: [id], onDelete: Restrict)
+  rentIncomeAccountId                 String
+  rentIncomeAccount                   Account  @relation("PropertyRentIncomeAccount", fields: [rentIncomeAccountId], references: [id], onDelete: Restrict)
+  ownerPayableAccountId               String
+  ownerPayableAccount                 Account  @relation("PropertyOwnerPayableAccount", fields: [ownerPayableAccountId], references: [id], onDelete: Restrict)
+  depositLiabilityAccountId           String
+  depositLiabilityAccount             Account  @relation("PropertyDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id], onDelete: Restrict)
+  depositOpeningEquityAccountId       String
+  depositOpeningEquityAccount         Account  @relation("PropertyDepositOpeningEquityAccount", fields: [depositOpeningEquityAccountId], references: [id], onDelete: Restrict)
+  rentPlanReceivableAccountId         String?
+  rentPlanReceivableAccount           Account? @relation("PropertyRentPlanReceivableAccount", fields: [rentPlanReceivableAccountId], references: [id], onDelete: Restrict)
+  landSaleReceivableAccountId         String?
+  landSaleReceivableAccount           Account? @relation("PropertyLandSaleReceivableAccount", fields: [landSaleReceivableAccountId], references: [id], onDelete: Restrict)
+  landSaleRevenueAccountId            String?
+  landSaleRevenueAccount              Account? @relation("PropertyLandSaleRevenueAccount", fields: [landSaleRevenueAccountId], references: [id], onDelete: Restrict)
+  landInventoryAccountId              String?
+  landInventoryAccount                Account? @relation("PropertyLandInventoryAccount", fields: [landInventoryAccountId], references: [id], onDelete: Restrict)
+  landCostOfSalesAccountId            String?
+  landCostOfSalesAccount              Account? @relation("PropertyLandCostOfSalesAccount", fields: [landCostOfSalesAccountId], references: [id], onDelete: Restrict)
+  saleCommissionRevenueAccountId      String?
+  saleCommissionRevenueAccount        Account? @relation("PropertySaleCommissionRevenueAccount", fields: [saleCommissionRevenueAccountId], references: [id], onDelete: Restrict)
+  saleOwnerPayableAccountId           String?
+  saleOwnerPayableAccount             Account? @relation("PropertySaleOwnerPayableAccount", fields: [saleOwnerPayableAccountId], references: [id], onDelete: Restrict)
+  saleCustomerAdvanceAccountId        String?
+  saleCustomerAdvanceAccount          Account? @relation("PropertySaleCustomerAdvanceAccount", fields: [saleCustomerAdvanceAccountId], references: [id], onDelete: Restrict)
   landInventoryOpeningEquityAccountId String?
-  landInventoryOpeningEquityAccount Account? @relation("PropertyLandInventoryOpeningEquityAccount", fields: [landInventoryOpeningEquityAccountId], references: [id], onDelete: Restrict)
-  isEnabled                 Boolean  @default(true)
-  isSystemManaged           Boolean  @default(true)
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  landInventoryOpeningEquityAccount   Account? @relation("PropertyLandInventoryOpeningEquityAccount", fields: [landInventoryOpeningEquityAccountId], references: [id], onDelete: Restrict)
+  isEnabled                           Boolean  @default(true)
+  isSystemManaged                     Boolean  @default(true)
+  createdAt                           DateTime @default(now())
+  updatedAt                           DateTime @updatedAt
 
   @@map("property_accounting_configs")
 }
 
 model RentPaymentAllocation {
-  id             String              @id @default(cuid())
-  paymentId      String
-  payment        PropertyRentPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  chargeId       String
-  charge         RentCharge          @relation(fields: [chargeId], references: [id], onDelete: Restrict)
-  amount         Float
-  advanceAppliedAmount Float             @default(0)
-  createdAt      DateTime            @default(now())
+  id                   String              @id @default(cuid())
+  paymentId            String
+  payment              PropertyRentPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  chargeId             String
+  charge               RentCharge          @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  amount               Float
+  advanceAppliedAmount Float               @default(0)
+  createdAt            DateTime            @default(now())
 
   @@unique([paymentId, chargeId])
   @@index([chargeId])
@@ -3186,35 +3213,35 @@ model RentPaymentAllocation {
 }
 
 model PropertySale {
-  id                    String                     @id @default(cuid())
-  tenantId              String
-  tenant                 Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  propertyId            String
-  property               ManagedProperty            @relation(fields: [propertyId], references: [id], onDelete: Restrict)
-  unitId                String
-  unit                   PropertyUnit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  buyerId               String
-  buyer                  Customer                   @relation(fields: [buyerId], references: [id], onDelete: Restrict)
-  ownerId               String?
-  owner                  PropertyOwner?              @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  createdById           String
-  createdBy              User                        @relation("PropertySaleCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  saleNo                String
-  saleMode              String
-  salePrice             Float
-  commissionAmount      Float                        @default(0)
-  costBasis             Float                        @default(0)
-  recognitionMoment     String                       @default("contract")
-  paymentPlan           String                       @default("full")
-  installmentCount      Int                          @default(1)
-  installmentFrequency  String                       @default("monthly")
-  saleDate              DateTime                     @default(now())
-  notes                 String?
-  status                String                       @default("active")
-  installments          PropertySaleInstallment[]
-  payments              PropertySalePayment[]
-  createdAt             DateTime                     @default(now())
-  updatedAt             DateTime                     @updatedAt
+  id                   String                    @id @default(cuid())
+  tenantId             String
+  tenant               Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  propertyId           String
+  property             ManagedProperty           @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  unitId               String
+  unit                 PropertyUnit              @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  buyerId              String
+  buyer                Customer                  @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  ownerId              String?
+  owner                PropertyOwner?            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  createdById          String
+  createdBy            User                      @relation("PropertySaleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  saleNo               String
+  saleMode             String
+  salePrice            Float
+  commissionAmount     Float                     @default(0)
+  costBasis            Float                     @default(0)
+  recognitionMoment    String                    @default("contract")
+  paymentPlan          String                    @default("full")
+  installmentCount     Int                       @default(1)
+  installmentFrequency String                    @default("monthly")
+  saleDate             DateTime                  @default(now())
+  notes                String?
+  status               String                    @default("active")
+  installments         PropertySaleInstallment[]
+  payments             PropertySalePayment[]
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
 
   @@unique([tenantId, saleNo])
   @@index([tenantId, buyerId, saleDate])
@@ -3224,18 +3251,18 @@ model PropertySale {
 }
 
 model PropertySaleInstallment {
-  id          String                    @id @default(cuid())
+  id          String                          @id @default(cuid())
   tenantId    String
   saleId      String
-  sale        PropertySale              @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale        PropertySale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   sequence    Int
   dueDate     DateTime
   amount      Float
-  amountPaid  Float                     @default(0)
-  status      String                    @default("unpaid")
+  amountPaid  Float                           @default(0)
+  status      String                          @default("unpaid")
   allocations PropertySalePaymentAllocation[]
-  createdAt   DateTime                  @default(now())
-  updatedAt   DateTime                  @updatedAt
+  createdAt   DateTime                        @default(now())
+  updatedAt   DateTime                        @updatedAt
 
   @@unique([saleId, sequence])
   @@index([tenantId, dueDate, status])
@@ -3243,27 +3270,27 @@ model PropertySaleInstallment {
 }
 
 model PropertySalePayment {
-  id             String                    @id @default(cuid())
+  id             String                          @id @default(cuid())
   tenantId       String
-  tenant         Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant         Tenant                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   saleId         String
-  sale           PropertySale              @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  sale           PropertySale                    @relation(fields: [saleId], references: [id], onDelete: Restrict)
   cashAccountId  String
-  cashAccount    CashAccount               @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  cashAccount    CashAccount                     @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
   createdById    String
-  createdBy      User                      @relation("PropertySalePaymentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy      User                            @relation("PropertySalePaymentCreator", fields: [createdById], references: [id], onDelete: Restrict)
   receiptNo      String
   idempotencyKey String?
   amount         Float
-  paymentDate    DateTime                  @default(now())
-  paymentMethod  String                    @default("cash")
+  paymentDate    DateTime                        @default(now())
+  paymentMethod  String                          @default("cash")
   transactionRef String?
   notes          String?
-  status         String                    @default("posted")
+  status         String                          @default("posted")
   voidReason     String?
   voidedAt       DateTime?
   allocations    PropertySalePaymentAllocation[]
-  createdAt      DateTime                  @default(now())
+  createdAt      DateTime                        @default(now())
 
   @@unique([tenantId, receiptNo])
   @@unique([tenantId, idempotencyKey])
@@ -3273,13 +3300,13 @@ model PropertySalePayment {
 }
 
 model PropertySalePaymentAllocation {
-  id            String                    @id @default(cuid())
+  id            String                  @id @default(cuid())
   paymentId     String
-  payment       PropertySalePayment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  payment       PropertySalePayment     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   installmentId String
-  installment   PropertySaleInstallment   @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+  installment   PropertySaleInstallment @relation(fields: [installmentId], references: [id], onDelete: Restrict)
   amount        Float
-  createdAt     DateTime                  @default(now())
+  createdAt     DateTime                @default(now())
 
   @@unique([paymentId, installmentId])
   @@index([installmentId])
@@ -3287,34 +3314,34 @@ model PropertySalePaymentAllocation {
 }
 
 model PropertyLandPurchase {
-  id             String                       @id @default(cuid())
-  tenantId       String
-  tenant         Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  propertyId     String
-  property       ManagedProperty              @relation(fields: [propertyId], references: [id], onDelete: Restrict)
-  unitId         String                       @unique
-  unit           PropertyUnit                 @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  supplierId     String
-  supplier       Supplier                     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  createdById    String
-  createdBy      User                         @relation("PropertyLandPurchaseCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  purchaseNo     String
-  idempotencyKey String?
-  supplierRef    String?
-  purchaseDate   DateTime                     @default(now())
-  purchasePrice  Float
-  capitalizedCosts Float                      @default(0)
-  recoverableTax Float                        @default(0)
-  costBasis      Float
-  total          Float
-  amountPaid     Float                        @default(0)
-  balance        Float                        @default(0)
-  paymentStatus  String                       @default("unpaid")
-  dueDate        DateTime?
-  notes          String?
-  payments       PropertyLandPurchasePayment[]
-  createdAt      DateTime                     @default(now())
-  updatedAt      DateTime                     @updatedAt
+  id               String                        @id @default(cuid())
+  tenantId         String
+  tenant           Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  propertyId       String
+  property         ManagedProperty               @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  unitId           String                        @unique
+  unit             PropertyUnit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  supplierId       String
+  supplier         Supplier                      @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdById      String
+  createdBy        User                          @relation("PropertyLandPurchaseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  purchaseNo       String
+  idempotencyKey   String?
+  supplierRef      String?
+  purchaseDate     DateTime                      @default(now())
+  purchasePrice    Float
+  capitalizedCosts Float                         @default(0)
+  recoverableTax   Float                         @default(0)
+  costBasis        Float
+  total            Float
+  amountPaid       Float                         @default(0)
+  balance          Float                         @default(0)
+  paymentStatus    String                        @default("unpaid")
+  dueDate          DateTime?
+  notes            String?
+  payments         PropertyLandPurchasePayment[]
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
 
   @@unique([tenantId, purchaseNo])
   @@unique([tenantId, idempotencyKey])
@@ -3332,7 +3359,7 @@ model PropertyLandPurchasePayment {
   supplierId     String
   supplier       Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   cashAccountId  String
-  cashAccount    CashAccount           @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  cashAccount    CashAccount          @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
   createdById    String
   createdBy      User                 @relation("PropertyLandPurchasePaymentCreator", fields: [createdById], references: [id], onDelete: Restrict)
   receiptNo      String
@@ -3354,17 +3381,17 @@ model PropertyLandPurchasePayment {
 }
 
 model PropertyRentReminder {
-  id             String          @id @default(cuid())
-  tenantId       String
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tenancyId      String
-  tenancy        PropertyTenancy @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
-  period         String
-  reminderType   String
-  scheduledFor   DateTime
-  sentAt         DateTime?
-  status         String          @default("pending")
-  createdAt      DateTime        @default(now())
+  id           String          @id @default(cuid())
+  tenantId     String
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenancyId    String
+  tenancy      PropertyTenancy @relation(fields: [tenancyId], references: [id], onDelete: Cascade)
+  period       String
+  reminderType String
+  scheduledFor DateTime
+  sentAt       DateTime?
+  status       String          @default("pending")
+  createdAt    DateTime        @default(now())
 
   @@unique([tenancyId, period, reminderType])
   @@index([tenantId, status, scheduledFor])
@@ -3425,62 +3452,62 @@ model SaleReturnItem {
 // =====================================================
 
 model Account {
-  id                                      String                        @id @default(cuid())
-  tenantId                                String
-  tenant                                  Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  code                                    String // e.g. "1000", "2001"
-  name                                    String // e.g. "Cash", "Accounts Receivable"
-  type                                    String // asset, liability, equity, revenue, expense
-  subType                                 String? // current_asset, fixed_asset, current_liability, etc.
-  parentId                                String?
-  parent                                  Account?                      @relation("AccountHierarchy", fields: [parentId], references: [id])
-  children                                Account[]                     @relation("AccountHierarchy")
-  balance                                 Float                         @default(0)
-  isActive                                Boolean                       @default(true)
-  isSystemManaged                         Boolean                       @default(false)
-  description                             String?
-  branchId                                String?
-  branch                                  Branch?                       @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  journalLines                            JournalLine[]
-  receivablesARConfigs                    ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
-  receivablesRevenueConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
-  receivablesTaxConfigs                   ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
-  receivablesReturnsConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
-  receivablesCOGSConfigs                  ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
-  receivablesInventoryConfigs             ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
-  receivablesAdvanceConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
-  receivablesOpeningEquityConfigs         ReceivablesAccountingConfig[] @relation("ReceivablesOpeningEquityAccount")
-  receivablesMarketplaceSettlementConfigs ReceivablesAccountingConfig[] @relation("ReceivablesMarketplaceSettlementAccount")
-  payablesAPConfigs                       PayablesAccountingConfig[]    @relation("PayablesAPAccount")
-  payablesOpeningEquityConfigs            PayablesAccountingConfig[]    @relation("PayablesOpeningEquityAccount")
-  payablesPurchaseExpenseConfigs          PayablesAccountingConfig[]    @relation("PayablesPurchaseExpenseAccount")
-  payablesInventoryConfigs                PayablesAccountingConfig[]    @relation("PayablesInventoryAccount")
-  payablesReturnsConfigs                  PayablesAccountingConfig[]    @relation("PayablesReturnsAccount")
-  payablesInputTaxConfigs                 PayablesAccountingConfig[]    @relation("PayablesInputTaxAccount")
-  payablesFreightInventoryConfigs         PayablesAccountingConfig[]    @relation("PayablesFreightInventoryAccount")
-  payablesFreightExpenseConfigs           PayablesAccountingConfig[]    @relation("PayablesFreightExpenseAccount")
-  propertyRentReceivableConfigs            PropertyAccountingConfig[]    @relation("PropertyRentReceivableAccount")
-  propertyRentPlanReceivableConfigs        PropertyAccountingConfig[]    @relation("PropertyRentPlanReceivableAccount")
-  propertyRentIncomeConfigs                PropertyAccountingConfig[]    @relation("PropertyRentIncomeAccount")
-  propertyOwnerPayableConfigs              PropertyAccountingConfig[]    @relation("PropertyOwnerPayableAccount")
-  propertyDepositLiabilityConfigs          PropertyAccountingConfig[]    @relation("PropertyDepositLiabilityAccount")
-  propertyDepositOpeningEquityConfigs      PropertyAccountingConfig[]    @relation("PropertyDepositOpeningEquityAccount")
-  propertyLandSaleReceivableConfigs        PropertyAccountingConfig[]    @relation("PropertyLandSaleReceivableAccount")
-  propertyLandSaleRevenueConfigs           PropertyAccountingConfig[]    @relation("PropertyLandSaleRevenueAccount")
-  propertyLandInventoryConfigs             PropertyAccountingConfig[]    @relation("PropertyLandInventoryAccount")
-  propertyLandCostOfSalesConfigs           PropertyAccountingConfig[]    @relation("PropertyLandCostOfSalesAccount")
-  propertySaleCommissionRevenueConfigs     PropertyAccountingConfig[]    @relation("PropertySaleCommissionRevenueAccount")
-  propertySaleOwnerPayableConfigs          PropertyAccountingConfig[]    @relation("PropertySaleOwnerPayableAccount")
-  propertySaleCustomerAdvanceConfigs       PropertyAccountingConfig[]    @relation("PropertySaleCustomerAdvanceAccount")
-  propertyLandInventoryOpeningEquityConfigs PropertyAccountingConfig[]   @relation("PropertyLandInventoryOpeningEquityAccount")
-  rentalReceivableConfigs                  RentalAccountingConfig[]      @relation("RentalReceivableAccount")
-  rentalRevenueConfigs                     RentalAccountingConfig[]      @relation("RentalRevenueAccount")
-  rentalDeferredRevenueConfigs             RentalAccountingConfig[]      @relation("RentalDeferredRevenueAccount")
-  rentalDepositLiabilityConfigs            RentalAccountingConfig[]      @relation("RentalDepositLiabilityAccount")
-  rentalTaxPayableConfigs                  RentalAccountingConfig[]      @relation("RentalTaxPayableAccount")
-  rentalOpeningEquityConfigs               RentalAccountingConfig[]      @relation("RentalOpeningEquityAccount")
-  createdAt                               DateTime                      @default(now())
-  updatedAt                               DateTime                      @updatedAt
+  id                                        String                        @id @default(cuid())
+  tenantId                                  String
+  tenant                                    Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code                                      String // e.g. "1000", "2001"
+  name                                      String // e.g. "Cash", "Accounts Receivable"
+  type                                      String // asset, liability, equity, revenue, expense
+  subType                                   String? // current_asset, fixed_asset, current_liability, etc.
+  parentId                                  String?
+  parent                                    Account?                      @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children                                  Account[]                     @relation("AccountHierarchy")
+  balance                                   Float                         @default(0)
+  isActive                                  Boolean                       @default(true)
+  isSystemManaged                           Boolean                       @default(false)
+  description                               String?
+  branchId                                  String?
+  branch                                    Branch?                       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  journalLines                              JournalLine[]
+  receivablesARConfigs                      ReceivablesAccountingConfig[] @relation("ReceivablesARAccount")
+  receivablesRevenueConfigs                 ReceivablesAccountingConfig[] @relation("ReceivablesRevenueAccount")
+  receivablesTaxConfigs                     ReceivablesAccountingConfig[] @relation("ReceivablesTaxAccount")
+  receivablesReturnsConfigs                 ReceivablesAccountingConfig[] @relation("ReceivablesReturnsAccount")
+  receivablesCOGSConfigs                    ReceivablesAccountingConfig[] @relation("ReceivablesCOGSAccount")
+  receivablesInventoryConfigs               ReceivablesAccountingConfig[] @relation("ReceivablesInventoryAccount")
+  receivablesAdvanceConfigs                 ReceivablesAccountingConfig[] @relation("ReceivablesAdvanceAccount")
+  receivablesOpeningEquityConfigs           ReceivablesAccountingConfig[] @relation("ReceivablesOpeningEquityAccount")
+  receivablesMarketplaceSettlementConfigs   ReceivablesAccountingConfig[] @relation("ReceivablesMarketplaceSettlementAccount")
+  payablesAPConfigs                         PayablesAccountingConfig[]    @relation("PayablesAPAccount")
+  payablesOpeningEquityConfigs              PayablesAccountingConfig[]    @relation("PayablesOpeningEquityAccount")
+  payablesPurchaseExpenseConfigs            PayablesAccountingConfig[]    @relation("PayablesPurchaseExpenseAccount")
+  payablesInventoryConfigs                  PayablesAccountingConfig[]    @relation("PayablesInventoryAccount")
+  payablesReturnsConfigs                    PayablesAccountingConfig[]    @relation("PayablesReturnsAccount")
+  payablesInputTaxConfigs                   PayablesAccountingConfig[]    @relation("PayablesInputTaxAccount")
+  payablesFreightInventoryConfigs           PayablesAccountingConfig[]    @relation("PayablesFreightInventoryAccount")
+  payablesFreightExpenseConfigs             PayablesAccountingConfig[]    @relation("PayablesFreightExpenseAccount")
+  propertyRentReceivableConfigs             PropertyAccountingConfig[]    @relation("PropertyRentReceivableAccount")
+  propertyRentPlanReceivableConfigs         PropertyAccountingConfig[]    @relation("PropertyRentPlanReceivableAccount")
+  propertyRentIncomeConfigs                 PropertyAccountingConfig[]    @relation("PropertyRentIncomeAccount")
+  propertyOwnerPayableConfigs               PropertyAccountingConfig[]    @relation("PropertyOwnerPayableAccount")
+  propertyDepositLiabilityConfigs           PropertyAccountingConfig[]    @relation("PropertyDepositLiabilityAccount")
+  propertyDepositOpeningEquityConfigs       PropertyAccountingConfig[]    @relation("PropertyDepositOpeningEquityAccount")
+  propertyLandSaleReceivableConfigs         PropertyAccountingConfig[]    @relation("PropertyLandSaleReceivableAccount")
+  propertyLandSaleRevenueConfigs            PropertyAccountingConfig[]    @relation("PropertyLandSaleRevenueAccount")
+  propertyLandInventoryConfigs              PropertyAccountingConfig[]    @relation("PropertyLandInventoryAccount")
+  propertyLandCostOfSalesConfigs            PropertyAccountingConfig[]    @relation("PropertyLandCostOfSalesAccount")
+  propertySaleCommissionRevenueConfigs      PropertyAccountingConfig[]    @relation("PropertySaleCommissionRevenueAccount")
+  propertySaleOwnerPayableConfigs           PropertyAccountingConfig[]    @relation("PropertySaleOwnerPayableAccount")
+  propertySaleCustomerAdvanceConfigs        PropertyAccountingConfig[]    @relation("PropertySaleCustomerAdvanceAccount")
+  propertyLandInventoryOpeningEquityConfigs PropertyAccountingConfig[]    @relation("PropertyLandInventoryOpeningEquityAccount")
+  rentalReceivableConfigs                   RentalAccountingConfig[]      @relation("RentalReceivableAccount")
+  rentalRevenueConfigs                      RentalAccountingConfig[]      @relation("RentalRevenueAccount")
+  rentalDeferredRevenueConfigs              RentalAccountingConfig[]      @relation("RentalDeferredRevenueAccount")
+  rentalDepositLiabilityConfigs             RentalAccountingConfig[]      @relation("RentalDepositLiabilityAccount")
+  rentalTaxPayableConfigs                   RentalAccountingConfig[]      @relation("RentalTaxPayableAccount")
+  rentalOpeningEquityConfigs                RentalAccountingConfig[]      @relation("RentalOpeningEquityAccount")
+  createdAt                                 DateTime                      @default(now())
+  updatedAt                                 DateTime                      @updatedAt
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -3488,23 +3515,23 @@ model Account {
 }
 
 model JournalEntry {
-  id          String   @id @default(cuid())
-  entryNo     String
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId    String?
-  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  date        DateTime @default(now())
-  description String?
-  currency    String?
-  foreignTotal Float?
+  id                 String   @id @default(cuid())
+  entryNo            String
+  tenantId           String
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId           String?
+  branch             Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  date               DateTime @default(now())
+  description        String?
+  currency           String?
+  foreignTotal       Float?
   exchangeRateToBase Float?
-  exchangeRateAsOf String?
+  exchangeRateAsOf   String?
   exchangeRateSource String?
-  reference   String? // e.g. sale receipt no, invoice no
-  status      String   @default("posted") // draft, posted, reversed
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  reference          String? // e.g. sale receipt no, invoice no
+  status             String   @default("posted") // draft, posted, reversed
+  userId             String
+  user               User     @relation(fields: [userId], references: [id])
 
   // Source tracking for idempotency (prevents double-posting)
   sourceType String? // SALARY_ADVANCE, PAYROLL, PAYROLL_PAYMENT, SALARY_ADVANCE_RECOVERY, etc.
@@ -4052,23 +4079,23 @@ model TenantAccountingCutover {
 }
 
 model FinancialYearClose {
-  id                String   @id @default(cuid())
-  tenantId          String
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  startDate         DateTime
-  endDate           DateTime
-  status            String   @default("draft") // draft, closed, reopened
-  snapshot          Json
-  lifecycleEvents   Json     @default("[]")
-  createdById       String
-  signedOffById     String?
-  signedOffAt       DateTime?
-  closedAt          DateTime?
-  reopenedById      String?
-  reopenedAt        DateTime?
-  reopenReason      String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id              String    @id @default(cuid())
+  tenantId        String
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startDate       DateTime
+  endDate         DateTime
+  status          String    @default("draft") // draft, closed, reopened
+  snapshot        Json
+  lifecycleEvents Json      @default("[]")
+  createdById     String
+  signedOffById   String?
+  signedOffAt     DateTime?
+  closedAt        DateTime?
+  reopenedById    String?
+  reopenedAt      DateTime?
+  reopenReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([tenantId, startDate, endDate])
   @@index([tenantId, status, startDate, endDate])
@@ -4367,21 +4394,21 @@ model RestaurantOrderItem {
 }
 
 model RestaurantMenuEntry {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId     String?
-  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  productId    String   @unique
-  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  category     String   @default("General")
-  description  String?
-  station      String   @default("kitchen")
-  price        Float
-  isAvailable  Boolean  @default(true)
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  productId   String   @unique
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category    String   @default("General")
+  description String?
+  station     String   @default("kitchen")
+  price       Float
+  isAvailable Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([tenantId, branchId, isAvailable, sortOrder])
   @@map("restaurant_menu_entries")
@@ -4397,20 +4424,20 @@ enum ItemStatus {
 
 // Waiters
 model Waiter {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId  String?
-  employeeId String?
-  employee  Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  name      String
-  phone     String?
-  code      String? // short code for quick assignment
-  pinHash   String?
+  id           String    @id @default(cuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  employeeId   String?
+  employee     Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  name         String
+  phone        String?
+  code         String? // short code for quick assignment
+  pinHash      String?
   pinUpdatedAt DateTime?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   orders RestaurantOrder[]
   tips   Tip[]
@@ -4717,23 +4744,23 @@ model FuelTank {
 }
 
 model FuelStockMovement {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tankId        String
-  tank          FuelTank @relation(fields: [tankId], references: [id], onDelete: Restrict)
-  branchId      String?
-  movementType  String
-  litresDelta   Float
-  balanceAfter  Float
-  unitCost      Float    @default(0)
-  stockValueDelta Float  @default(0)
-  stockValueAfter Float  @default(0)
-  sourceType    String
-  sourceId      String?
-  reason        String?
-  actorId       String?
-  createdAt     DateTime @default(now())
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tankId          String
+  tank            FuelTank @relation(fields: [tankId], references: [id], onDelete: Restrict)
+  branchId        String?
+  movementType    String
+  litresDelta     Float
+  balanceAfter    Float
+  unitCost        Float    @default(0)
+  stockValueDelta Float    @default(0)
+  stockValueAfter Float    @default(0)
+  sourceType      String
+  sourceId        String?
+  reason          String?
+  actorId         String?
+  createdAt       DateTime @default(now())
 
   @@unique([tenantId, sourceType, sourceId])
   @@index([tenantId, tankId, createdAt])
@@ -4742,19 +4769,19 @@ model FuelStockMovement {
 }
 
 model FuelStockAdjustment {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tankId        String
-  tank          FuelTank @relation(fields: [tankId], references: [id], onDelete: Restrict)
+  tank          FuelTank  @relation(fields: [tankId], references: [id], onDelete: Restrict)
   branchId      String?
   litresDelta   Float
   reason        String
-  status        String   @default("pending")
+  status        String    @default("pending")
   requestedById String
   approvedById  String?
   reviewNote    String?
-  requestedAt   DateTime @default(now())
+  requestedAt   DateTime  @default(now())
   reviewedAt    DateTime?
 
   @@index([tenantId, status, requestedAt])
@@ -4763,90 +4790,90 @@ model FuelStockAdjustment {
 }
 
 model FuelDelivery {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId     String?
-  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  tankId       String
-  tank         FuelTank @relation(fields: [tankId], references: [id])
-  supplierId   String?
-  supplier     Supplier? @relation(fields: [supplierId], references: [id])
-  supplierPurchaseId String? @unique
-  supplierPurchase SupplierPurchase? @relation(fields: [supplierPurchaseId], references: [id], onDelete: SetNull)
-  supplierName String?
-  invoiceNo    String?
-  litres       Float
-  unitCost     Float
-  totalCost    Float
-  deliveryDate DateTime @default(now())
-  notes        String?
-  createdAt    DateTime @default(now())
+  id                 String            @id @default(cuid())
+  tenantId           String
+  tenant             Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId           String?
+  branch             Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  tankId             String
+  tank               FuelTank          @relation(fields: [tankId], references: [id])
+  supplierId         String?
+  supplier           Supplier?         @relation(fields: [supplierId], references: [id])
+  supplierPurchaseId String?           @unique
+  supplierPurchase   SupplierPurchase? @relation(fields: [supplierPurchaseId], references: [id], onDelete: SetNull)
+  supplierName       String?
+  invoiceNo          String?
+  litres             Float
+  unitCost           Float
+  totalCost          Float
+  deliveryDate       DateTime          @default(now())
+  notes              String?
+  createdAt          DateTime          @default(now())
 
-  @@index([tenantId, branchId])
   @@unique([tenantId, supplierId, invoiceNo])
+  @@index([tenantId, branchId])
   @@map("fuel_deliveries")
 }
 
 model FuelMeterReading {
-  id             String   @id @default(cuid())
-  tenantId       String
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  pumpId         String
-  pump           FuelPump @relation(fields: [pumpId], references: [id])
-  shiftId        String?
-  openingReading Float    @default(0) // litres at start
-  closingReading Float    @default(0) // litres at end
-  litresSold     Float    @default(0)
-  amount         Float    @default(0)
+  id                  String   @id @default(cuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pumpId              String
+  pump                FuelPump @relation(fields: [pumpId], references: [id])
+  shiftId             String?
+  openingReading      Float    @default(0) // litres at start
+  closingReading      Float    @default(0) // litres at end
+  litresSold          Float    @default(0)
+  amount              Float    @default(0)
   priceOverrideReason String?
-  readingDate    DateTime @default(now())
-  createdAt      DateTime @default(now())
+  readingDate         DateTime @default(now())
+  createdAt           DateTime @default(now())
 
   @@index([tenantId, pumpId])
   @@map("fuel_meter_readings")
 }
 
 model FuelShiftReport {
-  id             String    @id @default(cuid())
-  tenantId       String
-  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId       String?
-  branch         Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  shiftNo        String
-  userId         String
-  user           User      @relation(fields: [userId], references: [id])
-  pumpId         String?
-  pump           FuelPump? @relation(fields: [pumpId], references: [id])
-  openingReading Float     @default(0)
-  closingReading Float     @default(0)
-  litresSold     Float     @default(0)
-  cashSales      Float     @default(0)
-  mobileSales    Float     @default(0)
-  creditSales    Float     @default(0)
-  totalSales     Float     @default(0)
-  lubricantSales Float     @default(0)
-  carWashIncome  Float     @default(0)
-  expenses       Float     @default(0)
-  netAmount      Float     @default(0)
-  expectedFuelSales Float  @default(0)
-  actualTenderTotal Float  @default(0)
-  reportedSalesTotal Float @default(0)
-  reconciliationVariance Float @default(0)
-  varianceReason String?
-  reviewedById   String?
-  reviewNote     String?
-  cashAccountId String?
-  mobileAccountId String?
-  expenseAccountId String?
-  startDate      DateTime
-  endDate        DateTime?
-  status         String    @default("open") // open, closed, reconciled
-  notes          String?
-  salesMode      String    @default("aggregate")
-  fuelSales      FuelSale[]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                     String     @id @default(cuid())
+  tenantId               String
+  tenant                 Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId               String?
+  branch                 Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  shiftNo                String
+  userId                 String
+  user                   User       @relation(fields: [userId], references: [id])
+  pumpId                 String?
+  pump                   FuelPump?  @relation(fields: [pumpId], references: [id])
+  openingReading         Float      @default(0)
+  closingReading         Float      @default(0)
+  litresSold             Float      @default(0)
+  cashSales              Float      @default(0)
+  mobileSales            Float      @default(0)
+  creditSales            Float      @default(0)
+  totalSales             Float      @default(0)
+  lubricantSales         Float      @default(0)
+  carWashIncome          Float      @default(0)
+  expenses               Float      @default(0)
+  netAmount              Float      @default(0)
+  expectedFuelSales      Float      @default(0)
+  actualTenderTotal      Float      @default(0)
+  reportedSalesTotal     Float      @default(0)
+  reconciliationVariance Float      @default(0)
+  varianceReason         String?
+  reviewedById           String?
+  reviewNote             String?
+  cashAccountId          String?
+  mobileAccountId        String?
+  expenseAccountId       String?
+  startDate              DateTime
+  endDate                DateTime?
+  status                 String     @default("open") // open, closed, reconciled
+  notes                  String?
+  salesMode              String     @default("aggregate")
+  fuelSales              FuelSale[]
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
 
   @@unique([tenantId, shiftNo])
   @@index([tenantId, branchId])
@@ -4854,21 +4881,21 @@ model FuelShiftReport {
 }
 
 model FuelSale {
-  id          String         @id @default(cuid())
-  tenantId    String
-  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branchId    String?
-  branch      Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  tankId      String
-  tank        FuelTank        @relation(fields: [tankId], references: [id], onDelete: Restrict)
-  shiftId     String
-  shift       FuelShiftReport @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  saleId      String          @unique
-  sale        SaleRecord      @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  idempotencyKey String?      @unique
-  litres      Float
-  unitPrice   Float
-  createdAt   DateTime        @default(now())
+  id             String          @id @default(cuid())
+  tenantId       String
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId       String?
+  branch         Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  tankId         String
+  tank           FuelTank        @relation(fields: [tankId], references: [id], onDelete: Restrict)
+  shiftId        String
+  shift          FuelShiftReport @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  saleId         String          @unique
+  sale           SaleRecord      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  idempotencyKey String?         @unique
+  litres         Float
+  unitPrice      Float
+  createdAt      DateTime        @default(now())
 
   @@index([tenantId, shiftId, createdAt])
   @@map("fuel_sales")

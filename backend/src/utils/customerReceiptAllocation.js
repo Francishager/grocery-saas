@@ -22,3 +22,17 @@ export function allocateCustomerReceipt(amount, sales, preferredSaleId = null) {
 
   return { allocations, unallocated: remaining }
 }
+
+export function allocateCustomerReceiptToRentals(amount, rentals) {
+  let remaining = Math.max(0, money(amount))
+  const allocations = []
+  for (const rental of rentals) {
+    if (remaining <= 0) break
+    const openAmount = Math.max(0, money(rental.balance))
+    const allocated = Math.min(remaining, openAmount)
+    if (allocated <= 0) continue
+    allocations.push({ rentalId: rental.id, amount: allocated })
+    remaining = money(remaining - allocated)
+  }
+  return { allocations, unallocated: remaining }
+}

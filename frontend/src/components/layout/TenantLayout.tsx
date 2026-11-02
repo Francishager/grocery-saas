@@ -53,6 +53,7 @@ const receivablesSubItems = [
   { to: '/tenant/receivables/customers', label: 'Customers', icon: CreditCard, permission: 'canViewReceivable', feature: 'receivables' },
   { to: '/tenant/receivables/sales', label: 'Credit Sales', icon: Receipt, permission: 'canViewReceivable', feature: 'receivables' },
   { to: '/tenant/receivables/payments', label: 'Payments', icon: DollarSign, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/rentals', label: 'Rental Receivables', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
   { to: '/tenant/receivables/reconciliation', label: 'Payment Reconciliation', icon: ClipboardCheck, permission: 'canViewReceivableReconciliation', feature: 'receivables' },
   { to: '/tenant/receivables/fuel-cards', label: 'Fuel Cards', icon: CardIcon, permission: 'canViewReceivable', feature: 'fuel_station.fuel_cards' },
   { to: '/tenant/receivables/credit-accounts', label: 'Credit Accounts', icon: BadgeDollarSign, permission: 'canViewReceivable', feature: 'fuel_station.credit_accounts' },
@@ -680,6 +681,7 @@ export function TenantLayout() {
     }
 
     if (item.feature && !canAccessFeature(item.feature)) {
+      if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
       return false

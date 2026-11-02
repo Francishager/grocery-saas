@@ -87,6 +87,19 @@ test('customer history permission groups do not expose other transaction categor
   assert.deepEqual(filterCustomerHistoryRows(rows, access).map((row) => row.source), ['customer_payment', 'sale_return'])
 })
 
+test('historical rental receivables and collections follow customer sales/payment or business-activity permissions', () => {
+  const rows = [
+    { source: 'historical_rental_receivable' },
+    { source: 'rental_payment' },
+  ]
+  const denied = customerProfileAccess([])
+  assert.deepEqual(filterCustomerHistoryRows(rows, denied), [])
+  const activity = customerProfileAccess(['canViewCustomerBusinessActivity'])
+  assert.deepEqual(filterCustomerHistoryRows(rows, activity), rows)
+  const finance = customerProfileAccess(['canViewCustomerSalesHistory', 'canViewCustomerPaymentsHistory'])
+  assert.deepEqual(filterCustomerHistoryRows(rows, finance), rows)
+})
+
 test('credit history requires balance visibility and a permitted credit activity domain', () => {
   assert.equal(customerProfileAccess(['canViewCustomerSalesHistory']).creditHistory, false)
   assert.equal(customerProfileAccess(['canViewCustomerBalance']).creditHistory, false)

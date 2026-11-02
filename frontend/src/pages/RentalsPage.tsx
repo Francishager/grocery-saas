@@ -1,6 +1,6 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Sparkles, CalendarCheck, Printer } from 'lucide-react'
 import { apiFetch, rentalsApi, inventoryApi, branchesApi, settingsApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ interface RentalItem {
 interface Rental {
   id: string
   rentalNo: string
+  customerId?: string | null
   customer?: { id: string; name: string; phone?: string } | null
   customerName?: string | null
   customerPhone?: string | null
@@ -56,7 +57,11 @@ interface Rental {
   paymentMethod?: string
   depositPaid?: number
   depositRefunded?: number
-  payments?: { id: string; receiptNo: string; kind: string; amount: number; balanceAfter: number; paymentMethod?: string | null; paymentDate: string; transactionRef?: string | null; notes?: string | null; cashAccount?: { name: string; type: string } | null }[]
+  payments?: { id: string; receiptNo: string; kind: string; amount: number; balanceAfter: number; status?: string; createdAt?: string; paymentMethod?: string | null; paymentDate: string; transactionRef?: string | null; notes?: string | null; cashAccount?: { name: string; type: string } | null; user?: { id: string; fname?: string; lname?: string } | null }[]
+  isHistoricalRecord?: boolean
+  isHistoricalReceivable?: boolean
+  historicalReceivableAmount?: number
+  historicalReference?: string | null
   status: string
   bookingState?: string
   bookingPurpose?: string | null
@@ -67,7 +72,8 @@ interface Rental {
   chargeLines?: { id: string; label: string; category: string; quantity: number; unitPrice: number; totalAmount: number }[]
 }
 
-interface RentalChargeDraft { label: string; category: string; quantity: number; unitPrice: number }
+interface RentalChargeDraft { lineType: 'service' | 'consumable'; productId?: string; label: string; category: string; quantity: number; unitPrice: number; unitCost?: number }
+interface RentalChargeCatalogItem { id: string; name: string; sku?: string | null; itemType: 'service' | 'product'; price: number; quantity: number; baseUnit?: string | null }
 
 function heldDepositAmount(rental: Pick<Rental, 'depositPaid' | 'depositAmount' | 'depositRefunded' | 'depositStatus'>) {
   const paid = Number(rental.depositPaid || 0)
@@ -76,7 +82,7 @@ function heldDepositAmount(rental: Pick<Rental, 'depositPaid' | 'depositAmount' 
   return Math.max(0, collected - Number(rental.depositRefunded || 0))
 }
 
-export default function RentalsPage({ section = 'bookings' }: { section?: 'bookings' | 'returns' }) {
+export default function RentalsPage({ section = 'bookings' }: { section?: 'bookings' | 'returns' | 'receivables' }) {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const customerFilter = searchParams.get('customerId') || ''
@@ -86,10 +92,20 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [bookingMode, setBookingMode] = useState<'reserve' | 'checkout'>('checkout')
   const [showForm, setShowForm] = useState(false)
+  const [historicalMode, setHistoricalMode] = useState(false)
+  const [historicalImportKey, setHistoricalImportKey] = useState('')
+  const [historicalReference, setHistoricalReference] = useState('')
+  const [collectUnpaidBalance, setCollectUnpaidBalance] = useState(false)
+  const [historicalReceivableReference, setHistoricalReceivableReference] = useState('')
+  const [historicalReceivableCustomerId, setHistoricalReceivableCustomerId] = useState('')
+  const [historicalReceivableCustomerSearch, setHistoricalReceivableCustomerSearch] = useState('')
+  const [historicalReceivableCustomerOptions, setHistoricalReceivableCustomerOptions] = useState<any[]>([])
+  const [searchingHistoricalCustomers, setSearchingHistoricalCustomers] = useState(false)
   const [showReturnForm, setShowReturnForm] = useState(false)
   const [returningRental, setReturningRental] = useState<Rental | null>(null)
   const [selectedRental, setSelectedRental] = useState<Rental | null>(null)
   const [rentalItems, setRentalItems] = useState<InventoryItem[]>([])
+  const [chargeCatalog, setChargeCatalog] = useState<RentalChargeCatalogItem[]>([])
   const [branches, setBranches] = useState<BranchOption[]>([])
   const [summary, setSummary] = useState<any>(null)
 
@@ -103,6 +119,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [manualRenter, setManualRenter] = useState(false)
   const [hireDate, setHireDate] = useState(localDateInput())
   const [expectedReturnDate, setExpectedReturnDate] = useState('')
+  const [actualReturnDate, setActualReturnDate] = useState(localDateInput())
+  const [historicalTaxRate, setHistoricalTaxRate] = useState(0)
+  const [historicalPayments, setHistoricalPayments] = useState<{ kind: 'rental_payment' | 'deposit' | 'deposit_refund'; amount: number; paymentDate: string; paymentMethod: string; mobileProvider: string; phoneNumber: string; transactionRef: string; notes: string }[]>([])
   const [depositAmount, setDepositAmount] = useState(0)
   const [amountPaid, setAmountPaid] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState('cash')
@@ -178,6 +197,30 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   }, [showForm, canSelectExistingCustomer, manualRenter, customerId, customerSearch])
 
   useEffect(() => {
+    if (!selectedRental?.isHistoricalRecord || selectedRental.customerId || !canSelectExistingCustomer || !historicalReceivableCustomerSearch.trim()) {
+      setHistoricalReceivableCustomerOptions([])
+      setSearchingHistoricalCustomers(false)
+      return
+    }
+    const controller = new AbortController()
+    const timer = window.setTimeout(async () => {
+      setSearchingHistoricalCustomers(true)
+      try {
+        const params = new URLSearchParams({ page: '1', limit: '20', search: historicalReceivableCustomerSearch.trim(), status: 'active' })
+        const response = await apiFetch(`/api/receivables/customers?${params}`, { signal: controller.signal })
+        if (!response.ok) throw new Error('Could not search customers')
+        const data = await response.json()
+        if (!controller.signal.aborted) setHistoricalReceivableCustomerOptions(data?.customers || [])
+      } catch {
+        if (!controller.signal.aborted) setHistoricalReceivableCustomerOptions([])
+      } finally {
+        if (!controller.signal.aborted) setSearchingHistoricalCustomers(false)
+      }
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [selectedRental?.id, selectedRental?.isHistoricalRecord, selectedRental?.customerId, canSelectExistingCustomer, historicalReceivableCustomerSearch])
+
+  useEffect(() => {
     setStatusFilter(section === 'returns' ? 'active' : 'all')
     setSelectedRental(null)
     setShowForm(false)
@@ -197,7 +240,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     loadBranches()
     loadTaxConfig()
     if (canViewReport) loadSummary()
-  }, [statusFilter, customerFilter])
+  }, [statusFilter, customerFilter, section])
 
   const loadTaxConfig = async () => {
     try {
@@ -215,8 +258,17 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setLoading(true)
     try {
       if (online) {
-        const data = await rentalsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined, customerId: customerFilter || undefined })
-        setRentals(data?.rentals || [])
+        if (section === 'receivables') {
+          const first = await rentalsApi.receivables({ page: 1, limit: 250 })
+          const pages = Number(first?.pagination?.pages || 1)
+          const remaining = pages > 1
+            ? await Promise.all(Array.from({ length: pages - 1 }, (_, index) => rentalsApi.receivables({ page: index + 2, limit: 250 })))
+            : []
+          setRentals([...(first?.rentals || []), ...remaining.flatMap((result: any) => result?.rentals || [])])
+        } else {
+          const data = await rentalsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined, customerId: customerFilter || undefined })
+          setRentals(data?.rentals || [])
+        }
       } else {
         const local = await getLocalRentals(statusFilter)
         setRentals((local as any[]).filter(rental => !customerFilter || rental.customerId === customerFilter))
@@ -262,21 +314,30 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   }
 
   const loadRentalItems = async () => {
-    try {
-      const data = await inventoryApi.list(undefined, undefined, 'rental')
-      setRentalItems(data)
-    } catch (err: any) {
-      toast({ title: 'Error', description: 'Failed to load rental items', variant: 'destructive' })
-    }
+    const [rentalResult, catalogResult] = await Promise.allSettled([
+      inventoryApi.list(undefined, branchId || undefined, 'rental'),
+      rentalsApi.catalog(),
+    ])
+    if (rentalResult.status === 'fulfilled') setRentalItems(rentalResult.value)
+    else toast({ title: 'Error', description: 'Failed to load rental items', variant: 'destructive' })
+    if (catalogResult.status === 'fulfilled') setChargeCatalog(catalogResult.value.filter((item: any) => item.itemType === 'product' || item.itemType === 'service'))
+    else setChargeCatalog([])
   }
 
   const openNewForm = () => {
     setShowForm(true)
+    setHistoricalMode(false)
+    setHistoricalImportKey('')
+    setHistoricalReference('')
+    setCollectUnpaidBalance(false)
     setCustomerId('')
     setCustomerName('')
     setCustomerPhone('')
     setHireDate(localDateInput())
     setExpectedReturnDate('')
+    setActualReturnDate(localDateInput())
+    setHistoricalTaxRate(0)
+    setHistoricalPayments([])
     setDepositAmount(0)
     setAmountPaid(0)
     setPaymentMethod('cash')
@@ -298,6 +359,15 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     setManualRenter(false)
     setBookingPurpose('')
     loadRentalItems()
+  }
+
+  const openHistoricalForm = () => {
+    openNewForm()
+    setHistoricalMode(true)
+    setCollectUnpaidBalance(section === 'receivables')
+    setHistoricalImportKey(globalThis.crypto?.randomUUID?.() || `history-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`)
+    setBookingMode('checkout')
+    setActualReturnDate(localDateInput())
   }
 
   useEffect(() => {
@@ -332,6 +402,13 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   useEffect(() => {
     setContractDraftValue(selectedRental?.contractDraft || '')
   }, [selectedRental?.id, selectedRental?.contractDraft])
+
+  useEffect(() => {
+    setHistoricalReceivableCustomerId(selectedRental?.customerId || '')
+    setHistoricalReceivableCustomerSearch('')
+    setHistoricalReceivableCustomerOptions([])
+    setHistoricalReceivableReference(selectedRental?.historicalReference || '')
+  }, [selectedRental?.id])
 
   const openReturnForm = (rental: Rental) => {
     setReturningRental(rental)
@@ -380,12 +457,112 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const chargesSubtotal = additionalCharges.reduce((sum, charge) => sum + charge.quantity * charge.unitPrice, 0)
   const subtotal = hireSubtotal + chargesSubtotal
   const taxableAmount = Math.max(0, subtotal - discount)
-  const taxAmount = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
+  const taxAmount = historicalMode
+    ? Math.round(taxableAmount * historicalTaxRate / 100 * 100) / 100
+    : (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
   const totalAmount = Math.max(0, taxableAmount + taxAmount)
+  const historicalRentalPaid = historicalPayments.filter(row => row.kind === 'rental_payment').reduce((sum, row) => sum + Number(row.amount || 0), 0)
+  const historicalOpenBalance = Math.max(0, totalAmount - historicalRentalPaid)
+
+  const handleHistoricalSubmit = async () => {
+    const shouldCollectHistoricalBalance = section === 'receivables' || collectUnpaidBalance
+    if (!customerId && !customerName.trim()) {
+      toast({ title: 'Customer name required', description: 'Select an existing customer or enter the customer name from the old booking.', variant: 'destructive' })
+      return
+    }
+    if (shouldCollectHistoricalBalance && !customerId) {
+      toast({ title: 'Existing customer required', description: 'Link this past booking to an existing customer before adding its balance to receivables.', variant: 'destructive' })
+      return
+    }
+    if (!hireDate || !expectedReturnDate || !actualReturnDate || actualReturnDate < hireDate) {
+      toast({ title: 'Past dates required', description: 'Enter the original hire, expected return, and actual return dates. Actual return cannot be before hire.', variant: 'destructive' })
+      return
+    }
+    if (!selectedItems.length && !additionalCharges.length) {
+      toast({ title: 'Booking details required', description: 'Add at least one hire item, service, or goods line.', variant: 'destructive' })
+      return
+    }
+    if (additionalCharges.some(line => !line.label.trim())) {
+      toast({ title: 'Description required', description: 'Complete each historical service or goods line.', variant: 'destructive' })
+      return
+    }
+    if (branches.length && !branchId) {
+      toast({ title: 'Branch required', description: 'Select the branch associated with the historical booking.', variant: 'destructive' })
+      return
+    }
+    const chargePaid = historicalRentalPaid
+    const depositsReceived = historicalPayments.filter(row => row.kind === 'deposit').reduce((sum, row) => sum + Number(row.amount || 0), 0)
+    const depositsRefunded = historicalPayments.filter(row => row.kind === 'deposit_refund').reduce((sum, row) => sum + Number(row.amount || 0), 0)
+    if (chargePaid > totalAmount + 0.01 || depositsReceived > depositAmount + 0.01 || depositsRefunded > depositsReceived + 0.01) {
+      toast({ title: 'Payment totals do not reconcile', description: 'Rental payments cannot exceed the booking total, and deposit refunds cannot exceed deposits recorded as received.', variant: 'destructive' })
+      return
+    }
+    if (historicalPayments.some(row => !row.paymentDate || Number(row.amount) <= 0 || (row.paymentMethod === 'mobile_money' && (!row.mobileProvider || !row.phoneNumber.trim() || !row.transactionRef.trim())) || (['card', 'bank_transfer', 'cheque'].includes(row.paymentMethod) && !row.transactionRef.trim()))) {
+      toast({ title: 'Payment details incomplete', description: 'Enter a date, positive amount, method, and required transaction details for every historical payment.', variant: 'destructive' })
+      return
+    }
+    setSavingRental(true)
+    try {
+      const created = await rentalsApi.createHistorical({
+        historicalImportKey,
+        historicalReference: historicalReference.trim() || undefined,
+        collectUnpaidBalance: shouldCollectHistoricalBalance,
+        customerId: customerId || undefined,
+        customerName: customerName || undefined,
+        customerPhone: customerPhone || undefined,
+        items: selectedItems.map(item => ({ ...item, conditionReturn: 'good' })),
+        additionalCharges,
+        hireDate,
+        expectedReturnDate,
+        actualReturnDate,
+        depositAmount,
+        discount,
+        taxRate: historicalTaxRate,
+        payments: historicalPayments,
+        bookingPurpose: bookingPurpose || undefined,
+        notes,
+        branchId: branchId || undefined,
+      })
+      toast({ title: 'Historical booking recorded', description: shouldCollectHistoricalBalance ? 'The remaining amount is now a collectible customer receivable. No past cash or stock movement was recreated.' : 'Dated record and historical receipt copies were saved. No current cash, stock, customer balance, or ledger amounts were changed.' })
+      setShowForm(false)
+      setHistoricalImportKey('')
+      setSelectedRental(created)
+      loadRentals()
+      if (canViewReport) loadSummary()
+    } catch (err: any) {
+      toast({ title: 'Could not record historical booking', description: err.message || 'Review the dates and payment totals, then try again.', variant: 'destructive' })
+    } finally { setSavingRental(false) }
+  }
+
+  const makeSelectedHistoricalReceivable = async () => {
+    if (!selectedRental?.isHistoricalRecord || !canCreateRental || Number(selectedRental.balance) <= 0) return
+    const resolvedCustomerId = historicalReceivableCustomerId || selectedRental.customerId
+    if (!resolvedCustomerId) {
+      toast({ title: 'Customer link required', description: 'Select an existing customer before posting this balance to receivables.', variant: 'destructive' })
+      return
+    }
+    setSavingRental(true)
+    try {
+      const result = await rentalsApi.makeHistoricalReceivable(selectedRental.id, { customerId: resolvedCustomerId, historicalReference: historicalReceivableReference.trim() || selectedRental.historicalReference || undefined })
+      setSelectedRental((current) => current ? { ...current, ...result.rental, isHistoricalReceivable: true, historicalReceivableAmount: Number(result.rental.historicalReceivableAmount) } : current)
+      setHistoricalReceivableReference('')
+      setHistoricalReceivableCustomerId('')
+      setHistoricalReceivableCustomerSearch('')
+      toast({ title: 'Receivable added', description: 'The remaining balance is in the customer ledger and rental receivables account. No cash, inventory, or past sales revenue was recreated.' })
+      loadRentals()
+    } catch (err: any) {
+      toast({ title: 'Could not add receivable', description: err.message || 'Refresh the rental and try again.', variant: 'destructive' })
+    } finally { setSavingRental(false) }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (savingRental) return
+    if (historicalMode) return handleHistoricalSubmit()
+    if (section === 'receivables' && !customerId) {
+      toast({ title: 'Existing customer required', description: 'Select an existing customer so any unpaid rental amount can be tracked and collected from their receivables profile.', variant: 'destructive' })
+      return
+    }
     if (!customerId && (!customerName.trim() || !customerPhone.trim() || !customerNin.trim())) {
       toast({ title: 'Renter details required', description: 'Enter the renter’s name, phone number, and National ID, or select an existing customer.', variant: 'destructive' })
       return
@@ -430,6 +607,10 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     }
     if (amountPaid > totalAmount) {
       toast({ title: 'Amount exceeds rental total', description: 'Reduce the amount paid to the rental total. Record any extra customer advance separately.', variant: 'destructive' })
+      return
+    }
+    if (section === 'receivables' && totalAmount - amountPaid <= 0.01) {
+      toast({ title: 'No credit balance', description: 'Enter a partial payment or zero paid so this rental creates an amount due in Rental Receivables.', variant: 'destructive' })
       return
     }
 
@@ -534,11 +715,16 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       const rental = payment.rental
       const business = payment.tenant
       const safe = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character))
-      const itemRows = (rental.items || []).map((item: any) => `<tr><td>${safe(item.product?.name)}</td><td>${item.quantity}</td><td>${safe(formatCurrency(item.totalAmount))}</td></tr>`).join('')
+      const receiptLines = [
+        ...(rental.items || []).map((item: any) => ({ label: item.product?.name || 'Hire item', type: 'Hire asset', quantity: item.quantity, amount: item.totalAmount })),
+        ...(rental.chargeLines || []).map((line: any) => ({ label: line.label, type: line.lineType === 'consumable' ? 'Goods' : line.category || 'Service', quantity: line.quantity, amount: line.totalAmount })),
+      ]
+      const itemRows = receiptLines.map((line: any) => `<tr><td>${safe(line.label)}</td><td>${safe(line.type)}</td><td>${line.quantity}</td><td>${safe(formatCurrency(line.amount))}</td></tr>`).join('')
       const popup = window.open('', '_blank')
       if (!popup) return toast({ title: 'Print blocked', description: 'Allow pop-ups to print rental receipts.', variant: 'destructive' })
       popup.opener = null
-      popup.document.write(`<html><head><title>Rental receipt ${safe(payment.receiptNo)}</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}header{text-align:center;border-bottom:1px solid #bbb;padding-bottom:14px}h1{font-size:20px;margin:4px}table{width:100%;border-collapse:collapse;margin:20px 0}td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}.amount{text-align:right;font-size:18px;font-weight:bold}</style></head><body><header><h1>${safe(business?.name || 'Business')}</h1><div>${safe(business?.address || '')}</div><div>${safe(business?.phone || '')} ${safe(business?.email || '')}</div><h2>Rental payment receipt</h2></header><p><b>Receipt:</b> ${safe(payment.receiptNo)}<br><b>Date:</b> ${safe(new Date(payment.paymentDate).toLocaleString())}<br><b>Renter:</b> ${safe(rental.customer?.name || rental.customerName || 'Renter')}<br><b>Rental:</b> ${safe(rental.rentalNo)}<br><b>Payment type:</b> ${safe(payment.kind.replaceAll('_', ' '))}<br><b>Method/account:</b> ${safe(payment.paymentMethod || 'Non-cash settlement')} / ${safe(payment.cashAccount?.name || 'N/A')}<br><b>Mobile provider:</b> ${safe(payment.mobileProvider || '—')}<br><b>Payment phone:</b> ${safe(payment.phoneNumber || '—')}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Rental value</th></tr></thead><tbody>${itemRows}</tbody></table><p class="amount">${safe(formatCurrency(payment.amount))}</p><p>Rental total: ${safe(formatCurrency(rental.totalAmount))}<br>Outstanding after receipt: ${safe(formatCurrency(payment.balanceAfter))}<br>Reference: ${safe(payment.transactionRef || '—')}<br>Note: ${safe(payment.notes || '—')}</p><footer>Powered by JibuSales</footer><script>window.onload=()=>window.print()</script></body></html>`)
+      const historicalNotice = payment.status === 'historical' ? `<p style="padding:12px;border:1px solid #c58b20;background:#fff7df"><b>HISTORICAL RECEIPT COPY</b><br>Payment date supplied from prior records: ${safe(new Date(payment.paymentDate).toLocaleString())}. Entered in JibuSales: ${safe(payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'today')}. This is a historical record copy; no funds were processed and no cash or ledger movement was created in JibuSales.</p>` : ''
+      popup.document.write(`<html><head><title>Rental receipt ${safe(payment.receiptNo)}</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}header{text-align:center;border-bottom:1px solid #bbb;padding-bottom:14px}h1{font-size:20px;margin:4px}table{width:100%;border-collapse:collapse;margin:20px 0}td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}.amount{text-align:right;font-size:18px;font-weight:bold}</style></head><body><header><h1>${safe(business?.name || 'Business')}</h1><div>${safe(business?.address || '')}</div><div>${safe(business?.phone || '')} ${safe(business?.email || '')}</div><h2>${payment.status === 'historical' ? 'Historical rental payment record' : 'Rental payment receipt'}</h2></header>${historicalNotice}<p><b>Receipt:</b> ${safe(payment.receiptNo)}<br><b>Date:</b> ${safe(new Date(payment.paymentDate).toLocaleString())}<br><b>Renter:</b> ${safe(rental.customer?.name || rental.customerName || 'Renter')}<br><b>Rental:</b> ${safe(rental.rentalNo)}<br><b>Payment type:</b> ${safe(payment.kind.replaceAll('_', ' '))}<br><b>Method/account:</b> ${safe(payment.paymentMethod || 'Non-cash settlement')} / ${safe(payment.cashAccount?.name || (payment.status === 'historical' ? 'Not posted to a transaction account' : 'N/A'))}<br><b>Mobile provider:</b> ${safe(payment.mobileProvider || '—')}<br><b>Payment phone:</b> ${safe(payment.phoneNumber || '—')}</p><table><thead><tr><th>Item</th><th>Type</th><th>Qty</th><th>Value</th></tr></thead><tbody>${itemRows}</tbody></table><p class="amount">${safe(formatCurrency(payment.amount))}</p><p>Rental total: ${safe(formatCurrency(rental.totalAmount))}<br>Outstanding after record: ${safe(formatCurrency(payment.balanceAfter))}<br>Reference: ${safe(payment.transactionRef || '—')}<br>Note: ${safe(payment.notes || '—')}</p><footer>Powered by JibuSales</footer><script>window.onload=()=>window.print()</script></body></html>`)
       popup.document.close()
     } catch (err: any) { toast({ title: 'Receipt unavailable', description: err.message || 'Could not load receipt.', variant: 'destructive' }) }
   }
@@ -647,7 +833,9 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
 
   const visibleRentals = rentals.filter(rental => {
     const isReturnable = rental.status === 'active' && (!rental.bookingState || rental.bookingState === 'checked_out')
+    const isCollectible = rental.isHistoricalReceivable || (!rental.isHistoricalRecord && ['checked_out', 'returned'].includes(String(rental.bookingState)))
     if (section === 'returns' && !isReturnable) return false
+    if (section === 'receivables' && (Number(rental.balance) <= 0 || rental.status === 'cancelled' || !isCollectible)) return false
     const query = searchQuery.trim().toLowerCase()
     if (!query) return true
     return [rental.rentalNo, rental.customer?.name, rental.customerName, rental.customerPhone, rental.branch?.name,
@@ -655,6 +843,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       .some(value => String(value || '').toLowerCase().includes(query))
   })
   const { paginatedItems: paginatedRentals, currentPage, totalPages, totalItems, goToPage, pageSize } = usePagination(visibleRentals, 10)
+  const rentalReceivableTotal = visibleRentals.reduce((sum, rental) => sum + Math.max(0, Number(rental.balance) || 0), 0)
+  const historicalReceivableCount = visibleRentals.filter(rental => rental.isHistoricalReceivable).length
 
   if (selectedRental) {
     return (
@@ -668,6 +858,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             <CardTitle>Rental Details — {selectedRental.rentalNo}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            {selectedRental.isHistoricalRecord && <div className="space-y-3 rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100"><p><strong>Historical record.</strong> Past cash and stock movements were not recreated.{selectedRental.isHistoricalReceivable ? ' The unpaid balance is collectible and posted to customer receivables against rental opening equity.' : ' The remaining amount is not yet in customer receivables or the general ledger.'}</p>{selectedRental.historicalReference && <p>Original reference: <strong>{selectedRental.historicalReference}</strong></p>}{!selectedRental.isHistoricalReceivable && canCreateRental && Number(selectedRental.balance) > 0 && <div className="space-y-2"><div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Input value={historicalReceivableReference} onChange={event => setHistoricalReceivableReference(event.target.value)} placeholder="Receipt-book / original reference (optional)" aria-label="Original historical booking reference" /><Button type="button" onClick={makeSelectedHistoricalReceivable} disabled={savingRental || !(historicalReceivableCustomerId || selectedRental.customerId)}>{savingRental ? 'Posting…' : 'Add unpaid balance to receivables'}</Button></div>{!selectedRental.customerId && <div className="space-y-2"><Label htmlFor="historical-receivable-customer">Link existing customer</Label><Input id="historical-receivable-customer" value={historicalReceivableCustomerSearch} onChange={event => setHistoricalReceivableCustomerSearch(event.target.value)} placeholder="Search customer name or phone" autoComplete="off" />{searchingHistoricalCustomers && <p className="text-xs">Searching…</p>}{historicalReceivableCustomerOptions.map(customer => <button key={customer.id} type="button" className="flex w-full justify-between rounded border bg-background p-2 text-left" onClick={() => { setHistoricalReceivableCustomerId(customer.id); setHistoricalReceivableCustomerSearch(customer.name || ''); setHistoricalReceivableCustomerOptions([]) }}><span>{customer.name}</span><span className="text-muted-foreground">{customer.phone || customer.maskedPhone || ''}</span></button>)}</div>}</div>}</div>}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
               <div><span className="font-medium">Customer:</span> {selectedRental.customer?.name || selectedRental.customerName || 'Walk-in'}</div>
               <div><span className="font-medium">Phone:</span> {selectedRental.customer?.phone || selectedRental.customerPhone || '-'}</div>
@@ -703,8 +894,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
               <div className="text-sm"><span className="font-medium">Notes:</span> {selectedRental.notes}</div>
             )}
             <section className="space-y-3 border-t pt-4">
-              <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Payments and receipts</h3><p className="text-sm text-muted-foreground">Collections and deposit movements are linked to cash accounts and the general ledger.</p></div></div>
-              {selectedRental.payments?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Receipt</th><th>Date</th><th>Type</th><th>Account</th><th className="text-right">Amount</th><th></th></tr></thead><tbody>{selectedRental.payments.map(payment => <tr key={payment.id} className="border-b last:border-0"><td className="py-2 font-medium">{payment.receiptNo}</td><td>{new Date(payment.paymentDate).toLocaleDateString()}</td><td className="capitalize">{payment.kind.replaceAll('_', ' ')}</td><td>{payment.cashAccount?.name || 'Non-cash settlement'}</td><td className="text-right">{formatCurrency(payment.amount)}</td><td className="text-right"><Button size="sm" variant="outline" onClick={() => printRentalReceipt(payment.id)}><Printer className="mr-2 h-4 w-4" />Receipt</Button></td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No posted payment records yet. Existing legacy totals remain visible until a new payment is recorded.</p>}
+              <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Payments and receipts</h3><p className="text-sm text-muted-foreground">{selectedRental.isHistoricalRecord ? 'Past payment records are saved as historical receipt copies only.' : 'Collections and deposit movements are linked to transaction accounts and the general ledger.'}</p></div></div>
+              {selectedRental.payments?.length ? <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="py-2">Receipt</th><th>Date</th><th>Type</th><th>Account / Status</th><th className="text-right">Amount</th><th></th></tr></thead><tbody>{selectedRental.payments.map(payment => <tr key={payment.id} className="border-b last:border-0"><td className="py-2 font-medium">{payment.receiptNo}</td><td>{new Date(payment.paymentDate).toLocaleDateString()}</td><td className="capitalize">{payment.kind.replaceAll('_', ' ')}</td><td>{payment.status === 'historical' ? 'Historical · no posting' : payment.cashAccount?.name || 'Non-cash settlement'}</td><td className="text-right">{formatCurrency(payment.amount)}</td><td className="text-right"><Button size="sm" variant="outline" onClick={() => printRentalReceipt(payment.id)}><Printer className="mr-2 h-4 w-4" />{payment.status === 'historical' ? 'Print copy' : 'Receipt'}</Button></td></tr>)}</tbody></table></div> : <p className="text-sm text-muted-foreground">No payment records yet.</p>}
               {canRecordRentalPayment && Number(selectedRental.balance) > 0 && <div className="grid gap-3 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1"><Label htmlFor="rental-payment-amount">Receive rent payment</Label><Input id="rental-payment-amount" type="number" min="0.01" max={selectedRental.balance} step="any" value={paymentAmount || ''} onChange={event => setPaymentAmount(Number(event.target.value) || 0)} /></div>
                 <div className="space-y-1"><Label htmlFor="rental-payment-method">Payment method</Label><select id="rental-payment-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div>
@@ -804,16 +995,21 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{section === 'returns' ? 'Rental Returns' : 'Bookings & Check-out'}</h1>
-          <p className="text-muted-foreground">{section === 'returns' ? 'Review checked-out assets due back and complete their return.' : 'Reserve hire assets, check them out, and follow each booking.'}</p>
+          <h1 className="text-3xl font-bold tracking-tight">{section === 'returns' ? 'Rental Returns' : section === 'receivables' ? 'Rental Receivables' : 'Bookings & Check-out'}</h1>
+          <p className="text-muted-foreground">{section === 'returns' ? 'Review checked-out assets due back and complete their return.' : section === 'receivables' ? 'Track unpaid new bookings and past rental balances, then collect through the linked customer account.' : 'Reserve hire assets, check them out, and follow each booking.'}</p>
         </div>
-        {section === 'bookings' && canCreateRental && (
-          <Button onClick={openNewForm}>
-            <Plus className="mr-2 h-4 w-4" />
-            New Hire
-          </Button>
-        )}
+        {(section === 'bookings' || section === 'receivables') && canCreateRental && <div className="flex flex-wrap gap-2">
+          {section === 'receivables' && canSelectExistingCustomer && <Button variant="outline" onClick={openHistoricalForm}><Clock className="mr-2 h-4 w-4" />Record Past Rental</Button>}
+          {(section !== 'receivables' || canSelectExistingCustomer) && <Button onClick={openNewForm}><Plus className="mr-2 h-4 w-4" />{section === 'receivables' ? 'New Credit Rental' : 'New Hire'}</Button>}
+        </div>}
       </div>
+      {section === 'receivables' && !canSelectExistingCustomer && <p className="rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">Customer access is required to create collectible rental balances. Ask an administrator to grant customer viewing permission.</p>}
+      {section === 'receivables' && canSelectExistingCustomer && <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">New credit rentals are checked out and posted to the selected customer. Past balances can be brought forward with their original reference. To collect, open the customer and use <span className="font-medium text-foreground">Record Payment</span>; receipts and allocations stay in the customer ledger.</p>}
+      {section === 'receivables' && <div className="grid gap-3 sm:grid-cols-3">
+        <Card><CardContent className="pt-5"><p className="text-xs text-muted-foreground">Open rental receivables</p><p className="mt-1 text-xl font-semibold tabular-nums">{formatCurrency(rentalReceivableTotal)}</p></CardContent></Card>
+        <Card><CardContent className="pt-5"><p className="text-xs text-muted-foreground">Bookings with balances</p><p className="mt-1 text-xl font-semibold tabular-nums">{visibleRentals.length}</p></CardContent></Card>
+        <Card><CardContent className="pt-5"><p className="text-xs text-muted-foreground">Past balances</p><p className="mt-1 text-xl font-semibold tabular-nums">{historicalReceivableCount}</p></CardContent></Card>
+      </div>}
       {section === 'bookings' && customerFilter && <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
         <span>Showing bookings for the selected renter.</span>
         <Button variant="ghost" size="sm" onClick={() => setSearchParams({})}>Clear renter filter</Button>
@@ -888,7 +1084,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       {/* Rentals Table */}
       <Card>
         <CardHeader>
-          <CardTitle>{section === 'returns' ? `Items currently out (${visibleRentals.length})` : `Bookings (${visibleRentals.length})`}</CardTitle>
+          <CardTitle>{section === 'returns' ? `Items currently out (${visibleRentals.length})` : section === 'receivables' ? `Unpaid rental bookings (${visibleRentals.length})` : `Bookings (${visibleRentals.length})`}</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -897,7 +1093,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             </div>
           ) : visibleRentals.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-muted-foreground mb-4">{section === 'returns' ? 'No checked-out rentals are awaiting return.' : 'No bookings match this search.'}</p>
+              <p className="text-muted-foreground mb-4">{section === 'returns' ? 'No checked-out rentals are awaiting return.' : section === 'receivables' ? 'No open rental balances match this search.' : 'No bookings match this search.'}</p>
               {section === 'bookings' && canCreateRental && (
                 <Button onClick={openNewForm}>
                   <Plus className="mr-2 h-4 w-4" />
@@ -910,14 +1106,14 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
               <table className="w-full">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="pb-3 font-medium">Rental No</th>
+                    <th className="pb-3 font-medium">{section === 'receivables' ? 'Booking / Receipt Reference' : 'Rental No'}</th>
                     <th className="pb-3 font-medium">Customer</th>
-                    <th className="pb-3 font-medium">Items</th>
-                    <th className="pb-3 font-medium">Hire Date</th>
-                    <th className="pb-3 font-medium">Expected Return</th>
-                    <th className="pb-3 font-medium text-right">Total</th>
-                    <th className="pb-3 font-medium text-right">Deposit</th>
-                    <th className="pb-3 font-medium">Status</th>
+                    <th className="pb-3 font-medium">{section === 'receivables' ? 'Rental Details' : 'Items'}</th>
+                    <th className="pb-3 font-medium">{section === 'receivables' ? 'Booking Date' : 'Hire Date'}</th>
+                    {section !== 'receivables' && <th className="pb-3 font-medium">Expected Return</th>}
+                    <th className="pb-3 font-medium text-right">{section === 'receivables' ? 'Charge' : 'Total'}</th>
+                    {section === 'receivables' ? <><th className="pb-3 font-medium text-right">Paid</th><th className="pb-3 font-medium text-right">Outstanding</th></> : <th className="pb-3 font-medium text-right">Deposit</th>}
+                    {section !== 'receivables' && <th className="pb-3 font-medium">Status</th>}
                     <th className="pb-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
@@ -925,36 +1121,37 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                   {paginatedRentals.map((rental) => (
                     <tr key={rental.id} className="border-b last:border-0 hover:bg-muted/50">
                       <td className="py-3 font-medium cursor-pointer" onClick={() => setSelectedRental(rental)}>
-                        {rental.rentalNo}
+                        <span>{section === 'receivables' ? rental.historicalReference || rental.rentalNo : rental.rentalNo}</span>{rental.isHistoricalRecord && <span className="ml-2 inline-flex rounded-full border border-amber-500/40 px-2 py-0.5 text-[11px] font-medium text-amber-700">History</span>}
                       </td>
-                      <td className="py-3">{rental.customer?.name || 'Walk-in'}</td>
+                      <td className="py-3">{hasPermission('canViewCustomer') ? rental.customer?.id ? <Link className="text-primary hover:underline" to={`/tenant/receivables/customers/${encodeURIComponent(rental.customer.id)}`}>{rental.customer.name}</Link> : rental.customer?.name || 'Walk-in' : 'Restricted'}</td>
                       <td className="py-3 text-sm text-muted-foreground">
-                        {rental.items.length} item(s)
+                        {section === 'receivables' ? [...(rental.items || []).map(item => item.product?.name || 'Rental item'), ...(rental.chargeLines || []).map(line => line.label)].slice(0, 2).join(', ') || 'Rental charge' : `${rental.items.length} item(s)`}
                       </td>
                       <td className="py-3 text-sm">{new Date(rental.hireDate).toLocaleDateString()}</td>
-                      <td className="py-3 text-sm">
+                      {section !== 'receivables' && <td className="py-3 text-sm">
                         {new Date(rental.expectedReturnDate).toLocaleDateString()}
                         {isOverdue(rental) && (
                           <span className="ml-1 inline-flex items-center text-xs text-red-600">
                             <AlertTriangle className="h-3 w-3" /> Overdue
                           </span>
                         )}
-                      </td>
-                      <td className="py-3 text-right">{formatCurrency(rental.totalAmount)}</td>
-                      <td className="py-3 text-right">{formatCurrency(rental.depositAmount)}</td>
-                      <td className="py-3">
+                      </td>}
+                      <td className="py-3 text-right">{formatCurrency(section === 'receivables' && rental.isHistoricalReceivable ? rental.historicalReceivableAmount : rental.totalAmount)}</td>
+                      {section === 'receivables' ? <><td className="py-3 text-right">{formatCurrency(Math.max(0, Number(rental.isHistoricalReceivable ? rental.historicalReceivableAmount : rental.totalAmount) - Number(rental.balance)))}</td><td className="py-3 text-right font-semibold text-red-700">{formatCurrency(rental.balance)}</td></> : <td className="py-3 text-right">{formatCurrency(rental.depositAmount)}</td>}
+                      {section !== 'receivables' && <td className="py-3">
                         <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-medium", statusBadge(rental.status))}>
                           {rental.bookingState && rental.bookingState !== 'checked_out' ? rental.bookingState.replace('_', ' ') : rental.status}
                         </span>
-                      </td>
+                      </td>}
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-1">
-                          {rental.status === 'active' && rental.bookingState && rental.bookingState !== 'checked_out' && hasPermission('canEditRental') && (
+                          {section === 'receivables' && rental.customerId && hasPermission('canViewCustomer') && <Link to={`/tenant/receivables/customers/${encodeURIComponent(rental.customerId)}`} className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted">Open customer</Link>}
+                          {section !== 'receivables' && rental.status === 'active' && rental.bookingState && rental.bookingState !== 'checked_out' && hasPermission('canEditRental') && (
                             <Button variant="outline" size="sm" onClick={() => handleCheckout(rental)}>
                               <CalendarCheck className="mr-1 h-3.5 w-3.5" />Check out
                             </Button>
                           )}
-                          {canProcessReturn && rental.status === 'active' && (!rental.bookingState || rental.bookingState === 'checked_out') && (
+                          {section !== 'receivables' && canProcessReturn && rental.status === 'active' && (!rental.bookingState || rental.bookingState === 'checked_out') && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -964,7 +1161,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                               Return
                             </Button>
                           )}
-                          {canCancelRental && rental.status === 'active' && rental.bookingState !== 'checked_out' && (
+                          {section !== 'receivables' && canCancelRental && rental.status === 'active' && rental.bookingState !== 'checked_out' && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -994,20 +1191,21 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
       {/* New Rental Form */}
       <Dialog open={showForm} onOpenChange={open => { if (!open) setShowForm(false) }}>
         {showForm && <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-4xl">
-          <DialogHeader><DialogTitle>New rental booking</DialogTitle><DialogDescription>Choose a renter, add items, then reserve a future date or check them out immediately. Availability is checked before saving.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{historicalMode ? (section === 'receivables' ? 'Record Past Rental Receivable' : 'Record past booking') : section === 'receivables' ? 'New Credit Rental' : 'New rental booking'}</DialogTitle><DialogDescription>{historicalMode ? section === 'receivables' ? 'Record the original rental details and payments. Its remaining amount will be added to the selected customer’s receivables without recreating past cash or stock movements.' : 'Enter the original dates, booking details, and any documented payments. This creates a historical record only; it does not change current cash, stock, customer balances, or the general ledger.' : section === 'receivables' ? 'Record a rental checked out today. Any unpaid amount is posted to the selected customer’s receivables and can be collected from their customer profile.' : 'Choose a renter, add items, then reserve a future date or check them out immediately. Availability is checked before saving.'}</DialogDescription></DialogHeader>
         <Card className="border-0 p-0 shadow-none">
           <CardContent>
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
-              <div className="space-y-2">
+              {historicalMode && <div className="rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">{section === 'receivables' ? 'The documented unpaid amount will become collectible on the selected customer account. Past cash, inventory movements, and revenue will not be recreated.' : 'Past cash and stock are never recreated. You can optionally add the unpaid balance to the selected customer’s receivables, offset against rental opening equity without recognizing past revenue again.'}</div>}
+              {!historicalMode && section !== 'receivables' && <div className="space-y-2">
                 <Label>Booking action</Label>
                 <div className="inline-flex rounded-md border p-1">
                   <button type="button" onClick={() => setBookingMode('reserve')} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'reserve' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Reserve dates</button>
                   <button type="button" onClick={() => { setBookingMode('checkout'); setHireDate(localDateInput()) }} className={cn('rounded px-3 py-2 text-sm', bookingMode === 'checkout' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>Check out now</button>
                 </div>
-              </div>
+              </div>}
               {/* Customer info */}
               {canSelectExistingCustomer && !manualRenter ? <div className="space-y-2">
-                <Label htmlFor="rental-customer-search">Renter *</Label>
+                <Label htmlFor="rental-customer-search">{section === 'receivables' ? 'Customer *' : 'Renter *'}</Label>
                 {customerId ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 p-3">
                   <div><p className="font-medium">{customerName}</p>{customerPhone && <p className="text-sm text-muted-foreground">{customerPhone}</p>}<p className="text-xs text-muted-foreground">Existing customer linked to this rental</p></div>
                   <Button type="button" variant="outline" size="sm" onClick={() => { setCustomerId(''); setCustomerName(''); setCustomerPhone(''); setCustomerSearch('') }}>Change renter</Button>
@@ -1018,21 +1216,32 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                     {customerOptions.map(customer => <button key={customer.id} type="button" onClick={() => { setCustomerId(customer.id); setCustomerName(customer.name || ''); setCustomerPhone(customer.phone || ''); setCustomerNin(''); setCustomerOptions([]) }} className="flex w-full items-center justify-between gap-3 border-b p-3 text-left last:border-0 hover:bg-muted/50"><span className="font-medium">{customer.name}</span><span className="text-sm text-muted-foreground">{customer.phone || customer.maskedPhone || ''}</span></button>)}
                   </div>}
                   {customerSearch.trim() && !searchingCustomers && customerOptions.length === 0 && <p className="text-sm text-muted-foreground">No matching customer found.</p>}
-                  <Button type="button" variant="link" className="h-auto px-0" onClick={() => { setManualRenter(true); setCustomerId(''); setCustomerName(customerSearch.trim()); setCustomerSearch(''); setCustomerOptions([]) }}>Enter a new renter instead</Button>
+                  {section !== 'receivables' && <Button type="button" variant="link" className="h-auto px-0" onClick={() => { setManualRenter(true); setCustomerId(''); setCustomerName(customerSearch.trim()); setCustomerSearch(''); setCustomerOptions([]) }}>Enter a new renter instead</Button>}
                 </>}
               </div> : <div className="space-y-2">
                 {canSelectExistingCustomer && <div className="flex items-center justify-between gap-2"><Label>New renter details</Label><Button type="button" variant="link" className="h-auto px-0" onClick={() => { setManualRenter(false); setCustomerName(''); setCustomerPhone(''); setCustomerNin('') }}>Choose existing customer</Button></div>}
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="space-y-2"><Label htmlFor="customerName">Renter Name *</Label><Input id="customerName" value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="Full name" required={!customerId} /></div>
-                  <div className="space-y-2"><Label htmlFor="customerPhone">Renter Phone *</Label><Input id="customerPhone" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="Phone number" required={!customerId} /></div>
-                  <div className="space-y-2"><Label htmlFor="customerNin">National ID No. (NIN) *</Label><Input id="customerNin" value={customerNin} onChange={event => setCustomerNin(event.target.value)} placeholder="e.g. CF9802001234567" maxLength={20} required={!customerId} /></div>
+                  <div className="space-y-2"><Label htmlFor="customerName">Customer Name *</Label><Input id="customerName" value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="Full name" required={!customerId} /></div>
+                  <div className="space-y-2"><Label htmlFor="customerPhone">Phone {historicalMode ? '(optional)' : '*'}</Label><Input id="customerPhone" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="Phone number" required={!customerId && !historicalMode} /></div>
+                  {!historicalMode && <div className="space-y-2"><Label htmlFor="customerNin">National ID No. (NIN) *</Label><Input id="customerNin" value={customerNin} onChange={event => setCustomerNin(event.target.value)} placeholder="e.g. CF9802001234567" maxLength={20} required={!customerId} /></div>}
                 </div>
               </div>}
 
               <div className="grid gap-4 sm:grid-cols-3">
+                {historicalMode ? <>
+                  <div className="space-y-2"><Label htmlFor="hireDate">Original Hire Date *</Label><Input id="hireDate" type="date" value={hireDate} max={localDateInput()} onChange={event => setHireDate(event.target.value)} required /></div>
+                  <div className="space-y-2"><Label htmlFor="expectedReturnDate">Expected Return Date *</Label><Input id="expectedReturnDate" type="date" value={expectedReturnDate} onChange={event => setExpectedReturnDate(event.target.value)} required /></div>
+                  <div className="space-y-2"><Label htmlFor="actualReturnDate">Actual Return Date *</Label><Input id="actualReturnDate" type="date" value={actualReturnDate} max={localDateInput()} onChange={event => setActualReturnDate(event.target.value)} required /></div>
+                </> : <>
                 {bookingMode === 'reserve' ? <div className="space-y-2"><Label htmlFor="hireDate">Reservation Start Date *</Label><Input id="hireDate" type="date" value={hireDate} min={localDateInput()} onChange={event => setHireDate(event.target.value)} required /></div> : <div className="space-y-2"><Label>Check-out time</Label><div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm">Now · {new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date())}</div><p className="text-xs text-muted-foreground">The system records the actual checkout time automatically.</p></div>}
                 <div className="space-y-2"><Label htmlFor="expectedReturnDate">Expected Return Date *</Label><Input id="expectedReturnDate" type="date" value={expectedReturnDate} min={bookingMode === 'checkout' ? localDateInput() : hireDate || localDateInput()} onChange={event => setExpectedReturnDate(event.target.value)} required /></div>
+                </>}
               </div>
+
+              {historicalMode && <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-2"><Label htmlFor="historicalReference">Original booking / receipt-book reference</Label><Input id="historicalReference" value={historicalReference} onChange={event => setHistoricalReference(event.target.value)} maxLength={120} placeholder="e.g. Receipt book 00418; leave blank to use generated rental reference" /><p className="text-xs text-muted-foreground">This reference appears in the customer ledger and accounting narration. It can be a receipt-book number if there was no JibuSales reference.</p></div>
+                {section === 'receivables' ? <div className="rounded-md border bg-muted/30 p-3 text-sm"><p className="font-medium">Customer receivable</p><p className="mt-1 text-muted-foreground">{customerId ? `The remaining ${formatCurrency(historicalOpenBalance)} will be added to this customer’s receivable balance.` : 'Select an existing customer above. The balance cannot be recorded without a customer link.'}</p></div> : <label className={cn('flex items-start gap-3 rounded-md border p-3', !customerId || historicalOpenBalance <= 0 ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}><input type="checkbox" className="mt-1 h-4 w-4" checked={collectUnpaidBalance} disabled={!customerId || historicalOpenBalance <= 0} onChange={event => setCollectUnpaidBalance(event.target.checked)} /><span><span className="font-medium">Add unpaid balance to customer receivables</span><span className="mt-1 block text-xs text-muted-foreground">{customerId ? `Remaining balance ${formatCurrency(historicalOpenBalance)} will appear on the customer ledger, dated to this booking. The opening receivable is posted against rental opening equity on today’s accounting date.` : 'Select an existing customer above to make the balance collectible.'}</span></span></label>}
+              </div>}
 
               <div className="space-y-2">
                 <Label htmlFor="bookingPurpose">Purpose or event</Label>
@@ -1077,7 +1286,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                             <Package className="h-4 w-4 text-muted-foreground" />
                             <span className="text-sm font-medium">{item.product_name}</span>
                             <span className="text-xs text-muted-foreground">
-                              {availabilityByProduct[item.id] ?? item.quantity} available for dates
+                              {historicalMode ? `${item.quantity} recorded on-hand now` : `${availabilityByProduct[item.id] ?? item.quantity} available for dates`}
                             </span>
                           </div>
                           <span className="text-sm">
@@ -1171,20 +1380,36 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
 
               <section className="space-y-3 rounded-md border p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div><Label>Services and event charges</Label><p className="text-xs text-muted-foreground">Optional, non-stock lines such as delivery, setup, staff, venue or cleaning.</p></div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { label: '', category: 'service', quantity: 1, unitPrice: 0 }])}><Plus className="mr-1 h-4 w-4" />Add line</Button>
+                  <div><Label>Services, event charges, and goods</Label><p className="text-xs text-muted-foreground">Add services or fees, plus stocked food and supplies. Stock is issued only at check-out.</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { lineType: 'service', category: 'service', quantity: 1, unitPrice: 0, unitCost: 0, label: '' }])}><Plus className="mr-1 h-4 w-4" />Add line</Button>
                 </div>
-                {additionalCharges.map((charge, index) => <div key={index} className="grid grid-cols-12 gap-2 items-center">
-                  <Input className="col-span-12 sm:col-span-4" value={charge.label} maxLength={120} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, label: event.target.value } : row))} placeholder="Description" />
-                  <select aria-label="Charge type" className="col-span-6 sm:col-span-3 h-10 rounded-md border bg-background px-2 text-sm" value={charge.category} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, category: event.target.value } : row))}><option value="service">Service</option><option value="delivery">Delivery</option><option value="setup">Setup</option><option value="staffing">Staffing</option><option value="venue">Venue</option><option value="cleaning">Cleaning</option><option value="other">Other</option></select>
-                  <Input className="col-span-2 sm:col-span-1" type="number" min="0.01" step="any" value={charge.quantity} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, quantity: Number(event.target.value) || 1 } : row))} aria-label="Quantity" />
-                  <Input className="col-span-3 sm:col-span-3" type="number" min="0" step="any" value={charge.unitPrice} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, unitPrice: Number(event.target.value) || 0 } : row))} aria-label="Unit charge" placeholder="Rate" />
-                  <Button className="col-span-1" type="button" variant="ghost" size="icon" aria-label="Remove charge" onClick={() => setAdditionalCharges(rows => rows.filter((_, i) => i !== index))}><X className="h-4 w-4 text-destructive" /></Button>
-                </div>)}
+                {additionalCharges.map((charge, index) => {
+                  const selectedCatalogItem = chargeCatalog.find(item => item.id === charge.productId)
+                  const catalogOptions = chargeCatalog.filter(item => item.itemType === (charge.lineType === 'consumable' ? 'product' : 'service'))
+                  return <div key={index} className="grid grid-cols-1 gap-2 rounded-md border p-2 sm:grid-cols-12 sm:items-center sm:border-0 sm:p-0">
+                    <select aria-label="Booking line type" className="h-10 rounded-md border bg-background px-2 text-sm sm:col-span-2" value={charge.lineType} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, lineType: event.target.value as RentalChargeDraft['lineType'], productId: undefined, label: '', unitPrice: 0, category: event.target.value === 'consumable' ? 'other' : 'service' } : row))}>
+                      <option value="service">Service / fee</option><option value="consumable">Stocked item</option>
+                    </select>
+                    <select aria-label={charge.lineType === 'consumable' ? 'Select stocked item' : 'Select catalog service'} className="h-10 rounded-md border bg-background px-2 text-sm sm:col-span-3" value={charge.productId || ''} onChange={event => {
+                      const picked = catalogOptions.find(item => item.id === event.target.value)
+                      setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, productId: picked?.id, label: picked?.name || row.label, unitPrice: picked ? Number(picked.price || 0) : row.unitPrice } : row))
+                    }}>
+                      <option value="">{charge.lineType === 'consumable' ? 'Select stocked item *' : 'Optional service catalog item'}</option>
+                      {catalogOptions.map(item => <option key={item.id} value={item.id}>{item.name}{charge.lineType === 'consumable' ? ` · ${item.quantity} ${item.baseUnit || 'units'} on hand` : ''}</option>)}
+                    </select>
+                    <Input className="sm:col-span-2" value={charge.label} maxLength={120} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, label: event.target.value } : row))} placeholder="Description" />
+                    <select aria-label="Service or fee category" className="h-10 rounded-md border bg-background px-2 text-sm sm:col-span-2" value={charge.category} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, category: event.target.value } : row))}><option value="service">Service</option><option value="delivery">Delivery</option><option value="setup">Setup</option><option value="staffing">Staffing</option><option value="venue">Venue</option><option value="cleaning">Cleaning</option><option value="other">Other</option></select>
+                    <Input className="sm:col-span-1" type="number" min={charge.lineType === 'consumable' ? '1' : '0.01'} step={charge.lineType === 'consumable' ? '1' : 'any'} value={charge.quantity} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, quantity: Number(event.target.value) || 1 } : row))} aria-label="Quantity" placeholder="Qty" />
+                    <Input className="sm:col-span-1" type="number" min="0" step="any" value={charge.unitPrice} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, unitPrice: Number(event.target.value) || 0 } : row))} aria-label="Unit charge" placeholder="Rate" />
+                    <Button className="sm:col-span-1" type="button" variant="ghost" size="icon" aria-label="Remove charge" onClick={() => setAdditionalCharges(rows => rows.filter((_, i) => i !== index))}><X className="h-4 w-4 text-destructive" /></Button>
+                    {charge.lineType === 'consumable' && historicalMode && <Input className="sm:col-span-3" type="number" min="0" step="0.01" value={charge.unitCost || 0} onChange={event => setAdditionalCharges(rows => rows.map((row, i) => i === index ? { ...row, unitCost: Number(event.target.value) || 0 } : row))} aria-label="Historical unit cost" placeholder="Historical unit cost (optional)" />}
+                    {charge.lineType === 'consumable' && !historicalMode && selectedCatalogItem && <p className="text-xs text-muted-foreground sm:col-span-12">Stock is deducted and costed when this booking is checked out. Available now: {selectedCatalogItem.quantity} {selectedCatalogItem.baseUnit || 'units'}.</p>}
+                  </div>
+                })}
               </section>
 
               {/* Discount & Payment */}
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className={cn('grid gap-4', historicalMode ? 'sm:grid-cols-4' : 'sm:grid-cols-3')}>
                 <div className="space-y-2">
                   <Label htmlFor="discount">Discount</Label>
                   <Input
@@ -1208,7 +1433,10 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                     onChange={(e) => setDepositAmount(parseFloat(e.target.value) || 0)}
                   />
                 </div>
-                <div className="space-y-2">
+                {historicalMode ? <div className="space-y-2">
+                  <Label htmlFor="historicalTaxRate">Historical Tax Rate (%)</Label>
+                  <Input id="historicalTaxRate" type="number" min="0" max="100" step="0.01" value={historicalTaxRate} onChange={event => setHistoricalTaxRate(Number(event.target.value) || 0)} />
+                </div> : <div className="space-y-2">
                   <Label htmlFor="amountPaid">Amount Paid</Label>
                   <Input
                     id="amountPaid"
@@ -1218,9 +1446,26 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                     value={amountPaid}
                     onChange={(e) => setAmountPaid(parseFloat(e.target.value) || 0)}
                   />
-                </div>
+                </div>}
               </div>
 
+              {historicalMode ? <section className="space-y-3 rounded-md border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div><Label>Historical payment records</Label><p className="text-xs text-muted-foreground">Each row creates a dated historical receipt copy only. It does not change current transaction accounts.</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setHistoricalPayments(rows => [...rows, { kind: 'rental_payment', amount: 0, paymentDate: actualReturnDate || localDateInput(), paymentMethod: 'cash', mobileProvider: '', phoneNumber: '', transactionRef: '', notes: '' }])}><Plus className="mr-1 h-4 w-4" />Add payment record</Button>
+                </div>
+                {historicalPayments.map((payment, index) => <div key={index} className="grid gap-2 rounded-md border p-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="space-y-1"><Label>Record type</Label><select className="h-10 w-full rounded-md border bg-background px-2 text-sm" value={payment.kind} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, kind: event.target.value as typeof row.kind } : row))}><option value="rental_payment">Rental payment received</option><option value="deposit">Security deposit received</option><option value="deposit_refund">Security deposit refunded</option></select></div>
+                  <div className="space-y-1"><Label>Original payment date</Label><Input type="date" max={localDateInput()} value={payment.paymentDate} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, paymentDate: event.target.value } : row))} /></div>
+                  <div className="space-y-1"><Label>Amount</Label><Input type="number" min="0.01" step="0.01" value={payment.amount || ''} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, amount: Number(event.target.value) || 0 } : row))} /></div>
+                  <div className="space-y-1"><Label>Method</Label><select className="h-10 w-full rounded-md border bg-background px-2 text-sm" value={payment.paymentMethod} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, paymentMethod: event.target.value } : row))}><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank transfer</option><option value="card">Card</option><option value="cheque">Cheque</option><option value="other">Other</option></select></div>
+                  {payment.paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label>Provider</Label><Input value={payment.mobileProvider} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, mobileProvider: event.target.value } : row))} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label>Phone</Label><Input type="tel" value={payment.phoneNumber} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, phoneNumber: event.target.value } : row))} /></div></>}
+                  {!['cash', 'safe', 'other'].includes(payment.paymentMethod) && <div className="space-y-1"><Label>Transaction reference</Label><Input value={payment.transactionRef} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, transactionRef: event.target.value } : row))} /></div>}
+                  <div className="space-y-1"><Label>Note</Label><Input value={payment.notes} maxLength={500} onChange={event => setHistoricalPayments(rows => rows.map((row, i) => i === index ? { ...row, notes: event.target.value } : row))} placeholder="Optional record note" /></div>
+                  <div className="flex items-end justify-end"><Button type="button" variant="ghost" onClick={() => setHistoricalPayments(rows => rows.filter((_, i) => i !== index))}><X className="mr-2 h-4 w-4" />Remove</Button></div>
+                </div>)}
+                {historicalPayments.length > 0 && <div className="text-right text-sm">Rental payments recorded: <strong>{formatCurrency(historicalRentalPaid)}</strong> · Current rental balance: <strong>{formatCurrency(historicalOpenBalance)}</strong></div>}
+              </section> : <>
               <div className="space-y-2">
                 <Label htmlFor="paymentMethod">Payment Method *</Label>
                 <select
@@ -1313,6 +1558,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                   </div>
                 </div>
               )}
+              </>}
 
               {/* Guarantor (optional) */}
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1354,7 +1600,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 </Button>
                 <Button type="submit" disabled={savingRental}>
                   <Clock className="mr-2 h-4 w-4" />
-                  {savingRental ? 'Saving booking…' : bookingMode === 'reserve' ? 'Reserve items' : 'Check out items'}
+                  {savingRental ? 'Saving booking…' : historicalMode ? 'Save historical booking' : bookingMode === 'reserve' ? 'Reserve items' : 'Check out items'}
                 </Button>
               </div>
             </form>

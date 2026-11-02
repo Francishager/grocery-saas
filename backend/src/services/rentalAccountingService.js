@@ -1,9 +1,45 @@
 import { cashAccountMarker, linkedCashAccountId } from '../utils/accountingSync.js'
+import { ensureTenantAccountingSetup } from './tenantAccountingSetupService.js'
 
 const money = value => Math.round((Number(value) || 0) * 100) / 100
 const debitNormal = type => ['asset', 'expense', 'expenses'].includes(String(type || '').toLowerCase())
 const markerFor = role => `JibuSales rental accounting role: ${role}`
 const sourceName = (type, id) => `${type}-${id}`.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64)
+const cents = value => Math.round((Number(value) || 0) * 100)
+
+function allocateCents(total, weights) {
+  const positiveTotal = weights.reduce((sum, value) => sum + Math.max(0, value), 0)
+  if (!positiveTotal || !total) return weights.map(() => 0)
+  let allocated = 0
+  return weights.map((weight, index) => {
+    if (index === weights.length - 1) return total - allocated
+    const share = Math.round(total * Math.max(0, weight) / positiveTotal)
+    allocated += share
+    return share
+  })
+}
+
+export function allocateRentalLineAmounts(items, chargeLines, discount, taxRate) {
+  const rows = [...items, ...chargeLines]
+  const gross = rows.map(row => cents(row.totalAmount))
+  const grossTotal = gross.reduce((sum, value) => sum + value, 0)
+  const discountCents = Math.min(grossTotal, Math.max(0, cents(discount)))
+  const discounts = allocateCents(discountCents, gross)
+  const taxable = gross.map((value, index) => Math.max(0, value - discounts[index]))
+  const taxCents = Math.round(taxable.reduce((sum, value) => sum + value, 0) * Math.max(0, Number(taxRate) || 0) / 100)
+  const taxes = allocateCents(taxCents, taxable)
+  const enriched = rows.map((row, index) => ({
+    ...row,
+    discountAmount: discounts[index] / 100,
+    taxAmount: taxes[index] / 100,
+    netAmount: (taxable[index] - taxes[index]) / 100,
+  }))
+  return {
+    items: enriched.slice(0, items.length),
+    chargeLines: enriched.slice(items.length),
+    taxAmount: taxCents / 100,
+  }
+}
 
 export function heldRentalDeposit(rental) {
   const paid = Number(rental?.depositPaid || 0)
@@ -22,6 +58,14 @@ const roles = [
 ]
 
 export async function ensureRentalAccounting(tx, tenantId) {
+  let sharedConfig = await tx.receivablesAccountingConfig.findUnique({ where: { tenantId } })
+  if (!sharedConfig?.inventoryAccountId || !sharedConfig?.costOfGoodsSoldAccountId || !sharedConfig?.salesRevenueAccountId) {
+    await ensureTenantAccountingSetup(tx, { tenantId, userId: null, enableNewSetups: false })
+    sharedConfig = await tx.receivablesAccountingConfig.findUnique({ where: { tenantId } })
+  }
+  if (!sharedConfig?.inventoryAccountId || !sharedConfig?.costOfGoodsSoldAccountId || !sharedConfig?.salesRevenueAccountId) {
+    throw Object.assign(new Error('Shared inventory, cost-of-sales, and sales revenue mappings are unavailable. Complete system accounting setup before using stocked rental lines.'), { statusCode: 409 })
+  }
   const accounts = await tx.account.findMany({ where: { tenantId }, include: { _count: { select: { children: true } } } })
   const mapped = {}
   for (const [field, name, baseCode, type, subType] of roles) {
@@ -40,7 +84,10 @@ export async function ensureRentalAccounting(tx, tenantId) {
     }
     mapped[field] = account.id
   }
-  if (new Set(Object.values(mapped)).size !== roles.length) throw Object.assign(new Error('Rental system accounts must be distinct.'), { statusCode: 409 })
+  mapped.inventoryAccountId = sharedConfig.inventoryAccountId
+  mapped.costOfGoodsSoldAccountId = sharedConfig.costOfGoodsSoldAccountId
+  mapped.salesRevenueAccountId = sharedConfig.salesRevenueAccountId
+  if (new Set(roles.map(([field]) => mapped[field])).size !== roles.length) throw Object.assign(new Error('Rental system accounts must be distinct.'), { statusCode: 409 })
   return tx.rentalAccountingConfig.upsert({
     where: { tenantId },
     create: { tenantId, ...mapped, isEnabled: true, isSystemManaged: true },
@@ -138,9 +185,31 @@ export function rentalDepositForfeitLines(config, { amount, reference }) {
 }
 
 export function rentalRevenueRecognitionLines(config, { amount, reference }) {
+  const total = money(amount)
   return [
-    { accountId: config.deferredRevenueAccountId, debit: money(amount), credit: 0, description: `Recognize earned rental income ${reference}` },
-    { accountId: config.revenueAccountId, debit: 0, credit: money(amount), description: `Rental income earned ${reference}` },
+    { accountId: config.deferredRevenueAccountId, debit: total, credit: 0, description: `Recognize earned rental income ${reference}` },
+    { accountId: config.revenueAccountId, debit: 0, credit: total, description: `Rental income earned ${reference}` },
+  ]
+}
+
+export function rentalMixedRevenueRecognitionLines(config, { amount, goodsAmount = 0, reference }) {
+  const total = money(amount)
+  const goods = Math.min(total, money(goodsAmount))
+  const services = money(total - goods)
+  if (goods > 0 && !config.salesRevenueAccountId) throw Object.assign(new Error('Rental goods revenue account is not configured.'), { statusCode: 409 })
+  return [
+    { accountId: config.deferredRevenueAccountId, debit: total, credit: 0, description: `Recognize earned booking income ${reference}` },
+    ...(services > 0 ? [{ accountId: config.revenueAccountId, debit: 0, credit: services, description: `Rental and service income earned ${reference}` }] : []),
+    ...(goods > 0 ? [{ accountId: config.salesRevenueAccountId, debit: 0, credit: goods, description: `Goods revenue earned ${reference}` }] : []),
+  ]
+}
+
+export function rentalConsumableCostLines(config, { amount, reference }) {
+  const cost = money(amount)
+  if (cost > 0 && (!config.inventoryAccountId || !config.costOfGoodsSoldAccountId)) throw Object.assign(new Error('Rental inventory and cost-of-sales accounts are not configured.'), { statusCode: 409 })
+  return [
+    { accountId: config.costOfGoodsSoldAccountId, debit: cost, credit: 0, description: `Consumables used for booking ${reference}` },
+    { accountId: config.inventoryAccountId, debit: 0, credit: cost, description: `Inventory issued for booking ${reference}` },
   ]
 }
 
@@ -154,6 +223,8 @@ export function rentalDamageChargeLines(config, { amount, reference }) {
 export async function ensureLegacyRentalOpeningEntry(tx, { tenantId, rental, userId }) {
   const issued = await tx.journalEntry.findFirst({ where: { tenantId, sourceType: 'RENTAL_ISSUE', sourceId: rental.id } })
   if (issued) return issued
+  const historicalReceivable = await tx.journalEntry.findFirst({ where: { tenantId, sourceType: 'RENTAL_HISTORICAL_RECEIVABLE', sourceId: rental.id } })
+  if (historicalReceivable) return historicalReceivable
   const balance = money(Math.max(0, rental.balance))
   const depositHeld = heldRentalDeposit(rental)
   if (balance <= 0 && depositHeld <= 0) return null

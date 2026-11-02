@@ -189,6 +189,7 @@ function App() {
           <Route path="inventory/:tab" element={<FeatureGuard feature="inventory"><InventoryPage /></FeatureGuard>} />
           <Route path="purchases" element={<Navigate to="/tenant/payables" replace />} />
           <Route path="receivables" element={<Navigate to="/tenant/receivables/customers" replace />} />
+          <Route path="receivables/rentals" element={<FeatureGuard feature="rentals" permission="canViewRental"><RentalsPage section="receivables" /></FeatureGuard>} />
           <Route path="receivables/reconciliation" element={<FeatureGuard feature="receivables" permission="canViewReceivableReconciliation"><ReceivableReconciliationPage /></FeatureGuard>} />
           <Route path="receivables/customers/:customerId" element={<FeatureGuard feature="receivables"><CustomerProfilePage /></FeatureGuard>} />
           <Route path="receivables/:tab" element={<FeatureGuard feature="receivables"><ReceivablesPage /></FeatureGuard>} />

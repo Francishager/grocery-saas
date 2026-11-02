@@ -465,6 +465,10 @@ function mapProductToInventory(p: any): InventoryItem {
 
 // Rentals endpoints
 export const rentalsApi = {
+  catalog: async () => {
+    const data = await api.get<any>('/api/rentals/catalog')
+    return Array.isArray(data?.items) ? data.items : []
+  },
   crmOverview: async (params: { from: string; to: string; page?: number; limit?: number; search?: string }) =>
     api.get<any>('/api/rentals/crm/overview', { params }),
   crmWorkspace: () => api.get<any>('/api/rentals/crm/workspace'),
@@ -484,6 +488,10 @@ export const rentalsApi = {
     return data
   },
 
+  receivables: async (params?: { page?: number; limit?: number }) => {
+    return api.get<any>('/api/rentals/receivables', { params })
+  },
+
   get: async (id: string) => {
     const data = await api.get<any>(`/api/rentals/${id}`)
     return data
@@ -491,6 +499,12 @@ export const rentalsApi = {
 
   create: (data: any) =>
     api.post<any>('/api/rentals', { body: data }),
+
+  createHistorical: (data: any) =>
+    api.post<any>('/api/rentals/historical', { body: data }),
+
+  makeHistoricalReceivable: (id: string, data: { customerId?: string; historicalReference?: string }) =>
+    api.post<any>(`/api/rentals/${id}/historical-receivable`, { body: data }),
 
   paymentAccounts: async (paymentMethod = 'cash', branchId?: string) => {
     const data = await api.get<any>('/api/rentals/payment-accounts', { params: { paymentMethod, branchId } })

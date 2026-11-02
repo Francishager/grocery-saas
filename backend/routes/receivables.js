@@ -10,7 +10,7 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
 import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
 import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
-import { allocateCustomerReceipt } from '../src/utils/customerReceiptAllocation.js'
+import { allocateCustomerReceipt, allocateCustomerReceiptToRentals } from '../src/utils/customerReceiptAllocation.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
@@ -18,6 +18,7 @@ import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRow
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
+import { ensureRentalAccounting, ensureRentalCashLedgerAccount, postRentalJournal, rentalReceiptLines } from '../src/services/rentalAccountingService.js'
 import { applyAvailableCustomerCredit, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
 import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
 import {
@@ -617,7 +618,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
                 },
               } }),
             },
-          }
+          },
+          allocations: {
+            where: { targetType: 'rental' },
+            select: { amount: true, rental: { select: { rentalNo: true, historicalReference: true } } },
+          },
         },
         orderBy: { createdAt: 'asc' },
         take: limit
@@ -674,6 +679,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           branch: { select: { name: true } },
           User: userSelect,
           items: { include: { product: { select: { name: true, sku: true } } } },
+          payments: { where: { status: { in: ['posted', 'historical'] } }, include: { user: userSelect }, orderBy: { paymentDate: 'asc' } },
         },
         orderBy: { hireDate: 'asc' },
         take: limit,
@@ -931,8 +937,16 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         type: 'Payment',
         date: payment.createdAt,
         reference: customerPaymentDisplayReference(payment),
-        originalReference: payment.sale?.receiptNo || null,
-        description: payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : (payment.notes || 'Customer payment'),
+        originalReference: payment.sale?.receiptNo || payment.allocations?.[0]?.rental?.historicalReference || payment.allocations?.[0]?.rental?.rentalNo || null,
+        description: (() => {
+          const linkedRentals = (payment.allocations || []).map((allocation) => {
+            const reference = allocation.rental?.historicalReference || allocation.rental?.rentalNo
+            return reference ? `${reference} (${toMoney(allocation.amount).toLocaleString('en-GB')})` : null
+          }).filter(Boolean)
+          const saleText = payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : ''
+          const rentalText = linkedRentals.length ? `Applied to rental ${linkedRentals.join(', ')}` : ''
+          return [saleText, rentalText, !saleText && !rentalText ? payment.notes || 'Customer payment' : ''].filter(Boolean).join(' · ')
+        })(),
         debit: 0,
         credit: toMoney(payment.amount),
         amount: toMoney(payment.amount),
@@ -1107,18 +1121,61 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       branch: invoice.branch?.name || '', staff: '', items: [], sortOrder: 55,
     }))
 
-    rentals.forEach((rental) => rows.push({
-      id: rental.id, source: 'customer_activity', type: 'Rental', date: rental.hireDate,
-      dueDate: rental.expectedReturnDate, reference: rental.rentalNo,
-      description: `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`,
-      debit: toMoney(rental.totalAmount), credit: 0, amount: toMoney(rental.totalAmount),
-      remainingBalance: toMoney(rental.balance), balanceImpact: 0, affectsBalance: false,
-      paymentMethod: rental.paymentMethod, status: rental.paymentStatus, branch: rental.branch?.name || '',
-      staff: userName(rental.User), items: rental.items.map((item) => ({
-        productName: item.product?.name || 'Rental item', sku: item.product?.sku || '', quantity: item.quantity,
-        unitPrice: item.unitHirePrice, total: item.totalAmount,
-      })), sortOrder: 60,
-    }))
+    rentals.forEach((rental) => {
+      const historicalCollectible = rental.isHistoricalReceivable === true
+      const collectible = historicalCollectible || (!rental.isHistoricalRecord && Boolean(rental.customerId) && ['checked_out', 'returned'].includes(rental.bookingState))
+      const receivableAmount = historicalCollectible ? toMoney(rental.historicalReceivableAmount) : collectible ? toMoney(rental.totalAmount) : 0
+      const reference = rental.historicalReference || rental.rentalNo
+      rows.push({
+        id: rental.id, source: collectible ? 'rental_receivable' : 'customer_activity',
+        type: collectible ? historicalCollectible ? 'Historical Rental Receivable' : 'Rental Receivable' : 'Rental', date: rental.hireDate,
+        dueDate: rental.expectedReturnDate, reference,
+        originalReference: rental.rentalNo,
+        description: historicalCollectible
+          ? `Unpaid balance brought forward from rental dated ${new Date(rental.hireDate).toLocaleDateString('en-GB')}`
+          : collectible ? `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · rental charge` : `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`,
+        debit: collectible ? receivableAmount : toMoney(rental.totalAmount), credit: 0,
+        amount: collectible ? receivableAmount : toMoney(rental.totalAmount),
+        amountPaid: collectible ? Math.max(0, receivableAmount - toMoney(rental.balance)) : toMoney(rental.amountPaid),
+        remainingBalance: collectible ? toMoney(rental.balance) : toMoney(rental.balance),
+        balanceImpact: collectible ? receivableAmount : 0, affectsBalance: collectible,
+        paymentMethod: rental.paymentMethod, status: collectible ? (rental.balance <= 0 ? 'paid' : rental.balance < receivableAmount ? 'partial' : 'unpaid') : rental.paymentStatus,
+        branch: rental.branch?.name || '', staff: userName(rental.User),
+        items: rental.items.map((item) => ({
+          productName: item.product?.name || 'Rental item', sku: item.product?.sku || '', quantity: item.quantity,
+          unitPrice: item.unitHirePrice, total: item.totalAmount,
+        })), sortOrder: 60,
+      })
+      for (const payment of rental.payments || []) {
+        if (String(payment.idempotencyKey || '').startsWith('customer-payment:')) continue
+        const appliedAdvance = payment.status === 'posted' && payment.kind === 'rental_advance' && collectible
+        if (appliedAdvance) {
+          rows.push({
+            id: `advance-applied-${payment.id}`, source: 'rental_advance_application', type: 'Rental Advance Applied',
+            date: rental.hireDate, reference: payment.receiptNo, originalReference: reference,
+            description: `Reservation advance applied to rental ${reference}`,
+            debit: 0, credit: toMoney(payment.amount), amount: toMoney(payment.amount),
+            balanceImpact: -toMoney(payment.amount), affectsBalance: true,
+            paymentMethod: payment.paymentMethod, status: 'posted', branch: rental.branch?.name || '', staff: userName(payment.user),
+            items: [], sortOrder: 61,
+          })
+          continue
+        }
+        const posted = payment.status === 'posted' && payment.kind === 'rental_payment'
+        const historical = payment.status === 'historical' && payment.kind === 'rental_payment'
+        if (!posted && !historical) continue
+        rows.push({
+          id: payment.id, source: 'rental_payment', type: historical ? 'Historical Rental Payment' : 'Rental Payment',
+          date: payment.paymentDate, reference: payment.receiptNo, originalReference: reference,
+          description: `${historical ? 'Historical receipt copy' : 'Payment'} for rental ${reference}${payment.transactionRef ? ` · Ref ${payment.transactionRef}` : ''}`,
+          debit: 0, credit: collectible && posted ? toMoney(payment.amount) : 0, amount: toMoney(payment.amount),
+          balanceImpact: collectible && posted ? -toMoney(payment.amount) : 0,
+          affectsBalance: collectible && posted, paymentMethod: payment.paymentMethod,
+          status: historical ? 'historical' : 'posted', branch: rental.branch?.name || '', staff: userName(payment.user),
+          items: [], sortOrder: 61,
+        })
+      }
+    })
 
     restaurantOrders.forEach((order) => rows.push({
       id: order.id, source: 'customer_activity', type: 'Restaurant Order', date: order.createdAt,
@@ -2438,6 +2495,49 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
       })
       const receiptAllocation = allocateCustomerReceipt(paidAmount, openSales, saleId || null)
       const allocationBySale = new Map(receiptAllocation.allocations.map((row) => [row.saleId, row.amount]))
+      let rentalUnallocated = receiptAllocation.unallocated
+      const openRentals = !saleId && rentalUnallocated > 0
+        ? await tx.rental.findMany({
+          where: {
+            tenantId: scope.tenantId,
+            customerId,
+            balance: { gt: 0 },
+            status: { not: 'cancelled' },
+            AND: [
+              { OR: [
+                { isHistoricalReceivable: true },
+                { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } },
+              ] },
+              ...(scope.branchId ? [{ OR: [{ branchId: scope.branchId }, { branchId: null }] }] : []),
+            ],
+          },
+          orderBy: [{ hireDate: 'asc' }, { id: 'asc' }],
+          select: { id: true, rentalNo: true, branchId: true, balance: true },
+        })
+        : []
+      const rentalAllocations = []
+      for (const openRental of openRentals) {
+        if (rentalUnallocated <= 0.01) break
+        await tx.$queryRaw`SELECT "id" FROM "rentals" WHERE "id" = ${openRental.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+        const currentRental = await tx.rental.findFirst({
+          where: {
+            id: openRental.id, tenantId: scope.tenantId, customerId, status: { not: 'cancelled' },
+            OR: [
+              { isHistoricalReceivable: true },
+              { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } },
+            ],
+          },
+          select: { id: true, rentalNo: true, branchId: true, balance: true, amountPaid: true },
+        })
+        if (!currentRental) continue
+        const currentAllocation = allocateCustomerReceiptToRentals(rentalUnallocated, [currentRental])
+        const allocatedAmount = currentAllocation.allocations[0]?.amount || 0
+        if (allocatedAmount <= 0.01) continue
+        rentalAllocations.push({ rental: currentRental, amount: allocatedAmount })
+        rentalUnallocated = currentAllocation.unallocated
+      }
+
+      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'payments')
 
       const createdPayment = await tx.customerPayment.create({
         data: {
@@ -2475,20 +2575,64 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           }
         })
       }
-      if (receiptAllocation.unallocated > 0) {
+      for (const allocation of rentalAllocations) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: createdPayment.id,
+            rentalId: allocation.rental.id,
+            targetType: 'rental',
+            amount: allocation.amount,
+            createdById: req.user.id,
+          },
+        })
+        const receiptNo = `RNT-CP-${createdPayment.id.slice(-18)}-${allocation.rental.id.slice(-8)}`.slice(0, 64)
+        const idempotencyKey = `customer-payment:${createdPayment.id}:${allocation.rental.id}`.slice(0, 120)
+        const nextBalance = Math.max(0, toMoney(allocation.rental.balance) - allocation.amount)
+        await tx.rentalPayment.create({
+          data: {
+            tenantId: scope.tenantId,
+            rentalId: allocation.rental.id,
+            cashAccountId: accountToUse.id,
+            userId: req.user.id,
+            kind: 'rental_payment',
+            receiptNo,
+            idempotencyKey,
+            amount: allocation.amount,
+            balanceAfter: nextBalance,
+            paymentMethod: resolvedPaymentMethod,
+            mobileProvider: resolvedPaymentMethod === 'mobile_money' ? normalizedMobileProvider : null,
+            phoneNumber: resolvedPaymentMethod === 'mobile_money' ? normalizedPhoneNumber : null,
+            paymentDate: createdPayment.createdAt,
+            transactionRef: normalizedTransactionId || paymentReference || createdPayment.id,
+            notes: `Allocated from customer receipt ${paymentReference || createdPayment.id}`,
+            status: 'posted',
+          },
+        })
+        await tx.rental.update({
+          where: { id: allocation.rental.id },
+          data: {
+            amountPaid: { increment: allocation.amount },
+            balance: nextBalance,
+            paymentStatus: nextBalance <= 0.01 ? 'paid' : 'partial',
+            paymentMethod: resolvedPaymentMethod,
+          },
+        })
+      }
+      if (rentalUnallocated > 0.01) {
         await tx.customerPaymentAllocation.create({
           data: {
             tenantId: scope.tenantId,
             customerId,
             paymentId: createdPayment.id,
             targetType: 'customer_account',
-            amount: receiptAllocation.unallocated,
+            amount: rentalUnallocated,
             createdById: req.user.id,
           }
         })
       }
 
-      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'payments')
       if (String(accountToUse.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
         throw Object.assign(new Error(`This receipt posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.`), { statusCode: 409 })
       }
@@ -2518,9 +2662,10 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, accountToUse.id)
 
       const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
+      let transactionAccount = null
       if (arConfig?.isEnabled) {
         const receivableApplied = Math.min(paidAmount, Math.max(0, toMoney(customerBalanceBefore?.balance)))
-        const transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` } } })
+        transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` } } })
         if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${accountToUse.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
         await postReceivablesJournal(tx, {
           tenantId: scope.tenantId,
@@ -2533,6 +2678,50 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           description: `Customer receipt ${paymentReference || createdPayment.id}`,
           lines: receiptCollectionLines(arConfig, { transactionAccountId: transactionAccount.id, amount: paidAmount, receivableApplied, reference: paymentReference }),
         })
+      }
+
+      if (rentalAllocations.length) {
+        if (!arConfig?.isEnabled && !transactionAccount) {
+          transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` }, isActive: true } })
+        }
+        const rentalConfig = await ensureRentalAccounting(tx, scope.tenantId)
+        const cashLedger = await ensureRentalCashLedgerAccount(tx, scope.tenantId, accountToUse)
+        if (arConfig?.isEnabled && !transactionAccount) throw Object.assign(new Error('The selected transaction account is not linked to an active chart-of-accounts entry. No payment was recorded.'), { statusCode: 409 })
+        for (const allocation of rentalAllocations) {
+          const allocationRow = await tx.customerPaymentAllocation.findFirst({
+            where: { tenantId: scope.tenantId, paymentId: createdPayment.id, rentalId: allocation.rental.id, targetType: 'rental' },
+            select: { id: true },
+          })
+          if (!allocationRow) throw Object.assign(new Error('The rental receipt allocation could not be verified.'), { statusCode: 409 })
+          if (arConfig?.isEnabled) {
+            await postRentalJournal(tx, {
+              tenantId: scope.tenantId,
+              branchId: allocation.rental.branchId || scope.branchId,
+              userId: req.user.id,
+              sourceType: 'RENTAL_CUSTOMER_RECEIPT_REALLOCATION',
+              sourceId: allocationRow.id,
+              date: createdPayment.createdAt,
+              reference: paymentReference || createdPayment.id,
+              description: `Apply customer receipt to rental ${allocation.rental.rentalNo}`,
+              lines: [
+                { accountId: arConfig.receivableAccountId, debit: allocation.amount, credit: 0, description: `Move receipt allocation out of trade receivables ${allocation.rental.rentalNo}` },
+                { accountId: rentalConfig.receivableAccountId, debit: 0, credit: allocation.amount, description: `Settle rental receivable ${allocation.rental.rentalNo}` },
+              ],
+            })
+          } else {
+            await postRentalJournal(tx, {
+              tenantId: scope.tenantId,
+              branchId: allocation.rental.branchId || scope.branchId,
+              userId: req.user.id,
+              sourceType: 'RENTAL_CUSTOMER_RECEIPT',
+              sourceId: allocationRow.id,
+              date: createdPayment.createdAt,
+              reference: paymentReference || createdPayment.id,
+              description: `Customer receipt applied to rental ${allocation.rental.rentalNo}`,
+              lines: rentalReceiptLines(rentalConfig, { amount: allocation.amount, cashAccountId: cashLedger.id, reference: allocation.rental.rentalNo }),
+            })
+          }
+        }
       }
 
       for (const transactionSale of openSales) {
