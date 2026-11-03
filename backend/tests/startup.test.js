@@ -26,6 +26,7 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(dockerfile, /CMD \["\.\/start\.sh"\]/);
   assert.doesNotMatch(dockerfile, /prisma db push/);
   assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
+  assert.match(startupScript, /ensure-property-tenant-notes-schema\.js/);
   assert.match(startupScript, /ensure-customer-credit-applications-schema\.js/);
   assert.match(startupScript, /ensure-customer-alternate-phone-schema\.js/);
   assert.match(startupScript, /ensure-user-theme-schema\.js/);
@@ -35,6 +36,13 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(fractionalStockMigration, /ALTER COLUMN "quantity" TYPE DECIMAL\(18, 3\)/);
   assert.match(fractionalStockMigration, /USING ROUND\("quantity"::numeric, 3\)/);
   assert.doesNotMatch(fractionalStockMigration, /DROP TABLE|TRUNCATE|force-reset/i);
+  const tenantNotesSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-property-tenant-notes-schema.js'), 'utf8');
+  assert.match(tenantNotesSchema, /CREATE TABLE IF NOT EXISTS property_tenant_notes/);
+  assert.match(tenantNotesSchema, /ADD COLUMN IF NOT EXISTS "canViewTenantNotes" BOOLEAN NOT NULL DEFAULT FALSE/);
+  assert.match(tenantNotesSchema, /ADD COLUMN IF NOT EXISTS "canManageTenantNotes" BOOLEAN NOT NULL DEFAULT FALSE/);
+  assert.match(tenantNotesSchema, /ADD COLUMN IF NOT EXISTS "canEditTenantNotes" BOOLEAN NOT NULL DEFAULT FALSE/);
+  assert.match(tenantNotesSchema, /ADD COLUMN IF NOT EXISTS "canCompleteTenantNotes" BOOLEAN NOT NULL DEFAULT FALSE/);
+  assert.doesNotMatch(tenantNotesSchema, /DROP TABLE|TRUNCATE|force-reset/i);
   for (const migration of [
     'ensure-rental-credit-notes-schema.js',
     'ensure-rental-credit-note-permissions-schema.js',

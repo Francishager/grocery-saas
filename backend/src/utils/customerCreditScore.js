@@ -22,12 +22,13 @@ const monthsBetween = (later, earlier) => {
 export const calculateRepaymentTrustScore = ({
   customer = {},
   sales = [],
+  rentalObligations = [],
   paymentTotal = 0,
   paymentCount = 0,
   lastPaymentAt = null,
   latePaymentAmount = 0,
 } = {}) => {
-  const activeSales = sales.filter((sale) => sale?.status !== "cancelled");
+  const activeSales = [...sales, ...rentalObligations].filter((sale) => sale?.status !== "cancelled");
   const openingBalance = Math.max(0, toMoney(customer.openingBalance));
   let totalCreditExposure = openingBalance;
   let paidFromSaleRecords = 0;
@@ -124,6 +125,71 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
     },
   });
 
+  const additionalObligationsByCustomer = new Map()
+  const extraPaymentMetricsByCustomer = new Map()
+  const addObligation = (customerId, obligation) => {
+    if (!customerId) return
+    const list = additionalObligationsByCustomer.get(customerId) || []
+    list.push(obligation)
+    additionalObligationsByCustomer.set(customerId, list)
+  }
+  const addPaymentMetric = (customerId, amount, date) => {
+    if (!customerId) return
+    const current = extraPaymentMetricsByCustomer.get(customerId) || { total: 0, count: 0, lastPaymentAt: null }
+    current.total += toMoney(amount)
+    current.count += 1
+    if (date && (!current.lastPaymentAt || new Date(date) > new Date(current.lastPaymentAt))) current.lastPaymentAt = date
+    extraPaymentMetricsByCustomer.set(customerId, current)
+  }
+  const latePaymentsByCustomer = new Map()
+  const addLatePayment = (customerId, amount) => latePaymentsByCustomer.set(customerId, toMoney(latePaymentsByCustomer.get(customerId)) + toMoney(amount))
+
+  if (scope.includeRentals && client.rental?.findMany) {
+    const rentalRows = await client.rental.findMany({
+      where: scopedWhere(scope, { customerId: { in: customerIds }, status: { not: 'cancelled' } }),
+      select: { customerId: true, totalAmount: true, amountPaid: true, balance: true, hireDate: true, expectedReturnDate: true, status: true },
+    })
+    for (const rental of rentalRows) addObligation(rental.customerId, {
+      total: rental.totalAmount, amountPaid: rental.amountPaid, balance: rental.balance,
+      createdAt: rental.hireDate, dueDate: rental.expectedReturnDate, status: rental.status,
+    })
+    if (client.rentalPayment?.findMany) {
+      const rentalPayments = await client.rentalPayment.findMany({
+        where: { tenantId: scope.tenantId, status: 'posted', kind: 'rental_payment', rental: { customerId: { in: customerIds }, ...(scope.branchId ? { branchId: scope.branchId } : {}) } },
+        select: { amount: true, paymentDate: true, rental: { select: { customerId: true } } },
+      })
+      for (const payment of rentalPayments) addPaymentMetric(payment.rental?.customerId, payment.amount, payment.paymentDate)
+    }
+  }
+
+  if (scope.includePropertyManagement && client.rentCharge?.findMany) {
+    const charges = await client.rentCharge.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        tenancy: { customerId: { in: customerIds }, ...(scope.branchId ? { unit: { property: { branchId: scope.branchId } } } : {}) },
+      },
+      select: {
+        amount: true, amountPaid: true, dueDate: true, createdAt: true, status: true,
+        tenancy: { select: { customerId: true } },
+        allocations: { where: { payment: { status: 'posted' } }, select: { amount: true, payment: { select: { paymentDate: true } } } },
+      },
+    })
+    for (const charge of charges) {
+      const balance = Math.max(0, toMoney(charge.amount) - toMoney(charge.amountPaid))
+      addObligation(charge.tenancy?.customerId, { total: charge.amount, amountPaid: charge.amountPaid, balance, createdAt: charge.createdAt, dueDate: charge.dueDate, status: balance <= 0.01 ? 'paid' : 'unpaid' })
+      for (const allocation of charge.allocations || []) {
+        if (charge.dueDate && allocation.payment?.paymentDate && new Date(allocation.payment.paymentDate) > new Date(charge.dueDate)) addLatePayment(charge.tenancy?.customerId, allocation.amount)
+      }
+    }
+    if (client.propertyRentPayment?.findMany) {
+      const rentPayments = await client.propertyRentPayment.findMany({
+        where: { tenantId: scope.tenantId, status: 'posted', paymentType: { in: ['rent', 'rent_plan'] }, tenancy: { customerId: { in: customerIds }, ...(scope.branchId ? { unit: { property: { branchId: scope.branchId } } } : {}) } },
+        select: { amount: true, paymentDate: true, tenancy: { select: { customerId: true } } },
+      })
+      for (const payment of rentPayments) addPaymentMetric(payment.tenancy?.customerId, payment.amount, payment.paymentDate)
+    }
+  }
+
   const paymentGroups = await client.customerPayment.groupBy({
     by: ["customerId"],
     where: scopedWhere(scope, { customerId: { in: customerIds } }),
@@ -146,7 +212,6 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
     where: { tenantId: scope.tenantId, saleId: { in: saleIds }, targetType: "sale" },
     select: { saleId: true, amount: true, payment: { select: { createdAt: true } } },
   }) : [];
-  const latePaymentsByCustomer = new Map();
   for (const allocation of allocations) {
     const sale = salesById.get(allocation.saleId);
     const dueDate = sale?.dueDate ? new Date(sale.dueDate) : null;
@@ -155,8 +220,7 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
     const dueDay = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate());
     const paidDay = Date.UTC(paidAt.getUTCFullYear(), paidAt.getUTCMonth(), paidAt.getUTCDate());
     if (paidDay <= dueDay) continue;
-    latePaymentsByCustomer.set(sale.customerId,
-      toMoney(latePaymentsByCustomer.get(sale.customerId)) + Math.max(0, toMoney(allocation.amount)));
+    addLatePayment(sale.customerId, Math.max(0, toMoney(allocation.amount)))
   }
 
   const paymentMetricsByCustomer = new Map(
@@ -173,14 +237,16 @@ export async function getRepaymentTrustScores(client, scope, customers = []) {
   return new Map(
     customerList.map((customer) => {
       const paymentMetrics = paymentMetricsByCustomer.get(customer.id) || {};
+      const extraPaymentMetrics = extraPaymentMetricsByCustomer.get(customer.id) || {};
       return [
         customer.id,
         calculateRepaymentTrustScore({
           customer,
           sales: salesByCustomer.get(customer.id) || [],
-          paymentTotal: paymentMetrics.total || 0,
-          paymentCount: paymentMetrics.count || 0,
-          lastPaymentAt: paymentMetrics.lastPaymentAt || null,
+          rentalObligations: additionalObligationsByCustomer.get(customer.id) || [],
+          paymentTotal: Math.max(toMoney(paymentMetrics.total), toMoney(extraPaymentMetrics.total)),
+          paymentCount: Number(paymentMetrics.count || 0) + Number(extraPaymentMetrics.count || 0),
+          lastPaymentAt: [paymentMetrics.lastPaymentAt, extraPaymentMetrics.lastPaymentAt].filter(Boolean).sort((a, b) => new Date(b) - new Date(a))[0] || null,
           latePaymentAmount: latePaymentsByCustomer.get(customer.id) || 0,
         }),
       ];
@@ -196,8 +262,8 @@ export async function attachRepaymentTrustScores(client, scope, customers = []) 
   }));
 }
 
-export async function getRepaymentTrustScore(client, scope, customer) {
+export async function getRepaymentTrustScore(client, scope, customer, modules = {}) {
   if (!customer?.id) return 0;
-  const scores = await getRepaymentTrustScores(client, scope, [customer]);
+  const scores = await getRepaymentTrustScores(client, { ...scope, ...modules }, [customer]);
   return scores.get(customer.id) ?? 0;
 }

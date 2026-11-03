@@ -171,6 +171,7 @@ model Tenant {
   propertyOwners                  PropertyOwner[]
   managedProperties               ManagedProperty[]
   propertyTenancies               PropertyTenancy[]
+  propertyTenantNotes             PropertyTenantNote[]
   propertyTenantIdentities        PropertyTenantIdentity[]
   rentCharges                     RentCharge[]
   propertyRentPayments            PropertyRentPayment[]
@@ -518,6 +519,7 @@ model User {
   propertyLandPurchasePaymentsCreated PropertyLandPurchasePayment[] @relation("PropertyLandPurchasePaymentCreator")
   rentPaymentPlansCreated             PropertyRentPaymentPlan[]     @relation("PropertyRentPaymentPlanCreator")
   rentPromisesCreated                 PropertyRentPromise[]         @relation("PropertyRentPromiseCreator")
+  propertyTenantNotesCreated          PropertyTenantNote[]          @relation("PropertyTenantNoteCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1034,6 +1036,10 @@ model UserPermission {
   canCancelRentPaymentPlans              Boolean  @default(false)
   canViewRentPromises                    Boolean  @default(false)
   canManageRentPromises                  Boolean  @default(false)
+  canViewTenantNotes                     Boolean  @default(false)
+  canManageTenantNotes                   Boolean  @default(false)
+  canEditTenantNotes                     Boolean  @default(false)
+  canCompleteTenantNotes                 Boolean  @default(false)
   canViewPropertyReports                 Boolean  @default(false)
   canRecordOwnerPayout                   Boolean  @default(false)
   canViewPropertySales                   Boolean  @default(false)
@@ -1587,6 +1593,7 @@ model Customer {
   procurementCounterpartyLink     ProcurementCustomerLink?
   procurementSellerInvoices       ProcurementInvoice[]                     @relation("ProcurementInvoiceSellerCustomer")
   propertyTenancies               PropertyTenancy[]
+  propertyTenantNotes             PropertyTenantNote[]
   propertySales                   PropertySale[]
 
   creditNotes CreditNote[]
@@ -3005,6 +3012,7 @@ model PropertyTenancy {
   payments        PropertyRentPayment[]
   paymentPlans    PropertyRentPaymentPlan[]
   promises        PropertyRentPromise[]
+  profileNotes    PropertyTenantNote[]
   identity        PropertyTenantIdentity?
   reminders       PropertyRentReminder[]
   rentRateHistory PropertyRentRateHistory[]
@@ -3165,6 +3173,29 @@ model PropertyRentPromise {
   @@index([tenantId, tenancyId, createdAt])
   @@index([tenantId, dueDate])
   @@map("property_rent_promises")
+}
+
+model PropertyTenantNote {
+  id          String           @id @default(cuid())
+  tenantId    String
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tenancyId   String?
+  tenancy     PropertyTenancy? @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
+  createdById String
+  createdBy   User             @relation("PropertyTenantNoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  kind        String           @default("communication")
+  priority    String           @default("normal")
+  body        String           @db.Text
+  followUpAt  DateTime?
+  status      String           @default("open")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([tenantId, customerId, status, followUpAt])
+  @@index([tenantId, customerId, createdAt])
+  @@map("property_tenant_notes")
 }
 
 model PropertyRentPromiseChargeAllocation {

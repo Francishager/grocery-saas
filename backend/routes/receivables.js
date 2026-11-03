@@ -36,6 +36,14 @@ const toMoney = (value, fallback = 0) => {
   const num = Number(value)
   return Number.isFinite(num) ? Math.round(num * 100) / 100 : fallback
 }
+async function trustModuleScope(scope, features = null) {
+  const enabled = features || await getTenantFeatures(scope.tenantId)
+  return {
+    ...scope,
+    includePropertyManagement: hasFeatureAccess(enabled, 'property_management.landlord') || hasFeatureAccess(enabled, 'property_management.agent'),
+    includeRentals: hasFeatureAccess(enabled, 'rentals'),
+  }
+}
 
 let plotSaleHistorySchemaWarningLogged = false
 async function optionalPlotSaleRows(query) {
@@ -292,7 +300,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
     }
     let scoredCustomers = balancedCustomers
     try {
-      scoredCustomers = await attachRepaymentTrustScores(prisma, scope, balancedCustomers)
+      scoredCustomers = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), balancedCustomers)
     } catch (error) {
       console.error('Customer repayment score enrichment failed:', error)
       enrichmentWarnings.push('Repayment scores could not be refreshed.')
@@ -447,7 +455,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
       access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
     ])
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
-    const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
+    const trustScore = await getRepaymentTrustScore(prisma, await trustModuleScope(scope), reconciledCustomer)
 
     const outstandingItems = access.sales ? outstandingSales.flatMap((sale) => sale.fuelSale ? [{
         id: sale.fuelSale.id,
@@ -560,6 +568,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     const tenantFeatures = await getTenantFeatures(scope.tenantId)
     const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord')
       || hasFeatureAccess(tenantFeatures, 'property_management.agent')
+    const rentalFeatureEnabled = hasFeatureAccess(tenantFeatures, 'rentals')
     const limit = Math.min(Math.max(Number(req.query.limit || 250), 25), 1000)
 
     const customer = await prisma.customer.findFirst({
@@ -763,7 +772,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       })) : Promise.resolve([]),
     ]) : [[], []]
     const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
-    const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer)
+    const trustScore = await getRepaymentTrustScore(prisma, await trustModuleScope(scope, tenantFeatures), reconciledCustomer)
+    const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+    const canViewTrustScore = access.balance
+      || (propertyManagementEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewPropertyStatements') || req.userPermissions?.canViewPropertyStatements === true))
+      || (rentalFeatureEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewRental') || req.userPermissions?.canViewRental === true))
+    const profileCustomer = customerProfilePayload({ ...reconciledCustomer, trustScore }, access)
+    if (canViewTrustScore) profileCustomer.trustScore = trustScore
 
     const rows = []
     const paymentTotalBySale = new Map()
@@ -1334,7 +1349,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, withdrawals: 0, creditNotes: 0, returns: 0 })
 
     res.json({
-      customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
+      customer: profileCustomer,
       access: {
         phone: access.phone,
         email: access.email,
@@ -1348,6 +1363,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         withdrawals: access.withdrawals,
         businessActivity: access.businessActivity,
         creditHistory: access.creditHistory,
+        trustScore: canViewTrustScore,
         notes: access.notes,
         recordPayment: access.recordPayment,
         printReceipts: access.printReceipts,
@@ -1509,7 +1525,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       throw error
     }
 
-    const [customer] = await attachRepaymentTrustScores(prisma, scope, [customerRaw]).catch((err) => {
+    const [customer] = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), [customerRaw]).catch((err) => {
       console.error('Error attaching repayment trust scores:', err)
       return [customerRaw]
     })
@@ -1677,7 +1693,7 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
     })
 
     const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
-    const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
+    const [customer] = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), [balancedCustomer])
     res.json(customerProfilePayload(customer, await getTenantCustomerProfileAccess(req, scope.tenantId)))
   } catch (error) {
     if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
@@ -3137,7 +3153,7 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
       orderBy: { balance: 'desc' }
     })
     const balancedAccounts = await attachCustomerReceivableBalances(prisma, scope, accountsRaw)
-    const accounts = await attachRepaymentTrustScores(prisma, scope, balancedAccounts)
+    const accounts = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), balancedAccounts)
     const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
 
     res.json({ accounts: access.creditLimit ? accounts : accounts.map(({ creditLimit: _creditLimit, ...account }) => account) })
@@ -3176,7 +3192,7 @@ router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEdit
     })
 
     const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
-    const [customer] = await attachRepaymentTrustScores(prisma, scope, [balancedCustomer])
+    const [customer] = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), [balancedCustomer])
     res.json(customer)
   } catch (error) {
     console.error('Update credit account error:', error)

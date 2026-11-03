@@ -242,7 +242,11 @@ async function getCustomerCreditInfo(scope, customerId, access) {
     access.balance ? calculateCustomerReceivableBalance(prisma, scope, customerId) : Promise.resolve(null),
   ]);
   const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance };
-  const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer);
+  const enabledFeatures = await getTenantFeatures(scope.tenantId);
+  const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer, {
+    includePropertyManagement: hasFeatureAccess(enabledFeatures, 'property_management.landlord') || hasFeatureAccess(enabledFeatures, 'property_management.agent'),
+    includeRentals: hasFeatureAccess(enabledFeatures, 'rentals'),
+  });
 
   const saleItems = (sale) =>
     sale.items.map((item) => ({

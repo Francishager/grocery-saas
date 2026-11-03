@@ -21,6 +21,7 @@ node src/scripts/ensure-property-management-feature.js
 node src/scripts/ensure-property-tenancy-alternate-phone-schema.js
 node src/scripts/ensure-property-rent-rate-history-schema.js
 node src/scripts/ensure-property-rent-promises-schema.js
+node src/scripts/ensure-property-tenant-notes-schema.js
 node src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js
 node src/scripts/ensure-customer-credit-applications-schema.js
 node src/scripts/ensure-customer-alternate-phone-schema.js

@@ -47,6 +47,16 @@ test("a fully settled invoice paid late still lowers repayment trust", () => {
   assert.ok(settledLate < timely);
 });
 
+test("rental and property-rent arrears are included in repayment trust", () => {
+  const customer = { id: 'tenant-customer', balance: 0, openingBalance: 0, createdAt: daysAgo(240) }
+  const rental = { total: 1000, amountPaid: 700, balance: 300, createdAt: daysAgo(90), dueDate: daysAgo(75), status: 'active' }
+  const current = { ...rental, dueDate: daysAhead(10) }
+  const onTimeScore = calculateRepaymentTrustScore({ customer, rentalObligations: [current], paymentTotal: 700, paymentCount: 2, lastPaymentAt: daysAgo(5) })
+  const overdueScore = calculateRepaymentTrustScore({ customer, rentalObligations: [rental], paymentTotal: 700, paymentCount: 2, lastPaymentAt: daysAgo(5) })
+  assert.ok(onTimeScore > 0)
+  assert.ok(overdueScore < onTimeScore)
+})
+
 test("trust-score allocation lookup selects and uses sale IDs for existing customer records", async () => {
   let saleQuery
   let allocationQuery

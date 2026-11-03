@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3, Download, Printer } from 'lucide-react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3, Download, Printer, MoreHorizontal, Check } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -137,6 +138,7 @@ type CustomerHistoryResponse = {
     withdrawals: boolean
     businessActivity: boolean
     creditHistory: boolean
+    trustScore: boolean
     notes: boolean
     recordPayment: boolean
     printReceipts: boolean
@@ -174,6 +176,8 @@ type RentPlanProfileData = { plans: RentPaymentPlan[]; eligibleCharges: Array<{ 
 type RentPromiseTenancy = { id: string; tenantName: string; currency: string; status: string; unit: { unitCode: string; property: { name: string } } }
 type RentPromise = { id: string; amount: number; dueDate: string; notes?: string | null; createdAt: string; createdByName: string; fulfilledAmount: number; remainingAmount: number; status: string; tenancy: RentPromiseTenancy; allocations: Array<{ id: string; amount: number; fulfilledAmount: number; remainingAmount: number; period: string; rentDueDate: string }> }
 type RentPromiseProfileData = { counts: { total: number; upcoming: number; due_today: number; kept: number; partially_paid: number; partially_kept: number; missed: number; promisedAmount: number; fulfilledAmount: number; remainingAmount: number }; tenancies: RentPromiseTenancy[]; promises: RentPromise[] }
+type TenantProfileNote = { id: string; kind: string; priority: string; body: string; followUpAt?: string | null; tenancyId?: string | null; status: string; createdAt: string; authorName: string; tenancyLabel?: string | null; isOverdue: boolean }
+type TenantNotesData = { counts: { total: number; openFollowUps: number; overdueFollowUps: number; completed: number }; notes: TenantProfileNote[] }
 type RentPaymentAccount = { id: string; name: string; type: string; paymentMethod: string }
 
 function escapeAgreementHtml(value: string) {
@@ -425,6 +429,12 @@ export default function CustomerTransactionHistoryDialog({
   const [rentPromiseError, setRentPromiseError] = useState('')
   const [creatingPromise, setCreatingPromise] = useState(false)
   const [showPromiseForm, setShowPromiseForm] = useState(false)
+  const [tenantNotesData, setTenantNotesData] = useState<TenantNotesData | null>(null)
+  const [tenantNotesReload, setTenantNotesReload] = useState(0)
+  const [tenantNotesError, setTenantNotesError] = useState('')
+  const [savingTenantNote, setSavingTenantNote] = useState(false)
+  const [showTenantNoteForm, setShowTenantNoteForm] = useState(false)
+  const [editingTenantNote, setEditingTenantNote] = useState<TenantProfileNote | null>(null)
   const [rentPlanError, setRentPlanError] = useState('')
   const [rentPlanAccounts, setRentPlanAccounts] = useState<RentPaymentAccount[]>([])
   const [defaultRentPlanAccountId, setDefaultRentPlanAccountId] = useState('')
@@ -455,6 +465,10 @@ export default function CustomerTransactionHistoryDialog({
   const canCancelRentPaymentPlans = propertyManagementEnabled && hasPermission('canCancelRentPaymentPlans')
   const canViewRentPromises = propertyManagementEnabled && (hasPermission('canViewRentPromises') || hasPermission('canManageRentPromises'))
   const canManageRentPromises = propertyManagementEnabled && hasPermission('canManageRentPromises')
+  const canViewTenantNotes = propertyManagementEnabled && hasPermission('canViewTenantNotes')
+  const canManageTenantNotes = propertyManagementEnabled && hasPermission('canManageTenantNotes')
+  const canEditTenantNotes = propertyManagementEnabled && hasPermission('canEditTenantNotes')
+  const canCompleteTenantNotes = propertyManagementEnabled && hasPermission('canCompleteTenantNotes')
   const canRecordRentPayment = propertyManagementEnabled && hasPermission('canRecordRentPayment')
   const canPrintRentReceipts = propertyManagementEnabled && (hasPermission('canViewPropertyCollections') || canRecordRentPayment)
   const [loading, setLoading] = useState(false)
@@ -536,6 +550,24 @@ export default function CustomerTransactionHistoryDialog({
       .catch(error => { if (error?.name !== 'AbortError') setRentPromiseError(error?.message || 'Could not load tenant payment promises.') })
     return () => controller.abort()
   }, [open, customer?.id, canViewRentPromises, rentPromiseReload])
+
+  useEffect(() => {
+    if (!open || !customer?.id || !canViewTenantNotes) {
+      setTenantNotesData(null)
+      setTenantNotesError('')
+      return
+    }
+    const controller = new AbortController()
+    setTenantNotesError('')
+    void apiFetch(`/api/property-management/customers/${customer.id}/notes`, { signal: controller.signal } as RequestInit)
+      .then(async response => {
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(payload?.error || 'Could not load tenant notes.')
+        if (!controller.signal.aborted) setTenantNotesData(payload)
+      })
+      .catch(error => { if (error?.name !== 'AbortError') setTenantNotesError(error?.message || 'Could not load tenant notes.') })
+    return () => controller.abort()
+  }, [open, customer?.id, canViewTenantNotes, tenantNotesReload])
 
   useEffect(() => {
     if (!open || !canViewRentPaymentPlans || !canRecordRentPayment) {
@@ -632,6 +664,62 @@ export default function CustomerTransactionHistoryDialog({
       setRentPromiseReload(value => value + 1)
     } catch (error: any) { setRentPromiseError(error?.message || 'Could not record tenant payment promise.') }
     finally { setCreatingPromise(false) }
+  }
+
+  async function createTenantNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customer?.id) return
+    const form = new FormData(event.currentTarget)
+    setSavingTenantNote(true)
+    setTenantNotesError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/notes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          body: form.get('body'), kind: form.get('kind'), priority: form.get('priority'),
+          followUpAt: form.get('followUpAt') || null, tenancyId: form.get('tenancyId') || null,
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not save tenant note.')
+      setShowTenantNoteForm(false)
+      setTenantNotesReload(value => value + 1)
+    } catch (error: any) { setTenantNotesError(error?.message || 'Could not save tenant note.') }
+    finally { setSavingTenantNote(false) }
+  }
+
+  async function updateTenantNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customer?.id || !editingTenantNote) return
+    const form = new FormData(event.currentTarget)
+    setSavingTenantNote(true)
+    setTenantNotesError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/notes/${editingTenantNote.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          body: form.get('body'), kind: form.get('kind'), priority: form.get('priority'),
+          followUpAt: form.get('followUpAt') || null, tenancyId: form.get('tenancyId') || null,
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not update tenant note.')
+      setEditingTenantNote(null)
+      setShowTenantNoteForm(false)
+      setTenantNotesReload(value => value + 1)
+    } catch (error: any) { setTenantNotesError(error?.message || 'Could not update tenant note.') }
+    finally { setSavingTenantNote(false) }
+  }
+
+  async function completeTenantNote(noteId: string) {
+    if (!customer?.id) return
+    setTenantNotesError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/notes/${noteId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'completed' }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not complete tenant follow-up.')
+      setTenantNotesReload(value => value + 1)
+    } catch (error: any) { setTenantNotesError(error?.message || 'Could not complete tenant follow-up.') }
   }
 
   async function recordRentPlanPayment(event: FormEvent<HTMLFormElement>) {
@@ -833,6 +921,7 @@ export default function CustomerTransactionHistoryDialog({
               {canViewRent && <TabsTrigger className="shrink-0" value="rent">{hasRentalTenancies ? 'Tenancies & rent' : 'Rental profile'}</TabsTrigger>}
               {canViewTenancyAgreements && <TabsTrigger className="shrink-0" value="tenancy-agreements">Tenancy Agreement</TabsTrigger>}
               {canViewRentPaymentPlans && <TabsTrigger className="shrink-0" value="payment-plans">Payment Plans</TabsTrigger>}
+              {canViewTenantNotes && <TabsTrigger className="shrink-0" value="tenant-notes">Notes ({tenantNotesData?.counts.total || 0})</TabsTrigger>}
               {canViewRentPromises && <TabsTrigger className="shrink-0" value="rent-promises">Promises ({rentPromiseData?.counts.total || 0})</TabsTrigger>}
             </TabsList>
 
@@ -862,7 +951,7 @@ export default function CustomerTransactionHistoryDialog({
                 {!data.access.notes && data.customer.maskedNotes && <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">Customer notes: {data.customer.maskedNotes}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   {data.customer.status && <Badge variant="outline">{data.customer.status}</Badge>}
-                  <Badge variant="secondary">{data.access.balance ? `Trust ${Number(data.customer.trustScore || 0)}/100` : 'Trust ****'}</Badge>
+                  {data.access.trustScore && <Badge variant="secondary">Trust {Number(data.customer.trustScore || 0)}/100</Badge>}
                   <Badge variant="outline" className="gap-1">
                     <CalendarClock className="h-3 w-3" />
                     Last {lastDate}
@@ -1134,6 +1223,43 @@ export default function CustomerTransactionHistoryDialog({
               })}
             </TabsContent>}
 
+            {canViewTenantNotes && <TabsContent value="tenant-notes" className="space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h3 className="font-semibold">Communication & follow-ups</h3><p className="text-sm text-muted-foreground">Record calls, messages, visits, and agreed next steps. Overdue and high-priority follow-ups are ranked first.</p></div>
+                {canManageTenantNotes && <Button type="button" onClick={() => { setTenantNotesError(''); setEditingTenantNote(null); setShowTenantNoteForm(value => !value) }}><CalendarClock className="mr-2 h-4 w-4" />Add note</Button>}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {countMetric('Notes recorded', tenantNotesData?.counts.total)}
+                {countMetric('Open follow-ups', tenantNotesData?.counts.openFollowUps)}
+                {countMetric('Overdue follow-ups', tenantNotesData?.counts.overdueFollowUps)}
+                {countMetric('Completed follow-ups', tenantNotesData?.counts.completed)}
+              </div>
+              {tenantNotesError && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{tenantNotesError}</p>}
+              {showTenantNoteForm && (editingTenantNote ? canEditTenantNotes : canManageTenantNotes) && <form key={editingTenantNote?.id || 'new-tenant-note'} onSubmit={editingTenantNote ? updateTenantNote : createTenantNote} className="grid gap-3 rounded-md border border-primary/30 bg-muted/20 p-4 sm:grid-cols-2">
+                <label className="block text-sm">Interaction type<select name="kind" defaultValue={editingTenantNote?.kind || 'communication'} className="mt-1 h-10 w-full rounded-md border bg-background px-3"><option value="communication">Communication</option><option value="call">Phone call</option><option value="message">Message</option><option value="email">Email</option><option value="visit">Visit</option><option value="other">Other</option></select></label>
+                <label className="block text-sm">Priority<select name="priority" defaultValue={editingTenantNote?.priority || 'normal'} className="mt-1 h-10 w-full rounded-md border bg-background px-3"><option value="normal">Normal</option><option value="high">High</option></select></label>
+                <label className="block text-sm">Related tenancy<select name="tenancyId" defaultValue={editingTenantNote?.tenancyId || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3"><option value="">All tenant agreements</option>{rentalData?.tenancies.map(tenancy => <option key={tenancy.id} value={tenancy.id}>{tenancy.unit.property.name} · {tenancy.unit.unitCode} · {tenancy.status}</option>)}</select></label>
+                <label className="block text-sm">Follow-up date (optional)<input name="followUpAt" type="date" defaultValue={editingTenantNote?.followUpAt?.slice(0, 10) || ''} className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label>
+                <label className="block text-sm sm:col-span-2">Note<textarea name="body" required maxLength={5000} rows={4} defaultValue={editingTenantNote?.body || ''} placeholder="What was discussed, agreed, or needs follow-up?" className="mt-1 w-full rounded-md border bg-background p-3" /></label>
+                <div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="outline" onClick={() => { setShowTenantNoteForm(false); setEditingTenantNote(null) }}>Cancel</Button><Button type="submit" disabled={savingTenantNote}>{savingTenantNote ? 'Saving…' : editingTenantNote ? 'Save changes' : 'Save note'}</Button></div>
+              </form>}
+              {!tenantNotesData && !tenantNotesError && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">Loading tenant notes…</div>}
+              {tenantNotesData && !tenantNotesData.notes.length && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No communication notes have been recorded for this tenant.</div>}
+              {!!tenantNotesData?.notes.length && <div className="space-y-3">{tenantNotesData.notes.map(note => <article key={note.id} className={cn('rounded-md border p-4', note.isOverdue && 'border-red-300 bg-red-50/50')}>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex flex-wrap items-center gap-2"><Badge variant={note.status === 'completed' ? 'outline' : note.isOverdue ? 'destructive' : note.priority === 'high' ? 'secondary' : 'outline'}>{note.status === 'completed' ? 'Completed' : note.isOverdue ? 'Overdue follow-up' : note.priority === 'high' ? 'High priority' : 'Open'}</Badge><Badge variant="outline">{normalizeText(note.kind)}</Badge>{note.tenancyLabel && <span className="text-xs text-muted-foreground">{note.tenancyLabel}</span>}</div><span className="text-xs text-muted-foreground">{formatDisplayDate(note.createdAt)} · {note.authorName}</span></div>
+                <p className="mt-3 whitespace-pre-wrap break-words text-sm">{note.body}</p>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={cn('text-xs', note.isOverdue && 'font-medium text-destructive')}>{note.followUpAt ? `Follow-up ${formatDisplayDate(note.followUpAt)}` : 'No follow-up date'}</span>{(canEditTenantNotes || (canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt)) && <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`Actions for note from ${note.authorName}`} title="Note actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content align="end" sideOffset={4} className="z-[100] min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                      {canEditTenantNotes && <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none focus:bg-accent" onSelect={() => { setEditingTenantNote(note); setShowTenantNoteForm(true); setTenantNotesError('') }}><Edit className="h-4 w-4" />Edit note</DropdownMenu.Item>}
+                      {canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt && <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none focus:bg-accent" onSelect={() => void completeTenantNote(note.id)}><Check className="h-4 w-4" />Mark complete</DropdownMenu.Item>}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>}</div>
+              </article>)}</div>}
+            </TabsContent>}
+
             {canViewRentPromises && <TabsContent value="rent-promises" className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><h3 className="font-semibold">Promises to pay</h3><p className="text-sm text-muted-foreground">Track what was promised, when it is due, and what posted rent receipts fulfilled.</p></div>
@@ -1241,6 +1367,7 @@ export default function CustomerTransactionHistoryDialog({
                     {metric('Current rent outstanding', rentalData?.closingBalance, 'text-amber-700')}
                     {countMetric('Overdue rent charges', rentalCharges.filter(row => row.status === 'overdue').length)}
                   </div>
+                  {data.access.trustScore && <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-4"><div><h4 className="font-medium">Repayment trust</h4><p className="text-sm text-muted-foreground">Based on available trade, rental, and rent payment history; arrears ageing can lower the score.</p></div><Badge variant="secondary" className="tabular-nums">{Number(data.customer.trustScore || 0)}/100</Badge></div>}
                   <RentArrearsAging aging={rentalData?.arrearsAging} />
                   <div className="overflow-x-auto rounded-md border"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Agreement</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">Monthly rent</th><th className="px-3 py-2 text-right">Outstanding</th></tr></thead><tbody>{rentalData?.tenancies.map(row => <tr key={row.id} className="border-t"><td className="px-3 py-2">{row.unit.property.name} · {row.unit.unitCode}</td><td className="px-3 py-2">{row.agreementRef || '—'}</td><td className="px-3 py-2"><Badge variant={row.status === 'active' ? 'default' : 'outline'}>{row.status}</Badge></td><td className="px-3 py-2 text-right">{formatCurrency(Number(row.rentAmount), row.currency)}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(Number(row.balance), row.currency)}</td></tr>)}</tbody></table></div>
                 </section>

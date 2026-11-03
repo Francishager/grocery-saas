@@ -915,6 +915,102 @@ router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canVie
   } catch (error) { console.error('List tenant payment plans failed:', error); res.status(500).json({ error: 'Could not load tenant payment plans.' }) }
 })
 
+router.get('/customers/:customerId/notes', requirePermission('canViewTenantNotes'), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
+    if (!customer) return res.status(404).json({ error: 'Tenant profile not found.' })
+    const records = await prisma.propertyTenantNote.findMany({
+      where: { tenantId, customerId: customer.id },
+      include: {
+        createdBy: { select: { fname: true, lname: true } },
+        tenancy: { select: { id: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } } },
+      },
+      orderBy: [{ followUpAt: 'asc' }, { createdAt: 'desc' }],
+      take: 500,
+    })
+    const now = new Date()
+    const isOpen = note => note.status !== 'completed'
+    const isOverdue = note => isOpen(note) && note.followUpAt && new Date(note.followUpAt) < now
+    const rank = note => isOverdue(note) ? 0 : isOpen(note) && note.followUpAt ? 1 : isOpen(note) && note.priority === 'high' ? 2 : 3
+    records.sort((a, b) => rank(a) - rank(b)
+      || (rank(a) < 3 ? new Date(a.followUpAt || a.createdAt) - new Date(b.followUpAt || b.createdAt) : new Date(b.createdAt) - new Date(a.createdAt)))
+    res.json({
+      counts: {
+        total: records.length,
+        openFollowUps: records.filter(note => isOpen(note) && note.followUpAt).length,
+        overdueFollowUps: records.filter(isOverdue).length,
+        completed: records.filter(note => note.status === 'completed').length,
+      },
+      notes: records.map(note => ({
+        ...note,
+        authorName: userDisplayName(note.createdBy) || 'Staff',
+        tenancyLabel: note.tenancy ? `${note.tenancy.unit.property.name} · ${note.tenancy.unit.unitCode}` : null,
+        isOverdue: Boolean(isOverdue(note)),
+      })),
+    })
+  } catch (error) { console.error('Load tenant communication notes failed:', error); res.status(500).json({ error: 'Could not load tenant notes.' }) }
+})
+
+router.post('/customers/:customerId/notes', requirePermission('canManageTenantNotes'), async (req, res) => {
+  const body = String(req.body?.body || '').trim()
+  const kind = ['communication', 'call', 'message', 'visit', 'email', 'other'].includes(req.body?.kind) ? req.body.kind : 'other'
+  const priority = req.body?.priority === 'high' ? 'high' : 'normal'
+  const followUpRaw = String(req.body?.followUpAt || '').trim()
+  const followUpAt = followUpRaw ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(followUpRaw) ? `${followUpRaw}T23:59:59.999Z` : followUpRaw) : null
+  const tenancyId = req.body?.tenancyId ? String(req.body.tenancyId) : null
+  if (!body || body.length > 5000) return badRequest(res, 'Enter a note of up to 5,000 characters.')
+  if (followUpAt && !Number.isFinite(followUpAt.getTime())) return badRequest(res, 'Enter a valid follow-up date.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
+    if (!customer) return res.status(404).json({ error: 'Tenant profile not found.' })
+    if (tenancyId) {
+      const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: tenancyId, tenantId, customerId: customer.id }, select: { id: true } })
+      if (!tenancy) return res.status(404).json({ error: 'This tenancy does not belong to the selected tenant profile.' })
+    }
+    const note = await prisma.propertyTenantNote.create({
+      data: { tenantId, customerId: customer.id, tenancyId, createdById: req.user.id, kind, priority, body, followUpAt },
+      include: { createdBy: { select: { fname: true, lname: true } }, tenancy: { select: { id: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } } } },
+    })
+    res.status(201).json({ ...note, authorName: userDisplayName(note.createdBy) || 'Staff', tenancyLabel: note.tenancy ? `${note.tenancy.unit.property.name} · ${note.tenancy.unit.unitCode}` : null, isOverdue: false })
+  } catch (error) { console.error('Create tenant communication note failed:', error); res.status(500).json({ error: 'Could not save tenant note.' }) }
+})
+
+router.patch('/customers/:customerId/notes/:noteId', requirePermission('canViewTenantNotes'), async (req, res) => {
+  if (req.body?.status === 'completed') {
+    if (!req.userPermissions?.canCompleteTenantNotes) return res.status(403).json({ error: 'You do not have permission to complete tenant follow-ups.' })
+    try {
+      const updated = await prisma.propertyTenantNote.updateMany({ where: { id: req.params.noteId, customerId: req.params.customerId, tenantId: tenantIdOf(req), status: 'open' }, data: { status: 'completed' } })
+      if (!updated.count) return res.status(404).json({ error: 'Open tenant follow-up not found.' })
+      return res.json({ id: req.params.noteId, status: 'completed' })
+    } catch (error) { console.error('Complete tenant follow-up failed:', error); return res.status(500).json({ error: 'Could not complete tenant follow-up.' }) }
+  }
+  if (!req.userPermissions?.canEditTenantNotes) return res.status(403).json({ error: 'You do not have permission to edit tenant communication notes.' })
+  const body = String(req.body?.body || '').trim()
+  const kind = ['communication', 'call', 'message', 'visit', 'email', 'other'].includes(req.body?.kind) ? req.body.kind : null
+  const priority = ['high', 'normal'].includes(req.body?.priority) ? req.body.priority : null
+  const followUpRaw = String(req.body?.followUpAt || '').trim()
+  const followUpAt = followUpRaw ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(followUpRaw) ? `${followUpRaw}T23:59:59.999Z` : followUpRaw) : null
+  const tenancyId = req.body?.tenancyId ? String(req.body.tenancyId) : null
+  if (!body || body.length > 5000) return badRequest(res, 'Enter a note of up to 5,000 characters.')
+  if (!kind || !priority) return badRequest(res, 'Choose a valid interaction type and priority.')
+  if (followUpAt && !Number.isFinite(followUpAt.getTime())) return badRequest(res, 'Enter a valid follow-up date.')
+  try {
+    const tenantId = tenantIdOf(req)
+    if (tenancyId) {
+      const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: tenancyId, tenantId, customerId: req.params.customerId }, select: { id: true } })
+      if (!tenancy) return res.status(404).json({ error: 'This tenancy does not belong to the selected tenant profile.' })
+    }
+    const updated = await prisma.propertyTenantNote.updateMany({
+      where: { id: req.params.noteId, customerId: req.params.customerId, tenantId },
+      data: { body, kind, priority, followUpAt, tenancyId },
+    })
+    if (!updated.count) return res.status(404).json({ error: 'Tenant communication note not found.' })
+    res.json({ id: req.params.noteId, body, kind, priority, followUpAt, tenancyId })
+  } catch (error) { console.error('Edit tenant communication note failed:', error); res.status(500).json({ error: 'Could not update tenant note.' }) }
+})
+
 router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canViewRentPromises', 'canManageRentPromises']), async (req, res) => {
   try {
     const tenantId = tenantIdOf(req)
