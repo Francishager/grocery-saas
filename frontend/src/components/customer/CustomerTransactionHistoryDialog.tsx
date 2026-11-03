@@ -1,6 +1,5 @@
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { AlertCircle, CalendarClock, CreditCard, Loader2, ReceiptText, UserRound, Wallet, Edit, Trash2, Gauge, CircleDollarSign, Clock3, Download, Printer, MoreHorizontal, Check } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -435,6 +434,7 @@ export default function CustomerTransactionHistoryDialog({
   const [savingTenantNote, setSavingTenantNote] = useState(false)
   const [showTenantNoteForm, setShowTenantNoteForm] = useState(false)
   const [editingTenantNote, setEditingTenantNote] = useState<TenantProfileNote | null>(null)
+  const [openTenantNoteActions, setOpenTenantNoteActions] = useState<string | null>(null)
   const [rentPlanError, setRentPlanError] = useState('')
   const [rentPlanAccounts, setRentPlanAccounts] = useState<RentPaymentAccount[]>([])
   const [defaultRentPlanAccountId, setDefaultRentPlanAccountId] = useState('')
@@ -469,6 +469,27 @@ export default function CustomerTransactionHistoryDialog({
   const canManageTenantNotes = propertyManagementEnabled && hasPermission('canManageTenantNotes')
   const canEditTenantNotes = propertyManagementEnabled && hasPermission('canEditTenantNotes')
   const canCompleteTenantNotes = propertyManagementEnabled && hasPermission('canCompleteTenantNotes')
+
+  useEffect(() => {
+    if (!openTenantNoteActions) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && !target.closest('[data-tenant-note-actions]')) setOpenTenantNoteActions(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenTenantNoteActions(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openTenantNoteActions])
+
+  useEffect(() => {
+    if (!open) setOpenTenantNoteActions(null)
+  }, [open])
   const canRecordRentPayment = propertyManagementEnabled && hasPermission('canRecordRentPayment')
   const canPrintRentReceipts = propertyManagementEnabled && (hasPermission('canViewPropertyCollections') || canRecordRentPayment)
   const [loading, setLoading] = useState(false)
@@ -1248,15 +1269,13 @@ export default function CustomerTransactionHistoryDialog({
               {!!tenantNotesData?.notes.length && <div className="space-y-3">{tenantNotesData.notes.map(note => <article key={note.id} className={cn('rounded-md border p-4', note.isOverdue && 'border-red-300 bg-red-50/50')}>
                 <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex flex-wrap items-center gap-2"><Badge variant={note.status === 'completed' ? 'outline' : note.isOverdue ? 'destructive' : note.priority === 'high' ? 'secondary' : 'outline'}>{note.status === 'completed' ? 'Completed' : note.isOverdue ? 'Overdue follow-up' : note.priority === 'high' ? 'High priority' : 'Open'}</Badge><Badge variant="outline">{normalizeText(note.kind)}</Badge>{note.tenancyLabel && <span className="text-xs text-muted-foreground">{note.tenancyLabel}</span>}</div><span className="text-xs text-muted-foreground">{formatDisplayDate(note.createdAt)} · {note.authorName}</span></div>
                 <p className="mt-3 whitespace-pre-wrap break-words text-sm">{note.body}</p>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={cn('text-xs', note.isOverdue && 'font-medium text-destructive')}>{note.followUpAt ? `Follow-up ${formatDisplayDate(note.followUpAt)}` : 'No follow-up date'}</span>{(canEditTenantNotes || (canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt)) && <DropdownMenu.Root>
-                  <DropdownMenu.Trigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`Actions for note from ${note.authorName}`} title="Note actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenu.Trigger>
-                  <DropdownMenu.Portal>
-                    <DropdownMenu.Content align="end" sideOffset={4} className="z-[120] min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
-                      {canEditTenantNotes && <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none focus:bg-accent" onSelect={() => { setEditingTenantNote(note); setShowTenantNoteForm(true); setTenantNotesError('') }}><Edit className="h-4 w-4" />Edit note</DropdownMenu.Item>}
-                      {canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt && <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none focus:bg-accent" onSelect={() => void completeTenantNote(note.id)}><Check className="h-4 w-4" />Mark complete</DropdownMenu.Item>}
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Portal>
-                </DropdownMenu.Root>}</div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={cn('text-xs', note.isOverdue && 'font-medium text-destructive')}>{note.followUpAt ? `Follow-up ${formatDisplayDate(note.followUpAt)}` : 'No follow-up date'}</span>{(canEditTenantNotes || (canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt)) && <div className="relative" data-tenant-note-actions>
+                  <Button type="button" variant="ghost" size="icon" aria-label={`Actions for note from ${note.authorName}`} aria-haspopup="menu" aria-expanded={openTenantNoteActions === note.id} title="Note actions" onClick={() => setOpenTenantNoteActions(current => current === note.id ? null : note.id)}><MoreHorizontal className="h-4 w-4" /></Button>
+                  {openTenantNoteActions === note.id && <div role="menu" aria-label="Tenant note actions" className="absolute right-0 bottom-full z-30 mb-1 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+                    {canEditTenantNotes && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none hover:bg-accent focus:bg-accent" onClick={() => { setEditingTenantNote(note); setShowTenantNoteForm(true); setTenantNotesError(''); setOpenTenantNoteActions(null) }}><Edit className="h-4 w-4" />Edit note</button>}
+                    {canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none hover:bg-accent focus:bg-accent" onClick={() => { setOpenTenantNoteActions(null); void completeTenantNote(note.id) }}><Check className="h-4 w-4" />Mark complete</button>}
+                  </div>}
+                </div>}</div>
               </article>)}</div>}
             </TabsContent>}
 
@@ -1483,10 +1502,7 @@ export default function CustomerTransactionHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent onInteractOutside={event => {
-        const target = event.target
-        if (target instanceof Element && target.closest('[data-radix-popper-content-wrapper]')) event.preventDefault()
-      }} className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
+      <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
         {content}
       </DialogContent>
     </Dialog>
