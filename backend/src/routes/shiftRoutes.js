@@ -39,7 +39,7 @@ router.get('/shifts/templates', async (req, res) => {
 });
 
 // Create shift template
-router.post('/shifts/templates', requireHRPermission('SHIFT_MANAGE'), async (req, res) => {
+router.post('/shifts/templates', requireHRPermission('SHIFT_CREATE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { branchId, ...data } = req.body;
@@ -82,7 +82,7 @@ router.put('/shifts/templates/:id', requireHRPermission('SHIFT_MANAGE'), async (
 });
 
 // Soft-delete shift template
-router.delete('/shifts/templates/:id', requireHRPermission('SHIFT_MANAGE'), async (req, res) => {
+router.delete('/shifts/templates/:id', requireHRPermission('SHIFT_DELETE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;

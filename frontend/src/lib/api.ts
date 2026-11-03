@@ -428,7 +428,7 @@ function mapProductToInventory(p: any): InventoryItem {
     business_id: p.tenantId,
     product_id: p.sku || '',
     product_name: p.name,
-    quantity: p.quantity ?? 0,
+    quantity: Number(p.quantity ?? 0),
     unit_price: p.price ?? 0,
     cost_price: p.cost ?? 0,
     low_stock_alert: p.minStock ?? 10,

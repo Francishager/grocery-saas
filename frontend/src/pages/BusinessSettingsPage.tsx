@@ -35,7 +35,7 @@ export default function BusinessSettingsPage() {
   const { user, hasPermission } = useJWTAuth()
   const canViewBusinessSettings = user?.role === 'owner' || hasPermission('canViewSettings')
   const canPaySubscriptionInvoice = user?.role === 'owner' || hasPermission('canPaySubscriptionInvoice')
-  const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canEditStaff')
+  const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canManageWorkingHours')
 
   useEffect(() => { loadSettings() }, [online, canViewBusinessSettings])
   useEffect(() => { if (online) void loadBilling() }, [online])

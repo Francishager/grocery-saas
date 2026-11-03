@@ -190,6 +190,7 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 export default function ReceivablesPage() {
   const { user, hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
+  const multiUnitEnabled = hasFeature('inventory.multi_unit')
   const propertyManagementBusiness = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
   const baseCurrency = getTenantCurrency()
   const { toast } = useToast()
@@ -264,8 +265,8 @@ export default function ReceivablesPage() {
   const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
   const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
   const canViewCustomerBalance = hasPermission('canViewCustomerBalance')
-  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit'))
-  const canManageCustomerCreditLimit = hasFeature('customers.credit_limits') && hasPermission('canManageCustomerCreditLimit')
+  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canCreateCustomerCreditLimit') || hasPermission('canEditCustomerCreditLimit'))
+  const canManageCustomerCreditLimit = hasFeature('customers.credit_limits') && hasPermission('canEditCustomerCreditLimit')
   const canRecordCustomerPayment = hasPermission('canRecordCustomerPayment')
   const canEditCustomer = hasPermission('canEditCustomer') || hasPermission('canEditReceivable')
   const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
@@ -2243,7 +2244,7 @@ export default function ReceivablesPage() {
                   const selectedItemType = (selectedItem as any)?.itemType
                   const isService = selectedItemType === 'service'
                   const isRental = selectedItemType === 'rental'
-                  const sellingUnits = selectedItem?.units || []
+                  const sellingUnits = multiUnitEnabled ? (selectedItem?.units || []) : []
                   return (
                   <div key={index} className={`grid gap-3 ${sellingUnits.length ? 'md:grid-cols-[minmax(0,1.3fr)_minmax(145px,0.9fr)_80px_110px_110px_40px]' : 'md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]'}`}>
                     <FormSelectSearch

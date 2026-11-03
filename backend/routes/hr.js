@@ -649,7 +649,7 @@ router.get("/:id/attendance", authenticateToken, requirePermission("canViewHRAtt
   }
 });
 
-router.post("/:id/attendance", authenticateToken, requirePermission("canManageHRAttendance"), async (req, res) => {
+router.post("/:id/attendance", authenticateToken, requirePermission("canRecordHRAttendance"), async (req, res) => {
   try {
     const { date, checkIn, checkOut, status, notes, method, location } = req.body;
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
@@ -767,7 +767,7 @@ router.get("/payroll", authenticateToken, requirePermission("canViewHRPayroll"),
   }
 });
 
-router.post("/payroll/run", authenticateToken, requirePermission("canManageHRPayroll"), async (req, res) => {
+router.post("/payroll/run", authenticateToken, requirePermission("canCreateHRPayroll"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const {
@@ -832,7 +832,7 @@ router.post("/payroll/run", authenticateToken, requirePermission("canManageHRPay
   }
 });
 
-router.post("/payroll/:id/post", authenticateToken, requirePermission("canManageHRPayroll"), async (req, res) => {
+router.post("/payroll/:id/post", authenticateToken, requirePermission("canPostHRPayroll"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const userId = req.user.id;
@@ -936,7 +936,7 @@ router.post("/payroll/:id/post", authenticateToken, requirePermission("canManage
   }
 });
 
-router.put("/payroll/:id/pay", authenticateToken, requirePermission("canManageHRPayroll"), async (req, res) => {
+router.put("/payroll/:id/pay", authenticateToken, requirePermission("canPayHRPayroll"), async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const userId = req.user.id;

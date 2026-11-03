@@ -270,8 +270,8 @@ const planDueDate = (startDate, sequence, frequency) => {
 const pageSize = value => Math.min(Math.max(Number.parseInt(value, 10) || 100, 1), 500)
 const badRequest = (res, message) => res.status(400).json({ error: message })
 const canViewCustomerIdentity = req => (req.user?.permissions || []).includes('*') || (req.user?.permissions || []).includes('canViewCustomerIdentity')
-const canViewTenantPersonalDetails = req => ['*', 'canViewTenantPersonalDetails', 'canManageTenantPersonalDetails'].some(permission => req.user?.permissions?.includes(permission))
-const canManageTenantPersonalDetails = req => ['*', 'canManageTenantPersonalDetails'].some(permission => req.user?.permissions?.includes(permission))
+const canViewTenantPersonalDetails = req => ['*', 'canViewTenantPersonalDetails', 'canCreateTenantPersonalDetails', 'canEditTenantPersonalDetails'].some(permission => req.user?.permissions?.includes(permission))
+const canManageTenantPersonalDetails = req => ['*', 'canCreateTenantPersonalDetails', 'canEditTenantPersonalDetails'].some(permission => req.user?.permissions?.includes(permission))
 const TENANT_PERSONAL_FIELDS = ['maritalStatus', 'spouseNames', 'childrenCount', 'householdSize', 'placeOfOrigin']
 function tenantPersonalDetails(input) {
   const result = {}
@@ -445,7 +445,7 @@ router.get('/sale-payables/owners', requireAnyPermission(['canRecordOwnerPayout'
   } catch (error) { console.error('Load plot sale owner payables failed:', error); res.status(500).json({ error: 'Could not load landlord plot sale payables.' }) }
 })
 
-router.post('/owners', requirePermission('canManagePropertyOwners'), async (req, res) => {
+router.post('/owners', requirePermission('canCreatePropertyOwners'), async (req, res) => {
   const name = String(req.body?.name || '').trim()
   if (!name) return badRequest(res, 'Owner name is required.')
   try {
@@ -454,7 +454,7 @@ router.post('/owners', requirePermission('canManagePropertyOwners'), async (req,
   } catch (error) { console.error('Create property owner failed:', error); res.status(500).json({ error: 'Could not save owner.' }) }
 })
 
-router.put('/owners/:id', requirePermission('canManagePropertyOwners'), async (req, res) => {
+router.put('/owners/:id', requirePermission('canEditPropertyOwners'), async (req, res) => {
   try {
     const exists = await prisma.propertyOwner.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) } })
     if (!exists) return res.status(404).json({ error: 'Owner not found.' })
@@ -470,7 +470,7 @@ router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'can
   } catch (error) { console.error('List properties failed:', error); res.status(500).json({ error: 'Could not load properties.' }) }
 })
 
-router.post('/properties', requirePermission('canManageProperties'), async (req, res) => {
+router.post('/properties', requirePermission('canCreateProperties'), async (req, res) => {
   const name = String(req.body?.name || '').trim()
   const address = String(req.body?.address || '').trim()
   if (!name || !address) return badRequest(res, 'Property name and address are required.')
@@ -482,7 +482,7 @@ router.post('/properties', requirePermission('canManageProperties'), async (req,
   } catch (error) { console.error('Create property failed:', error); res.status(500).json({ error: 'Could not save property.' }) }
 })
 
-router.put('/properties/:id', requirePermission('canManageProperties'), async (req, res) => {
+router.put('/properties/:id', requirePermission('canEditProperties'), async (req, res) => {
   try {
     const property = await prisma.managedProperty.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) } })
     if (!property) return res.status(404).json({ error: 'Property not found.' })
@@ -504,7 +504,7 @@ router.put('/properties/:id', requirePermission('canManageProperties'), async (r
   } catch (error) { console.error('Update property failed:', error); res.status(500).json({ error: 'Could not update property.' }) }
 })
 
-router.post('/properties/:id/units', requirePermission('canManagePropertyUnits'), async (req, res) => {
+router.post('/properties/:id/units', requirePermission('canCreatePropertyUnits'), async (req, res) => {
   const unitCode = String(req.body?.unitCode || '').trim()
   const rentAmount = Number(req.body?.rentAmount)
   if (!unitCode || !Number.isFinite(rentAmount) || rentAmount < 0) return badRequest(res, 'Unit code and a non-negative monthly rent are required.')
@@ -555,7 +555,7 @@ router.put('/units/:id/acquisition-cost', requirePermission('canManagePropertyLa
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Record plot acquisition cost failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record plot cost.' : error.message }) }
 })
 
-router.put('/units/:id', requirePermission('canManagePropertyUnits'), async (req, res) => {
+router.put('/units/:id', requirePermission('canEditPropertyUnits'), async (req, res) => {
   try {
     const unit = await prisma.propertyUnit.findFirst({ where: { id: req.params.id, property: { tenantId: tenantIdOf(req) } }, include: { property: { select: { propertyType: true } } } })
     if (!unit) return res.status(404).json({ error: 'Unit not found.' })
@@ -638,7 +638,7 @@ router.get('/units/:id/rent-history', requireAnyPermission(['canViewPropertyPort
   } catch (error) { console.error('Load unit rent history failed:', error); res.status(500).json({ error: 'Could not load rent history.' }) }
 })
 
-router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies', 'canEditRentPeriods']), async (req, res) => {
+router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies', 'canEditRentPeriods']), async (req, res) => {
   try {
     const where = { tenantId: tenantIdOf(req), ...(req.query.status && req.query.status !== 'all' ? { status: String(req.query.status) } : {}), ...(req.query.ownerId ? { unit: { property: { ownerId: String(req.query.ownerId) } } } : {}) }
     const rows = await prisma.propertyTenancy.findMany({ where, take: pageSize(req.query.limit), orderBy: [{ status: 'asc' }, { tenantName: 'asc' }], include: { unit: { include: { property: { include: { owner: true } } } }, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] }, planAllocations: { none: { plan: { status: 'active' } } } }, orderBy: { dueDate: 'asc' } }, payments: { where: { status: 'posted', paymentType: { in: ['rent', 'opening_settlement'] } }, select: { advanceAmount: true, paymentType: true } } } })
@@ -655,7 +655,7 @@ router.get('/tenancies', requireAnyPermission(['canViewPropertyPortfolio', 'canV
   } catch (error) { console.error('List property tenancies failed:', error); res.status(500).json({ error: 'Could not load tenancies.' }) }
 })
 
-router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requireAnyPermission(['canCreateTenancies', 'canManageTenancies']), async (req, res) => {
+router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requirePermission('canCreateTenancies'), async (req, res) => {
   const requestedTenantName = String(req.body?.tenantName || '').trim()
   const existingCustomerId = String(req.body?.customerId || '').trim()
   const startMonth = req.body?.startMonth ? String(req.body.startMonth).trim() : null
@@ -668,9 +668,9 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
   const alternatePhone = req.body?.alternatePhone == null ? null : String(req.body.alternatePhone).trim() || null
   if (alternatePhone && alternatePhone.length > 40) return badRequest(res, 'The second phone number must be 40 characters or fewer.')
   if ((!requestedTenantName && !existingCustomerId) || !req.body?.unitId || !Number.isFinite(startDate.getTime()) || (startMonth && !isMonthKey(startMonth)) || !Number.isInteger(arrearsMonths) || arrearsMonths < 0 || arrearsMonths > 120 || !Number.isFinite(rentAmount) || rentAmount <= 0 || !Number.isFinite(depositRequired) || depositRequired < 0 || !Number.isFinite(depositHeld) || depositHeld < 0 || depositHeld - depositRequired > 0.01) return badRequest(res, 'Enter a tenant, valid tenancy start month, total unpaid rent months including the current month from 0 to 120, positive monthly rent, and valid deposit amounts.')
-  if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage tenant household details.' })
+  if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined && req.body[field] !== '') && !req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canCreateTenantPersonalDetails')) return res.status(403).json({ error: 'You do not have permission to record tenant household details.' })
   try {
-    const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
+    const personalDetails = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canCreateTenantPersonalDetails') ? tenantPersonalDetails(req.body) : {}
     const identity = await uploadRenterIdentity(req)
     const unit = await prisma.propertyUnit.findFirst({ where: { id: req.body.unitId, property: { tenantId: tenantIdOf(req), status: 'active' } } })
     if (!unit) return res.status(404).json({ error: 'Unit not found in this business.' })
@@ -699,7 +699,7 @@ router.post('/tenancies', identityUpload.fields([{ name: 'profilePhoto', maxCoun
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenancy failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create tenancy.' : error.message }) }
 })
 
-router.put('/tenancies/:id/profile', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requirePermission('canManageTenancies'), async (req, res) => {
+router.put('/tenancies/:id/profile', identityUpload.fields([{ name: 'profilePhoto', maxCount: 1 }, { name: 'nationalIdFront', maxCount: 1 }, { name: 'nationalIdBack', maxCount: 1 }]), requirePermission('canEditTenancies'), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { select: { name: true, ownerId: true } } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
@@ -726,14 +726,14 @@ router.put('/tenancies/:id/profile', identityUpload.fields([{ name: 'profilePhot
   } catch (error) { console.error('Update tenant profile failed:', error); res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'Could not update tenant profile.' }) }
 })
 
-router.put('/tenancies/:id', requireAnyPermission(['canManageTenancies', 'canManageTenantPersonalDetails']), async (req, res) => {
+router.put('/tenancies/:id', requireAnyPermission(['canEditTenancies', 'canEditTenantPersonalDetails']), async (req, res) => {
   try {
     const tenancy = await prisma.propertyTenancy.findFirst({ where: { id: req.params.id, tenantId: tenantIdOf(req) }, include: { unit: { include: { property: { select: { name: true, ownerId: true } } } } } })
     if (!tenancy) return res.status(404).json({ error: 'Tenancy not found.' })
-    const canManageTenancy = ['*', 'canManageTenancies'].some(permission => req.user?.permissions?.includes(permission))
+    const canManageTenancy = ['*', 'canEditTenancies'].some(permission => req.user?.permissions?.includes(permission))
     if (!canManageTenancy && Object.keys(req.body).some(field => !TENANT_PERSONAL_FIELDS.includes(field))) return res.status(403).json({ error: 'You may update tenant household details only.' })
-    if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined) && !canManageTenantPersonalDetails(req)) return res.status(403).json({ error: 'You do not have permission to manage tenant household details.' })
-    const personalDetails = canManageTenantPersonalDetails(req) ? tenantPersonalDetails(req.body) : {}
+    if (TENANT_PERSONAL_FIELDS.some(field => req.body[field] !== undefined) && !req.user?.permissions?.includes('*') && !req.user?.permissions?.includes('canEditTenantPersonalDetails')) return res.status(403).json({ error: 'You do not have permission to edit tenant household details.' })
+    const personalDetails = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canEditTenantPersonalDetails') ? tenantPersonalDetails(req.body) : {}
 
     const tenantName = req.body.tenantName === undefined ? undefined : String(req.body.tenantName).trim()
     const phone = req.body.phone === undefined ? undefined : String(req.body.phone).trim() || null
@@ -864,7 +864,7 @@ router.get('/customers/:customerId/rent-ledger', requirePermission('canViewPrope
   } catch (error) { console.error('Load tenant ledger failed:', error); res.status(500).json({ error: 'Could not load rental history.' }) }
 })
 
-router.get('/customers/:customerId/household', requireAnyPermission(['canViewTenantPersonalDetails', 'canManageTenantPersonalDetails']), async (req, res) => {
+router.get('/customers/:customerId/household', requireAnyPermission(['canViewTenantPersonalDetails', 'canCreateTenantPersonalDetails', 'canEditTenantPersonalDetails']), async (req, res) => {
   try {
     const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId: tenantIdOf(req) }, select: { id: true } })
     if (!customer) return res.status(404).json({ error: 'Customer not found.' })
@@ -881,7 +881,7 @@ router.get('/customers/:customerId/household', requireAnyPermission(['canViewTen
   } catch (error) { console.error('Load tenant household details failed:', error); res.status(500).json({ error: 'Could not load tenant household details.' }) }
 })
 
-router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canViewRentPaymentPlans', 'canManageRentPaymentPlans']), async (req, res) => {
+router.get('/customers/:customerId/payment-plans', requireAnyPermission(['canViewRentPaymentPlans', 'canCreateRentPaymentPlans', 'canCancelRentPaymentPlans']), async (req, res) => {
   try {
     const tenantId = tenantIdOf(req)
     const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
@@ -1035,7 +1035,7 @@ router.post('/customers/:customerId/rent-promises', requirePermission('canManage
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenant payment promise failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record tenant payment promise.' : error.message }) }
 })
 
-router.post('/customers/:customerId/payment-plans', requirePermission('canManageRentPaymentPlans'), async (req, res) => {
+router.post('/customers/:customerId/payment-plans', requirePermission('canCreateRentPaymentPlans'), async (req, res) => {
   const tenancyId = String(req.body?.tenancyId || '').trim()
   const installmentCount = Number(req.body?.installmentCount)
   const frequency = String(req.body?.frequency || 'monthly').toLowerCase()
@@ -1090,7 +1090,7 @@ router.post('/customers/:customerId/payment-plans', requirePermission('canManage
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenant payment plan failed:', error); res.status(status).json({ error: status === 500 ? 'Could not create tenant payment plan.' : error.message }) }
 })
 
-router.post('/payment-plans/:id/cancel', requirePermission('canManageRentPaymentPlans'), async (req, res) => {
+router.post('/payment-plans/:id/cancel', requirePermission('canCancelRentPaymentPlans'), async (req, res) => {
   const reason = String(req.body?.reason || '').trim()
   if (reason.length < 5 || reason.length > 500) return badRequest(res, 'Enter a cancellation reason between 5 and 500 characters.')
   try {
@@ -2143,7 +2143,7 @@ router.get('/land-purchases/payments/:paymentId/receipt', requirePermission('can
 
 router.get('/sale-buyers', requirePermission('canViewPropertySales'), async (req, res) => {
   try {
-    const canViewCreditLimit = req.user?.role === 'owner' || req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerCreditLimit') || req.user?.permissions?.includes('canManageCustomerCreditLimit')
+    const canViewCreditLimit = req.user?.role === 'owner' || req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerCreditLimit') || req.user?.permissions?.includes('canManageCustomerCreditLimit') || req.user?.permissions?.includes('canCreateCustomerCreditLimit') || req.user?.permissions?.includes('canEditCustomerCreditLimit')
     const buyers = await prisma.customer.findMany({ where: { tenantId: tenantIdOf(req), status: 'active' }, take: 500, orderBy: { name: 'asc' }, select: { id: true, name: true, phone: true, email: true, balance: true, ...(canViewCreditLimit ? { creditLimit: true } : {}) } })
     res.json(buyers)
   } catch (error) { console.error('Load plot sale buyers failed:', error); res.status(500).json({ error: 'Could not load buyer accounts.' }) }

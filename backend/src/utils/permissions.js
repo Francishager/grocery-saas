@@ -105,6 +105,8 @@ const PERMISSION_TO_FEATURES = {
   canViewCustomerBalance: ['customers', 'crm'],
   canViewCustomerCreditLimit: ['customers', 'crm'],
   canManageCustomerCreditLimit: ['customers', 'crm'],
+  canCreateCustomerCreditLimit: ['customers', 'crm'],
+  canEditCustomerCreditLimit: ['customers', 'crm'],
   canViewCustomerSalesHistory: ['customers', 'crm'],
   canViewCustomerPaymentsHistory: ['customers', 'crm'],
   canViewCustomerReturnsHistory: ['customers', 'crm'],
@@ -327,13 +329,46 @@ const OWNER_CORE_PERMISSIONS = new Set([
   'canEditSettings',
 ]);
 
+// Old grants remain stored for upgrade compatibility, but expand to granular
+// actions and are hidden from the permission editor.
+export const LEGACY_COMBINED_PERMISSION_GRANTS = {
+  canManageCustomerCreditLimit: ['canCreateCustomerCreditLimit', 'canEditCustomerCreditLimit'],
+  canEditStaff: ['canEditStaffDetails', 'canManageStaffPermissions', 'canManageWorkingHours'],
+  canManageHRStructure: ['canCreateHRStructure', 'canEditHRStructure', 'canDeleteHRStructure'],
+  canManageHRContracts: ['canCreateHRContracts', 'canEditHRContracts', 'canTerminateHRContracts'],
+  canManageHRDocuments: ['canUploadHRDocuments', 'canEditHRDocuments', 'canDeleteHRDocuments'],
+  canManageHRAttendance: ['canRecordHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canConfigureHRAttendance', 'canApproveHRAttendance'],
+  canManageHRShifts: ['canCreateHRShifts', 'canEditHRShifts', 'canDeleteHRShifts', 'canAssignHRShifts', 'canApproveHRShifts'],
+  canManageHRLeaveTypes: ['canCreateHRLeaveTypes', 'canEditHRLeaveTypes', 'canDeleteHRLeaveTypes', 'canAllocateHRLeave'],
+  canAdjustStock: ['canRecordStockIn', 'canAdjustStock'],
+  canManageHRPayroll: ['canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHROpeningBalances'],
+  canManagePropertyOwners: ['canCreatePropertyOwners', 'canEditPropertyOwners'],
+  canManageProperties: ['canCreateProperties', 'canEditProperties'],
+  canManagePropertyUnits: ['canCreatePropertyUnits', 'canEditPropertyUnits'],
+  canManageTenancies: ['canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies'],
+  canManageTenantPersonalDetails: ['canViewTenantPersonalDetails', 'canCreateTenantPersonalDetails', 'canEditTenantPersonalDetails'],
+  canManageRentPayment: ['canVoidRentPayment', 'canRefundTenantDeposit'],
+  canManageRentPaymentPlans: ['canCreateRentPaymentPlans', 'canCancelRentPaymentPlans'],
+  canManageSupplierNetwork: ['canEditMarketplaceSellerProfile', 'canRequestSupplierRelationship', 'canManageSupplierRelationships'],
+  canManageMarketplacePromotions: ['canPauseMarketplaceCampaign', 'canResumeMarketplaceCampaign', 'canCancelMarketplaceCampaign'],
+  canManageProcurementQuotes: ['canSelectProcurementQuote'],
+  canReviewProcurementInvoice: ['canViewProcurementInvoice', 'canApproveProcurementInvoice', 'canRejectProcurementInvoice'],
+  canUseAnyTransactionAccount: ['canUseOwnCashAccount', 'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount'],
+  canUseOtherCashAccount: ['canUseOtherStaffCashAccount'],
+};
+export const LEGACY_COMBINED_PERMISSION_KEYS = Object.keys(LEGACY_COMBINED_PERMISSION_GRANTS);
+for (const [legacyKey, granularKeys] of Object.entries(LEGACY_COMBINED_PERMISSION_GRANTS)) {
+  const features = PERMISSION_TO_FEATURES[legacyKey];
+  if (features) for (const key of granularKeys) PERMISSION_TO_FEATURES[key] ||= features;
+}
+
 export const ALL_PERMISSION_KEYS = [
   "canViewDashboard",
   "canUseBusinessAI",
   // Sales
   "canCreateSale", "canViewSale", "canEditSale", "canDeleteSale", "canRefundSale",
   // Inventory
-  "canCreateProduct", "canViewProduct", "canViewPriceHistory", "canEditProduct", "canDeleteProduct", "canAdjustStock", "canTransferStock",
+  "canCreateProduct", "canViewProduct", "canViewPriceHistory", "canEditProduct", "canDeleteProduct", "canAdjustStock", "canRecordStockIn", "canTransferStock",
   // Purchases / Payables
   "canCreatePurchase", "canViewPurchase", "canEditPurchase", "canDeletePurchase",
   "canCreatePayable", "canViewPayable", "canEditPayable", "canDeletePayable",
@@ -342,7 +377,7 @@ export const ALL_PERMISSION_KEYS = [
   // Customers / Receivables
   "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
   "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerIdentity", "canViewCustomerAddress", "canViewCustomerBalance",
-  "canViewCustomerCreditLimit", "canManageCustomerCreditLimit",
+  "canViewCustomerCreditLimit", "canManageCustomerCreditLimit", "canCreateCustomerCreditLimit", "canEditCustomerCreditLimit",
   "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
   "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
   "canViewCustomerNotes", "canRecordCustomerPayment", "canPrintCustomerReceipts",
@@ -350,26 +385,26 @@ export const ALL_PERMISSION_KEYS = [
   "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
   "canCreateSupplier", "canViewSupplier", "canEditSupplier", "canDeleteSupplier",
-  "canViewProcurement", "canFollowMarketplaceSellers", "canManageSupplierNetwork", "canManageMarketplaceCatalogue",
+  "canViewProcurement", "canFollowMarketplaceSellers", "canManageSupplierNetwork", "canEditMarketplaceSellerProfile", "canRequestSupplierRelationship", "canManageSupplierRelationships", "canManageMarketplaceCatalogue",
   "canCreateMarketplaceListing", "canChangeMarketplacePrice",
-  "canCreateMarketplacePromotion", "canRunMarketplaceAds", "canManageMarketplacePromotions",
-  "canCreateProcurementRFQ", "canRespondToProcurementRFQ", "canManageProcurementQuotes",
+  "canCreateMarketplacePromotion", "canRunMarketplaceAds", "canManageMarketplacePromotions", "canPauseMarketplaceCampaign", "canResumeMarketplaceCampaign", "canCancelMarketplaceCampaign",
+  "canCreateProcurementRFQ", "canRespondToProcurementRFQ", "canManageProcurementQuotes", "canSelectProcurementQuote",
   "canCreateProcurementOrder", "canApproveProcurementOrder", "canAcknowledgeProcurementOrder",
-  "canReceiveProcurementGoods", "canSubmitProcurementInvoice", "canReviewProcurementInvoice", "canApproveProcurementPayment", "canRecordProcurementPayment",
+  "canReceiveProcurementGoods", "canSubmitProcurementInvoice", "canReviewProcurementInvoice", "canViewProcurementInvoice", "canApproveProcurementInvoice", "canRejectProcurementInvoice", "canApproveProcurementPayment", "canRecordProcurementPayment",
   // Staff
-  "canCreateStaff", "canViewStaff", "canEditStaff", "canDeleteStaff",
+  "canCreateStaff", "canViewStaff", "canEditStaff", "canDeleteStaff", "canEditStaffDetails", "canManageStaffPermissions", "canManageWorkingHours",
   // HR Management
   "canViewHR", "canViewHREmployeesForAttendance", "canCreateHREmployee", "canEditHREmployee", "canDeleteHREmployee",
-  "canManageHRStructure", "canViewHRContracts", "canManageHRContracts",
-  "canViewHRDocuments", "canManageHRDocuments", "canViewHRSalaries", "canManageHRSalaries",
+  "canManageHRStructure", "canCreateHRStructure", "canEditHRStructure", "canDeleteHRStructure", "canViewHRContracts", "canManageHRContracts", "canCreateHRContracts", "canEditHRContracts", "canTerminateHRContracts",
+  "canViewHRDocuments", "canManageHRDocuments", "canUploadHRDocuments", "canEditHRDocuments", "canDeleteHRDocuments", "canViewHRSalaries", "canManageHRSalaries",
   "canViewHRAttendance", "canRecordHRAttendance", "canRecordOwnHRAttendance", "canManageHRAttendance",
   "canEditHRAttendance", "canDeleteHRAttendance", "canImportHRAttendance",
   "canConfigureHRAttendance", "canApproveHRAttendance",
-  "canViewHRShifts", "canManageHRShifts", "canAssignHRShifts", "canApproveHRShifts",
-  "canViewHRLeave", "canRequestHRLeave", "canManageHRLeaveTypes", "canApproveHRLeave",
+  "canViewHRShifts", "canManageHRShifts", "canCreateHRShifts", "canEditHRShifts", "canDeleteHRShifts", "canAssignHRShifts", "canApproveHRShifts",
+  "canViewHRLeave", "canRequestHRLeave", "canManageHRLeaveTypes", "canCreateHRLeaveTypes", "canEditHRLeaveTypes", "canDeleteHRLeaveTypes", "canAllocateHRLeave", "canApproveHRLeave",
   "canViewHRPayroll", "canCreateHRPayroll", "canApproveHRPayroll",
   "canPostHRPayroll", "canPayHRPayroll", "canManageHRPayrollSettings",
-  "canManageHRPayroll",
+  "canManageHRPayroll", "canManageHROpeningBalances",
   // Branches
   "canCreateBranch", "canViewBranch", "canEditBranch", "canDeleteBranch",
   // Reports
@@ -391,10 +426,10 @@ export const ALL_PERMISSION_KEYS = [
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
   "canProcessRentalReturn", "canCancelRental", "canRecordRentalPayment", "canRefundRentalDeposit", "canRefundRentalAdvance", "canViewRentalCreditNotes", "canCreateRentalCreditNote", "canEditRentalCreditNote", "canRefundRentalCreditNote", "canForfeitRentalDeposit", "canGenerateRentalContract",
   "canViewPlanner", "canManagePlanner", "canViewCRM", "canCreateCRM", "canEditCRM", "canDeleteCRM",
-  "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails",
-  "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits",
+  "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails", "canCreateTenantPersonalDetails", "canEditTenantPersonalDetails",
+  "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits", "canCreatePropertyOwners", "canEditPropertyOwners", "canCreateProperties", "canEditProperties", "canCreatePropertyUnits", "canEditPropertyUnits",
   "canCreateTenancies", "canEndTenancies", "canReactivateTenancies", "canManageTenancies", "canEditRentPeriods", "canRecordRentPayment", "canRecordTenantDeposit",
-  "canRefundTenantDeposit", "canApplyTenantDepositToRent", "canVoidRentPayment", "canManageRentPayment", "canViewRentPaymentPlans", "canManageRentPaymentPlans", "canViewRentPromises", "canManageRentPromises",
+  "canRefundTenantDeposit", "canApplyTenantDepositToRent", "canVoidRentPayment", "canManageRentPayment", "canViewRentPaymentPlans", "canManageRentPaymentPlans", "canCreateRentPaymentPlans", "canCancelRentPaymentPlans", "canViewRentPromises", "canManageRentPromises",
   "canViewPropertyReports", "canRecordOwnerPayout", "canViewPropertySales", "canCreatePropertySale",
   "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
   "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
@@ -469,6 +504,18 @@ export const PERMISSION_CATEGORIES = [
 const PERMISSION_DETAIL_OVERRIDES = {
   ...reportPermissionMetadata,
   ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, p])),
+  ...Object.fromEntries(Object.entries({
+    canEditStaffDetails: 'Edit staff profiles and assignments', canManageStaffPermissions: 'Assign staff permissions', canManageWorkingHours: 'Manage business working hours',
+    canCreateHRStructure: 'Create HR departments, positions, units, and teams', canEditHRStructure: 'Edit HR departments, positions, units, and teams', canDeleteHRStructure: 'Deactivate HR departments, positions, units, and teams',
+    canCreateHRContracts: 'Create employee contracts', canEditHRContracts: 'Edit employee contracts', canTerminateHRContracts: 'Terminate employee contracts',
+    canUploadHRDocuments: 'Upload employee documents', canEditHRDocuments: 'Replace or edit employee documents', canDeleteHRDocuments: 'Delete employee documents',
+    canCreateHRShifts: 'Create shift templates', canEditHRShifts: 'Edit shift templates', canDeleteHRShifts: 'Delete shift templates', canAllocateHRLeave: 'Allocate employee leave balances', canManageHROpeningBalances: 'Record employee opening balances', canRecordStockIn: 'Record stock received into inventory',
+    canCreatePropertyOwners: 'Create property owners', canEditPropertyOwners: 'Edit property owners', canCreateProperties: 'Create properties', canEditProperties: 'Edit properties', canCreatePropertyUnits: 'Create rental units', canEditPropertyUnits: 'Edit rental units',
+    canCreateTenantPersonalDetails: 'Record tenant household details', canEditTenantPersonalDetails: 'Edit tenant household details', canCreateRentPaymentPlans: 'Create rent payment plans', canCancelRentPaymentPlans: 'Cancel rent payment plans',
+    canEditMarketplaceSellerProfile: 'Edit marketplace seller profile', canRequestSupplierRelationship: 'Request supplier relationships', canManageSupplierRelationships: 'Approve, reject, and suspend supplier relationships',
+    canPauseMarketplaceCampaign: 'Pause marketplace campaigns', canResumeMarketplaceCampaign: 'Resume marketplace campaigns', canCancelMarketplaceCampaign: 'Cancel marketplace campaigns', canSelectProcurementQuote: 'Select a supplier quote',
+    canViewProcurementInvoice: 'View supplier invoices for matching', canApproveProcurementInvoice: 'Approve supplier invoices and create payables', canRejectProcurementInvoice: 'Reject supplier invoices',
+  }).map(([key, name]) => [key, { name, description: `Allow the user to ${String(name).toLowerCase()}.` }])),
   canUseBusinessAI: {
     name: 'Use AI business advisor',
     description: 'Chat about marketing and sales growth using only business data this user is already permitted to view.',
@@ -626,8 +673,16 @@ const PERMISSION_DETAIL_OVERRIDES = {
     description: 'See a customer’s authorized credit limit and remaining limit.',
   },
   canManageCustomerCreditLimit: {
-    name: 'Set and edit customer credit limits',
-    description: 'Set or change the credit limit used to validate unpaid credit sales. This also grants permission to view limits.',
+    name: 'Legacy customer credit-limit management',
+    description: 'Compatibility permission from older assignments; replaced by separate create and edit permissions.',
+  },
+  canCreateCustomerCreditLimit: {
+    name: 'Create customer credit limits',
+    description: 'Set the initial credit limit when creating a customer. This also grants access to view the limit.',
+  },
+  canEditCustomerCreditLimit: {
+    name: 'Edit customer credit limits',
+    description: 'Change an existing customer credit limit or credit account. This also grants access to view the limit.',
   },
   canViewCustomerSalesHistory: {
     name: 'View customer sales history',
@@ -1304,7 +1359,7 @@ function permissionCategoryForKey(key) {
   if (key.includes('Staff')) return 'staff';
   if (key === 'canViewHR') return 'hr';
   if (key.includes('HREmployee')) return 'hr_employees';
-  if (key === 'canManageHRStructure') return 'hr_structure';
+  if (key.includes('HRStructure')) return 'hr_structure';
   if (key.includes('HRContracts')) return 'hr_contracts';
   if (key.includes('HRDocuments')) return 'hr_documents';
   if (key.includes('HRSalaries')) return 'hr_salaries';
@@ -1377,6 +1432,10 @@ export function normalizePermissionRecord(permissionRecord = {}) {
   const normalized = {};
   for (const key of ALL_PERMISSION_KEYS) {
     normalized[key] = Boolean(permissionRecord?.[key] ?? false);
+  }
+  for (const [legacyKey, granularKeys] of Object.entries(LEGACY_COMBINED_PERMISSION_GRANTS)) {
+    if (!normalized[legacyKey]) continue;
+    for (const key of granularKeys) normalized[key] = true;
   }
   return normalized;
 }
@@ -1460,13 +1519,19 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
 
   if (Array.isArray(inheritedPermissions)) {
     inheritedPermissions
-      .filter((permission) => permission && !LEGACY_SERVICE_PERMISSION_KEYS.includes(permission) && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(permission) && permissionAllowedForTenant(permission, tenantFeatures))
+      .filter((permission) => permission && !LEGACY_COMBINED_PERMISSION_KEYS.includes(permission) && !LEGACY_SERVICE_PERMISSION_KEYS.includes(permission) && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(permission) && permissionAllowedForTenant(permission, tenantFeatures))
       .forEach((permission) => granted.add(permission));
+    for (const permission of inheritedPermissions) {
+      if (!LEGACY_COMBINED_PERMISSION_GRANTS[permission]) continue;
+      for (const key of LEGACY_COMBINED_PERMISSION_GRANTS[permission]) {
+        if (permissionAllowedForTenant(key, tenantFeatures)) granted.add(key);
+      }
+    }
   }
 
   const normalized = normalizePermissionRecord(permissionRecord || {});
   for (const [key, enabled] of Object.entries(normalized)) {
-    if (enabled && key.startsWith("can") && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, tenantFeatures)) {
+    if (enabled && key.startsWith("can") && !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, tenantFeatures)) {
       granted.add(key);
     }
   }
@@ -1475,7 +1540,13 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
   // the newer collections, statement, or financial-action permissions.
   if (normalized.canViewPropertyManagement) granted.add('canViewPropertyPortfolio');
 
-  if (normalized.canManageCustomerCreditLimit) granted.add('canViewCustomerCreditLimit');
+  for (const [legacyKey, granularKeys] of Object.entries(LEGACY_COMBINED_PERMISSION_GRANTS)) {
+    const legacyGranted = normalized[legacyKey] || (Array.isArray(inheritedPermissions) && inheritedPermissions.includes(legacyKey));
+    if (legacyGranted) for (const key of granularKeys) if (permissionAllowedForTenant(key, tenantFeatures)) granted.add(key);
+  }
+  if (normalized.canManageCustomerCreditLimit || normalized.canCreateCustomerCreditLimit || normalized.canEditCustomerCreditLimit) {
+    granted.add('canViewCustomerCreditLimit');
+  }
 
   return [...granted];
 }

@@ -102,8 +102,9 @@ export default function SalesPage() {
   const { hasPermission, user } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const navigate = useNavigate()
+  const multiUnitEnabled = hasFeature('inventory.multi_unit')
   const canCreateSaleJobs = hasFeature('service.job_cards') && hasPermission('canCreateServiceJobCard')
-  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canManageCustomerCreditLimit'))
+  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canCreateCustomerCreditLimit') || hasPermission('canEditCustomerCreditLimit'))
   const [saleTechnicians, setSaleTechnicians] = useState<SaleTechnician[]>([])
   const [serviceOptionsError, setServiceOptionsError] = useState('')
   useEffect(() => {
@@ -892,7 +893,7 @@ export default function SalesPage() {
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Products</p>
                       <div className="grid gap-3 sm:grid-cols-2">
                         {productItems.map((item) => {
-                          const units = (item as any).units || []
+                          const units = multiUnitEnabled ? ((item as any).units || []) : []
                           const baseUnit = (item as any).baseUnit || 'Piece'
                           const isUncategorized = (item as any).isUncategorized
                           return (

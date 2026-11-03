@@ -18,6 +18,7 @@ import { ensureTenantCategoryCatalog } from "../utils/categoryDefaults.js";
 import { categoryNameKey, categorySlug } from "../utils/categoryCatalog.js";
 import { deleteCloudinaryAsset, safeCloudinaryId, uploadBufferToCloudinary } from '../utils/cloudinaryUpload.js';
 import { canUploadRentalItemImage } from '../utils/rentalImageAccess.js';
+import { isValidStockQuantity } from '../utils/stockQuantity.js';
 
 const router = Router();
 const rentalImageUpload = multer({
@@ -82,7 +83,6 @@ const normalizeProductAttribute = (value) => {
   if (value === null) return null;
   return String(value).normalize("NFKC").trim().replace(/\s+/g, " ") || null;
 };
-
 async function generateUniqueBarcode(tenantId, branchId, excludeProductId) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const payload = `20${Array.from({ length: 10 }, () => randomInt(10)).join("")}`;
@@ -750,7 +750,10 @@ router.get("/", authenticateToken, async (req, res) => {
     const { search, category, page = 1, limit = 100, lowStock, barcode, itemType } = req.query;
     const where = scopedWhere(scope, { isActive: { not: false } });
     const includeDailyMovements = String(req.query.includeDailyMovements || "").toLowerCase() === "true";
+    const multiUnitEnabled = await hasFeatureAccess(await getTenantFeatures(tenantId), 'inventory.multi_unit');
+    const hideSellingUnits = (rows) => multiUnitEnabled ? rows : rows.map((product) => ({ ...product, units: [] }));
     const buildListResponse = async (products, total, responsePage = Number(page), responseLimit = Number(limit)) => {
+      products = hideSellingUnits(products);
       if (hasFeatureAccess(await getTenantFeatures(tenantId), 'service.job_cards')) products = await attachProductServiceLinks(prisma, tenantId, products);
       if (!includeDailyMovements) {
         return { products, total, page: responsePage, limit: responseLimit };
@@ -789,10 +792,10 @@ router.get("/", authenticateToken, async (req, res) => {
         };
       return {
         products: products.map(withMovement),
-        movementProducts: historyProducts.filter((product) => {
+        movementProducts: hideSellingUnits(historyProducts.filter((product) => {
           const period = byProductId.get(product.id)?.period;
           return product.isActive !== false || (period && Object.values(period).some((quantity) => quantity > 0));
-        }).map(withMovement),
+        })).map(withMovement),
         total,
         page: responsePage,
         limit: responseLimit,
@@ -1077,8 +1080,8 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
       return res.status(400).json({ error: "Stock quantity is required" });
     }
     const parsedQuantity = Number(quantityValue);
-    if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
-      return res.status(400).json({ error: "Stock quantity must be a non-negative integer" });
+    if (!isValidStockQuantity(parsedQuantity)) {
+      return res.status(400).json({ error: "Stock quantity must be non-negative and use no more than 3 decimal places" });
     }
     body.quantity = parsedQuantity;
 
@@ -1244,8 +1247,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const quantityWasProvided = quantity !== undefined && quantity !== null && quantity !== "";
     if (quantityWasProvided) {
       const parsedQuantity = Number(quantity);
-      if (!Number.isInteger(parsedQuantity) || parsedQuantity < 0) {
-        return res.status(400).json({ error: "Stock quantity must be a non-negative integer" });
+      if (!isValidStockQuantity(parsedQuantity)) {
+        return res.status(400).json({ error: "Stock quantity must be non-negative and use no more than 3 decimal places" });
       }
       if (parsedQuantity !== Number(existing.quantity || 0) && itemType !== "service") {
         return res.status(400).json({
@@ -1405,7 +1408,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
 });
 
 // Adjust product stock separately from product detail updates
-router.post("/:id/stock-adjust", authenticateToken, requirePermission("canAdjustStock"), async (req, res) => {
+router.post("/:id/stock-adjust", authenticateToken, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const product = await prisma.product.findFirst({
@@ -1422,10 +1425,14 @@ router.post("/:id/stock-adjust", authenticateToken, requirePermission("canAdjust
     if (!["stock_in", "stock_out"].includes(adjustmentType)) {
       return res.status(400).json({ error: "Adjustment type must be stock_in or stock_out" });
     }
+    const requiredPermission = adjustmentType === 'stock_in' ? 'canRecordStockIn' : 'canAdjustStock';
+    if (!req.user?.permissions?.includes('*') && !req.user?.permissions?.includes(requiredPermission)) {
+      return res.status(403).json({ error: `You do not have permission to record ${adjustmentType === 'stock_in' ? 'stock received' : 'stock-out adjustments'}.` });
+    }
 
     const parsedQuantity = Number(req.body.quantity);
-    if (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0) {
-      return res.status(400).json({ error: "Adjustment quantity must be a positive integer" });
+    if (!isValidStockQuantity(parsedQuantity, { allowZero: false })) {
+      return res.status(400).json({ error: "Adjustment quantity must be positive and use no more than 3 decimal places" });
     }
 
     const currentQuantity = Number(product.quantity || 0);
@@ -1519,7 +1526,7 @@ router.delete("/:id", authenticateToken, async (req, res) => {
 // ==================== PRODUCT UNITS (Multi-UOM) ====================
 
 // Get units for a product
-router.get("/:productId/units", authenticateToken, async (req, res) => {
+router.get("/:productId/units", authenticateToken, requireFeature('inventory.multi_unit'), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }) });
@@ -1530,20 +1537,23 @@ router.get("/:productId/units", authenticateToken, async (req, res) => {
 });
 
 // Add a selling unit to a product
-router.post("/:productId/units", authenticateToken, requirePermission("canCreateProduct"), async (req, res) => {
+router.post("/:productId/units", authenticateToken, requireFeature('inventory.multi_unit'), requirePermission("canCreateProduct"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }) });
     if (!product) return res.status(404).json({ error: "Product not found" });
     const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
     if (!unitName || conversionFactor == null || sellingPrice == null) return res.status(400).json({ error: "unitName, conversionFactor, and sellingPrice are required" });
-    const unit = await prisma.productUnit.create({ data: { productId: product.id, unitName, conversionFactor: parseFloat(conversionFactor), sellingPrice: parseFloat(sellingPrice), isDefault: isDefault || false } });
+    const factor = Number(conversionFactor);
+    const price = Number(sellingPrice);
+    if (!Number.isFinite(factor) || factor <= 0 || !Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Conversion factor must be positive and selling price must be zero or greater." });
+    const unit = await prisma.productUnit.create({ data: { productId: product.id, unitName: String(unitName).trim(), conversionFactor: factor, sellingPrice: price, isDefault: isDefault || false } });
     res.status(201).json(unit);
   } catch (err) { handleBranchError(res, err); }
 });
 
 // Update a selling unit
-router.put("/:productId/units/:unitId", authenticateToken, requirePermission("canEditProduct"), async (req, res) => {
+router.put("/:productId/units/:unitId", authenticateToken, requireFeature('inventory.multi_unit'), requirePermission("canEditProduct"), async (req, res) => {
   try {
     const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
@@ -1558,8 +1568,12 @@ router.put("/:productId/units/:unitId", authenticateToken, requirePermission("ca
     if (!unit) return res.status(404).json({ error: "Unit not found" });
     const oldSellingPrice = Number(unit.sellingPrice || 0);
     const parsedSellingPrice = sellingPrice != null ? parseFloat(sellingPrice) : null;
+    const parsedConversionFactor = conversionFactor != null ? Number(conversionFactor) : null;
+    if ((parsedConversionFactor != null && (!Number.isFinite(parsedConversionFactor) || parsedConversionFactor <= 0)) || (parsedSellingPrice != null && (!Number.isFinite(parsedSellingPrice) || parsedSellingPrice < 0))) {
+      return res.status(400).json({ error: "Conversion factor must be positive and selling price must be zero or greater." });
+    }
     const updated = await prisma.$transaction(async (tx) => {
-      const saved = await tx.productUnit.update({ where: { id: unit.id }, data: { ...(unitName && { unitName }), ...(conversionFactor != null && { conversionFactor: parseFloat(conversionFactor) }), ...(sellingPrice != null && { sellingPrice: parsedSellingPrice }), ...(isDefault != null && { isDefault }) } });
+      const saved = await tx.productUnit.update({ where: { id: unit.id }, data: { ...(unitName && { unitName: String(unitName).trim() }), ...(parsedConversionFactor != null && { conversionFactor: parsedConversionFactor }), ...(sellingPrice != null && { sellingPrice: parsedSellingPrice }), ...(isDefault != null && { isDefault }) } });
       if (parsedSellingPrice != null && Number.isFinite(parsedSellingPrice) && parsedSellingPrice !== oldSellingPrice) {
         await tx.productPriceHistory.create({
           data: {
@@ -1582,7 +1596,7 @@ router.put("/:productId/units/:unitId", authenticateToken, requirePermission("ca
 });
 
 // Delete a selling unit
-router.delete("/:productId/units/:unitId", authenticateToken, requirePermission("canEditProduct"), async (req, res) => {
+router.delete("/:productId/units/:unitId", authenticateToken, requireFeature('inventory.multi_unit'), requirePermission("canEditProduct"), async (req, res) => {
   try {
     const unit = await prisma.productUnit.findUnique({ where: { id: req.params.unitId } });
     if (!unit) return res.status(404).json({ error: "Unit not found" });
@@ -1662,8 +1676,8 @@ router.post("/import", authenticateToken, requirePermission("canImportInventory"
       if (quantityRaw === undefined || quantityRaw === null || String(quantityRaw).trim() === "") {
         rowErrors.push("Stock Quantity is required");
       } else {
-        quantity = parseInt(quantityRaw, 10);
-        if (isNaN(quantity) || quantity < 0) rowErrors.push("Stock Quantity must be a non-negative integer");
+        quantity = Number(quantityRaw);
+        if (!isValidStockQuantity(quantity)) rowErrors.push("Stock Quantity must be non-negative and use no more than 3 decimal places");
       }
 
       // Optional: minStock

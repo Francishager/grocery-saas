@@ -121,6 +121,10 @@ async function checkDiscountPermission(req, userId, saleItems, cashDiscount = 0)
 
 async function checkedSaleItems(items, scope) {
   const normalized = normalizeItems(items);
+  const usesSellingUnits = normalized.some((item) => Boolean(item.unitName));
+  if (usesSellingUnits && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'inventory.multi_unit')) {
+    throw Object.assign(new Error('Selling Units (Multi-UOM) is not enabled for this business.'), { statusCode: 403 });
+  }
   const productIds = [...new Set(normalized.map((item) => item.productId).filter(Boolean))];
   const products = await prisma.product.findMany({
     where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } }),
@@ -145,11 +149,16 @@ async function checkedSaleItems(items, scope) {
 
     if (unitName) {
       const unit = product.units.find((u) => u.unitName === unitName);
-      if (unit) {
-        effectivePrice = unit.sellingPrice;
-        conversionFactor = unit.conversionFactor;
-        baseQty = item.quantity * unit.conversionFactor; // convert to base units
-      }
+      if (!unit) throw Object.assign(new Error(`Selling unit "${unitName}" is not configured for ${product.name}.`), { statusCode: 400 });
+      effectivePrice = unit.sellingPrice;
+      conversionFactor = unit.conversionFactor;
+      baseQty = item.quantity * unit.conversionFactor; // convert to base units
+    } else {
+      conversionFactor = 1;
+    }
+
+    if (!Number.isFinite(Number(conversionFactor)) || Number(conversionFactor) <= 0) {
+      throw Object.assign(new Error(`Selling unit conversion is invalid for ${product.name}.`), { statusCode: 400 });
     }
 
     // Check stock in base units (skip for service items)

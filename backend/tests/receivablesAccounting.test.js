@@ -236,7 +236,7 @@ test('missing historical legacy receipt journal is reconstructed with its receip
   assert.equal(result.posted, true)
 })
 
-test('legacy receipt journal that credited excess to receivables gets a balanced advance reclassification', async () => {
+test('linked sale overpayment gets a balanced advance reclassification for its unapplied receipt surplus', async () => {
   const mapped = { ...config, isEnabled: true }
   const roleTypes = {
     receivableAccountId: 'asset', salesRevenueAccountId: 'revenue', taxPayableAccountId: 'liability',
@@ -244,15 +244,16 @@ test('legacy receipt journal that credited excess to receivables gets a balanced
     customerAdvancesAccountId: 'liability', openingBalanceEquityAccountId: 'equity',
   }
   const receiptDate = new Date('2026-10-20T10:00:00Z')
-  const entries = new Map([['CUSTOMER_RECEIPT:payment-legacy', {
+  const entries = new Map([['CUSTOMER_RECEIPT:payment-linked', {
     id: 'old-receipt-journal', lines: [
       { accountId: 'till', debit: 100, credit: 0 },
       { accountId: 'ar', debit: 0, credit: 100 },
     ],
   }]])
   const payment = {
-    id: 'payment-legacy', tenantId: 'tenant', customerId: 'customer-1', saleId: null,
-    amount: 100, allocationMode: 'legacy', branchId: null, reference: 'RCPT-1', createdAt: receiptDate, allocations: [],
+    id: 'payment-linked', tenantId: 'tenant', customerId: 'customer-1', saleId: 'sale-1',
+    amount: 100, allocationMode: 'explicit', branchId: null, reference: 'RCPT-1', createdAt: receiptDate,
+    allocations: [{ saleId: 'sale-1', targetType: 'sale', amount: 60 }],
   }
   const client = {
     $queryRaw: async (parts) => parts.join('?').includes('SUM(jl."debit" - jl."credit")') ? [{ amount: 0 }] : [],

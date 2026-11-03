@@ -137,7 +137,7 @@ test('receivable reconciliation access and review are independently permissioned
   assert.match(PERMISSION_METADATA.canReviewReceivableReconciliation.description, /does not post or change balances/i);
 });
 
-test('customer credit-limit visibility and editing are separate customer permissions', () => {
+test('customer credit-limit create and edit permissions are independent; legacy grants remain compatible', () => {
   const limitedUser = resolveEffectivePermissions({ role: 'attendant' }, {
     canViewCustomerBalance: true,
     canViewCustomerCreditLimit: true,
@@ -145,13 +145,35 @@ test('customer credit-limit visibility and editing are separate customer permiss
   const manager = resolveEffectivePermissions({ role: 'attendant' }, {
     canManageCustomerCreditLimit: true,
   }, [], new Set(['customers', 'receivables']));
+  const createOnly = resolveEffectivePermissions({ role: 'attendant' }, {
+    canCreateCustomerCreditLimit: true,
+  }, [], new Set(['customers', 'receivables']));
+  const editOnly = resolveEffectivePermissions({ role: 'attendant' }, {
+    canEditCustomerCreditLimit: true,
+  }, [], new Set(['customers', 'receivables']));
 
   assert.ok(limitedUser.includes('canViewCustomerCreditLimit'));
   assert.ok(!limitedUser.includes('canManageCustomerCreditLimit'));
-  assert.ok(manager.includes('canManageCustomerCreditLimit'));
+  assert.ok(manager.includes('canCreateCustomerCreditLimit'));
+  assert.ok(manager.includes('canEditCustomerCreditLimit'));
+  assert.ok(!manager.includes('canManageCustomerCreditLimit'));
   assert.ok(manager.includes('canViewCustomerCreditLimit'));
+  assert.ok(createOnly.includes('canCreateCustomerCreditLimit'));
+  assert.ok(createOnly.includes('canViewCustomerCreditLimit'));
+  assert.ok(!createOnly.includes('canEditCustomerCreditLimit'));
+  assert.ok(editOnly.includes('canEditCustomerCreditLimit'));
+  assert.ok(editOnly.includes('canViewCustomerCreditLimit'));
+  assert.ok(!editOnly.includes('canCreateCustomerCreditLimit'));
   assert.equal(PERMISSION_METADATA.canViewCustomerCreditLimit.category, 'customers');
   assert.equal(PERMISSION_METADATA.canManageCustomerCreditLimit.category, 'customers');
+  assert.equal(PERMISSION_METADATA.canCreateCustomerCreditLimit.category, 'customers');
+  assert.equal(PERMISSION_METADATA.canEditCustomerCreditLimit.category, 'customers');
+});
+
+test('customer credit-limit create and edit permissions are present in the Prisma permission record', () => {
+  const schema = readFileSync(new URL('../prisma/schema.prisma', import.meta.url), 'utf8');
+  assert.match(schema, /canCreateCustomerCreditLimit\s+Boolean\s+@default\(false\)/);
+  assert.match(schema, /canEditCustomerCreditLimit\s+Boolean\s+@default\(false\)/);
 });
 
 test('recording receivables stays unavailable when the SaaS tenant lacks the receivables feature', () => {

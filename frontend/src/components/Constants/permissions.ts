@@ -118,6 +118,8 @@ export const permissions: Permission[] = [
   { id: 'canViewCustomerIdentity', name: 'View Customer Identity Documents', description: 'View customer profile photos and National ID images', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerAddress', name: 'View Customer Addresses', description: 'View customer physical addresses', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerBalance', name: 'View Customer Balances & Credit Limits', description: 'View opening/current balances, limits, and trust scores', category: 'customers', accessesBusinessData: true },
+  { id: 'canCreateCustomerCreditLimit', name: 'Create Customer Credit Limits', description: 'Set an initial credit limit when creating a customer', category: 'customers', accessesBusinessData: true },
+  { id: 'canEditCustomerCreditLimit', name: 'Edit Customer Credit Limits', description: 'Change an existing customer credit limit or credit account', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerSalesHistory', name: 'View Customer Sales History', description: 'View customer sales, items, amounts, and receipts', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerPaymentsHistory', name: 'View Customer Payment History', description: 'View customer payments, methods, amounts, and receipts', category: 'customers', accessesBusinessData: true },
   { id: 'canViewCustomerReturnsHistory', name: 'View Customer Returns History', description: 'View customer returns, returned items, and refunds', category: 'customers', accessesBusinessData: true },

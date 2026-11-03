@@ -10,13 +10,13 @@ export const TRASH_MODELS = {
   cashAccount: { label: 'Transaction account', permissions: ['canDeleteTransactionAccount'], fields: inactive },
   employee: { label: 'Employee', permissions: ['canDeleteHREmployee'], fields: () => ({ status: 'inactive', terminationDate: new Date() }) },
   attendanceRecord: { label: 'Attendance', permissions: ['canDeleteHRAttendance'], fields: inactive },
-  department: { label: 'Department', permissions: ['canManageHRStructure'], fields: inactive },
-  position: { label: 'Position', permissions: ['canManageHRStructure'], fields: inactive },
-  unit: { label: 'HR unit', permissions: ['canManageHRStructure'], fields: inactive },
-  team: { label: 'HR team', permissions: ['canManageHRStructure'], fields: inactive },
-  shiftTemplate: { label: 'Shift template', permissions: ['canManageHRShifts'], fields: inactive },
+  department: { label: 'Department', permissions: ['canDeleteHRStructure'], fields: inactive },
+  position: { label: 'Position', permissions: ['canDeleteHRStructure'], fields: inactive },
+  unit: { label: 'HR unit', permissions: ['canDeleteHRStructure'], fields: inactive },
+  team: { label: 'HR team', permissions: ['canDeleteHRStructure'], fields: inactive },
+  shiftTemplate: { label: 'Shift template', permissions: ['canDeleteHRShifts'], fields: inactive },
   shiftAssignment: { label: 'Shift assignment', permissions: ['canAssignHRShifts'], fields: () => ({ isActive: false, status: 'ended', assignmentEndDate: new Date() }) },
-  leaveType: { label: 'Leave type', permissions: ['canManageHRLeaveTypes'], fields: inactive },
+  leaveType: { label: 'Leave type', permissions: ['canDeleteHRLeaveTypes'], fields: inactive },
 };
 export const TRASH_PERMISSIONS = [...new Set(Object.values(TRASH_MODELS).flatMap(config => config.permissions))];
 const json = value => JSON.parse(JSON.stringify(value ?? null));

@@ -23,7 +23,7 @@ export function customerProfileAccess(permissions = []) {
   const granted = new Set(Array.isArray(permissions) ? permissions : [])
   const has = (permission) => granted.has('*') || granted.has(permission)
   const balance = has('canViewCustomerBalance')
-  const creditLimit = has('canViewCustomerCreditLimit') || has('canManageCustomerCreditLimit')
+  const creditLimit = has('canViewCustomerCreditLimit') || has('canManageCustomerCreditLimit') || has('canCreateCustomerCreditLimit') || has('canEditCustomerCreditLimit')
   const sales = has('canViewCustomerSalesHistory')
   const payments = has('canViewCustomerPaymentsHistory')
   const returns = has('canViewCustomerReturnsHistory')

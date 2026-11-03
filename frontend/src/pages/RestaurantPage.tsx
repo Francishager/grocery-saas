@@ -60,7 +60,8 @@ export default function RestaurantPage() {
   const canCreateRestaurant = hasPermission('canCreateRestaurant')
   const canEditRestaurant = hasPermission('canEditRestaurant')
   const canDeleteRestaurant = hasPermission('canDeleteRestaurant')
-  const canAdjustStock = hasPermission('canAdjustStock')
+  const canAdjustStockOut = hasPermission('canAdjustStock')
+  const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
   const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
   const [tab, setActiveTab] = useState(routeTab || 'dashboard')
   const setTab = (nextTab: string) => {
@@ -711,7 +712,7 @@ export default function RestaurantPage() {
   }
 
   const submitStockAdjustment = async () => {
-    if (!stockAdjustProduct || !canAdjustStock) return
+    if (!stockAdjustProduct || (stockAdjustForm.adjustmentType === 'stock_in' ? !hasPermission('canRecordStockIn') && !canAdjustStockOut : !canAdjustStockOut)) return
     if (!Number.isInteger(stockAdjustForm.quantity) || stockAdjustForm.quantity <= 0) {
       toast({ variant: 'destructive', title: 'Enter a positive whole-unit quantity' })
       return
@@ -1189,7 +1190,7 @@ export default function RestaurantPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>{stockAdjustForm.adjustmentType === 'stock_in' ? 'Receive stock' : 'Record stock-out'}{stockAdjustProduct ? ` · ${stockAdjustProduct.name}` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div><Label>Movement</Label><Select value={stockAdjustForm.adjustmentType} onValueChange={adjustmentType => setStockAdjustForm(current => ({ ...current, adjustmentType, reason: adjustmentType === 'stock_in' ? '' : 'Waste / spoilage' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="stock_in">Receive / add stock</SelectItem><SelectItem value="stock_out">Waste / remove stock</SelectItem></SelectContent></Select></div>
+            <div><Label>Movement</Label><Select value={stockAdjustForm.adjustmentType} onValueChange={adjustmentType => setStockAdjustForm(current => ({ ...current, adjustmentType, reason: adjustmentType === 'stock_in' ? '' : 'Waste / spoilage' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(hasPermission('canRecordStockIn') || canAdjustStockOut) && <SelectItem value="stock_in">Receive / add stock</SelectItem>}{canAdjustStockOut && <SelectItem value="stock_out">Waste / remove stock</SelectItem>}</SelectContent></Select></div>
             <div><Label>Quantity ({stockAdjustProduct?.baseUnit || 'Piece'})</Label><Input type="number" min="1" step="1" value={stockAdjustForm.quantity} onChange={event => setStockAdjustForm(current => ({ ...current, quantity: Number(event.target.value) }))} /></div>
             <div><Label>Reason</Label><Input required value={stockAdjustForm.reason} onChange={event => setStockAdjustForm(current => ({ ...current, reason: event.target.value }))} placeholder={stockAdjustForm.adjustmentType === 'stock_in' ? 'e.g. Opening count correction' : 'e.g. Spoilage, breakage, staff meal'} /></div>
             {stockAdjustForm.adjustmentType === 'stock_out' && stockAdjustProduct && <p className="text-xs text-muted-foreground">Available: {stockAdjustProduct.quantity} {stockAdjustProduct.baseUnit || 'Piece'}. The recorded quantity cannot exceed stock on hand.</p>}

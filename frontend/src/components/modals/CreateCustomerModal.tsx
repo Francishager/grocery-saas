@@ -64,7 +64,9 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
   const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
   const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
   const canViewCustomerAddress = hasPermission('canViewCustomerAddress')
-  const canManageCustomerCreditLimit = hasPermission('canManageCustomerCreditLimit') && isFeatureEnabled('customers.credit_limits')
+  const canSetCustomerCreditLimit = isFeatureEnabled('customers.credit_limits') && (
+    initialData?.id ? hasPermission('canEditCustomerCreditLimit') : hasPermission('canCreateCustomerCreditLimit')
+  )
   const canViewCustomerNotes = hasPermission('canViewCustomerNotes')
   
   const [formData, setFormData] = useState({
@@ -164,7 +166,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         name: formData.name,
         status: formData.status,
         branchId: formData.branchId || undefined,
-        creditLimit: canManageCustomerCreditLimit ? Number(formData.creditLimit || 0) : undefined,
+        creditLimit: canSetCustomerCreditLimit ? Number(formData.creditLimit || 0) : undefined,
         phone: !initialData?.id || canViewCustomerPhone ? formData.phone : undefined,
         alternatePhone: !initialData?.id || canViewCustomerPhone ? formData.alternatePhone || null : undefined,
         email: !initialData?.id || canViewCustomerEmail ? formData.email : undefined,
@@ -302,18 +304,20 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
             </div>
           </div>
 
-          {canManageCustomerCreditLimit && <div className="space-y-2">
-              <Label htmlFor="creditLimit">Credit limit (optional)</Label>
+          <div className={`grid gap-4 ${canSetCustomerCreditLimit ? 'md:grid-cols-2' : ''}`}>
+          {canSetCustomerCreditLimit && <div className="space-y-2">
+              <Label htmlFor="creditLimit">Credit limit <span aria-hidden="true">*</span></Label>
               <Input
                 id="creditLimit"
                 type="number"
+                required
                 value={formData.creditLimit}
                 onChange={(e) => handleInputChange('creditLimit', Number(e.target.value))}
                 placeholder="0 for cash/deposit customers"
                 min="0"
                 step="0.01"
               />
-              <p className="text-xs text-muted-foreground">Set a limit only when you authorize this customer to buy on credit. Credit sales are checked against it.</p>
+              <p className="text-xs text-muted-foreground">Enter 0 when this customer is not authorized to buy on credit.</p>
             </div>}
 
           <div className="space-y-2">
@@ -325,6 +329,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
               placeholder="Enter customer address"
               rows={2}
             /> : <Textarea id="address" value="" readOnly placeholder={initialData.maskedAddress || '******'} aria-label="Address masked by your permissions" rows={2} />}
+          </div>
           </div>
 
           {canManageOpeningBalances && (

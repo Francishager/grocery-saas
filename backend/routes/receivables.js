@@ -209,11 +209,12 @@ const validateOptionalCustomerCreditLimit = (creditLimit) => {
   return { valid: true, amount }
 }
 
-const canManageCustomerCreditLimit = (req) =>
+const canManageCustomerCreditLimit = (req, action) =>
   req.user?.role === 'owner' ||
   req.user?.role === 'saas_admin' ||
   req.user?.permissions?.includes('*') ||
-  req.user?.permissions?.includes('canManageCustomerCreditLimit') ||
+  req.user?.permissions?.includes(action) ||
+  req.userPermissions?.[action] === true ||
   req.userPermissions?.canManageCustomerCreditLimit === true
 
 async function getTenantCustomerProfileAccess(req, tenantId) {
@@ -1424,14 +1425,17 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
     const normalizedAlternatePhone = String(alternatePhone || '').replace(/\D/g, '')
     if (normalizedPhone && normalizedPhone === normalizedAlternatePhone) return res.status(400).json({ error: 'Use a different number for the alternate phone.' })
 
+    const customerFeatures = await getTenantFeatures(scope.tenantId)
+    const creditLimitsEnabled = hasFeatureAccess(customerFeatures, 'customers.credit_limits')
     if (creditLimit !== undefined) {
-      const features = await getTenantFeatures(scope.tenantId)
-      if (!hasFeatureAccess(features, 'customers.credit_limits')) {
+      if (!creditLimitsEnabled) {
         return res.status(403).json({ error: 'Customer credit limits are not enabled for this business plan.', code: 'CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED' })
       }
-      if (!canManageCustomerCreditLimit(req)) {
-        return res.status(403).json({ error: 'You do not have permission to set customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+      if (!canManageCustomerCreditLimit(req, 'canCreateCustomerCreditLimit')) {
+        return res.status(403).json({ error: 'You do not have permission to create customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_CREATE_PERMISSION_REQUIRED' })
       }
+    } else if (creditLimitsEnabled && canManageCustomerCreditLimit(req, 'canCreateCustomerCreditLimit')) {
+      return res.status(400).json({ error: 'Customer credit limit is required. Enter 0 if this customer is not authorized to buy on credit.', code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
     }
     const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit)
     if (!creditLimitCheck.valid) {
@@ -1544,8 +1548,8 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
       if (!hasFeatureAccess(features, 'customers.credit_limits')) {
         return res.status(403).json({ error: 'Customer credit limits are not enabled for this business plan.', code: 'CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED' })
       }
-      if (!canManageCustomerCreditLimit(req)) {
-        return res.status(403).json({ error: 'You do not have permission to set or change customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED' })
+      if (!canManageCustomerCreditLimit(req, 'canEditCustomerCreditLimit')) {
+        return res.status(403).json({ error: 'You do not have permission to edit customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_EDIT_PERMISSION_REQUIRED' })
       }
     }
 
@@ -1769,6 +1773,9 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
 
     if (!customerId) return res.status(400).json({ error: 'Customer is required' })
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one sale item is required' })
+    if (items.some((item) => Boolean(item.unitName)) && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'inventory.multi_unit')) {
+      return res.status(403).json({ error: 'Selling Units (Multi-UOM) is not enabled for this business.', code: 'FEATURE_NOT_ENABLED', feature: 'inventory.multi_unit' })
+    }
 
     const customer = await prisma.customer.findFirst({
       where: scopedWhere(scope, { id: customerId })
@@ -1793,10 +1800,11 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       const unitName = item.unitName || null
       if (unitName) {
         const unit = (product.units || []).find((entry) => entry.unitName === unitName)
-        if (unit) {
-          price = toMoney(unit.sellingPrice, price)
-          conversionFactor = Number(unit.conversionFactor || 1)
-        }
+        if (!unit) throw Object.assign(new Error(`Selling unit "${unitName}" is not configured for ${product.name}.`), { statusCode: 400 })
+        price = toMoney(unit.sellingPrice, price)
+        conversionFactor = Number(unit.conversionFactor)
+      } else {
+        conversionFactor = 1
       }
       const normalizedConversionFactor = Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1
       const baseQty = quantity * normalizedConversionFactor
@@ -3140,7 +3148,7 @@ router.get('/credit-accounts', authenticateToken, requirePermission('canViewRece
 })
 
 // Update credit terms. Trust score is calculated from repayment history.
-router.put('/credit-accounts/:id', authenticateToken, requirePermission('canManageCustomerCreditLimit'), requireFeature('receivables'), requireFeature('customers.credit_limits'), requireTenant, async (req, res) => {
+router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEditCustomerCreditLimit'), requireFeature('receivables'), requireFeature('customers.credit_limits'), requireTenant, async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
     const { id } = req.params

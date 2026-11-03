@@ -76,7 +76,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     const { name, email, phone, address, attendanceLatitude, attendanceLongitude, attendanceRadiusMeters, currency, timezone, dateFormat, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
     const data = {};
     if (req.body.workingHours !== undefined) {
-      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canEditStaff')) {
+      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canManageWorkingHours')) {
         return res.status(403).json({ error: 'Staff access management permission is required to change working hours.' });
       }
       data.workingHours = validateWorkingHours(req.body.workingHours) ?? Prisma.DbNull;
@@ -106,7 +106,7 @@ router.put("/", authenticateToken, requirePermission("canEditSettings"), async (
     if (currency !== undefined) data.currency = currency;
     if (timezone !== undefined) {
       data.timezone = validateTimezone(timezone);
-      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canEditStaff')) {
+      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canManageWorkingHours')) {
         const current = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } });
         if (current?.timezone !== timezone) return res.status(403).json({ error: 'Staff access management permission is required to change the business timezone.' });
       }

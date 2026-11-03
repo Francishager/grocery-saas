@@ -15,6 +15,7 @@ import {
   ROLE_DEFAULTS,
   normalizePermissionRecord,
   permissionAllowedForTenant,
+  LEGACY_COMBINED_PERMISSION_KEYS,
 } from "../utils/permissions.js";
 
 const router = Router();
@@ -134,7 +135,9 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
     // Build permission data from request or role defaults
     const permData = {};
     for (const key of PERM_KEYS) {
-      if (!permissionAllowedForTenant(key, req.tenantFeatures)) {
+      if (LEGACY_COMBINED_PERMISSION_KEYS.includes(key)) {
+        permData[key] = false;
+      } else if (!permissionAllowedForTenant(key, req.tenantFeatures)) {
         permData[key] = false;
       } else if (permissions && permissions[key] !== undefined) {
         permData[key] = Boolean(permissions[key]);
@@ -212,7 +215,7 @@ router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (
   }
 });
 
-router.patch("/:id", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
+router.patch("/:id", authenticateToken, requirePermission("canEditStaffDetails"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -357,7 +360,7 @@ router.get("/:id/permissions", authenticateToken, requirePermission("canViewStaf
 });
 
 // Update permissions for a staff member
-router.put("/:id/permissions", authenticateToken, requirePermission("canEditStaff"), async (req, res) => {
+router.put("/:id/permissions", authenticateToken, requirePermission("canManageStaffPermissions"), async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
@@ -370,7 +373,7 @@ router.put("/:id/permissions", authenticateToken, requirePermission("canEditStaf
     const requestPermissions = req.body || {};
     const data = {};
     for (const key of PERM_KEYS) {
-      data[key] = permissionAllowedForTenant(key, req.tenantFeatures) && Boolean(requestPermissions[key] ?? false);
+      data[key] = !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, req.tenantFeatures) && Boolean(requestPermissions[key] ?? false);
     }
 
     const perms = await prisma.userPermission.upsert({

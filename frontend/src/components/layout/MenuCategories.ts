@@ -141,7 +141,7 @@ export const dashboardMenuCategories: MenuCategory[] = [
         label: 'Users & Permissions',
         path: '/settings/users',
         icon: 'Users',
-        permission: 'canEditStaff',
+        permission: 'canViewStaff',
       },
       {
         id: 'integrations',

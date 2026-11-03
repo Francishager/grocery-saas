@@ -6,11 +6,16 @@ import { fileURLToPath } from 'node:url'
 const source = readFileSync(fileURLToPath(new URL('../src/pages/receivables/ReceivablesPage.tsx', import.meta.url)), 'utf8')
 
 test('credit sale form offers saved product selling units and uses their configured prices', () => {
-  assert.match(source, /const sellingUnits = selectedItem\?\.units \|\| \[\]/)
+  assert.match(source, /hasFeature\('inventory\.multi_unit'\)/)
+  assert.match(source, /const sellingUnits = multiUnitEnabled \? \(selectedItem\?\.units \|\| \[\]\) : \[\]/)
   assert.match(source, /sellingUnits\.map\(\(unit: any\)/)
   assert.match(source, /unitName: selectedUnit\.unitName, price: String\(selectedUnit\.sellingPrice\)/)
   assert.match(source, /unitName: item\.unitName \|\| null/)
   assert.match(source, /disabled=\{Boolean\(item\.unitName\)\}/)
+})
+
+test('credit sale cannot present saved selling units when the tenant lacks the SaaS feature', () => {
+  assert.match(source, /multiUnitEnabled \? \(selectedItem\?\.units \|\| \[\]\) : \[\]/)
 })
 
 test('credit sale invoice print and download preserve the selected selling unit', () => {

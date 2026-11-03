@@ -8,9 +8,16 @@ const teamSalesPermissions = new Set([
   "canViewStaff",
   "canCreateStaff",
   "canEditStaff",
+  "canEditStaffDetails",
+  "canManageStaffPermissions",
   "canDeleteStaff",
   "canViewStaffTillSheet",
   "canManageHRPayroll",
+  "canCreateHRPayroll",
+  "canApproveHRPayroll",
+  "canPostHRPayroll",
+  "canPayHRPayroll",
+  "canManageHROpeningBalances",
   "canApproveHRPayroll",
 ]);
 

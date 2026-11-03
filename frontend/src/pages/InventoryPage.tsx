@@ -206,11 +206,14 @@ const defaultMovementForItem = (item: InventoryItem): DailyMovement => ({
 })
 
 const formatQty = (value: number | undefined | null) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value || 0))
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(Number(value || 0))
+const isValidStockQuantity = (value: number, allowZero = true) =>
+  Number.isFinite(value) && value >= (allowZero ? 0 : Number.EPSILON) && Math.abs(value * 1000 - Math.round(value * 1000)) < 1e-7
 
 export default function InventoryPage() {
   const { hasFeature } = useFeatureAccess()
   const restaurantFeatureEnabled = hasFeature('restaurant')
+  const multiUnitEnabled = hasFeature('inventory.multi_unit')
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryQuery, setCategoryQuery] = useState('')
   const [categorySaving, setCategorySaving] = useState(false)
@@ -264,7 +267,8 @@ export default function InventoryPage() {
   const canViewPriceHistory = hasPermission('canViewPriceHistory')
   const canEditProduct = hasPermission('canEditProduct')
   const canDeleteProduct = hasPermission('canDeleteProduct')
-  const canAdjustStock = hasPermission('canAdjustStock')
+  const canAdjustStockOut = hasPermission('canAdjustStock')
+  const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
   const canViewRestaurant = hasPermission('canViewRestaurant')
   const hospitalityView = searchParams.get('hospitalityView') || 'all'
   const showHospitalityInventory = hospitalityBusiness && restaurantFeatureEnabled && canViewRestaurant && lockedType === 'product'
@@ -559,8 +563,8 @@ export default function InventoryPage() {
       toast({ variant: 'destructive', title: 'Category is required' })
       return
     }
-    if (formData.itemType !== 'service' && !editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !Number.isFinite(formData.quantity) || formData.quantity < 0)) {
-      toast({ variant: 'destructive', title: 'Stock quantity is required and must be a non-negative number' })
+    if (formData.itemType !== 'service' && !editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !isValidStockQuantity(formData.quantity))) {
+      toast({ variant: 'destructive', title: 'Stock quantity is required and supports up to 3 decimal places' })
       return
     }
     if (!['product', 'service', 'rental'].includes(formData.itemType)) {
@@ -756,8 +760,8 @@ export default function InventoryPage() {
   }
 
   const openStockAdjust = (item: InventoryItem, adjustmentType: StockAdjustmentType = 'stock_in') => {
-    if (!canAdjustStock) {
-      toast({ variant: 'destructive', title: 'You do not have permission to adjust stock' })
+    if (adjustmentType === 'stock_in' ? !hasPermission('canRecordStockIn') && !canAdjustStockOut : !canAdjustStockOut) {
+      toast({ variant: 'destructive', title: adjustmentType === 'stock_in' ? 'You do not have permission to record stock received' : 'You do not have permission to adjust stock out' })
       return
     }
     if (!online) {
@@ -820,8 +824,8 @@ export default function InventoryPage() {
     if (!stockAdjust) return
 
     const quantity = Number(stockAdjust.quantity)
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-      toast({ variant: 'destructive', title: 'Enter a positive whole-number quantity' })
+    if (!isValidStockQuantity(quantity, false)) {
+      toast({ variant: 'destructive', title: 'Enter a positive quantity with no more than 3 decimal places' })
       return
     }
     if (stockAdjust.adjustmentType === 'stock_out' && quantity > Number(stockAdjust.item.quantity || 0)) {
@@ -1398,7 +1402,7 @@ export default function InventoryPage() {
               )}
 
               {/* Product fields */}
-              {formData.itemType === 'product' && (
+              {formData.itemType === 'product' && multiUnitEnabled && (
                 <>
               <div className="space-y-2">
                 <Label htmlFor="product_id">SKU / Product ID</Label>
@@ -1623,6 +1627,7 @@ export default function InventoryPage() {
                     id="quantity"
                     type="number"
                     min="0"
+                    step="0.001"
                     required
                     value={formData.quantity}
                     onChange={(e) =>
@@ -2267,7 +2272,7 @@ export default function InventoryPage() {
                   <div className="grid grid-cols-2 gap-2">
                     {([
                       ['stock_in', 'Stock In'],
-                      ['stock_out', 'Stock Out'],
+                      ...(canAdjustStockOut ? [['stock_out', 'Stock Out'] as [StockAdjustmentType, string][]] : []),
                     ] as Array<[StockAdjustmentType, string]>).map(([value, label]) => (
                       <button
                         key={value}
@@ -2291,8 +2296,8 @@ export default function InventoryPage() {
                   <Input
                     id="stockAdjustQuantity"
                     type="number"
-                    min="1"
-                    step="1"
+                    min="0.001"
+                    step="0.001"
                     value={stockAdjust.quantity}
                     onChange={(event) => setStockAdjust((prev) => prev ? { ...prev, quantity: event.target.value } : prev)}
                     required

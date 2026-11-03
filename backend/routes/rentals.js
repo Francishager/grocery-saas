@@ -558,8 +558,11 @@ router.post("/crm/leads/:id/convert", authenticateToken, requireTenant, requireA
         if (!customer) throw Object.assign(new Error("Select a customer from this business and branch."), { statusCode: 404 });
       } else {
         const name = String(req.body?.customerName || lead.prospectName || lead.contactName || lead.title || "").trim();
-        if (Object.prototype.hasOwnProperty.call(req.body || {}, "creditLimit") && !crmCanView(req, "canManageCustomerCreditLimit")) {
-          throw Object.assign(new Error("You do not have permission to set customer credit limits."), { statusCode: 403, code: "CUSTOMER_CREDIT_LIMIT_PERMISSION_REQUIRED" });
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, "creditLimit") && !crmCanView(req, "canCreateCustomerCreditLimit")) {
+          throw Object.assign(new Error("You do not have permission to create customer credit limits."), { statusCode: 403, code: "CUSTOMER_CREDIT_LIMIT_CREATE_PERMISSION_REQUIRED" });
+        }
+        if (Object.prototype.hasOwnProperty.call(req.body || {}, "creditLimit") && !hasFeatureAccess(req.tenantFeatures || new Set(), "customers.credit_limits")) {
+          throw Object.assign(new Error("Customer credit limits are not enabled for this business plan."), { statusCode: 403, code: "CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED" });
         }
         const creditLimit = Number(req.body?.creditLimit ?? 0);
         if (!name) throw Object.assign(new Error("A prospect or business name is required."), { statusCode: 400 });

@@ -38,7 +38,7 @@ router.get('/leave-types', async (req, res) => {
 });
 
 // Create leave type
-router.post('/leave-types', requireHRPermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
+router.post('/leave-types', requireHRPermission('LEAVE_TYPE_CREATE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { name, code, daysAllowedPerYear, ...data } = req.body;
@@ -73,7 +73,7 @@ router.get('/leave-types/:id', async (req, res) => {
 });
 
 // Update leave type
-router.put('/leave-types/:id', requireHRPermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
+router.put('/leave-types/:id', requireHRPermission('LEAVE_TYPE_UPDATE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;
@@ -86,7 +86,7 @@ router.put('/leave-types/:id', requireHRPermission('LEAVE_TYPE_MANAGE'), async (
 });
 
 // Deactivate leave type
-router.delete('/leave-types/:id', requireHRPermission('LEAVE_TYPE_MANAGE'), async (req, res) => {
+router.delete('/leave-types/:id', requireHRPermission('LEAVE_TYPE_DELETE'), async (req, res) => {
   try {
     const tenantId = req.tenant.id;
     const { id } = req.params;

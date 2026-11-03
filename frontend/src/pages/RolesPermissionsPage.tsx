@@ -34,6 +34,15 @@ type PermissionSchema = {
   categories?: PermissionCategoryDefinition[]
 }
 
+const HIDDEN_LEGACY_PERMISSION_KEYS = new Set([
+  'canManageCustomerCreditLimit', 'canEditStaff', 'canManageHRStructure', 'canManageHRContracts', 'canManageHRLeaveTypes',
+  'canManageHRDocuments', 'canManageHRAttendance', 'canManageHRShifts', 'canManageHRPayroll',
+  'canManagePropertyOwners', 'canManageProperties', 'canManagePropertyUnits', 'canManageTenancies',
+  'canManageTenantPersonalDetails', 'canManageRentPayment', 'canManageRentPaymentPlans',
+  'canManageSupplierNetwork', 'canManageMarketplacePromotions', 'canManageProcurementQuotes',
+  'canReviewProcurementInvoice', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount',
+])
+
 const PERM_LABELS: Record<string, string> = {
   ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, p.name])),
   canViewDashboard:'Can view dashboard',
@@ -44,22 +53,27 @@ const PERM_LABELS: Record<string, string> = {
   canCreatePayable:'Can create bills', canViewPayable:'Can view bills', canEditPayable:'Can edit bills', canDeletePayable:'Can delete bills',
   canCreateExpense:'Can create expense records', canViewExpense:'Can view expense records', canEditExpense:'Can edit expense records', canDeleteExpense:'Can delete expense records', canViewStaffTillSheet:'Can view staff till sheet',
   canCreateCustomer:'Can create customers', canViewCustomer:'Can view customers', canEditCustomer:'Can edit customers', canDeleteCustomer:'Can delete customers',
-  canViewCustomerPhone:'Can view customer phone numbers', canViewCustomerEmail:'Can view customer email addresses', canViewCustomerIdentity:'Can view customer identity documents', canViewCustomerAddress:'Can view customer addresses', canViewCustomerBalance:'Can view customer balances', canViewCustomerCreditLimit:'Can view customer credit limits', canManageCustomerCreditLimit:'Can set and edit customer credit limits',
+  canViewCustomerPhone:'Can view customer phone numbers', canViewCustomerEmail:'Can view customer email addresses', canViewCustomerIdentity:'Can view customer identity documents', canViewCustomerAddress:'Can view customer addresses', canViewCustomerBalance:'Can view customer balances', canViewCustomerCreditLimit:'Can view customer credit limits', canCreateCustomerCreditLimit:'Create customer credit limits', canEditCustomerCreditLimit:'Edit customer credit limits',
   canViewCustomerSalesHistory:'Can view customer sales history', canViewCustomerPaymentsHistory:'Can view customer payment history', canViewCustomerReturnsHistory:'Can view customer returns history', canViewCustomerCreditNotesHistory:'Can view customer credit note history', canViewCustomerWithdrawalsHistory:'Can view customer withdrawal history', canViewCustomerBusinessActivity:'Can view customer service and order activity',
   canViewCustomerNotes:'Can view customer notes', canRecordCustomerPayment:'Can record customer payments', canPrintCustomerReceipts:'Can print and download customer receipts',
   canCreateReceivable:'Can create credit sales', canViewReceivable:'Can view receivables', canEditReceivable:'Can edit receivables', canDeleteReceivable:'Can delete receivables',
   canCreateSupplier:'Can create suppliers', canViewSupplier:'Can view suppliers', canEditSupplier:'Can edit suppliers', canDeleteSupplier:'Can delete suppliers',
-  canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaff:'Can edit staff', canDeleteStaff:'Can delete staff',
+  canEditMarketplaceSellerProfile:'Edit seller marketplace profile', canRequestSupplierRelationship:'Request supplier relationships', canManageSupplierRelationships:'Approve, reject, or suspend supplier relationships',
+  canPauseMarketplaceCampaign:'Pause campaigns', canResumeMarketplaceCampaign:'Resume campaigns', canCancelMarketplaceCampaign:'Cancel campaigns',
+  canSelectProcurementQuote:'Select a supplier quote', canViewProcurementInvoice:'View supplier invoices', canApproveProcurementInvoice:'Approve supplier invoices', canRejectProcurementInvoice:'Reject supplier invoices',
+  canCreatePropertyOwners:'Create property owners', canEditPropertyOwners:'Edit property owners', canCreateProperties:'Create properties', canEditProperties:'Edit properties', canCreatePropertyUnits:'Create rental units', canEditPropertyUnits:'Edit rental units',
+  canCreateTenantPersonalDetails:'Record tenant household details', canEditTenantPersonalDetails:'Edit tenant household details', canCreateRentPaymentPlans:'Create rent payment plans', canCancelRentPaymentPlans:'Cancel rent payment plans',
+  canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaffDetails:'Edit staff profiles and assignments', canManageStaffPermissions:'Assign staff permissions', canManageWorkingHours:'Manage business working hours', canDeleteStaff:'Can delete staff',
   canViewHR:'Can view HR management',
   canViewHREmployeesForAttendance:'Can view employees for attendance only',
   canCreateHREmployee:'Can create HR employees',
   canEditHREmployee:'Can edit HR employees',
   canDeleteHREmployee:'Can delete HR employees',
-  canManageHRStructure:'Can manage HR departments, positions, units and teams',
+  canCreateHRStructure:'Create HR departments, positions, units and teams', canEditHRStructure:'Edit HR departments, positions, units and teams', canDeleteHRStructure:'Deactivate HR departments, positions, units and teams',
   canViewHRContracts:'Can view HR contracts',
-  canManageHRContracts:'Can manage HR contracts',
+  canCreateHRContracts:'Create HR contracts', canEditHRContracts:'Edit HR contracts', canTerminateHRContracts:'Terminate HR contracts',
   canViewHRDocuments:'Can view HR documents',
-  canManageHRDocuments:'Can manage HR documents',
+  canUploadHRDocuments:'Upload HR documents', canEditHRDocuments:'Edit or replace HR documents', canDeleteHRDocuments:'Delete HR documents',
   canViewHRSalaries:'Can view HR salaries',
   canManageHRSalaries:'Can manage HR salary records',
   canViewHRAttendance:'Can view HR attendance',
@@ -72,12 +86,12 @@ const PERM_LABELS: Record<string, string> = {
   canConfigureHRAttendance:'Can configure HR attendance',
   canApproveHRAttendance:'Can approve HR attendance',
   canViewHRShifts:'Can view HR shifts',
-  canManageHRShifts:'Can manage HR shifts',
+  canCreateHRShifts:'Create HR shifts', canEditHRShifts:'Edit HR shifts', canDeleteHRShifts:'Delete HR shifts',
   canAssignHRShifts:'Can assign HR shifts',
   canApproveHRShifts:'Can approve HR shift changes',
   canViewHRLeave:'Can view HR leave',
   canRequestHRLeave:'Can request HR leave',
-  canManageHRLeaveTypes:'Can manage HR leave types',
+  canCreateHRLeaveTypes:'Create HR leave types', canEditHRLeaveTypes:'Edit HR leave types', canDeleteHRLeaveTypes:'Delete HR leave types', canAllocateHRLeave:'Allocate leave balances',
   canApproveHRLeave:'Can approve HR leave',
   canViewHRPayroll:'Can view HR payroll',
   canCreateHRPayroll:'Can create HR payroll drafts',
@@ -85,7 +99,7 @@ const PERM_LABELS: Record<string, string> = {
   canPostHRPayroll:'Can post HR payroll to accounting',
   canPayHRPayroll:'Can pay salaries',
   canManageHRPayrollSettings:'Can manage HR payroll setup',
-  canManageHRPayroll:'Can manage HR payroll',
+  canManageHROpeningBalances:'Record employee opening balances',
   canCreateBranch:'Can create branches', canViewBranch:'Can view branches', canEditBranch:'Can edit branches', canDeleteBranch:'Can delete branches',
   canViewAuditReport:'Can view audit log', canExportReport:'Can export reports',
   canViewSettings:'Can view settings', canEditSettings:'Can edit settings', canGiveDiscount:'Can give discounts',
@@ -103,7 +117,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canManageFinancialYearClose:'Prepare financial-year close', canSignOffFinancialYearClose:'Sign off and close financial year', canReopenFinancialYearClose:'Reopen financial year', canDeleteAccounting:'Can delete accounting entries', canReverseAccountingEntry:'Can reverse accounting entries', canViewChartOfAccounts:'Can view chart of accounts', canCreateChartOfAccounts:'Can create chart of accounts', canEditChartOfAccounts:'Can edit chart of accounts',
   canViewTransactionAccount:'Can view transaction accounts', canUseAnyTransactionAccount:'Can use any transaction account', canUseOtherCashAccount:'Can use other cash accounts', canUseOwnCashAccount:'Can use own cash till', canUseOtherStaffCashAccount:'Can use other staff cash tills', canUseSafeAccount:'Can use safe accounts', canUseBankAccount:'Can use bank accounts', canUseMobileMoneyAccount:'Can use mobile money accounts', canUseCardAccount:'Can use card accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
   canCreateWithdrawal:'Can record customer withdrawals',
-  canAdjustStock:'Can adjust stock', canTransferStock:'Can transfer stock', canViewPriceHistory:'Can view price history',
+  canAdjustStock:'Can adjust stock out', canRecordStockIn:'Can record stock received', canTransferStock:'Can transfer stock', canViewPriceHistory:'Can view price history',
   canUseCash:'Can use assigned cash', canUseMobileMoney:'Can use mobile money', canUseBank:'Can use bank transfer', canUseCard:'Can use card',
   canImportInventory:'Can import inventory',
 }
@@ -121,19 +135,19 @@ const TRANSACTION_PERMISSION_KEYS = [
 
 const PAYMENT_METHOD_PERMISSION_KEYS = ['canUseCash', 'canUseMobileMoney', 'canUseBank', 'canUseCard']
 
-const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaff', 'canDeleteStaff']
+const STAFF_PERMISSION_KEYS = ['canCreateStaff', 'canViewStaff', 'canEditStaffDetails', 'canManageStaffPermissions', 'canManageWorkingHours', 'canDeleteStaff']
 const HR_PERMISSION_KEYS = [
   'canViewHR', 'canViewHREmployeesForAttendance', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee',
-  'canManageHRStructure', 'canViewHRContracts', 'canManageHRContracts',
-  'canViewHRDocuments', 'canManageHRDocuments', 'canViewHRSalaries', 'canManageHRSalaries',
+  'canCreateHRStructure', 'canEditHRStructure', 'canDeleteHRStructure', 'canViewHRContracts', 'canCreateHRContracts', 'canEditHRContracts', 'canTerminateHRContracts',
+  'canViewHRDocuments', 'canUploadHRDocuments', 'canEditHRDocuments', 'canDeleteHRDocuments', 'canViewHRSalaries', 'canManageHRSalaries',
   'canViewHRAttendance', 'canRecordHRAttendance', 'canRecordOwnHRAttendance', 'canManageHRAttendance',
   'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance',
   'canConfigureHRAttendance', 'canApproveHRAttendance',
-  'canViewHRShifts', 'canManageHRShifts', 'canAssignHRShifts', 'canApproveHRShifts',
-  'canViewHRLeave', 'canRequestHRLeave', 'canManageHRLeaveTypes', 'canApproveHRLeave',
+  'canViewHRShifts', 'canCreateHRShifts', 'canEditHRShifts', 'canDeleteHRShifts', 'canAssignHRShifts', 'canApproveHRShifts',
+  'canViewHRLeave', 'canRequestHRLeave', 'canCreateHRLeaveTypes', 'canEditHRLeaveTypes', 'canDeleteHRLeaveTypes', 'canAllocateHRLeave', 'canApproveHRLeave',
   'canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll',
   'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings',
-  'canManageHRPayroll',
+  'canManageHROpeningBalances',
 ]
 const EXPENSE_PERMISSION_KEYS = ['canCreateExpense', 'canViewExpense', 'canEditExpense', 'canDeleteExpense']
 
@@ -266,7 +280,7 @@ function fallbackPermissionCategoryName(categoryId: string) {
 }
 
 function getPermissionGroups(schema: PermissionSchema | null, search: string) {
-  const keys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])].filter(key => !LEGACY_SERVICE_PERMISSION_KEYS.includes(key))
+  const keys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])].filter(key => !LEGACY_SERVICE_PERMISSION_KEYS.includes(key) && !HIDDEN_LEGACY_PERMISSION_KEYS.has(key))
   const definitions = new Map([...SERVICE_PERMISSION_DEFINITIONS, ...(schema?.permissions || [])].map(permission => [permission.id, permission]))
   const categories = new Map([...SERVICE_PERMISSION_CATEGORIES, ...(schema?.categories || [])].map(category => [category.id, category]))
   const query = search.trim().toLowerCase()
@@ -326,7 +340,7 @@ function PermissionMatrix({
   search: string
   onSearch: (value: string) => void
 }) {
-  const allKeys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])].filter(key => !LEGACY_SERVICE_PERMISSION_KEYS.includes(key))
+  const allKeys = [...new Set([...(schema?.keys || []), ...Object.keys(PERM_LABELS)])].filter(key => !LEGACY_SERVICE_PERMISSION_KEYS.includes(key) && !HIDDEN_LEGACY_PERMISSION_KEYS.has(key))
   const groups = getPermissionGroups(schema, search)
 
   const setAll = (checked: boolean) => {
@@ -441,7 +455,7 @@ export default function RolesPermissionsPage() {
   const [hoursByUser, setHoursByUser] = useState<Record<string, WorkingHours | null>>({})
   const [savingHours, setSavingHours] = useState<string | null>(null)
   const [businessTimezone, setBusinessTimezone] = useState('Africa/Kampala')
-  const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canEditStaff')
+  const canManageHours = user?.role === 'owner' || user?.role === 'saas_admin' || hasPermission('canManageWorkingHours')
   const staffHours = (member: any) => hoursByUser[member.id] !== undefined ? hoursByUser[member.id] : member.workingHours || null
   const saveHours = async (member: any) => {
     if (savingHours) return

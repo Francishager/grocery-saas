@@ -46,7 +46,7 @@ router.post('/', upload.single('profilePhoto'), async (req, res) => {
     }
 
     const body = await attachProfilePhoto(req);
-    const canManageHROpeningBalances = await hrPermissionService.hasPermission(tenantId, userId, 'HR_PAYROLL_MANAGE');
+    const canManageHROpeningBalances = await hrPermissionService.hasPermission(tenantId, userId, 'HR_OPENING_BALANCES');
     const employee = await employeeService.createEmployee(tenantId, {
       ...body,
       createdBy: userId,
@@ -119,7 +119,7 @@ router.put('/:id', upload.single('profilePhoto'), async (req, res) => {
     }
 
     const body = await attachProfilePhoto(req);
-    const canManageHROpeningBalances = await hrPermissionService.hasPermission(tenantId, userId, 'HR_PAYROLL_MANAGE');
+    const canManageHROpeningBalances = await hrPermissionService.hasPermission(tenantId, userId, 'HR_OPENING_BALANCES');
     const employee = await employeeService.updateEmployee(tenantId, req.params.id, {
       ...body,
       updatedBy: userId,

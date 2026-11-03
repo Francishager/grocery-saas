@@ -183,15 +183,22 @@ async function ensureCustomerReceiptAdvanceJournal(client, { tenantId, applicati
     where: { id: application.sourceId, tenantId, customerId: application.customerId },
     include: { allocations: true },
   })
-  if (!payment || payment.saleId) {
-    throw Object.assign(new Error('This customer credit receipt is not an unlinked customer-account receipt. Review its allocation before applying the credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
+  if (!payment) {
+    throw Object.assign(new Error('This customer credit receipt could not be found. Review its allocation before applying the credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
   }
 
-  const accountAllocations = (payment.allocations || []).filter((row) => row.targetType === 'customer_account' && !row.saleId)
-  const allocatedCredit = payment.allocationMode === 'explicit'
-    ? money(accountAllocations.reduce((sum, row) => sum + money(row.amount), 0))
-    : money(Number(payment.amount) - (payment.allocations || []).reduce((sum, row) => sum + money(row.amount), 0))
-  if (allocatedCredit <= 0 || allocatedCredit - money(payment.amount) > 0.01) {
+  const allocations = payment.allocations || []
+  const allocatedToAccount = allocations
+    .filter((row) => row.targetType === 'customer_account')
+    .reduce((sum, row) => sum + money(row.amount), 0)
+  const allocatedTotal = allocations.reduce((sum, row) => sum + money(row.amount), 0)
+  // A payment linked to a sale can still contain a genuine surplus when its
+  // recorded sale allocations leave part of the receipt unapplied.
+  const allocatedCredit = money(Math.min(
+    money(payment.amount),
+    allocatedToAccount + Math.max(0, money(payment.amount) - allocatedTotal),
+  ))
+  if (allocatedCredit + 0.01 < money(application.amount)) {
     throw Object.assign(new Error('The customer receipt allocation does not match its recorded amount. Reconcile the receipt before applying this credit.'), { statusCode: 409, code: 'CUSTOMER_ADVANCE_SOURCE_UNRESOLVED' })
   }
 

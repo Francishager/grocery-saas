@@ -638,14 +638,14 @@ export function TenantLayout() {
     ...(canAccessFeature('property_management.landlord') ? [
       { to: '/tenant/property-management/my-properties', label: 'My Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
       { to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
-      { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies'] },
+      { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies'] },
       { to: '/tenant/property-management/rent', label: 'Rent & Receivables', icon: Wallet, permission: ['canViewPropertyCollections', 'canViewPropertyReports'] },
     ] : []),
     ...(canAccessFeature('property_management.agent') ? [
       { to: '/tenant/property-management/clients', label: 'Landlord Clients', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
       { to: '/tenant/property-management/managed-properties', label: 'Managed Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
       ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] }] : []),
-      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canManageTenancies'] }] : []),
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies'] }] : []),
       { to: '/tenant/property-management/collections', label: 'Rent Collection', icon: Wallet, permission: 'canViewPropertyCollections' },
       { to: '/tenant/property-management/sales', label: 'Plot Sales & Installments', icon: Receipt, permission: 'canViewPropertySales' },
       { to: '/tenant/property-management/purchases', label: 'Plot Purchases & Supplier Payments', icon: Receipt, permission: ['canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment'] },

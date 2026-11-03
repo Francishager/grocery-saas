@@ -112,9 +112,13 @@ test('customer and renter reprints open an in-app preview with close, browser pr
   assert.match(thermalPrinter, /export function buildEscPosReceiptCommands\(receipt: ReceiptPreview\)/);
 });
 
-test('customer credit limits are a plan feature and require the existing manage permission', () => {
-  assert.match(createCustomerModal, /hasPermission\('canManageCustomerCreditLimit'\) && isFeatureEnabled\('customers\.credit_limits'\)/);
-  assert.match(receivablesPage, /hasFeature\('customers\.credit_limits'\) && hasPermission\('canManageCustomerCreditLimit'\)/);
+test('customer credit limits are feature-gated and use separate create/edit permissions', () => {
+  assert.match(createCustomerModal, /hasPermission\('canCreateCustomerCreditLimit'\)/);
+  assert.match(createCustomerModal, /hasPermission\('canEditCustomerCreditLimit'\)/);
+  assert.match(createCustomerModal, /Credit limit <span aria-hidden="true">\*<\/span>/);
+  assert.match(createCustomerModal, /md:grid-cols-2/);
+  assert.match(receivablesPage, /hasPermission\('canEditCustomerCreditLimit'\)/);
+  assert.match(backendReceivables, /requirePermission\('canEditCustomerCreditLimit'\)/);
   assert.match(saasFeatures, /customers\.credit_limits/);
   assert.match(saasPlans, /customers\.credit_limits/);
   assert.match(backendReceivables, /hasFeatureAccess\(features, 'customers\.credit_limits'\)/);

@@ -137,8 +137,10 @@ router.use((req, res, next) => {
   const permissionRecord = req.userPermissions || {};
   const canViewCreditLimit = req.user?.role === 'owner' || req.user?.role === 'saas_admin' ||
     permissions.includes('*') || permissions.includes('canViewCustomerCreditLimit') ||
-    permissions.includes('canManageCustomerCreditLimit') || permissionRecord.canViewCustomerCreditLimit === true ||
-    permissionRecord.canManageCustomerCreditLimit === true;
+    permissions.includes('canManageCustomerCreditLimit') || permissions.includes('canCreateCustomerCreditLimit') ||
+    permissions.includes('canEditCustomerCreditLimit') || permissionRecord.canViewCustomerCreditLimit === true ||
+    permissionRecord.canManageCustomerCreditLimit === true || permissionRecord.canCreateCustomerCreditLimit === true ||
+    permissionRecord.canEditCustomerCreditLimit === true;
   if (canViewCreditLimit) return next();
 
   const originalJson = res.json.bind(res);
