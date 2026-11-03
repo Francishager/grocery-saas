@@ -29,6 +29,12 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(startupScript, /ensure-customer-credit-applications-schema\.js/);
   assert.match(startupScript, /ensure-customer-alternate-phone-schema\.js/);
   assert.match(startupScript, /ensure-user-theme-schema\.js/);
+  assert.match(startupScript, /ensure-fractional-product-stock-schema\.js/);
+  assert.ok(startupScript.indexOf('ensure-fractional-product-stock-schema.js') < startupScript.indexOf('=== Starting Node App ==='));
+  const fractionalStockMigration = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-fractional-product-stock-schema.js'), 'utf8');
+  assert.match(fractionalStockMigration, /ALTER COLUMN "quantity" TYPE DECIMAL\(18, 3\)/);
+  assert.match(fractionalStockMigration, /USING ROUND\("quantity"::numeric, 3\)/);
+  assert.doesNotMatch(fractionalStockMigration, /DROP TABLE|TRUNCATE|force-reset/i);
   for (const migration of [
     'ensure-rental-credit-notes-schema.js',
     'ensure-rental-credit-note-permissions-schema.js',

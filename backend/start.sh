@@ -25,6 +25,7 @@ node src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js
 node src/scripts/ensure-customer-credit-applications-schema.js
 node src/scripts/ensure-customer-alternate-phone-schema.js
 node src/scripts/ensure-user-theme-schema.js
+node src/scripts/ensure-fractional-product-stock-schema.js
 run_rental_schema_step src/scripts/ensure-rental-runtime-schema.js
 run_rental_schema_step src/scripts/ensure-rental-mixed-booking-schema.js
 run_rental_schema_step src/scripts/ensure-rental-historical-entry-schema.js
