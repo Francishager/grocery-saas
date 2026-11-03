@@ -41,8 +41,21 @@ type Drilldown = { title: string; rows: any[]; closingBalance?: number } | null
 type SummaryCard = { label: string; value: number; kinds: string[]; methods?: string[]; icon: typeof BarChart3 }
 
 const today = () => new Date().toISOString().slice(0, 10)
+const decimalObjectValue = (value: unknown) => {
+  if (!value || typeof value !== 'object') return value
+  const decimal = value as { s?: number; e?: number; d?: number[] }
+  if (!Number.isFinite(decimal.s) || !Number.isFinite(decimal.e) || !Array.isArray(decimal.d) || !decimal.d.length) return value
+  const digits = decimal.d.map((part, index) => index ? String(part).padStart(7, '0') : String(part)).join('')
+  const decimalIndex = Number(decimal.e) + 1
+  const unsigned = decimalIndex <= 0
+    ? `0.${'0'.repeat(Math.min(1000, -decimalIndex))}${digits}`
+    : decimalIndex >= digits.length
+      ? `${digits}${'0'.repeat(Math.min(1000, decimalIndex - digits.length))}`
+      : `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`
+  return `${Number(decimal.s) < 0 ? '-' : ''}${unsigned}`
+}
 const numberValue = (value: unknown) => {
-  const number = Number(value ?? 0)
+  const number = Number(decimalObjectValue(value) ?? 0)
   return Number.isFinite(number) ? number : 0
 }
 const money = (value: unknown) => formatCurrency(numberValue(value))
@@ -171,7 +184,11 @@ function normalizeDailyBusinessData(input: any): DailyBusinessData {
     profitability: input.profitability || {},
     customerActivity: Array.isArray(input.customerActivity) ? input.customerActivity : [],
     staffActivity: Array.isArray(input.staffActivity) ? input.staffActivity : [],
-    productActivity: Array.isArray(input.productActivity) ? input.productActivity : [],
+    productActivity: Array.isArray(input.productActivity) ? input.productActivity.map((row: any) => ({
+      ...row,
+      quantitySold: numberValue(row?.quantitySold),
+      currentStock: row?.currentStock === null || row?.currentStock === undefined ? null : numberValue(row.currentStock),
+    })) : [],
     expenses: Array.isArray(input.expenses) ? input.expenses : [],
     transactions: Array.isArray(input.transactions) ? input.transactions : [],
     staffTills: Array.isArray(input.staffTills) ? input.staffTills : [],
@@ -877,7 +894,7 @@ export default function DailyBusinessReport({ data: rawData }: { data: DailyBusi
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Package className="h-4 w-4" />Product Activity</CardTitle></CardHeader>
           <CardContent className="max-h-[520px] space-y-2 overflow-auto">
-            {data.productActivity?.length ? data.productActivity.slice(0, 20).map((row: any) => <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border p-3"><span className="min-w-0"><span className="block break-words font-medium">{row.name}</span><span className="text-xs text-muted-foreground">Qty {row.quantitySold} - Stock {row.currentStock} - Profit {money(row.grossProfit)}</span></span><span className="shrink-0 font-semibold">{money(row.salesValue)}</span></div>) : <p className="text-sm text-muted-foreground">No product activity.</p>}
+            {data.productActivity?.length ? data.productActivity.slice(0, 20).map((row: any) => <div key={row.id} className="flex items-center justify-between gap-3 rounded-md border p-3"><span className="min-w-0"><span className="block break-words font-medium">{row.name}</span><span className="text-xs text-muted-foreground">Qty {numberValue(row.quantitySold)} - Stock {row.currentStock === null || row.currentStock === undefined ? '—' : numberValue(row.currentStock)} - Profit {money(row.grossProfit)}</span></span><span className="shrink-0 font-semibold">{money(row.salesValue)}</span></div>) : <p className="text-sm text-muted-foreground">No product activity.</p>}
           </CardContent>
         </Card>
       </div>

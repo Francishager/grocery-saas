@@ -118,6 +118,15 @@ test('missing business header and an empty response cannot crash the report', ()
   }
 });
 
+test('daily product activity safely renders Prisma Decimal-shaped fractional stock', () => {
+  const tree = render({ productActivity: [{
+    id: 'fractional-stock', name: 'Cooking oil', quantitySold: 0.5, currentStock: { s: 1, e: 1, d: [54, 500000] },
+    grossProfit: 100, salesValue: 200,
+  }] });
+  assert.match(textOf(tree), /Stock\s+54\.05/);
+  assert.doesNotMatch(textOf(tree), /\[object Object\]/);
+});
+
 test('Cash at Hand details include opening float but Net Cash Movement details do not', () => {
   const data = { header: { date: '2026-09-23' },
     cashMovement: { openingCash: 100, cashAtHand: 400, netCashMovement: 300 },

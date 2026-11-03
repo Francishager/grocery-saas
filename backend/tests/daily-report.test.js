@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Prisma } from '@prisma/client';
 
 const prisma = {
   tenant: { findUnique: async () => ({ name: 'Report Test Business' }) },
@@ -66,7 +67,7 @@ test('daily report nets credit notes and POS returns, reverses returned COGS, an
     amountPaid: 400, balance: 780, paymentMethod: 'credit', paymentStatus: 'partial', status: 'completed', createdAt: date,
     customerId: 'customer', customer: { id: 'customer', name: 'Ada', balance: 780, creditLimit: 2000 },
     User: { id: 'staff', fname: 'Staff' }, branch: null,
-    items: [{ productId: 'credit-product', quantity: 2, conversionFactor: 1, cost: 300, total: 1000, price: 500, product: { id: 'credit-product', name: 'Rice', sku: 'R', quantity: 8, cost: 300 } }],
+    items: [{ productId: 'credit-product', quantity: 2, conversionFactor: 1, cost: 300, total: 1000, price: 500, product: { id: 'credit-product', name: 'Rice', sku: 'R', quantity: new Prisma.Decimal('8.125'), cost: 300 } }],
   };
   const posSale = {
     id: 'pos-sale', receiptNo: 'POS-1', total: 1180, subtotal: 1000, tax: 180, discount: 0,
@@ -113,6 +114,9 @@ test('daily report nets credit notes and POS returns, reverses returned COGS, an
   };
 
   const all = await run();
+  const productActivity = all.productActivity.find((row) => row.id === 'credit-product');
+  assert.equal(productActivity.currentStock, 8.125);
+  assert.equal(typeof productActivity.currentStock, 'number');
   assert.equal(all.summary.totalSales, 2360);
   assert.equal(all.summary.salesReturns, 600);
   assert.equal(all.summary.netSales, 1400);

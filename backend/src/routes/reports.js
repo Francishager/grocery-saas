@@ -1265,7 +1265,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
           salesValue: 0,
           cogs: 0,
           grossProfit: 0,
-          currentStock: product.quantity,
+          currentStock: Number(product.quantity ?? 0),
         };
         row.quantitySold += Number(item.quantity || 0);
         row.salesValue += Number(item.total || 0);
@@ -1294,7 +1294,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
           salesValue: 0,
           cogs: 0,
           grossProfit: 0,
-          currentStock: product.quantity ?? null,
+          currentStock: product.quantity == null ? null : Number(product.quantity),
         };
         const baseQuantity = Number(item.quantity || 0);
         const returnedCost = returnedInventoryCost([item], sourceItems);
@@ -1421,7 +1421,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         sale.items.forEach((item) => {
           const product = item.product;
           if (!product?.id) return;
-          const productRow = productMap.get(product.id) || { id: product.id, name: product.name, sku: product.sku, quantitySold: 0, salesValue: 0, cogs: 0, grossProfit: 0, currentStock: product.quantity };
+          const productRow = productMap.get(product.id) || { id: product.id, name: product.name, sku: product.sku, quantitySold: 0, salesValue: 0, cogs: 0, grossProfit: 0, currentStock: Number(product.quantity ?? 0) };
           productRow.quantitySold += Number(item.quantity || 0) * allocationRatio;
           productRow.salesValue += allocatedAmount(item.total, selectedPortion, grossAmount);
           productRow.cogs += allocatedAmount(saleLineCogs(item), selectedPortion, grossAmount);
