@@ -306,14 +306,35 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
       enrichmentWarnings.push('Repayment scores could not be refreshed.')
     }
     const profileAccess = await getTenantCustomerProfileAccess(req, scope.tenantId)
+    const tenantFeatures = await getTenantFeatures(scope.tenantId)
+    const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord') || hasFeatureAccess(tenantFeatures, 'property_management.agent')
+    const propertyAddresses = new Map()
+    if (propertyManagementEnabled && profileAccess.address && scoredCustomers.length) {
+      try {
+        const activeTenancies = await prisma.propertyTenancy.findMany({
+          where: { tenantId: scope.tenantId, customerId: { in: scoredCustomers.map(customer => customer.id) }, status: 'active' },
+          select: { customerId: true, unit: { select: { unitCode: true, property: { select: { name: true, address: true, city: true } } } } },
+          orderBy: { createdAt: 'desc' },
+        })
+        for (const tenancy of activeTenancies) {
+          if (!tenancy.customerId) continue
+          const property = tenancy.unit.property
+          const location = [property.address, property.city].filter(Boolean).join(', ')
+          const entry = [property.name, `Unit ${tenancy.unit.unitCode}`, location].filter(Boolean).join(' · ')
+          const existing = propertyAddresses.get(tenancy.customerId) || []
+          if (!existing.includes(entry)) propertyAddresses.set(tenancy.customerId, [...existing, entry])
+        }
+      } catch (error) {
+        console.error('Tenant property address enrichment failed:', error)
+        enrichmentWarnings.push('Some tenant property locations could not be refreshed.')
+      }
+    }
     let rentalBalances = new Map()
     let rentalIntegrationEnabled = false
     const canReadRentalBalances = profileAccess.balance && (req.user?.permissions || []).includes('canViewPropertyStatements')
     if (canReadRentalBalances && scoredCustomers.length) {
       try {
-        const features = await getTenantFeatures(scope.tenantId)
-        const rentalFeatureEnabled = hasFeatureAccess(features, 'property_management.landlord') || hasFeatureAccess(features, 'property_management.agent')
-        if (rentalFeatureEnabled) {
+        if (propertyManagementEnabled) {
           rentalIntegrationEnabled = true
           const rentals = await prisma.propertyTenancy.findMany({
             where: { tenantId: scope.tenantId, customerId: { in: scoredCustomers.map(customer => customer.id) } },
@@ -333,7 +354,8 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
     const customers = scoredCustomers.map((customer) => {
       const canDelete = customerHasNoBalanceOrHistory(customer)
       const { _count, procurementCounterpartyLink, ...publicCustomer } = customer
-      return { ...customerProfilePayload({ ...publicCustomer, ...(rentalIntegrationEnabled ? { rentalBalance: rentalBalances.get(customer.id) || 0 } : {}) }, profileAccess), canDelete }
+      const propertyAddress = propertyAddresses.get(customer.id)?.join('; ')
+      return { ...customerProfilePayload({ ...publicCustomer, ...(propertyAddress ? { address: propertyAddress } : {}), ...(rentalIntegrationEnabled ? { rentalBalance: rentalBalances.get(customer.id) || 0 } : {}) }, profileAccess), canDelete }
     })
 
     res.json({
@@ -777,7 +799,24 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     const canViewTrustScore = access.balance
       || (propertyManagementEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewPropertyStatements') || req.userPermissions?.canViewPropertyStatements === true))
       || (rentalFeatureEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewRental') || req.userPermissions?.canViewRental === true))
-    const profileCustomer = customerProfilePayload({ ...reconciledCustomer, trustScore }, access)
+    let tenantPropertyAddress = null
+    if (propertyManagementEnabled && access.address) {
+      try {
+        const activeTenancies = await prisma.propertyTenancy.findMany({
+          where: { tenantId: scope.tenantId, customerId: id, status: 'active' },
+          select: { unit: { select: { unitCode: true, property: { select: { name: true, address: true, city: true } } } } },
+          orderBy: { createdAt: 'desc' },
+        })
+        const locations = [...new Set(activeTenancies.map(({ unit }) => {
+          const property = unit.property
+          return [property.name, `Unit ${unit.unitCode}`, [property.address, property.city].filter(Boolean).join(', ')].filter(Boolean).join(' · ')
+        }))]
+        if (locations.length) tenantPropertyAddress = locations.join('; ')
+      } catch (error) {
+        console.error('Load tenant property address failed:', error)
+      }
+    }
+    const profileCustomer = customerProfilePayload({ ...reconciledCustomer, ...(tenantPropertyAddress ? { address: tenantPropertyAddress } : {}), trustScore }, access)
     if (canViewTrustScore) profileCustomer.trustScore = trustScore
 
     const rows = []
