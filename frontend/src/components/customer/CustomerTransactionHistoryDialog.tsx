@@ -1251,7 +1251,7 @@ export default function CustomerTransactionHistoryDialog({
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={cn('text-xs', note.isOverdue && 'font-medium text-destructive')}>{note.followUpAt ? `Follow-up ${formatDisplayDate(note.followUpAt)}` : 'No follow-up date'}</span>{(canEditTenantNotes || (canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt)) && <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`Actions for note from ${note.authorName}`} title="Note actions"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
-                    <DropdownMenu.Content align="end" sideOffset={4} className="z-[100] min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                    <DropdownMenu.Content align="end" sideOffset={4} className="z-[120] min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
                       {canEditTenantNotes && <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none focus:bg-accent" onSelect={() => { setEditingTenantNote(note); setShowTenantNoteForm(true); setTenantNotesError('') }}><Edit className="h-4 w-4" />Edit note</DropdownMenu.Item>}
                       {canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt && <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm outline-none focus:bg-accent" onSelect={() => void completeTenantNote(note.id)}><Check className="h-4 w-4" />Mark complete</DropdownMenu.Item>}
                     </DropdownMenu.Content>
@@ -1483,7 +1483,10 @@ export default function CustomerTransactionHistoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
+      <DialogContent onInteractOutside={event => {
+        const target = event.target
+        if (target instanceof Element && target.closest('[data-radix-popper-content-wrapper]')) event.preventDefault()
+      }} className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
         {content}
       </DialogContent>
     </Dialog>
