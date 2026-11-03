@@ -24,6 +24,7 @@ import { RichTextArea, RichTextDisplay, markdownToHtml } from '@/components/Rich
 const localDateInput = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 const RENTAL_LINE_CATEGORIES = [
   { name: 'Service', value: 'service' },
+  { name: 'Event', value: 'event' },
   { name: 'Delivery', value: 'delivery' },
   { name: 'Setup', value: 'setup' },
   { name: 'Staffing', value: 'staffing' },
@@ -1588,9 +1589,13 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
               )}
 
               <section className="space-y-3 rounded-md border p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div><Label>Services, event charges, and goods</Label><p className="text-xs text-muted-foreground">Add services or fees, plus stocked food and supplies. Stock is issued only at check-out.</p></div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { lineType: 'service', category: 'service', quantity: 1, unitPrice: 0, unitCost: 0, label: '' }])}><Plus className="mr-1 h-4 w-4" />Add line</Button>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div><Label>Services, event charges, and goods</Label><p className="text-xs text-muted-foreground">Add each charge separately. Stocked goods are issued only at check-out; historical entries do not change current stock.</p></div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { lineType: 'service', category: 'service', quantity: 1, unitPrice: 0, unitCost: 0, label: '' }])}><Plus className="mr-1 h-4 w-4" />Add service</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { lineType: 'service', category: 'event', quantity: 1, unitPrice: 0, unitCost: 0, label: '' }])}><Plus className="mr-1 h-4 w-4" />Add event charge</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setAdditionalCharges(rows => [...rows, { lineType: 'consumable', category: 'other', quantity: 1, unitPrice: 0, unitCost: 0, label: '' }])}><Plus className="mr-1 h-4 w-4" />Add goods</Button>
+                  </div>
                 </div>
                 {additionalCharges.map((charge, index) => {
                   const selectedCatalogItem = chargeCatalog.find(item => item.id === charge.productId)

@@ -17,7 +17,7 @@ const crmCollections = new Set(["leads", "activities", "cases", "campaigns"]);
 const crmStages = new Set(["new", "qualified", "proposal", "won", "lost"]);
 const crmPriorities = new Set(["low", "normal", "high", "urgent"]);
 const crmColors = new Set(["yellow", "pink", "blue", "green", "orange", "purple"]);
-const builtInRentalChargeCategories = new Set(["service", "delivery", "setup", "staffing", "venue", "cleaning", "other"]);
+const builtInRentalChargeCategories = new Set(["service", "event", "delivery", "setup", "staffing", "venue", "cleaning", "other"]);
 const rentalCreditNoteReasons = new Set(["cancellation", "price_adjustment", "service_not_provided", "overcharge", "other"]);
 
 async function resolveRentalChargeCategory(tenantId, value) {
