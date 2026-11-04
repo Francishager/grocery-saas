@@ -531,21 +531,22 @@ export default function InventoryPage() {
   }
 
   const saveSellingUnits = async (productId: string) => {
-    // For edit: delete existing units that were removed, add new ones
-    // Simple approach: delete all existing then recreate
-    if (editingItem) {
-      const existing = (editingItem as any).units || []
-      for (const u of existing) {
-        if (u.id) await inventoryApi.deleteUnit(productId, u.id)
-      }
+    const existingUnits: SellingUnit[] = editingItem ? ((editingItem as any).units || []) : []
+    const retainedIds = new Set(sellingUnits.flatMap(unit => unit.id ? [unit.id] : []))
+
+    for (const unit of existingUnits) {
+      if (unit.id && !retainedIds.has(unit.id)) await inventoryApi.deleteUnit(productId, unit.id)
     }
+
     for (const u of sellingUnits) {
-      await inventoryApi.addUnit(productId, {
+      const payload = {
         unitName: u.unitName,
         conversionFactor: u.conversionFactor,
         sellingPrice: u.sellingPrice,
         isDefault: u.isDefault,
-      })
+      }
+      if (u.id) await inventoryApi.updateUnit(productId, u.id, payload)
+      else await inventoryApi.addUnit(productId, payload)
     }
   }
 
@@ -578,6 +579,13 @@ export default function InventoryPage() {
     if (!Number.isFinite(formData.unit_price) || formData.unit_price <= 0) {
       toast({ variant: 'destructive', title: 'Selling price must be greater than 0' })
       return
+    }
+    if (formData.itemType === 'product') {
+      const unitNames = sellingUnits.map(unit => unit.unitName.trim().toLocaleLowerCase())
+      if (unitNames.some(name => !name) || new Set(unitNames).size !== unitNames.length) {
+        toast({ variant: 'destructive', title: 'Selling unit names must be filled in and unique' })
+        return
+      }
     }
     if (canManageInventory && branches.length === 0) {
       toast({

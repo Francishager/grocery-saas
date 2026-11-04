@@ -1543,19 +1543,25 @@ router.post("/:productId/units", authenticateToken, requireFeature('inventory.mu
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }) });
     if (!product) return res.status(404).json({ error: "Product not found" });
     const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
-    if (!unitName || conversionFactor == null || sellingPrice == null) return res.status(400).json({ error: "unitName, conversionFactor, and sellingPrice are required" });
+    const normalizedUnitName = String(unitName || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedUnitName || conversionFactor == null || sellingPrice == null) return res.status(400).json({ error: "A unit name, conversion factor, and selling price are required" });
     const factor = Number(conversionFactor);
     const price = Number(sellingPrice);
     if (!Number.isFinite(factor) || factor <= 0 || !Number.isFinite(price) || price < 0) return res.status(400).json({ error: "Conversion factor must be positive and selling price must be zero or greater." });
-    const unit = await prisma.productUnit.create({ data: { productId: product.id, unitName: String(unitName).trim(), conversionFactor: factor, sellingPrice: price, isDefault: isDefault || false } });
+    const unit = await prisma.productUnit.create({ data: { productId: product.id, unitName: normalizedUnitName, conversionFactor: factor, sellingPrice: price, isDefault: isDefault || false } });
     res.status(201).json(unit);
-  } catch (err) { handleBranchError(res, err); }
+  } catch (err) {
+    if (err?.code === 'P2002') return res.status(409).json({ error: 'This selling unit already exists for the product.' });
+    handleBranchError(res, err);
+  }
 });
 
 // Update a selling unit
 router.put("/:productId/units/:unitId", authenticateToken, requireFeature('inventory.multi_unit'), requirePermission("canEditProduct"), async (req, res) => {
   try {
     const { unitName, conversionFactor, sellingPrice, isDefault } = req.body;
+    const normalizedUnitName = unitName == null ? undefined : String(unitName).trim().replace(/\s+/g, ' ');
+    if (unitName != null && !normalizedUnitName) return res.status(400).json({ error: 'Selling unit name cannot be empty.' });
     const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
     const unit = await prisma.productUnit.findFirst({
       where: {
@@ -1573,7 +1579,7 @@ router.put("/:productId/units/:unitId", authenticateToken, requireFeature('inven
       return res.status(400).json({ error: "Conversion factor must be positive and selling price must be zero or greater." });
     }
     const updated = await prisma.$transaction(async (tx) => {
-      const saved = await tx.productUnit.update({ where: { id: unit.id }, data: { ...(unitName && { unitName: String(unitName).trim() }), ...(parsedConversionFactor != null && { conversionFactor: parsedConversionFactor }), ...(sellingPrice != null && { sellingPrice: parsedSellingPrice }), ...(isDefault != null && { isDefault }) } });
+      const saved = await tx.productUnit.update({ where: { id: unit.id }, data: { ...(normalizedUnitName !== undefined && { unitName: normalizedUnitName }), ...(parsedConversionFactor != null && { conversionFactor: parsedConversionFactor }), ...(sellingPrice != null && { sellingPrice: parsedSellingPrice }), ...(isDefault != null && { isDefault }) } });
       if (parsedSellingPrice != null && Number.isFinite(parsedSellingPrice) && parsedSellingPrice !== oldSellingPrice) {
         await tx.productPriceHistory.create({
           data: {
@@ -1592,7 +1598,10 @@ router.put("/:productId/units/:unitId", authenticateToken, requireFeature('inven
       return saved;
     });
     res.json(updated);
-  } catch (err) { handleBranchError(res, err); }
+  } catch (err) {
+    if (err?.code === 'P2002') return res.status(409).json({ error: 'Another selling unit already uses this name for the product.' });
+    handleBranchError(res, err);
+  }
 });
 
 // Delete a selling unit
