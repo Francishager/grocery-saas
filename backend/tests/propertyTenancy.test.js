@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { countUnpaidRentMonths, tenancyOccupiesRentPeriod } from '../src/utils/propertyTenancy.js'
+import { countUnpaidRentMonths, proratedStartingMonthRent, tenancyOccupiesRentPeriod } from '../src/utils/propertyTenancy.js'
 
 const tenancy = overrides => ({ startDate: new Date('2026-01-01T12:00:00.000Z'), endDate: null, status: 'active', ...overrides })
 
@@ -22,6 +22,14 @@ test('rent charges do not precede the tenancy start month', () => {
   const future = tenancy({ startDate: new Date('2026-04-01T12:00:00.000Z') })
   assert.equal(tenancyOccupiesRentPeriod(future, '2026-03'), false)
   assert.equal(tenancyOccupiesRentPeriod(future, '2026-04'), true)
+})
+
+test('a mid-month tenancy includes its start month and charges remaining days inclusively', () => {
+  const midMonth = tenancy({ startDate: new Date('2026-10-16T12:00:00.000Z') })
+  assert.equal(tenancyOccupiesRentPeriod(midMonth, '2026-09'), false)
+  assert.equal(tenancyOccupiesRentPeriod(midMonth, '2026-10'), true)
+  assert.equal(proratedStartingMonthRent(310000, midMonth.startDate, '2026-10'), 160000)
+  assert.equal(proratedStartingMonthRent(310000, midMonth.startDate, '2026-11'), 310000)
 })
 
 test('the unpaid rent month count includes the current month but not months before tenancy start', () => {

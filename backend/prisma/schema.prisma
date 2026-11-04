@@ -3003,6 +3003,8 @@ model PropertyTenancy {
   endDate         DateTime?
   dueDay          Int                       @default(1)
   rentAmount      Float
+  advanceMonthsRequired Int?
+  depositMonthsRequired Int?
   currency        String                    @default("UGX")
   depositRequired Float                     @default(0)
   depositHeld     Float                     @default(0)
