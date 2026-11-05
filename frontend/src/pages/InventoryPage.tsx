@@ -59,6 +59,8 @@ interface FormData {
   categoryId: string
   branchId: string
   baseUnit: string
+  contentsPerBaseUnit: number | ''
+  contentsUnit: string
   itemType: 'product' | 'service' | 'rental'
   description: string
   estimatedHours: number | ''
@@ -117,6 +119,7 @@ interface StockAdjustState {
   item: InventoryItem
   adjustmentType: StockAdjustmentType
   quantity: string
+  unitId: string
   reason: string
 }
 
@@ -144,6 +147,8 @@ const initialFormData: FormData = {
   categoryId: '',
   branchId: '',
   baseUnit: 'Piece',
+  contentsPerBaseUnit: '',
+  contentsUnit: '',
   itemType: 'product',
   description: '',
   estimatedHours: '',
@@ -206,9 +211,19 @@ const defaultMovementForItem = (item: InventoryItem): DailyMovement => ({
 })
 
 const formatQty = (value: number | undefined | null) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 3 }).format(Number(value || 0))
-const isValidStockQuantity = (value: number, allowZero = true) =>
-  Number.isFinite(value) && value >= (allowZero ? 0 : Number.EPSILON) && Math.abs(value * 1000 - Math.round(value * 1000)) < 1e-7
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(Number(value || 0))
+const toStockPrecision = (value: number) => Number(value.toFixed(6))
+const isValidStockQuantity = (value: number, allowZero = true, precision = 3) => {
+  const scale = 10 ** precision
+  return Number.isFinite(value) && value >= (allowZero ? 0 : Number.EPSILON) && Math.abs(value * scale - Math.round(value * scale)) < 1e-7
+}
+const normalizeUnitKey = (value: string) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ').replace(/s$/, '')
+const unitFactorFromPackageContents = (unitName: string, contentsUnit: string, contentsPerBaseUnit: number) =>
+  contentsPerBaseUnit > 0 && normalizeUnitKey(unitName) === normalizeUnitKey(contentsUnit)
+    ? 1 / contentsPerBaseUnit
+    : null
+const requiresPackageContents = (unitName: string) => ['box', 'carton', 'dose', 'packet', 'pack', 'case', 'crate'].includes(normalizeUnitKey(unitName))
+const canDefinePackageContents = (unitName: string) => requiresPackageContents(unitName) || normalizeUnitKey(unitName) !== 'piece'
 
 export default function InventoryPage() {
   const { hasFeature } = useFeatureAccess()
@@ -242,6 +257,7 @@ export default function InventoryPage() {
   const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false)
   const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
   const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+  const [openingStockUnitName, setOpeningStockUnitName] = useState('')
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
   const [itemTypeFilter, setItemTypeFilter] = useState<'all' | 'product'>('all')
@@ -269,6 +285,12 @@ export default function InventoryPage() {
   const canDeleteProduct = hasPermission('canDeleteProduct')
   const canAdjustStockOut = hasPermission('canAdjustStock')
   const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
+  const openingStockUnit = sellingUnits.find(unit => unit.unitName === openingStockUnitName)
+  const inferredOpeningFactor = openingStockUnitName
+    ? unitFactorFromPackageContents(openingStockUnitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
+    : null
+  const openingStockFactor = Number(inferredOpeningFactor || openingStockUnit?.conversionFactor || 1)
+  const openingStockBaseQuantity = toStockPrecision(Number(formData.quantity || 0) * openingStockFactor)
   const canViewRestaurant = hasPermission('canViewRestaurant')
   const hospitalityView = searchParams.get('hospitalityView') || 'all'
   const showHospitalityInventory = hospitalityBusiness && restaurantFeatureEnabled && canViewRestaurant && lockedType === 'product'
@@ -539,9 +561,10 @@ export default function InventoryPage() {
     }
 
     for (const u of sellingUnits) {
+      const inferredFactor = unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
       const payload = {
         unitName: u.unitName,
-        conversionFactor: u.conversionFactor,
+        conversionFactor: inferredFactor || u.conversionFactor,
         sellingPrice: u.sellingPrice,
         isDefault: u.isDefault,
       }
@@ -564,8 +587,16 @@ export default function InventoryPage() {
       toast({ variant: 'destructive', title: 'Category is required' })
       return
     }
-    if (formData.itemType !== 'service' && !editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !isValidStockQuantity(formData.quantity))) {
-      toast({ variant: 'destructive', title: 'Stock quantity is required and supports up to 3 decimal places' })
+    if (formData.itemType !== 'service' && !editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !isValidStockQuantity(formData.quantity) || !isValidStockQuantity(openingStockBaseQuantity, true, 6))) {
+      toast({ variant: 'destructive', title: 'Enter up to 3 decimals for the counted quantity; converted stock is stored to 6 decimals' })
+      return
+    }
+    if (formData.itemType === 'product' && requiresPackageContents(formData.baseUnit) && (!Number(formData.contentsPerBaseUnit) || !formData.contentsUnit.trim())) {
+      toast({ variant: 'destructive', title: `Enter how many inner units are in each ${formData.baseUnit}` })
+      return
+    }
+    if ((formData.contentsPerBaseUnit !== '' && (!Number.isFinite(Number(formData.contentsPerBaseUnit)) || Number(formData.contentsPerBaseUnit) <= 0)) || (Boolean(formData.contentsPerBaseUnit) !== Boolean(formData.contentsUnit.trim()))) {
+      toast({ variant: 'destructive', title: 'Enter both a positive inner-unit count and the inner-unit name' })
       return
     }
     if (!['product', 'service', 'rental'].includes(formData.itemType)) {
@@ -622,6 +653,8 @@ export default function InventoryPage() {
       categoryId: formData.categoryId || null,
       branchId: formData.branchId || null,
       baseUnit: formData.baseUnit || 'Piece',
+      contentsPerBaseUnit: formData.contentsPerBaseUnit === '' ? null : Number(formData.contentsPerBaseUnit),
+      contentsUnit: formData.contentsUnit || null,
       itemType: formData.itemType,
       serviceCategory: null,
       estimatedHours: formData.estimatedHours === '' ? null : formData.estimatedHours,
@@ -677,7 +710,7 @@ export default function InventoryPage() {
         }
         let printableProduct: Pick<InventoryItem, 'product_name' | 'barcode' | 'size' | 'brand' | 'design'> | null = null
         if (online) {
-          const result = await inventoryApi.create({ ...formData, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
+          const result = await inventoryApi.create({ ...formData, quantity: openingStockBaseQuantity, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
           const savedProduct = (result as any)?.product || result
           printableProduct = {
             product_name: savedProduct?.name || formData.product_name,
@@ -705,7 +738,7 @@ export default function InventoryPage() {
             expiryDate: formData.expiryDate || undefined,
             price: formData.unit_price,
             cost: formData.cost_price,
-            quantity: formData.quantity,
+            quantity: openingStockBaseQuantity,
             minStock: formData.low_stock_alert,
             baseUnit: formData.baseUnit,
             categoryId: formData.categoryId || undefined,
@@ -716,7 +749,7 @@ export default function InventoryPage() {
             duration: formData.duration,
             updatedAt: new Date().toISOString(),
           })
-          await queueMutation('products', 'create', newId, queuedProductData(offlineBarcode, Number(formData.quantity || 0)))
+          await queueMutation('products', 'create', newId, queuedProductData(offlineBarcode, openingStockBaseQuantity))
           printableProduct = {
             product_name: formData.product_name,
             barcode: offlineBarcode || undefined,
@@ -780,6 +813,7 @@ export default function InventoryPage() {
       item,
       adjustmentType,
       quantity: '',
+      unitId: '',
       reason: adjustmentType === 'stock_in' ? 'Restock' : '',
     })
   }
@@ -836,7 +870,20 @@ export default function InventoryPage() {
       toast({ variant: 'destructive', title: 'Enter a positive quantity with no more than 3 decimal places' })
       return
     }
-    if (stockAdjust.adjustmentType === 'stock_out' && quantity > Number(stockAdjust.item.quantity || 0)) {
+    const selectedUnit = (stockAdjust.item as any).units?.find((unit: any) => unit.id === stockAdjust.unitId)
+    const isContentsUnit = stockAdjust.unitId === '__contents_unit__'
+    const contentsPerBaseUnit = Number((stockAdjust.item as any).contentsPerBaseUnit || 0)
+    const contentsFactor = isContentsUnit && contentsPerBaseUnit > 0 ? 1 / contentsPerBaseUnit : null
+    if (isContentsUnit && !contentsFactor) {
+      toast({ variant: 'destructive', title: 'This product has no valid package-content conversion.' })
+      return
+    }
+    const baseQuantity = toStockPrecision(quantity * Number(contentsFactor || selectedUnit?.conversionFactor || 1))
+    if (!isValidStockQuantity(baseQuantity, false, 6)) {
+      toast({ variant: 'destructive', title: 'The selected unit converts to more than 6 decimal places of base stock' })
+      return
+    }
+    if (stockAdjust.adjustmentType === 'stock_out' && baseQuantity > Number(stockAdjust.item.quantity || 0)) {
       toast({ variant: 'destructive', title: 'Stock out cannot exceed current stock' })
       return
     }
@@ -845,7 +892,10 @@ export default function InventoryPage() {
     try {
       await inventoryApi.adjustStock(String(stockAdjust.item.id), {
         adjustmentType: stockAdjust.adjustmentType,
-        quantity,
+        quantity: baseQuantity,
+        enteredQuantity: quantity,
+        unitId: stockAdjust.unitId && !isContentsUnit ? stockAdjust.unitId : undefined,
+        stockUnitName: isContentsUnit ? (stockAdjust.item as any).contentsUnit : undefined,
         reason: stockAdjust.reason.trim() || undefined,
         branchId: stockAdjust.item.branchId || stockAdjust.item.branch?.id || null,
       })
@@ -899,11 +949,14 @@ export default function InventoryPage() {
       categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
       branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
       baseUnit: (item as any).baseUnit || 'Piece',
+      contentsPerBaseUnit: (item as any).contentsPerBaseUnit ?? '',
+      contentsUnit: (item as any).contentsUnit || '',
       itemType: item.itemType || 'product',
       description: (item as any).description || '',
       estimatedHours: item.estimatedHours ?? '',
       duration: item.duration || '',
     })
+    setOpeningStockUnitName('')
     // Load selling units for this product
     const units = (item as any).units || []
     setSellingUnits(units.map((u: any) => ({ id: u.id, unitName: u.unitName, conversionFactor: u.conversionFactor, sellingPrice: u.sellingPrice, isDefault: u.isDefault })))
@@ -938,6 +991,7 @@ export default function InventoryPage() {
       branchId: defaultBranchId(user, branches),
     })
     setSellingUnits([])
+    setOpeningStockUnitName('')
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
     setCategoryOpen(false)
     setCategoryQuery('')
@@ -950,6 +1004,7 @@ export default function InventoryPage() {
     setEditingItem(null)
     setFormData(initialFormData)
     setSellingUnits([])
+    setOpeningStockUnitName('')
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
     setShowBarcodeScanner(false)
     setScannerFailed(false)
@@ -959,7 +1014,8 @@ export default function InventoryPage() {
 
   const addSellingUnit = () => {
     if (!newUnit.unitName || newUnit.conversionFactor <= 0) return
-    setSellingUnits(prev => [...prev, { ...newUnit }])
+    const packageFactor = unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
+    setSellingUnits(prev => [...prev, { ...newUnit, conversionFactor: packageFactor || newUnit.conversionFactor }])
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
   }
 
@@ -1108,10 +1164,35 @@ export default function InventoryPage() {
   ]
 
   const stockAdjustQuantity = Number(stockAdjust?.quantity || 0)
+  const stockAdjustProductUnits = (stockAdjust?.item as any)?.units || []
+  const stockAdjustHasContentsUnit = Boolean(
+    stockAdjust
+      && (stockAdjust.item as any).contentsUnit
+      && Number((stockAdjust.item as any).contentsPerBaseUnit) > 0
+      && !stockAdjustProductUnits.some((unit: any) => normalizeUnitKey(unit.unitName) === normalizeUnitKey((stockAdjust.item as any).contentsUnit))
+  )
+  const stockAdjustUnit = stockAdjust?.unitId === '__contents_unit__'
+    ? {
+        id: '__contents_unit__',
+        unitName: (stockAdjust.item as any).contentsUnit,
+        conversionFactor: 1 / Number((stockAdjust.item as any).contentsPerBaseUnit),
+      }
+    : (() => {
+        const unit = stockAdjustProductUnits.find((candidate: any) => candidate.id === stockAdjust?.unitId)
+        if (!unit || !stockAdjust) return unit
+        const factor = unitFactorFromPackageContents(
+          unit.unitName,
+          (stockAdjust.item as any).contentsUnit || '',
+          Number((stockAdjust.item as any).contentsPerBaseUnit || 0),
+        )
+        return factor ? { ...unit, conversionFactor: factor } : unit
+      })()
+  const stockAdjustFactor = Number(stockAdjustUnit?.conversionFactor || 1)
+  const stockAdjustBaseQuantity = toStockPrecision(stockAdjustQuantity * stockAdjustFactor)
   const stockAdjustProjectedQuantity = stockAdjust
     ? stockAdjust.adjustmentType === 'stock_in'
-      ? Number(stockAdjust.item.quantity || 0) + (Number.isFinite(stockAdjustQuantity) ? stockAdjustQuantity : 0)
-      : Number(stockAdjust.item.quantity || 0) - (Number.isFinite(stockAdjustQuantity) ? stockAdjustQuantity : 0)
+      ? Number(stockAdjust.item.quantity || 0) + (Number.isFinite(stockAdjustBaseQuantity) ? stockAdjustBaseQuantity : 0)
+      : Number(stockAdjust.item.quantity || 0) - (Number.isFinite(stockAdjustBaseQuantity) ? stockAdjustBaseQuantity : 0)
     : 0
 
   const priceHistoryUser = (row: ProductPriceHistory) =>
@@ -1631,20 +1712,31 @@ export default function InventoryPage() {
               ) : (
                 <div className="space-y-2">
                   <Label htmlFor="quantity">Opening Stock <span className="text-red-500">*</span></Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min="0"
-                    step="0.001"
-                    required
-                    value={formData.quantity}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        quantity: e.target.value === '' ? '' : parseFloat(e.target.value),
-                      }))
-                    }
-                  />
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(120px,0.8fr)] gap-2">
+                    <Input
+                      id="quantity"
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      required
+                      value={formData.quantity}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          quantity: e.target.value === '' ? '' : parseFloat(e.target.value),
+                        }))
+                      }
+                    />
+                    <select value={openingStockUnitName} onChange={event => setOpeningStockUnitName(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm">
+                      <option value="">{formData.baseUnit || 'Piece'} (base)</option>
+                      {sellingUnits.map(unit => <option key={unit.unitName} value={unit.unitName}>{unit.unitName}</option>)}
+                      {formData.contentsUnit && Number(formData.contentsPerBaseUnit) > 0 && !sellingUnits.some(unit => normalizeUnitKey(unit.unitName) === normalizeUnitKey(formData.contentsUnit)) && <option value={formData.contentsUnit}>{formData.contentsUnit}</option>}
+                    </select>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {openingStockUnitName ? `1 ${openingStockUnitName} = ${openingStockFactor} ${formData.baseUnit || 'Piece'}. ` : ''}
+                    Inventory is stored as {formatQty(openingStockBaseQuantity)} {formData.baseUnit || 'Piece'}.
+                  </p>
                 </div>
               )}
               <div className="space-y-2">
@@ -1687,9 +1779,21 @@ export default function InventoryPage() {
                   onChange={(e) =>
                     setFormData((prev) => ({ ...prev, baseUnit: e.target.value }))
                   }
-                  placeholder="e.g. KG, Bottle, Piece, Tablet"
+                  placeholder="e.g. Piece, Carton, Box, Dose, Packet"
                 />
               </div>
+              {canDefinePackageContents(formData.baseUnit) && <div className="space-y-2 sm:col-span-2 rounded-md border border-primary/20 bg-primary/5 p-3">
+                <Label>Contents in each {formData.baseUnit}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {requiresPackageContents(formData.baseUnit)
+                    ? `Enter how many inner units one ${formData.baseUnit} contains.`
+                    : `Optional: define the smaller unit contained in one ${formData.baseUnit}. Enter the actual package contents; JibuSales will not assume a count.`}
+                </p>
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(120px,0.8fr)] gap-2">
+                  <Input type="number" min="0.000001" step="any" value={formData.contentsPerBaseUnit} onChange={event => setFormData(prev => ({ ...prev, contentsPerBaseUnit: event.target.value === '' ? '' : Number(event.target.value) }))} placeholder="Number inside" aria-label={`Number of inner units per ${formData.baseUnit}`}/>
+                  <Input value={formData.contentsUnit} onChange={event => setFormData(prev => ({ ...prev, contentsUnit: event.target.value }))} placeholder="Inner unit, e.g. Piece" aria-label="Inner unit name"/>
+                </div>
+              </div>}
                 </>
               )}
 
@@ -1703,7 +1807,7 @@ export default function InventoryPage() {
                     {sellingUnits.map((u, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
                         <span className="flex-1 text-sm font-medium">{u.unitName}</span>
-                        <span className="text-xs text-muted-foreground">{u.conversionFactor} {formData.baseUnit}</span>
+                        <span className="text-xs text-muted-foreground">{unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) || u.conversionFactor} {formData.baseUnit}</span>
                         <span className="text-sm">{formatCurrency(u.sellingPrice)}</span>
                         {u.isDefault && <span className="text-xs text-primary font-medium">Default</span>}
                         <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeSellingUnit(idx)}><Trash2 className="h-3 w-3" /></Button>
@@ -1718,7 +1822,7 @@ export default function InventoryPage() {
                   </div>
                   <div className="w-24">
                     <Label className="text-xs">Factor</Label>
-                    <Input type="number" step="any" min="0.01" value={newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" />
+                    <Input type="number" step="any" min="0.000001" value={unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" readOnly={Boolean(unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)))} />
                   </div>
                   <div className="w-28">
                     <Label className="text-xs">Price</Label>
@@ -2300,7 +2404,15 @@ export default function InventoryPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="stockAdjustQuantity">Quantity</Label>
+                  {((stockAdjust.item as any).units?.length > 0 || stockAdjustHasContentsUnit) && <div className="space-y-2">
+                    <Label htmlFor="stockAdjustUnit">Count stock as</Label>
+                    <select id="stockAdjustUnit" value={stockAdjust.unitId} onChange={event => setStockAdjust(prev => prev ? { ...prev, unitId: event.target.value } : prev)} className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                      <option value="">{stockAdjust.item.baseUnit || 'Piece'} (base)</option>
+                      {(stockAdjust.item as any).units.map((unit: any) => <option key={unit.id} value={unit.id}>{unit.unitName} · {unitFactorFromPackageContents(unit.unitName, (stockAdjust.item as any).contentsUnit || '', Number((stockAdjust.item as any).contentsPerBaseUnit || 0)) || unit.conversionFactor} {stockAdjust.item.baseUnit || 'Piece'}</option>)}
+                      {stockAdjustHasContentsUnit && <option value="__contents_unit__">{(stockAdjust.item as any).contentsUnit} · {formatQty(1 / Number((stockAdjust.item as any).contentsPerBaseUnit))} {stockAdjust.item.baseUnit || 'Piece'}</option>}
+                    </select>
+                  </div>}
+                  <Label htmlFor="stockAdjustQuantity">{stockAdjust.adjustmentType === 'stock_in' ? 'Quantity received' : 'Quantity adjusted'}</Label>
                   <Input
                     id="stockAdjustQuantity"
                     type="number"
@@ -2310,6 +2422,7 @@ export default function InventoryPage() {
                     onChange={(event) => setStockAdjust((prev) => prev ? { ...prev, quantity: event.target.value } : prev)}
                     required
                   />
+                  {stockAdjustUnit && <p className="text-xs text-muted-foreground">{stockAdjustQuantity || 0} {stockAdjustUnit.unitName} converts to {formatQty(stockAdjustBaseQuantity)} {stockAdjust.item.baseUnit || 'Piece'}.</p>}
                 </div>
 
                 <div className="space-y-2">

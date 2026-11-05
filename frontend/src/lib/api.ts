@@ -345,6 +345,8 @@ export const inventoryApi = {
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
       baseUnit: data.baseUnit || 'Piece',
+      contentsPerBaseUnit: data.contentsPerBaseUnit === '' || data.contentsPerBaseUnit == null ? null : Number(data.contentsPerBaseUnit),
+      contentsUnit: data.contentsUnit || null,
       itemType: data.itemType || 'product',
       serviceCategory: data.serviceCategory || null,
       estimatedHours: data.estimatedHours || null,
@@ -384,6 +386,8 @@ export const inventoryApi = {
       categoryId: data.categoryId || null,
       branchId: data.branchId || null,
       baseUnit: data.baseUnit || 'Piece',
+      contentsPerBaseUnit: data.contentsPerBaseUnit === '' || data.contentsPerBaseUnit == null ? null : Number(data.contentsPerBaseUnit),
+      contentsUnit: data.contentsUnit || null,
       itemType: data.itemType || 'product',
       serviceCategory: data.serviceCategory || null,
       estimatedHours: data.estimatedHours || null,
@@ -395,7 +399,7 @@ export const inventoryApi = {
       replacementValue: data.replacementValue || null,
     } }),
 
-  adjustStock: (id: string, data: { adjustmentType: 'stock_in' | 'stock_out'; quantity: number; reason?: string; branchId?: string | null }) =>
+  adjustStock: (id: string, data: { adjustmentType: 'stock_in' | 'stock_out'; quantity: number; enteredQuantity?: number; unitId?: string; stockUnitName?: string; reason?: string; branchId?: string | null }) =>
     api.post<any>(`/api/inventory/${id}/stock-adjust`, { body: data }),
 
   getPriceHistory: async (id: string) => {
@@ -445,6 +449,8 @@ function mapProductToInventory(p: any): InventoryItem {
     branch: p.branch || null,
     updated_at: p.updatedAt || p.createdAt,
     baseUnit: p.baseUnit || 'Piece',
+    contentsPerBaseUnit: p.contentsPerBaseUnit == null ? null : Number(p.contentsPerBaseUnit),
+    contentsUnit: p.contentsUnit || null,
     units: p.units || [],
     itemType: p.itemType || 'product',
     includedServices: p.includedServices || [],
@@ -1252,6 +1258,8 @@ export interface InventoryItem {
   categoryName?: string | null
   updated_at: string
   baseUnit?: string
+  contentsPerBaseUnit?: number | null
+  contentsUnit?: string | null
   units?: any[]
   itemType?: 'product' | 'service' | 'rental'
   serviceCategory?: string | null
@@ -1287,6 +1295,8 @@ export interface InventoryMovementDetail {
   reference?: string
   referenceId?: string
   quantity?: number
+  baseQuantity?: number
+  conversionFactor?: number
   unit?: string
   reason?: string
   staff?: string

@@ -78,6 +78,9 @@ const slugify = (value = "") =>
     .replace(/(^-|-$)/g, "");
 
 const normalizeProductName = (value = "") => String(value).trim().replace(/\s+/g, " ");
+const normalizeUnitLabel = (value = "") => String(value).trim().toLocaleLowerCase().replace(/\s+/g, " ").replace(/s$/, "");
+const packagedBaseUnits = new Set(["box", "carton", "dose", "packet", "pack", "case", "crate"]);
+const requiresPackageContents = (value) => packagedBaseUnits.has(normalizeUnitLabel(value));
 const normalizeProductAttribute = (value) => {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -202,7 +205,10 @@ function auditLogStockMovement(log) {
       type: label,
       reference: log.id.slice(-8),
       referenceId: log.id,
-      quantity: qty,
+      quantity: Number(stockMovement.enteredQuantity ?? qty),
+      baseQuantity: qty,
+      conversionFactor: Number(stockMovement.conversionFactor || 1),
+      unit: stockMovement.unitName || null,
       reason: stockMovement.reason || log.changes?.reason || (movementType === "stock_in" ? "Restock" : "Manual stock adjustment"),
       staff: log.userEmail || "Unknown",
     },
@@ -821,7 +827,7 @@ router.get("/", authenticateToken, async (req, res) => {
     if (barcode) {
       const product = await prisma.product.findFirst({
         where: scopedWhere(scope, { barcode, isActive: { not: false } }),
-        include: { category: true, branch: true },
+    include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
       });
       return res.json(await buildListResponse(product ? [product] : [], product ? 1 : 0, 1, 1));
     }
@@ -1080,8 +1086,8 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
       return res.status(400).json({ error: "Stock quantity is required" });
     }
     const parsedQuantity = Number(quantityValue);
-    if (!isValidStockQuantity(parsedQuantity)) {
-      return res.status(400).json({ error: "Stock quantity must be non-negative and use no more than 3 decimal places" });
+    if (!isValidStockQuantity(parsedQuantity, { precision: 6 })) {
+      return res.status(400).json({ error: "Stock quantity must be non-negative and use no more than 6 stored decimal places" });
     }
     body.quantity = parsedQuantity;
 
@@ -1110,6 +1116,13 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     // Set itemType (default to product, allow rental)
     const itemTypeValue = ["service", "rental"].includes(itemType) ? itemType : "product";
     body.itemType = itemTypeValue;
+    const contentsPerBaseUnit = body.contentsPerBaseUnit == null || body.contentsPerBaseUnit === "" ? null : Number(body.contentsPerBaseUnit);
+    const contentsUnit = body.contentsUnit == null ? "" : String(body.contentsUnit).trim().replace(/\s+/g, " ");
+    if (contentsPerBaseUnit != null && (!Number.isFinite(contentsPerBaseUnit) || contentsPerBaseUnit <= 0)) return res.status(400).json({ error: "Contents per package unit must be greater than zero." });
+    if (Boolean(contentsPerBaseUnit) !== Boolean(contentsUnit)) return res.status(400).json({ error: "Enter both the number of inner units and their unit name." });
+    if (itemTypeValue === "product" && requiresPackageContents(body.baseUnit) && !contentsPerBaseUnit) return res.status(400).json({ error: `Enter how many inner units are in each ${body.baseUnit}.` });
+    body.contentsPerBaseUnit = contentsPerBaseUnit;
+    body.contentsUnit = contentsUnit || null;
     body.barcode = typeof body.barcode === "string" ? body.barcode.trim() || null : body.barcode || null;
 
     const duplicateCheck = await ensureUniqueProductName(prisma, scope.tenantId, scope.branchId, normalizedName);
@@ -1247,8 +1260,8 @@ router.put("/:id", authenticateToken, async (req, res) => {
     const quantityWasProvided = quantity !== undefined && quantity !== null && quantity !== "";
     if (quantityWasProvided) {
       const parsedQuantity = Number(quantity);
-      if (!isValidStockQuantity(parsedQuantity)) {
-        return res.status(400).json({ error: "Stock quantity must be non-negative and use no more than 3 decimal places" });
+      if (!isValidStockQuantity(parsedQuantity, { precision: 6 })) {
+        return res.status(400).json({ error: "Stock quantity must be non-negative and use no more than 6 stored decimal places" });
       }
       if (parsedQuantity !== Number(existing.quantity || 0) && itemType !== "service") {
         return res.status(400).json({
@@ -1306,6 +1319,19 @@ router.put("/:id", authenticateToken, async (req, res) => {
     } else if (itemType === "rental") {
       data.itemType = "rental";
     }
+
+    const nextBaseUnit = body.baseUnit === undefined ? existing.baseUnit : body.baseUnit;
+    const nextContentsPerBaseUnit = body.contentsPerBaseUnit === undefined
+      ? existing.contentsPerBaseUnit
+      : body.contentsPerBaseUnit === "" || body.contentsPerBaseUnit == null ? null : Number(body.contentsPerBaseUnit);
+    const nextContentsUnit = body.contentsUnit === undefined
+      ? existing.contentsUnit
+      : String(body.contentsUnit || "").trim().replace(/\s+/g, " ") || null;
+    if (nextContentsPerBaseUnit != null && (!Number.isFinite(nextContentsPerBaseUnit) || nextContentsPerBaseUnit <= 0)) return res.status(400).json({ error: "Contents per package unit must be greater than zero." });
+    if (Boolean(nextContentsPerBaseUnit) !== Boolean(nextContentsUnit)) return res.status(400).json({ error: "Enter both the number of inner units and their unit name." });
+    if (itemType === "product" && requiresPackageContents(nextBaseUnit) && !nextContentsPerBaseUnit) return res.status(400).json({ error: `Enter how many inner units are in each ${nextBaseUnit}.` });
+    data.contentsPerBaseUnit = itemType === "service" ? null : nextContentsPerBaseUnit;
+    data.contentsUnit = itemType === "service" ? null : nextContentsUnit;
 
     if (itemType === "product") {
       const requestedBarcode = typeof body.barcode === "string" ? body.barcode.trim() : "";
@@ -1413,7 +1439,7 @@ router.post("/:id/stock-adjust", authenticateToken, async (req, res) => {
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const product = await prisma.product.findFirst({
       where: scopedWhere(scope, { id: req.params.id }),
-      include: { category: true, branch: true },
+      include: { category: true, branch: true, units: { orderBy: { conversionFactor: "asc" } } },
     });
     if (!product) return res.status(404).json({ error: "Product not found" });
     if (product.itemType === 'rental' && !(await hasRentalFeature(scope.tenantId))) return res.status(403).json({ error: 'Rental Items are not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
@@ -1430,9 +1456,44 @@ router.post("/:id/stock-adjust", authenticateToken, async (req, res) => {
       return res.status(403).json({ error: `You do not have permission to record ${adjustmentType === 'stock_in' ? 'stock received' : 'stock-out adjustments'}.` });
     }
 
-    const parsedQuantity = Number(req.body.quantity);
-    if (!isValidStockQuantity(parsedQuantity, { allowZero: false })) {
-      return res.status(400).json({ error: "Adjustment quantity must be positive and use no more than 3 decimal places" });
+    let parsedQuantity = Number(req.body.quantity);
+    let stockUnit = null;
+    const enteredQuantity = req.body.enteredQuantity == null ? parsedQuantity : Number(req.body.enteredQuantity);
+    if (req.body.unitId) {
+      if (!isValidStockQuantity(enteredQuantity, { allowZero: false })) {
+        return res.status(400).json({ error: "Entered stock quantity must be positive and use no more than 3 decimal places." });
+      }
+      stockUnit = await prisma.productUnit.findFirst({ where: { id: String(req.body.unitId), productId: product.id } });
+      if (!stockUnit) return res.status(400).json({ error: "The selected stock unit is not configured for this product." });
+      const contentsPerBaseUnit = Number(product.contentsPerBaseUnit || 0);
+      const configuredContentsUnit = normalizeUnitLabel(product.contentsUnit || "");
+      const conversionFactor = configuredContentsUnit && normalizeUnitLabel(stockUnit.unitName) === configuredContentsUnit && contentsPerBaseUnit > 0
+        ? 1 / contentsPerBaseUnit
+        : Number(stockUnit.conversionFactor);
+      stockUnit = { ...stockUnit, conversionFactor };
+      parsedQuantity = Number((enteredQuantity * conversionFactor).toFixed(6));
+      if (Math.abs(parsedQuantity - Number(req.body.quantity)) > 0.000001) {
+        return res.status(400).json({ error: "Stock unit conversion changed. Refresh the product and try again." });
+      }
+    } else if (req.body.stockUnitName) {
+      if (!isValidStockQuantity(enteredQuantity, { allowZero: false })) {
+        return res.status(400).json({ error: "Entered stock quantity must be positive and use no more than 3 decimal places." });
+      }
+      const requestedUnit = normalizeUnitLabel(req.body.stockUnitName);
+      const configuredUnit = normalizeUnitLabel(product.contentsUnit || "");
+      const contentsPerBaseUnit = Number(product.contentsPerBaseUnit || 0);
+      if (!configuredUnit || requestedUnit !== configuredUnit || !Number.isFinite(contentsPerBaseUnit) || contentsPerBaseUnit <= 0) {
+        return res.status(400).json({ error: "The selected inner stock unit is not configured for this product." });
+      }
+      const conversionFactor = 1 / contentsPerBaseUnit;
+      stockUnit = { unitName: product.contentsUnit, conversionFactor };
+      parsedQuantity = Number((enteredQuantity * conversionFactor).toFixed(6));
+      if (Math.abs(parsedQuantity - Number(req.body.quantity)) > 0.000001) {
+        return res.status(400).json({ error: "Stock unit conversion changed. Refresh the product and try again." });
+      }
+    }
+    if (!isValidStockQuantity(parsedQuantity, { allowZero: false, precision: 6 })) {
+      return res.status(400).json({ error: "Converted stock quantity must be positive and use no more than 6 decimal places" });
     }
 
     const currentQuantity = Number(product.quantity || 0);
@@ -1467,6 +1528,11 @@ router.post("/:id/stock-adjust", authenticateToken, async (req, res) => {
             stockMovement: {
               type: adjustmentType,
               quantity: parsedQuantity,
+              enteredQuantity,
+              unitName: stockUnit?.unitName || product.baseUnit || "Piece",
+              conversionFactor: stockUnit?.conversionFactor || 1,
+              baseQuantity: parsedQuantity,
+              baseUnit: product.baseUnit || "Piece",
               reason,
               productName: product.name,
               previousQuantity: currentQuantity,

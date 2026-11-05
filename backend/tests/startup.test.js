@@ -33,8 +33,10 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(startupScript, /ensure-fractional-product-stock-schema\.js/);
   assert.ok(startupScript.indexOf('ensure-fractional-product-stock-schema.js') < startupScript.indexOf('=== Starting Node App ==='));
   const fractionalStockMigration = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-fractional-product-stock-schema.js'), 'utf8');
-  assert.match(fractionalStockMigration, /ALTER COLUMN "quantity" TYPE DECIMAL\(18, 3\)/);
-  assert.match(fractionalStockMigration, /USING ROUND\("quantity"::numeric, 3\)/);
+  assert.match(fractionalStockMigration, /ALTER COLUMN "quantity" TYPE DECIMAL\(18, 6\)/);
+  assert.match(fractionalStockMigration, /USING ROUND\("quantity"::numeric, 6\)/);
+  assert.match(fractionalStockMigration, /ADD COLUMN IF NOT EXISTS "contentsPerBaseUnit"/);
+  assert.match(fractionalStockMigration, /ADD COLUMN IF NOT EXISTS "contentsUnit"/);
   assert.doesNotMatch(fractionalStockMigration, /DROP TABLE|TRUNCATE|force-reset/i);
   const tenantNotesSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-property-tenant-notes-schema.js'), 'utf8');
   assert.match(tenantNotesSchema, /CREATE TABLE IF NOT EXISTS property_tenant_notes/);

@@ -370,21 +370,31 @@ router.put("/:id/permissions", authenticateToken, requirePermission("canManageSt
     });
     if (!user) return res.status(404).json({ error: "Staff not found" });
 
-    const requestPermissions = req.body || {};
+    const requestPermissions = req.body?.permissions && typeof req.body.permissions === 'object'
+      ? req.body.permissions
+      : req.body;
+    if (!requestPermissions || typeof requestPermissions !== 'object' || Array.isArray(requestPermissions)) {
+      return res.status(400).json({ error: 'A permissions object is required.' });
+    }
     const data = {};
     for (const key of PERM_KEYS) {
-      data[key] = !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, req.tenantFeatures) && Boolean(requestPermissions[key] ?? false);
+      if (!Object.prototype.hasOwnProperty.call(requestPermissions, key)) continue;
+      data[key] = !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, req.tenantFeatures) && Boolean(requestPermissions[key]);
     }
+    if (!Object.keys(data).length) return res.status(400).json({ error: 'No recognized permissions were provided.' });
+
+    const createData = Object.fromEntries(PERM_KEYS.map((key) => [key, false]));
+    Object.assign(createData, data);
 
     const perms = await prisma.userPermission.upsert({
       where: { userId: user.id },
       update: data,
-      create: { userId: user.id, ...data },
+      create: { userId: user.id, ...createData },
     });
     res.json({ message: "Permissions updated", permissions: normalizePermissionRecord(perms) });
   } catch (err) {
-    console.error("Update permissions error:", err);
-    res.status(500).json({ error: "Failed to update permissions" });
+    console.error("Update permissions error:", err?.stack || err);
+    res.status(500).json({ error: "Failed to update permissions", code: err?.code || "PERMISSION_UPDATE_FAILED" });
   }
 });
 

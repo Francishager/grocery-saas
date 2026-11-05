@@ -1239,7 +1239,7 @@ model Product {
   description      String?
   price            Float
   cost             Float?
-  quantity         Decimal       @default(0) @db.Decimal(18, 3)
+  quantity         Decimal       @default(0) @db.Decimal(18, 6)
   minStock         Int           @default(10)
   categoryId       String?
   category         Category?     @relation(fields: [categoryId], references: [id])
@@ -1253,6 +1253,8 @@ model Product {
   imagePublicId    String?
   expiryDate       DateTime?
   baseUnit         String        @default("Piece") // Base unit of measure: KG, Bottle, Piece, Tablet, etc.
+  contentsPerBaseUnit Float?
+  contentsUnit       String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

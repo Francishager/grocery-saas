@@ -49,7 +49,8 @@ function logAuthenticationEvent(req, action, user = null, statusCode = 200) {
 }
 
 function primaryBranchId(user) {
-  const primary = user.branches?.find((item) => item.isPrimary) || user.branches?.[0];
+  const branches = Array.isArray(user?.branches) ? user.branches : [];
+  const primary = branches.find((item) => item.isPrimary) || branches[0];
   return primary?.branchId || null;
 }
 

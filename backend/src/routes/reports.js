@@ -4223,10 +4223,13 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       const quantityDelta = Number.isFinite(beforeQty) && Number.isFinite(afterQty) ? afterQty - beforeQty : 0;
       const stockMovement = adj.changes?.stockMovement || {};
       const movementLabel = stockMovement.reason || stockMovement.reference || adj.action;
+      const enteredStock = stockMovement.enteredQuantity != null && stockMovement.unitName
+        ? ` (${stockMovement.enteredQuantity} ${stockMovement.unitName}; ${Math.abs(quantityDelta)} ${product?.baseUnit || stockMovement.baseUnit || 'base units'})`
+        : '';
       entries.push({
         date: adj.createdAt,
         refNo: stockMovement.reference || adj.id.slice(-6),
-        description: `Adjustment: ${movementLabel}`,
+        description: `Adjustment: ${movementLabel}${enteredStock}`,
         inQty: quantityDelta > 0 ? quantityDelta : 0,
         outQty: quantityDelta < 0 ? Math.abs(quantityDelta) : 0,
         balance: 0,
