@@ -1802,6 +1802,7 @@ export default function InventoryPage() {
               <div className="sm:col-span-2 space-y-3 border rounded-lg p-4">
                 <Label className="text-base font-semibold">Selling Units (Multi-UOM)</Label>
                 <p className="text-xs text-muted-foreground">Add different selling units with conversion factors and prices. Stock is tracked in the base unit ({formData.baseUnit || 'Piece'}).</p>
+                <p className="text-xs text-muted-foreground">Factor means base units per 1 selling unit. Examples: with kg as the base, Half kg = 0.5 and Quarter kg = 0.25. With Piece as the base, if one Dose contains 12 pieces, Dose = 12 and Half dose = 6. These conversions are used for stock and cost.</p>
                 {sellingUnits.length > 0 && (
                   <div className="space-y-2">
                     {sellingUnits.map((u, idx) => (
@@ -1820,8 +1821,8 @@ export default function InventoryPage() {
                     <Label className="text-xs">Unit Name</Label>
                     <Input value={newUnit.unitName} onChange={e => setNewUnit(prev => ({ ...prev, unitName: e.target.value }))} placeholder="e.g. Half KG" className="h-8 text-sm" />
                   </div>
-                  <div className="w-24">
-                    <Label className="text-xs">Factor</Label>
+                  <div className="w-36">
+                    <Label className="text-xs">Base units per selling unit</Label>
                     <Input type="number" step="any" min="0.000001" value={unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" readOnly={Boolean(unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)))} />
                   </div>
                   <div className="w-28">
