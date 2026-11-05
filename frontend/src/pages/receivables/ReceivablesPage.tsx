@@ -2226,18 +2226,7 @@ export default function ReceivablesPage() {
               <TransactionCurrencyControl baseCurrency={baseCurrency} currency={saleCurrency} enabled={hasFeature('settings.currencies')} amount={saleRateToBase ? saleTotal / saleRateToBase : 0} onCurrencyChange={setSaleCurrency} onRateChange={(rate, units) => { setSaleRateToBase(rate); setSaleUnitsPerBase(units) }} />
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label>Items</Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSaleItems((prev) => [...prev, createEmptySaleItem()])}
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Item
-                  </Button>
-                </div>
+                <Label>Items</Label>
 
                 {saleItems.map((item, index) => {
                   const selectedItem = products.find((p) => String(p.id) === item.productId)
@@ -2313,6 +2302,15 @@ export default function ReceivablesPage() {
                   </div>
                   )
                 })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => setSaleItems((prev) => [...prev, createEmptySaleItem()])}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add another item
+                </Button>
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">

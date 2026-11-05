@@ -22,3 +22,13 @@ test('credit sale invoice print and download preserve the selected selling unit'
   assert.match(source, /item\?\.unitName \? ` \(\$\{item\.unitName\}\)`/)
   assert.match(source, /item\.unitName \? ` \$\{item\.unitName\}`/)
 })
+
+test('credit sale add-item action follows the item rows instead of the section heading', () => {
+  const sectionStart = source.indexOf('<Label>Items</Label>')
+  const firstItemRow = source.indexOf('{saleItems.map((item, index) => {', sectionStart)
+  const addAnotherItem = source.indexOf('Add another item', sectionStart)
+  assert.ok(sectionStart >= 0)
+  assert.ok(firstItemRow > sectionStart)
+  assert.ok(addAnotherItem > firstItemRow)
+  assert.doesNotMatch(source.slice(sectionStart, firstItemRow), /Add another item/)
+})
