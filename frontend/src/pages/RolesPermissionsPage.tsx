@@ -344,31 +344,19 @@ function PermissionMatrix({
   const groups = getPermissionGroups(schema, search)
 
   const setAll = (checked: boolean) => {
-    if (!checked) {
-      onChange({})
-      return
-    }
-    const next: Record<string, boolean> = {}
-    allKeys.forEach((key) => {
-      next[key] = true
-    })
+    const next: Record<string, boolean> = { ...values }
+    allKeys.forEach((key) => { next[key] = checked })
     onChange(next)
   }
 
   const setGroup = (keys: string[], checked: boolean) => {
     const next = { ...values }
-    keys.forEach((key) => {
-      if (checked) next[key] = true
-      else delete next[key]
-    })
+    keys.forEach((key) => { next[key] = checked })
     onChange(next)
   }
 
   const setPermission = (key: string, checked: boolean) => {
-    const next = { ...values }
-    if (checked) next[key] = true
-    else delete next[key]
-    onChange(next)
+    onChange({ ...values, [key]: checked })
   }
 
   return (
@@ -441,6 +429,7 @@ export default function RolesPermissionsPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [expandedPermId, setExpandedPermId] = useState<string | null>(null)
   const [permissions, setPermissions] = useState<Record<string, boolean>>({})
+  const [savingPermissionsFor, setSavingPermissionsFor] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '', cashAccountId: '' })
   const [formPerms, setFormPerms] = useState<Record<string, boolean>>({})
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -539,7 +528,9 @@ export default function RolesPermissionsPage() {
       return
     }
     try {
-      const result = await staffApi.create({ ...form, name: form.name || form.email.split('@')[0], permissions: formPerms })
+      const permissionKeys = [...new Set([...(permSchema?.keys || []), ...Object.keys(PERM_LABELS)])]
+      const explicitPermissions = Object.fromEntries(permissionKeys.map(key => [key, Boolean(formPerms[key])]))
+      const result = await staffApi.create({ ...form, name: form.name || form.email.split('@')[0], permissions: explicitPermissions })
       toast({ title: 'Staff created successfully' })
       setShowAddForm(false)
       setForm({ name: '', email: '', password: '', role: 'attendant' as 'attendant' | 'manager' | 'accountant', branchId: '', phone: '', cashAccountId: '' })
@@ -607,11 +598,24 @@ export default function RolesPermissionsPage() {
   }
 
   const handleSavePermissions = async (id: string) => {
+    if (savingPermissionsFor) return
+    setSavingPermissionsFor(id)
     try {
-      await staffApi.updatePermissions(id, permissions)
+      const saved = await staffApi.updatePermissions(id, permissions)
+      const persisted = await staffApi.getPermissions(id)
+      const savedPermissions = saved?.permissions || {}
+      const keys = permSchema?.keys || Object.keys(savedPermissions)
+      const mismatchedKey = keys.find(key => Boolean(savedPermissions[key]) !== Boolean(persisted?.[key]))
+      if (mismatchedKey) {
+        setPermissions(persisted)
+        throw new Error(`Permission ${PERM_LABELS[mismatchedKey] || mismatchedKey} did not persist. The form has been refreshed; try saving again.`)
+      }
+      setPermissions(persisted)
       toast({ title: 'Permissions updated' })
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Failed', description: err?.message })
+    } finally {
+      setSavingPermissionsFor(null)
     }
   }
 
@@ -825,7 +829,9 @@ export default function RolesPermissionsPage() {
                         search={permSearch}
                         onSearch={setPermSearch}
                       />
-                      <Button onClick={() => handleSavePermissions(s.id)} size="sm" className="mt-3">Save Permissions</Button>
+                      <Button onClick={() => handleSavePermissions(s.id)} size="sm" className="mt-3" disabled={savingPermissionsFor !== null}>
+                        {savingPermissionsFor === s.id ? 'Saving...' : 'Save Permissions'}
+                      </Button>
                       {s.role !== 'owner' && (
                         <div className="mt-5 space-y-3">
                           <WorkingHoursEditor custom value={staffHours(s)} timezone={businessTimezone}
