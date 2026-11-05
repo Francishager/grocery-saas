@@ -338,6 +338,7 @@ export const permissions: Permission[] = [
   { id: 'canEditAccounting', name: 'Edit Accounting Entries', description: 'Edit accounting records', category: 'accounting', accessesBusinessData: true },
   { id: 'canDeleteAccounting', name: 'Delete Accounting Entries', description: 'Delete accounting records', category: 'accounting', accessesBusinessData: true },
   { id: 'canReverseAccountingEntry', name: 'Reverse Accounting Entries', description: 'Reverse posted expense journal entries with auditable opposite entries', category: 'accounting', accessesBusinessData: true },
+  { id: 'canPostToProtectedAccounts', name: 'Post to Protected System Accounts', description: 'Make exceptional manual corrections to protected accounts with a required reason and reference', category: 'accounting', accessesBusinessData: true },
   { id: 'canViewChartOfAccounts', name: 'View Chart of Accounts', description: 'View account structure, categories, balances, and history', category: 'accounting', accessesBusinessData: true },
   { id: 'canCreateChartOfAccounts', name: 'Create Chart of Accounts', description: 'Create normal ledger accounts and account categories', category: 'accounting', accessesBusinessData: true },
   { id: 'canEditChartOfAccounts', name: 'Edit Chart of Accounts', description: 'Edit or deactivate normal ledger accounts and account categories', category: 'accounting', accessesBusinessData: true },

@@ -30,6 +30,7 @@ interface Account {
   subType?: string
   balance: number
   isActive: boolean
+  isSystemManaged?: boolean
   parentId?: string
   children?: Account[]
   description?: string
@@ -336,6 +337,7 @@ export default function AccountingPage() {
   const canCreateAccountingEntries = hasPermission('canCreateAccounting')
   const canEditAccountingEntries = hasPermission('canEditAccounting')
   const canReverseAccountingEntries = hasPermission('canReverseAccountingEntry')
+  const canPostToProtectedAccounts = hasPermission('canPostToProtectedAccounts')
   const canViewChartOfAccounts = hasPermission('canViewChartOfAccounts')
   const canCreateChartOfAccounts = hasPermission('canCreateChartOfAccounts')
   const canEditChartOfAccounts = hasPermission('canEditChartOfAccounts')
@@ -382,8 +384,8 @@ export default function AccountingPage() {
   const [jeSubForm, setJeSubForm] = useState<'single' | 'multiple'>('single')
 
   // Multiple General Journal form
-  const [mjLines, setMjLines] = useState<{ debitAccount: string; creditAccount: string; amount: string; date: string; description: string }[]>([
-    { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' },
+  const [mjLines, setMjLines] = useState<{ debitAccount: string; creditAccount: string; amount: string; date: string; description: string; reference: string }[]>([
+    { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '', reference: '' },
   ])
 
   // Journal Ledger
@@ -494,10 +496,13 @@ export default function AccountingPage() {
   const transactionAccounts = useMemo(() => (
     visibleAccounts.filter(account => isTransactionAccount(account))
   ), [visibleAccounts])
+  const isProtectedPostingAccount = (account?: Account) => Boolean(account && (account.isSystemManaged || account.isHrProtected))
   const postingAccounts = useMemo(() => (
-    visibleAccounts.filter(account => !account.isHrProtected)
-  ), [visibleAccounts])
-  const postingAccountOptions = useMemo(() => buildAccountOptions(postingAccounts), [postingAccounts])
+    visibleAccounts.filter(account => !isProtectedPostingAccount(account) || canPostToProtectedAccounts)
+  ), [visibleAccounts, canPostToProtectedAccounts])
+  const postingAccountOptions = useMemo(() => buildAccountOptions(postingAccounts).map(option => (
+    isProtectedPostingAccount(option.account) ? { ...option, label: `Protected: ${option.label}` } : option
+  )), [postingAccounts])
   const journalActionAccountOptions = useMemo(() => (
     buildAccountOptions(
       postingAccounts,
@@ -517,6 +522,10 @@ export default function AccountingPage() {
   ), [transactionAccounts, jeAccount, jePaymentMethod, assignedCashAccountId, hasPermission])
   const flatAccounts = useMemo(() => flattenAccountTree(accounts), [accounts])
   const accountById = useMemo(() => new Map(flatAccounts.map(account => [account.id, account])), [flatAccounts])
+  const selectedSingleProtectedAccount = isProtectedPostingAccount(accountById.get(jeAccount))
+  const hasMultipleProtectedSelection = mjLines.some(line =>
+    [line.debitAccount, line.creditAccount].some(id => isProtectedPostingAccount(accountById.get(id))),
+  )
   const selectedHistoryAccountIds = useMemo(() => collectAccountIds(selectedHistoryAccount), [selectedHistoryAccount])
   const accountHistoryRows = useMemo<AccountHistoryRow[]>(() => {
     if (!selectedHistoryAccount || selectedHistoryAccountIds.size === 0) return []
@@ -896,6 +905,9 @@ export default function AccountingPage() {
     if (!journalActionAccountOptions.some(option => option.value === jeAccount)) return toast({ variant: 'destructive', title: 'Choose an account that matches the selected action' })
     if (!jePaymentMethod || !canUsePaymentMethod(jePaymentMethod)) return toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
     if (!paymentAccountOptions.some(option => option.value === jePaymentAccount)) return toast({ variant: 'destructive', title: 'Choose a permitted transaction account' })
+    if (selectedSingleProtectedAccount && (!jeDescription.trim() || !jeVoucher.trim())) {
+      return toast({ variant: 'destructive', title: 'Protected-account correction needs a reason and reference' })
+    }
     try {
       const amount = Number(jeAmount)
       if (!Number.isFinite(amount) || amount <= 0) {
@@ -962,6 +974,10 @@ export default function AccountingPage() {
     if (new Set(selectedAccountIds).size !== selectedAccountIds.length) {
       return toast({ variant: 'destructive', title: 'Each account can only be selected once in the same multiple journal form' })
     }
+    const missingProtectedEvidence = validLines.some(line =>
+      [line.debitAccount, line.creditAccount].some(id => isProtectedPostingAccount(accountById.get(id))) && (!line.description.trim() || !line.reference.trim()),
+    )
+    if (missingProtectedEvidence) return toast({ variant: 'destructive', title: 'Protected-account corrections need a reason and reference on each affected line' })
 
     try {
       for (const line of validLines) {
@@ -979,6 +995,7 @@ export default function AccountingPage() {
             date: line.date,
             branchId: jeBranch || undefined,
             description: line.description,
+            reference: line.reference,
             currency: jeCurrency,
             unitsPerBase: jeUnitsPerBase,
             lines: [
@@ -993,7 +1010,7 @@ export default function AccountingPage() {
         }
       }
       toast({ title: `${validLines.length} journal entries posted` })
-      setMjLines([{ debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' }])
+      setMjLines([{ debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '', reference: '' }])
       fetchEntries(); fetchAccounts()
     } catch (err) {
       toast({ variant: 'destructive', title: err instanceof Error ? err.message : 'Failed to post journal entries' })
@@ -1583,6 +1600,11 @@ export default function AccountingPage() {
           {/* Single Journal Ledger Entry Form */}
           {jeSubForm === 'single' && (
             <div className="space-y-4">
+              {selectedSingleProtectedAccount && canPostToProtectedAccounts && (
+                <div role="alert" className="rounded-md border border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                  <strong>Protected account correction.</strong> This account is normally posted only by its linked system workflow. Confirm the correction carefully and provide a specific reason and supporting voucher/reference.
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label>Branch</Label>
@@ -1704,6 +1726,11 @@ export default function AccountingPage() {
           {/* Multiple General Journal Form */}
           {jeSubForm === 'multiple' && (
             <div className="space-y-3">
+              {hasMultipleProtectedSelection && canPostToProtectedAccounts && (
+                <div role="alert" className="rounded-md border border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                  <strong>Protected account correction.</strong> System workflows normally control these accounts. Every affected line requires a specific reason and supporting reference.
+                </div>
+              )}
               <TransactionCurrencyControl baseCurrency={tenantCurrency} currency={jeCurrency} enabled={hasFeature('settings.currencies')} amount={mjLines.reduce((total, line) => total + Number(line.amount || 0), 0)} onCurrencyChange={setJeCurrency} onRateChange={(rate, units) => { setJeRateToBase(rate); setJeUnitsPerBase(units) }} />
               {jeCurrency !== tenantCurrency && jeRateToBase && <p className="text-xs text-muted-foreground">Total base-currency posting: {(mjLines.reduce((total, line) => total + Number(line.amount || 0), 0) * jeRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {tenantCurrency}</p>}
               <div className="max-w-sm space-y-2">
@@ -1720,21 +1747,22 @@ export default function AccountingPage() {
                 )}
               </div>
               <div className="flex justify-end">
-                <Button size="sm" variant="outline" onClick={() => setMjLines([...mjLines, { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '' }])}>
+                <Button size="sm" variant="outline" onClick={() => setMjLines([...mjLines, { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '', reference: '' }])}>
                   <Plus className="h-3 w-3 mr-1" /> Add Line
                 </Button>
               </div>
               {/* Heading row */}
-              <div className="hidden md:grid grid-cols-1 md:grid-cols-5 gap-3 px-3 pb-2 border-b font-semibold text-sm">
+              <div className="hidden md:grid grid-cols-1 md:grid-cols-6 gap-3 px-3 pb-2 border-b font-semibold text-sm">
                 <div>Debit Account (DR)</div>
                 <div>Credit Account (CR)</div>
                 <div>Amount</div>
                 <div>Date</div>
                 <div>Description</div>
+                <div>Reference</div>
               </div>
               {/* Field rows */}
               {mjLines.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center rounded-lg border p-3">
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-center rounded-lg border p-3">
                   <div>
                     <Select value={line.debitAccount} onValueChange={(v) => {
                       const updated = [...mjLines]
@@ -1779,6 +1807,11 @@ export default function AccountingPage() {
                     <Input className="flex-1" value={line.description} onChange={(e) => {
                       const updated = [...mjLines]; updated[idx].description = e.target.value; setMjLines(updated)
                     }} placeholder="Description" />
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Input className="flex-1" value={line.reference} onChange={(e) => {
+                      const updated = [...mjLines]; updated[idx].reference = e.target.value; setMjLines(updated)
+                    }} placeholder="Voucher / reference" />
                     {mjLines.length > 1 && (
                       <Button size="sm" variant="ghost" onClick={() => setMjLines(mjLines.filter((_, i) => i !== idx))}>
                         <Trash2 className="h-4 w-4 text-red-500" />

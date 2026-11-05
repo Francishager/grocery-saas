@@ -297,6 +297,7 @@ const PERMISSION_TO_FEATURES = {
   canReopenFinancialYearClose: ['accounting'],
   canDeleteAccounting: ['accounting'],
   canReverseAccountingEntry: ['accounting'],
+  canPostToProtectedAccounts: ['accounting'],
   canViewChartOfAccounts: ['accounting'],
   canCreateChartOfAccounts: ['accounting'],
   canEditChartOfAccounts: ['accounting'],
@@ -451,7 +452,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   "canViewTeamMessaging", "canSendTeamMessages",
   // Accounting
-  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose", "canDeleteAccounting", "canReverseAccountingEntry", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose", "canDeleteAccounting", "canReverseAccountingEntry", "canPostToProtectedAccounts", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
   // Transaction Accounts & Cash Movements
   "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
   "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
@@ -1260,6 +1261,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'Reverse accounting entries',
     description: 'Reverse posted expense journal entries using auditable opposite entries.',
   },
+  canPostToProtectedAccounts: {
+    name: 'Post to protected system accounts',
+    description: 'Post an exceptional manual correction to a system-managed or HR-controlled account. A reason and reference are required and recorded in the journal.',
+  },
   canViewChartOfAccounts: {
     name: 'View chart of accounts',
     description: 'View account categories, ledger accounts, balances, and account history.',
@@ -1392,7 +1397,7 @@ function permissionCategoryForKey(key) {
   if (key.includes('Communication')) return 'communication';
   if (key.includes('TransactionAccount') || key === 'canUseOtherCashAccount') return 'transactions';
   if (key.includes('FinancialYearClose')) return 'accounting';
-  if (key.includes('Accounting') || key.includes('ChartOfAccounts')) return 'accounting';
+  if (key.includes('Accounting') || key.includes('ChartOfAccounts') || key === 'canPostToProtectedAccounts') return 'accounting';
   return 'settings';
 }
 

@@ -429,6 +429,7 @@ export const hasAccountingPermission = (req) => {
     'canEditAccounting',
     'canDeleteAccounting',
     'canReverseAccountingEntry',
+    'canPostToProtectedAccounts',
     'canViewChartOfAccounts',
     'canCreateChartOfAccounts',
     'canEditChartOfAccounts',

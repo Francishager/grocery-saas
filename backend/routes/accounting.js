@@ -10,6 +10,7 @@ import { setupTenantAccountingSystem } from "../src/services/tenantAccountingSet
 import { applyTenantAccountingCutover, previewTenantAccountingCutover, resolveTenantAccountingException } from "../src/services/tenantAccountingCutoverService.js";
 import { resolveTenantTransactionCurrency, toBaseCurrency } from "../src/services/currencyRates.js";
 import { buildFinancialYearCloseSnapshot } from "../src/services/financialYearClosingService.js";
+import { validateProtectedManualJournalPosting } from "../src/utils/manualJournalPolicy.js";
 
 const router = Router();
 const LINKED_CASH_ACCOUNT_MARKER = "cashAccount:";
@@ -761,11 +762,21 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
     if (parentPostingAccount) {
       return res.status(400).json({ error: `${parentPostingAccount.name} is a parent account. Select a sub-account for posting.` });
     }
-    const protectedIds = await hrProtectedAccountIds(tenantId);
-    const protectedPostingAccount = accounts.find((account) => isHrProtectedAccount(account, protectedIds));
-    if (protectedPostingAccount) {
-      return res.status(400).json({
-        error: `${protectedPostingAccount.name} is controlled by HR Accounting and cannot be selected in manual accounting entries. Use HR Accounting payroll, salary payment, advance, or loan workflows instead.`,
+    const hrProtectedIds = await hrProtectedAccountIds(tenantId);
+    const protectedIds = new Set(accounts.filter((account) => isHrProtectedAccount(account, hrProtectedIds)).map((account) => account.id));
+    const paymentAccount = accounts.find((account) => account.id === paymentAccountId);
+    const protectedPosting = validateProtectedManualJournalPosting({
+      accounts,
+      protectedAccountIds: protectedIds,
+      exemptAccountIds: paymentAccount && linkedCashAccountId(paymentAccount) ? new Set([paymentAccount.id]) : new Set(),
+      canPostToProtectedAccounts: req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canPostToProtectedAccounts'),
+      reason: description,
+      reference,
+    });
+    if (!protectedPosting.ok) {
+      return res.status(protectedPosting.status).json({
+        error: protectedPosting.error,
+        required: protectedPosting.status === 403 ? 'canPostToProtectedAccounts' : undefined,
       });
     }
     const accountsById = new Map(accounts.map((account) => [account.id, account]));
@@ -859,6 +870,8 @@ router.post("/journal", authenticateToken, requirePermission("canCreateAccountin
           reference,
           status: "posted",
           userId: req.user.id,
+          sourceType: protectedPosting.protectedAccounts.length ? "MANUAL_PROTECTED_ACCOUNT_CORRECTION" : null,
+          sourceId: protectedPosting.protectedAccounts.length ? entryNo : null,
           lines: {
             create: normalizedLines.map((l) => ({
               accountId: l.accountId,

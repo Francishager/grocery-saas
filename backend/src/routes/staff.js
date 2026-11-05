@@ -376,10 +376,22 @@ router.put("/:id/permissions", authenticateToken, requirePermission("canManageSt
     if (!requestPermissions || typeof requestPermissions !== 'object' || Array.isArray(requestPermissions)) {
       return res.status(400).json({ error: 'A permissions object is required.' });
     }
+    const unavailablePermissions = PERM_KEYS.filter((key) =>
+      Object.prototype.hasOwnProperty.call(requestPermissions, key) &&
+      Boolean(requestPermissions[key]) &&
+      !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) &&
+      !permissionAllowedForTenant(key, req.tenantFeatures),
+    );
+    if (unavailablePermissions.length) {
+      return res.status(403).json({
+        error: 'Some selected permissions are not included in this business subscription or feature override.',
+        unavailablePermissions,
+      });
+    }
     const data = {};
     for (const key of PERM_KEYS) {
       if (!Object.prototype.hasOwnProperty.call(requestPermissions, key)) continue;
-      data[key] = !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, req.tenantFeatures) && Boolean(requestPermissions[key]);
+      data[key] = !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && Boolean(requestPermissions[key]);
     }
     if (!Object.keys(data).length) return res.status(400).json({ error: 'No recognized permissions were provided.' });
 

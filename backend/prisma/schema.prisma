@@ -1147,6 +1147,7 @@ model UserPermission {
   canReopenFinancialYearClose            Boolean  @default(false)
   canDeleteAccounting                    Boolean  @default(false)
   canReverseAccountingEntry              Boolean  @default(false)
+  canPostToProtectedAccounts             Boolean  @default(false)
   canViewChartOfAccounts                 Boolean  @default(false)
   canCreateChartOfAccounts               Boolean  @default(false)
   canEditChartOfAccounts                 Boolean  @default(false)

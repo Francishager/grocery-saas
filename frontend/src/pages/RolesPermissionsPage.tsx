@@ -114,7 +114,7 @@ const PERM_LABELS: Record<string, string> = {
   canViewAgriculture:'Can view agriculture', canCreateAgriculture:'Can create agriculture entries', canEditAgriculture:'Can edit agriculture entries', canDeleteAgriculture:'Can delete agriculture entries',
   canViewCommunication:'Can view communication records', canCreateCommunication:'Can create communication records', canEditCommunication:'Can edit communication', canDeleteCommunication:'Can delete communication',
   canViewTeamMessaging:'View Team Messaging', canSendTeamMessages:'Send Team Messages',
-  canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canManageFinancialYearClose:'Prepare financial-year close', canSignOffFinancialYearClose:'Sign off and close financial year', canReopenFinancialYearClose:'Reopen financial year', canDeleteAccounting:'Can delete accounting entries', canReverseAccountingEntry:'Can reverse accounting entries', canViewChartOfAccounts:'Can view chart of accounts', canCreateChartOfAccounts:'Can create chart of accounts', canEditChartOfAccounts:'Can edit chart of accounts',
+  canViewAccounting:'Can view accounting module', canCreateAccounting:'Can create accounting entries', canEditAccounting:'Can edit accounting entries', canManageFinancialYearClose:'Prepare financial-year close', canSignOffFinancialYearClose:'Sign off and close financial year', canReopenFinancialYearClose:'Reopen financial year', canDeleteAccounting:'Can delete accounting entries', canReverseAccountingEntry:'Can reverse accounting entries', canPostToProtectedAccounts:'Post to protected system accounts', canViewChartOfAccounts:'Can view chart of accounts', canCreateChartOfAccounts:'Can create chart of accounts', canEditChartOfAccounts:'Can edit chart of accounts',
   canViewTransactionAccount:'Can view transaction accounts', canUseAnyTransactionAccount:'Can use any transaction account', canUseOtherCashAccount:'Can use other cash accounts', canUseOwnCashAccount:'Can use own cash till', canUseOtherStaffCashAccount:'Can use other staff cash tills', canUseSafeAccount:'Can use safe accounts', canUseBankAccount:'Can use bank accounts', canUseMobileMoneyAccount:'Can use mobile money accounts', canUseCardAccount:'Can use card accounts', canCreateTransactionAccount:'Can create transaction accounts', canEditTransactionAccount:'Can edit transaction accounts', canDeleteTransactionAccount:'Can deactivate transaction accounts',
   canCreateWithdrawal:'Can record customer withdrawals',
   canAdjustStock:'Can adjust stock out', canRecordStockIn:'Can record stock received', canTransferStock:'Can transfer stock', canViewPriceHistory:'Can view price history',
@@ -123,7 +123,7 @@ const PERM_LABELS: Record<string, string> = {
 }
 
 const ACCOUNTING_ACCESS_KEYS = [
-  'canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts',
+  'canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canPostToProtectedAccounts', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts',
 ]
 
 const TRANSACTION_PERMISSION_KEYS = [
@@ -604,8 +604,11 @@ export default function RolesPermissionsPage() {
       const saved = await staffApi.updatePermissions(id, permissions)
       const persisted = await staffApi.getPermissions(id)
       const savedPermissions = saved?.permissions || {}
-      const keys = permSchema?.keys || Object.keys(savedPermissions)
-      const mismatchedKey = keys.find(key => Boolean(savedPermissions[key]) !== Boolean(persisted?.[key]))
+      const keys = Object.keys(permissions)
+      const mismatchedKey = keys.find(key =>
+        Boolean(permissions[key]) !== Boolean(savedPermissions[key]) ||
+        Boolean(permissions[key]) !== Boolean(persisted?.[key]),
+      )
       if (mismatchedKey) {
         setPermissions(persisted)
         throw new Error(`Permission ${PERM_LABELS[mismatchedKey] || mismatchedKey} did not persist. The form has been refreshed; try saving again.`)

@@ -16,5 +16,6 @@ test('unchecking an individual or grouped permission sends false instead of omit
 test('permission save verifies persisted values before reporting success', () => {
   assert.match(page, /const saved = await staffApi\.updatePermissions\(id, permissions\)/);
   assert.match(page, /const persisted = await staffApi\.getPermissions\(id\)/);
-  assert.match(page, /savedPermissions\[key\].*!== Boolean\(persisted\?\.\[key\]\)/);
+  assert.match(page, /Boolean\(permissions\[key\]\) !== Boolean\(savedPermissions\[key\]\)/);
+  assert.match(page, /Boolean\(permissions\[key\]\) !== Boolean\(persisted\?\.\[key\]\)/);
 });
