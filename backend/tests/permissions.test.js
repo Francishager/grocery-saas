@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { PERMISSION_METADATA, resolveEffectivePermissions } from '../src/utils/permissions.js';
+import { ALL_PERMISSION_KEYS, PERMISSION_METADATA, resolveEffectivePermissions } from '../src/utils/permissions.js';
 
 test('returns explicit permissions from a user permission record', () => {
   const result = resolveEffectivePermissions(
@@ -102,6 +102,54 @@ test('tenancy reactivation is a separately assignable property-management permis
   assert.ok(!denied.includes('canReactivateTenancies'));
   assert.ok(owner.includes('canReactivateTenancies'));
   assert.equal(PERMISSION_METADATA.canReactivateTenancies.category, 'property_management');
+});
+
+test('property management edit permissions are separately assignable and legacy grants stay compatible', () => {
+  const editOnly = resolveEffectivePermissions({ role: 'attendant' }, {
+    canEditProperties: true,
+    canEditPropertyUnits: true,
+    canEditTenancies: true,
+  }, [], new Set(['property_management.landlord']));
+  const legacy = resolveEffectivePermissions({ role: 'attendant' }, {
+    canManageProperties: true,
+    canManagePropertyUnits: true,
+    canManageTenancies: true,
+  }, [], new Set(['property_management.landlord']));
+  const editWithoutFeature = resolveEffectivePermissions({ role: 'attendant' }, {
+    canEditTenancies: true,
+  }, [], new Set());
+
+  assert.ok(editOnly.includes('canEditProperties'));
+  assert.ok(editOnly.includes('canEditPropertyUnits'));
+  assert.ok(editOnly.includes('canEditTenancies'));
+  assert.ok(!editOnly.includes('canCreateTenancies'));
+  assert.ok(legacy.includes('canEditProperties'));
+  assert.ok(legacy.includes('canEditPropertyUnits'));
+  assert.ok(legacy.includes('canEditTenancies'));
+  assert.ok(!editWithoutFeature.includes('canEditTenancies'));
+  assert.ok(ALL_PERMISSION_KEYS.includes('canEditTenancies'));
+  assert.equal(PERMISSION_METADATA.canEditTenancies.category, 'property_management');
+});
+
+test('prisma schema includes the separately assignable tenancy edit field', () => {
+  const schemaPath = path.resolve(process.cwd(), 'prisma/schema.prisma');
+  const schema = readFileSync(schemaPath, 'utf8');
+  assert.match(schema, /canEditTenancies\s+Boolean\s+@default\(false\)/);
+});
+
+test('route permissions and Prisma permission columns stay registered', () => {
+  const root = path.resolve(process.cwd(), 'src/routes');
+  const routeFiles = readdirSync(root).filter(file => file.endsWith('.js'));
+  const source = routeFiles.map(file => readFileSync(path.join(root, file), 'utf8')).join('\n');
+  const routeKeys = [...source.matchAll(/require(?:Any)?Permission\s*\(\s*(?:\[([^\]]*)\]|'([^']+)'|"([^"]+)")/g)]
+    .flatMap(match => (match[1] || match[2] || match[3] || '').match(/['"](can[A-Za-z0-9]+)['"]/g) || [])
+    .map(match => match.replace(/['"]/g, ''));
+  const missingRouteKeys = [...new Set(routeKeys)].filter(key => !ALL_PERMISSION_KEYS.includes(key));
+  const schema = readFileSync(path.resolve(process.cwd(), 'prisma/schema.prisma'), 'utf8');
+  const missingColumns = ALL_PERMISSION_KEYS.filter(key => !new RegExp(`\\b${key}\\s+Boolean`).test(schema));
+
+  assert.deepEqual(missingRouteKeys, []);
+  assert.deepEqual(missingColumns, []);
 });
 
 test('team messaging permissions are separate from generic communication permissions', () => {

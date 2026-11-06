@@ -270,6 +270,7 @@ export const permissions: Permission[] = [
   { id: 'canManageProperties', name: 'Manage Properties', description: 'Create and update managed properties', category: 'property_management', accessesBusinessData: true },
   { id: 'canManagePropertyUnits', name: 'Manage Units', description: 'Create and update rental units and rent terms', category: 'property_management', accessesBusinessData: true },
   { id: 'canCreateTenancies', name: 'Create Tenancies', description: 'Create agreements and assign tenants to vacant units', category: 'property_management', accessesBusinessData: true },
+  { id: 'canEditTenancies', name: 'Edit Tenancy Details', description: 'Edit tenant details, tenancy terms, rent schedule, and agreement information', category: 'property_management', accessesBusinessData: true },
   { id: 'canEndTenancies', name: 'End Tenancies', description: 'End active agreements after reviewing outstanding rent', category: 'property_management', accessesBusinessData: true },
   { id: 'canManageTenancies', name: 'Manage Tenancies (Legacy)', description: 'Legacy combined permission for creating and ending agreements', category: 'property_management', accessesBusinessData: true },
   { id: 'canRecordRentPayment', name: 'Record Rent Payments', description: 'Record rent receipts and allocate to rent periods', category: 'property_management', accessesBusinessData: true },

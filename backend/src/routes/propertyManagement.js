@@ -401,7 +401,7 @@ function paymentSummary(payment) {
   return { id: payment.id, receiptNo: payment.receiptNo, amount: payment.amount, paymentDate: payment.paymentDate, paymentMethod: payment.paymentMethod, paymentType: payment.paymentType, tenantName: payment.tenancy?.tenantName, unitCode: payment.tenancy?.unit?.unitCode, propertyName: payment.tenancy?.unit?.property?.name }
 }
 
-router.get('/owners', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement']), async (req, res) => {
+router.get('/owners', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyOwners', 'canEditPropertyOwners']), async (req, res) => {
   try {
     const owners = await prisma.propertyOwner.findMany({ where: { tenantId: tenantIdOf(req) }, orderBy: { name: 'asc' }, include: { _count: { select: { properties: true } } } })
     res.json(owners)
@@ -465,7 +465,7 @@ router.put('/owners/:id', requirePermission('canEditPropertyOwners'), async (req
   } catch (error) { console.error('Update property owner failed:', error); res.status(500).json({ error: 'Could not update owner.' }) }
 })
 
-router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertySales', 'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase']), async (req, res) => {
+router.get('/properties', requireAnyPermission(['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreateProperties', 'canEditProperties', 'canCreatePropertyUnits', 'canEditPropertyUnits', 'canViewPropertySales', 'canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase']), async (req, res) => {
   try {
     const properties = await prisma.managedProperty.findMany({ where: { tenantId: tenantIdOf(req), ...(req.query.ownerId ? { ownerId: String(req.query.ownerId) } : {}), ...(req.query.status ? { status: String(req.query.status) } : {}) }, take: pageSize(req.query.limit), orderBy: { name: 'asc' }, include: { owner: true, units: { orderBy: { unitCode: 'asc' }, include: { _count: { select: { tenancies: true } }, tenancies: { where: { status: 'active' }, take: 1, include: { charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true } } } } } } } })
     res.json(properties.map(property => ({ ...property, units: property.units.map(unit => ({ ...unit, currentBalance: money(unit.tenancies[0]?.charges.reduce((sum, charge) => sum + Math.max(0, charge.amount - charge.amountPaid), 0) || 0), tenancies: undefined })) })))
@@ -626,7 +626,7 @@ router.put('/units/:id', requirePermission('canEditPropertyUnits'), async (req, 
   }
 })
 
-router.get('/units/:id/rent-history', requireAnyPermission(['canViewPropertyPortfolio', 'canManagePropertyUnits']), async (req, res) => {
+router.get('/units/:id/rent-history', requireAnyPermission(['canViewPropertyPortfolio', 'canCreatePropertyUnits', 'canEditPropertyUnits', 'canManagePropertyUnits']), async (req, res) => {
   try {
     const unit = await prisma.propertyUnit.findFirst({ where: { id: req.params.id, property: { tenantId: tenantIdOf(req) } }, select: { id: true } })
     if (!unit) return res.status(404).json({ error: 'Unit not found.' })

@@ -1020,6 +1020,7 @@ model UserPermission {
   canCreatePropertyUnits                 Boolean  @default(false)
   canEditPropertyUnits                   Boolean  @default(false)
   canCreateTenancies                     Boolean  @default(false)
+  canEditTenancies                       Boolean  @default(false)
   canEndTenancies                        Boolean  @default(false)
   canReactivateTenancies                 Boolean  @default(false)
   canManageTenancies                     Boolean  @default(false)

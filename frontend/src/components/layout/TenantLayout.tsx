@@ -540,73 +540,59 @@ export function TenantLayout() {
     }
   }, [tenantId, user?.id, location.pathname, location.search])
 
-  const toggleReports = () => {
-    setReportsExpanded(prev => !prev)
-    if (!reportsExpanded) { setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
+  const setExpandedGroup = (group: string | null) => {
+    setReportsExpanded(group === 'reports')
+    setSettingsExpanded(group === 'settings')
+    setInventoryExpanded(group === 'inventory')
+    setRentalsExpanded(group === 'rentals')
+    setAccountingExpanded(group === 'accounting')
+    setFuelStationExpanded(group === 'fuel')
+    setReceivablesExpanded(group === 'receivables')
+    setRestaurantExpanded(group === 'restaurant')
+    setPropertyManagementExpanded(group === 'property-management')
+    setServiceExpanded(group === 'service')
+    setProcurementExpanded(group === 'procurement')
+    setHRExpanded(group === 'hr')
   }
-  const toggleSettings = () => {
-    setSettingsExpanded(prev => !prev)
-    if (!settingsExpanded) { setReportsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
+  const toggleExpandedGroup = (group: string, isExpanded: boolean) => {
+    setExpandedGroup(isExpanded ? null : group)
   }
-  const toggleInventory = () => {
-    setInventoryExpanded(prev => !prev)
-    if (!inventoryExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
-  }
-  const toggleRentals = () => {
-    setRentalsExpanded(prev => !prev)
-    if (!rentalsExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false); setRestaurantExpanded(false); setHRExpanded(false) }
-  }
-  const toggleAccounting = () => {
-    setAccountingExpanded(prev => !prev)
-    if (!accountingExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
-  }
-  const toggleFuelStation = () => {
-    setFuelStationExpanded(prev => !prev)
-    if (!fuelStationExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
-  }
-  const toggleReceivables = () => {
-    setReceivablesExpanded(prev => !prev)
-    if (!receivablesExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setServiceExpanded(false) }
-  }
-  const toggleService = () => {
-    setServiceExpanded(prev => !prev)
-    if (!serviceExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setHRExpanded(false) }
-  }
-  const toggleRestaurant = () => {
-    setRestaurantExpanded(prev => !prev)
-    if (!restaurantExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false); setHRExpanded(false) }
-  }
-  const togglePropertyManagement = () => {
-    setPropertyManagementExpanded(prev => !prev)
-    if (!propertyManagementExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false); setRestaurantExpanded(false); setHRExpanded(false) }
-  }
-  const toggleProcurement = () => {
-    setProcurementExpanded(prev => !prev)
-    if (!procurementExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false); setHRExpanded(false) }
-  }
-  const toggleHR = () => {
-    setHRExpanded(prev => !prev)
-    if (!hrExpanded) { setReportsExpanded(false); setSettingsExpanded(false); setInventoryExpanded(false); setAccountingExpanded(false); setFuelStationExpanded(false); setReceivablesExpanded(false); setServiceExpanded(false) }
-  }
+  const toggleReports = () => toggleExpandedGroup('reports', reportsExpanded)
+  const toggleSettings = () => toggleExpandedGroup('settings', settingsExpanded)
+  const toggleInventory = () => toggleExpandedGroup('inventory', inventoryExpanded)
+  const toggleRentals = () => toggleExpandedGroup('rentals', rentalsExpanded)
+  const toggleAccounting = () => toggleExpandedGroup('accounting', accountingExpanded)
+  const toggleFuelStation = () => toggleExpandedGroup('fuel', fuelStationExpanded)
+  const toggleReceivables = () => toggleExpandedGroup('receivables', receivablesExpanded)
+  const toggleService = () => toggleExpandedGroup('service', serviceExpanded)
+  const toggleRestaurant = () => toggleExpandedGroup('restaurant', restaurantExpanded)
+  const togglePropertyManagement = () => toggleExpandedGroup('property-management', propertyManagementExpanded)
+  const toggleProcurement = () => toggleExpandedGroup('procurement', procurementExpanded)
+  const toggleHR = () => toggleExpandedGroup('hr', hrExpanded)
 
-  // Auto-expand when on relevant pages
+  // Keep only the current page's top-level section expanded.
   useEffect(() => {
-    if (location.pathname.startsWith('/tenant/inventory')) setInventoryExpanded(true)
-    if (location.pathname.startsWith('/tenant/rentals')) setRentalsExpanded(true)
-    if (location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers') setAccountingExpanded(true)
-    if (location.pathname.startsWith('/tenant/fuel-station')) setFuelStationExpanded(true)
-    if (location.pathname.startsWith('/tenant/receivables')) setReceivablesExpanded(true)
-    if (location.pathname.startsWith('/tenant/service')) setServiceExpanded(true)
-    if (location.pathname.startsWith('/tenant/restaurant')) setRestaurantExpanded(true)
-    if (location.pathname.startsWith('/tenant/property-management')) setPropertyManagementExpanded(true)
+    const path = location.pathname
+    let group: string | null = null
+    if (path.startsWith('/tenant/inventory')) group = 'inventory'
+    else if (path.startsWith('/tenant/rentals')) group = 'rentals'
+    else if (path.startsWith('/tenant/accounting') || path === '/tenant/transfers') group = 'accounting'
+    else if (path.startsWith('/tenant/fuel-station')) group = 'fuel'
+    else if (path.startsWith('/tenant/receivables')) group = 'receivables'
+    else if (path.startsWith('/tenant/service')) group = 'service'
+    else if (path.startsWith('/tenant/restaurant')) group = 'restaurant'
+    else if (path.startsWith('/tenant/property-management')) group = 'property-management'
+    else if (path.startsWith('/tenant/procurement')) group = 'procurement'
+    else if (path.startsWith('/tenant/hr')) group = 'hr'
+    else if (path === '/tenant/reports' || searchParams.get('view') === 'reports') group = 'reports'
+    else if (path.startsWith('/tenant/settings')) group = 'settings'
+    setExpandedGroup(group)
+
     if (location.pathname.startsWith('/tenant/procurement')) {
-      setProcurementExpanded(true)
       if (location.pathname.startsWith('/tenant/procurement/buying')) setProcurementBuyerExpanded(true)
       if (location.pathname.startsWith('/tenant/procurement/selling')) setProcurementSellerExpanded(true)
     }
-    if (location.pathname.startsWith('/tenant/hr')) setHRExpanded(true)
     if (location.pathname.startsWith('/tenant/hr/accounting')) setHRAccountingExpanded(true)
-    if (searchParams.get('view') === 'reports') setReportsExpanded(true)
   }, [location.pathname, location.search])
   function hasRequiredPermission(permission?: string | string[]) {
     if (!permission) return true
@@ -636,16 +622,16 @@ export function TenantLayout() {
   )
   const propertyManagementSubItems = [
     ...(canAccessFeature('property_management.landlord') ? [
-      { to: '/tenant/property-management/my-properties', label: 'My Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
-      { to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
-      { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies'] },
+      { to: '/tenant/property-management/my-properties', label: 'My Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreateProperties', 'canEditProperties', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
+      { to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
+      { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies'] },
       { to: '/tenant/property-management/rent', label: 'Rent & Receivables', icon: Wallet, permission: ['canViewPropertyCollections', 'canViewPropertyReports'] },
     ] : []),
     ...(canAccessFeature('property_management.agent') ? [
-      { to: '/tenant/property-management/clients', label: 'Landlord Clients', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
-      { to: '/tenant/property-management/managed-properties', label: 'Managed Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] },
-      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement'] }] : []),
-      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies'] }] : []),
+      { to: '/tenant/property-management/clients', label: 'Landlord Clients', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyOwners', 'canEditPropertyOwners'] },
+      { to: '/tenant/property-management/managed-properties', label: 'Managed Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreateProperties', 'canEditProperties', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyUnits', 'canEditPropertyUnits'] }] : []),
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies'] }] : []),
       { to: '/tenant/property-management/collections', label: 'Rent Collection', icon: Wallet, permission: 'canViewPropertyCollections' },
       { to: '/tenant/property-management/sales', label: 'Plot Sales & Installments', icon: Receipt, permission: 'canViewPropertySales' },
       { to: '/tenant/property-management/purchases', label: 'Plot Purchases & Supplier Payments', icon: Receipt, permission: ['canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment'] },

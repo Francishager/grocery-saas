@@ -61,7 +61,7 @@ const PERM_LABELS: Record<string, string> = {
   canEditMarketplaceSellerProfile:'Edit seller marketplace profile', canRequestSupplierRelationship:'Request supplier relationships', canManageSupplierRelationships:'Approve, reject, or suspend supplier relationships',
   canPauseMarketplaceCampaign:'Pause campaigns', canResumeMarketplaceCampaign:'Resume campaigns', canCancelMarketplaceCampaign:'Cancel campaigns',
   canSelectProcurementQuote:'Select a supplier quote', canViewProcurementInvoice:'View supplier invoices', canApproveProcurementInvoice:'Approve supplier invoices', canRejectProcurementInvoice:'Reject supplier invoices',
-  canCreatePropertyOwners:'Create property owners', canEditPropertyOwners:'Edit property owners', canCreateProperties:'Create properties', canEditProperties:'Edit properties', canCreatePropertyUnits:'Create rental units', canEditPropertyUnits:'Edit rental units',
+  canCreatePropertyOwners:'Create property owners', canEditPropertyOwners:'Edit property owners', canCreateProperties:'Create properties', canEditProperties:'Edit properties', canCreatePropertyUnits:'Create rental units', canEditPropertyUnits:'Edit rental units', canEditTenancies:'Edit tenancy details',
   canCreateTenantPersonalDetails:'Record tenant household details', canEditTenantPersonalDetails:'Edit tenant household details', canCreateRentPaymentPlans:'Create rent payment plans', canCancelRentPaymentPlans:'Cancel rent payment plans',
   canCreateStaff:'Can create staff', canViewStaff:'Can view staff', canEditStaffDetails:'Edit staff profiles and assignments', canManageStaffPermissions:'Assign staff permissions', canManageWorkingHours:'Manage business working hours', canDeleteStaff:'Can delete staff',
   canViewHR:'Can view HR management',
