@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ALL_PERMISSION_KEYS, PERMISSION_METADATA, permissionAllowedForTenant, ROLE_DEFAULTS } from '../src/utils/permissions.js';
+import { ALL_PERMISSION_KEYS, LEGACY_COMBINED_PERMISSION_KEYS, PERMISSION_METADATA, permissionAllowedForTenant, resolveEffectivePermissions, ROLE_DEFAULTS } from '../src/utils/permissions.js';
 import { validateProtectedManualJournalPosting } from '../src/utils/manualJournalPolicy.js';
 
 const managed = { id: 'system-expense', name: 'System expense', isSystemManaged: true };
@@ -49,4 +49,19 @@ test('override permission is separately registered, accounting-gated, and off by
   assert.equal(permissionAllowedForTenant('canPostToProtectedAccounts', new Set(['accounting'])), true);
   assert.equal(permissionAllowedForTenant('canPostToProtectedAccounts', new Set()), false);
   assert.equal(ROLE_DEFAULTS.accountant.canPostToProtectedAccounts, false);
+});
+
+test('stock-in and stock-out permissions remain independent and editable', () => {
+  assert.ok(ALL_PERMISSION_KEYS.includes('canAdjustStock'));
+  assert.ok(ALL_PERMISSION_KEYS.includes('canRecordStockIn'));
+  assert.equal(LEGACY_COMBINED_PERMISSION_KEYS.includes('canAdjustStock'), false);
+  const effective = resolveEffectivePermissions(
+    { id: 'staff', role: 'attendant' },
+    { canAdjustStock: true, canRecordStockIn: false },
+    [],
+    new Set(['inventory']),
+  );
+  assert.ok(effective.includes('canAdjustStock'));
+  assert.equal(effective.includes('canRecordStockIn'), false);
+  assert.equal(permissionAllowedForTenant('canRecordStockIn', new Set(['inventory'])), true);
 });
