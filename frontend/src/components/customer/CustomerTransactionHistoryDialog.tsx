@@ -175,7 +175,8 @@ type RentPlanProfileData = { plans: RentPaymentPlan[]; eligibleCharges: Array<{ 
 type RentPromiseTenancy = { id: string; tenantName: string; currency: string; status: string; unit: { unitCode: string; property: { name: string } } }
 type RentPromise = { id: string; amount: number; dueDate: string; notes?: string | null; createdAt: string; createdByName: string; fulfilledAmount: number; remainingAmount: number; status: string; tenancy: RentPromiseTenancy; allocations: Array<{ id: string; amount: number; fulfilledAmount: number; remainingAmount: number; period: string; rentDueDate: string }> }
 type RentPromiseProfileData = { counts: { total: number; upcoming: number; due_today: number; kept: number; partially_paid: number; partially_kept: number; missed: number; promisedAmount: number; fulfilledAmount: number; remainingAmount: number }; tenancies: RentPromiseTenancy[]; promises: RentPromise[] }
-type TenantProfileNote = { id: string; kind: string; priority: string; body: string; followUpAt?: string | null; tenancyId?: string | null; status: string; createdAt: string; authorName: string; tenancyLabel?: string | null; isOverdue: boolean }
+type TenantProfileNoteFollowUp = { id: string; body: string; followUpAt?: string | null; createdAt: string; authorName: string }
+type TenantProfileNote = { id: string; kind: string; priority: string; body: string; followUpAt?: string | null; tenancyId?: string | null; status: string; createdAt: string; authorName: string; tenancyLabel?: string | null; isOverdue: boolean; followUps?: TenantProfileNoteFollowUp[] }
 type TenantNotesData = { counts: { total: number; openFollowUps: number; overdueFollowUps: number; completed: number }; notes: TenantProfileNote[] }
 type RentPaymentAccount = { id: string; name: string; type: string; paymentMethod: string }
 
@@ -435,6 +436,8 @@ export default function CustomerTransactionHistoryDialog({
   const [showTenantNoteForm, setShowTenantNoteForm] = useState(false)
   const [editingTenantNote, setEditingTenantNote] = useState<TenantProfileNote | null>(null)
   const [openTenantNoteActions, setOpenTenantNoteActions] = useState<string | null>(null)
+  const [tenantNoteFollowUpTarget, setTenantNoteFollowUpTarget] = useState<string | null>(null)
+  const [savingTenantNoteFollowUp, setSavingTenantNoteFollowUp] = useState(false)
   const [rentPlanError, setRentPlanError] = useState('')
   const [rentPlanAccounts, setRentPlanAccounts] = useState<RentPaymentAccount[]>([])
   const [defaultRentPlanAccountId, setDefaultRentPlanAccountId] = useState('')
@@ -469,6 +472,7 @@ export default function CustomerTransactionHistoryDialog({
   const canManageTenantNotes = propertyManagementEnabled && hasPermission('canManageTenantNotes')
   const canEditTenantNotes = propertyManagementEnabled && hasPermission('canEditTenantNotes')
   const canCompleteTenantNotes = propertyManagementEnabled && hasPermission('canCompleteTenantNotes')
+  const canAddTenantNoteFollowUps = propertyManagementEnabled && hasPermission('canAddTenantNoteFollowUps')
 
   useEffect(() => {
     if (!openTenantNoteActions) return
@@ -576,6 +580,7 @@ export default function CustomerTransactionHistoryDialog({
     if (!open || !customer?.id || !canViewTenantNotes) {
       setTenantNotesData(null)
       setTenantNotesError('')
+      setTenantNoteFollowUpTarget(null)
       return
     }
     const controller = new AbortController()
@@ -741,6 +746,30 @@ export default function CustomerTransactionHistoryDialog({
       if (!response.ok) throw new Error(result?.error || 'Could not complete tenant follow-up.')
       setTenantNotesReload(value => value + 1)
     } catch (error: any) { setTenantNotesError(error?.message || 'Could not complete tenant follow-up.') }
+  }
+
+  async function addTenantNoteFollowUp(noteId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customer?.id || !canAddTenantNoteFollowUps) return
+    const form = new FormData(event.currentTarget)
+    setSavingTenantNoteFollowUp(true)
+    setTenantNotesError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/notes/${noteId}/follow-ups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: form.get('body'),
+          nextFollowUpAt: form.get('nextFollowUpAt') || null,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not save tenant note follow-up.')
+      setTenantNoteFollowUpTarget(null)
+      setTenantNotesReload(value => value + 1)
+    } catch (error: any) { setTenantNotesError(error?.message || 'Could not save tenant note follow-up.') }
+    finally { setSavingTenantNoteFollowUp(false) }
   }
 
   async function recordRentPlanPayment(event: FormEvent<HTMLFormElement>) {
@@ -1269,9 +1298,12 @@ export default function CustomerTransactionHistoryDialog({
               {!!tenantNotesData?.notes.length && <div className="space-y-3">{tenantNotesData.notes.map(note => <article key={note.id} className={cn('rounded-md border p-4', note.isOverdue && 'border-red-300 bg-red-50/50')}>
                 <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex flex-wrap items-center gap-2"><Badge variant={note.status === 'completed' ? 'outline' : note.isOverdue ? 'destructive' : note.priority === 'high' ? 'secondary' : 'outline'}>{note.status === 'completed' ? 'Completed' : note.isOverdue ? 'Overdue follow-up' : note.priority === 'high' ? 'High priority' : 'Open'}</Badge><Badge variant="outline">{normalizeText(note.kind)}</Badge>{note.tenancyLabel && <span className="text-xs text-muted-foreground">{note.tenancyLabel}</span>}</div><span className="text-xs text-muted-foreground">{formatDisplayDate(note.createdAt)} · {note.authorName}</span></div>
                 <p className="mt-3 whitespace-pre-wrap break-words text-sm">{note.body}</p>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={cn('text-xs', note.isOverdue && 'font-medium text-destructive')}>{note.followUpAt ? `Follow-up ${formatDisplayDate(note.followUpAt)}` : 'No follow-up date'}</span>{(canEditTenantNotes || (canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt)) && <div className="relative" data-tenant-note-actions>
+                {!!note.followUps?.length && <div className="mt-4 space-y-3 border-l-2 border-primary/20 pl-4" aria-label="Follow-up history">{note.followUps.map(followUp => <div key={followUp.id} className="relative rounded-md bg-muted/40 p-3"><span className="absolute -left-[1.35rem] top-4 h-2 w-2 rounded-full bg-primary" /><div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">Follow-up · {followUp.authorName}</span><time dateTime={followUp.createdAt}>{formatDisplayDate(followUp.createdAt)}</time></div><p className="mt-2 whitespace-pre-wrap break-words text-sm">{followUp.body}</p>{followUp.followUpAt && <p className="mt-2 text-xs text-muted-foreground">Next follow-up {formatDisplayDate(followUp.followUpAt)}</p>}</div>)}</div>}
+                {tenantNoteFollowUpTarget === note.id && canAddTenantNoteFollowUps && <form onSubmit={event => addTenantNoteFollowUp(note.id, event)} className="mt-4 grid gap-3 rounded-md border border-primary/25 bg-muted/20 p-3 sm:grid-cols-[1fr_12rem]"><label className="block text-sm sm:col-span-2">Follow-up update<textarea name="body" required maxLength={5000} rows={3} autoFocus placeholder="Record what happened and what was agreed…" className="mt-1 w-full rounded-md border bg-background p-3" /></label><label className="block text-sm">Next follow-up date (optional)<input name="nextFollowUpAt" type="date" className="mt-1 h-10 w-full rounded-md border bg-background px-3" /></label><div className="flex items-end justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={savingTenantNoteFollowUp} onClick={() => setTenantNoteFollowUpTarget(null)}>Cancel</Button><Button type="submit" size="sm" disabled={savingTenantNoteFollowUp}>{savingTenantNoteFollowUp ? 'Saving…' : 'Save follow-up'}</Button></div></form>}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><span className={cn('text-xs', note.isOverdue && 'font-medium text-destructive')}>{note.followUpAt ? `Follow-up ${formatDisplayDate(note.followUpAt)}` : 'No follow-up date'}</span>{(canEditTenantNotes || canAddTenantNoteFollowUps || (canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt)) && <div className="relative" data-tenant-note-actions>
                   <Button type="button" variant="ghost" size="icon" aria-label={`Actions for note from ${note.authorName}`} aria-haspopup="menu" aria-expanded={openTenantNoteActions === note.id} title="Note actions" onClick={() => setOpenTenantNoteActions(current => current === note.id ? null : note.id)}><MoreHorizontal className="h-4 w-4" /></Button>
                   {openTenantNoteActions === note.id && <div role="menu" aria-label="Tenant note actions" className="absolute right-0 bottom-full z-30 mb-1 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+                    {canAddTenantNoteFollowUps && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none hover:bg-accent focus:bg-accent" onClick={() => { setTenantNoteFollowUpTarget(note.id); setOpenTenantNoteActions(null); setTenantNotesError('') }}><CalendarClock className="h-4 w-4" />Add follow-up</button>}
                     {canEditTenantNotes && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none hover:bg-accent focus:bg-accent" onClick={() => { setEditingTenantNote(note); setShowTenantNoteForm(true); setTenantNotesError(''); setOpenTenantNoteActions(null) }}><Edit className="h-4 w-4" />Edit note</button>}
                     {canCompleteTenantNotes && note.status !== 'completed' && note.followUpAt && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none hover:bg-accent focus:bg-accent" onClick={() => { setOpenTenantNoteActions(null); void completeTenantNote(note.id) }}><Check className="h-4 w-4" />Mark complete</button>}
                   </div>}

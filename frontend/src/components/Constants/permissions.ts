@@ -286,6 +286,7 @@ export const permissions: Permission[] = [
   { id: 'canManageTenantNotes', name: 'Record Tenant Communication Notes', description: 'Add new tenant communication notes', category: 'property_management', accessesBusinessData: true },
   { id: 'canEditTenantNotes', name: 'Edit Tenant Communication Notes', description: 'Edit existing tenant communication notes and follow-up details', category: 'property_management', accessesBusinessData: true },
   { id: 'canCompleteTenantNotes', name: 'Complete Tenant Follow-ups', description: 'Mark an open tenant follow-up as completed', category: 'property_management', accessesBusinessData: true },
+  { id: 'canAddTenantNoteFollowUps', name: 'Add Tenant Note Follow-ups', description: 'Append dated follow-up entries to an existing tenant communication note', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertyReports', name: 'View Property Reports', description: 'View rent collection, balances, arrears, and statements', category: 'property_management', accessesBusinessData: true },
   { id: 'canRecordOwnerPayout', name: 'Record Landlord Payouts', description: 'Pay collected rent to property owners and record cash and payable movements', category: 'property_management', accessesBusinessData: true },
   { id: 'canViewPropertySales', name: 'View Plot Sales', description: 'View plot contracts, installments, receipts, and outstanding balances', category: 'property_management', accessesBusinessData: true },

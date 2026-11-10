@@ -936,6 +936,10 @@ router.get('/customers/:customerId/notes', requirePermission('canViewTenantNotes
       include: {
         createdBy: { select: { fname: true, lname: true } },
         tenancy: { select: { id: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } } },
+        followUps: {
+          orderBy: { createdAt: 'asc' },
+          include: { createdBy: { select: { fname: true, lname: true } } },
+        },
       },
       orderBy: [{ followUpAt: 'asc' }, { createdAt: 'desc' }],
       take: 500,
@@ -958,6 +962,10 @@ router.get('/customers/:customerId/notes', requirePermission('canViewTenantNotes
         authorName: userDisplayName(note.createdBy) || 'Staff',
         tenancyLabel: note.tenancy ? `${note.tenancy.unit.property.name} · ${note.tenancy.unit.unitCode}` : null,
         isOverdue: Boolean(isOverdue(note)),
+        followUps: note.followUps.map(followUp => ({
+          ...followUp,
+          authorName: userDisplayName(followUp.createdBy) || 'Staff',
+        })),
       })),
     })
   } catch (error) { console.error('Load tenant communication notes failed:', error); res.status(500).json({ error: 'Could not load tenant notes.' }) }
@@ -1020,6 +1028,74 @@ router.patch('/customers/:customerId/notes/:noteId', requirePermission('canViewT
     if (!updated.count) return res.status(404).json({ error: 'Tenant communication note not found.' })
     res.json({ id: req.params.noteId, body, kind, priority, followUpAt, tenancyId })
   } catch (error) { console.error('Edit tenant communication note failed:', error); res.status(500).json({ error: 'Could not update tenant note.' }) }
+})
+
+router.post('/customers/:customerId/notes/:noteId/follow-ups', requirePermission('canAddTenantNoteFollowUps'), async (req, res) => {
+  const body = String(req.body?.body || '').trim()
+  const nextFollowUpRaw = String(req.body?.nextFollowUpAt || '').trim()
+  const nextFollowUpAt = nextFollowUpRaw
+    ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(nextFollowUpRaw) ? `${nextFollowUpRaw}T23:59:59.999Z` : nextFollowUpRaw)
+    : null
+  const idempotencyKey = String(req.body?.idempotencyKey || '').trim() || null
+  if (!body || body.length > 5000) return badRequest(res, 'Enter a follow-up of up to 5,000 characters.')
+  if (nextFollowUpAt && !Number.isFinite(nextFollowUpAt.getTime())) return badRequest(res, 'Enter a valid next follow-up date.')
+  if (idempotencyKey && idempotencyKey.length > 128) return badRequest(res, 'Follow-up request key is too long.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
+    if (!customer) return res.status(404).json({ error: 'Tenant profile not found.' })
+    const note = await prisma.propertyTenantNote.findFirst({
+      where: { id: req.params.noteId, tenantId, customerId: customer.id },
+      select: { id: true },
+    })
+    if (!note) return res.status(404).json({ error: 'Tenant communication note not found.' })
+
+    if (idempotencyKey) {
+      const existing = await prisma.propertyTenantNoteFollowUp.findFirst({
+        where: { tenantId, customerId: customer.id, noteId: note.id, idempotencyKey },
+        include: { createdBy: { select: { fname: true, lname: true } } },
+      })
+      if (existing) return res.json({ ...existing, authorName: userDisplayName(existing.createdBy) || 'Staff' })
+    }
+
+    const followUp = await prisma.$transaction(async tx => {
+      const created = await tx.propertyTenantNoteFollowUp.create({
+        data: {
+          tenantId,
+          customerId: customer.id,
+          noteId: note.id,
+          createdById: req.user.id,
+          idempotencyKey,
+          body,
+          followUpAt: nextFollowUpAt,
+        },
+        include: { createdBy: { select: { fname: true, lname: true } } },
+      })
+      await tx.propertyTenantNote.update({
+        where: { id: note.id },
+        data: { followUpAt: nextFollowUpAt, status: 'open' },
+      })
+      return created
+    })
+    return res.status(201).json({ ...followUp, authorName: userDisplayName(followUp.createdBy) || 'Staff' })
+  } catch (error) {
+    if (error?.code === 'P2002' && req.body?.idempotencyKey) {
+      try {
+        const existing = await prisma.propertyTenantNoteFollowUp.findFirst({
+          where: {
+            tenantId: tenantIdOf(req),
+            customerId: req.params.customerId,
+            noteId: req.params.noteId,
+            idempotencyKey: String(req.body.idempotencyKey).trim(),
+          },
+          include: { createdBy: { select: { fname: true, lname: true } } },
+        })
+        if (existing) return res.json({ ...existing, authorName: userDisplayName(existing.createdBy) || 'Staff' })
+      } catch (lookupError) { console.error('Lookup duplicate tenant note follow-up failed:', lookupError) }
+    }
+    console.error('Create tenant note follow-up failed:', error)
+    return res.status(500).json({ error: 'Could not save tenant note follow-up.' })
+  }
 })
 
 router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canViewRentPromises', 'canManageRentPromises']), async (req, res) => {

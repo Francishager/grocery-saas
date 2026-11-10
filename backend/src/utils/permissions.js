@@ -256,6 +256,7 @@ const PERMISSION_TO_FEATURES = {
   canManageTenantNotes: ['property_management.landlord', 'property_management.agent'],
   canEditTenantNotes: ['property_management.landlord', 'property_management.agent'],
   canCompleteTenantNotes: ['property_management.landlord', 'property_management.agent'],
+  canAddTenantNoteFollowUps: ['property_management.landlord', 'property_management.agent'],
   canViewPropertyReports: ['property_management.landlord', 'property_management.agent'],
   canRecordOwnerPayout: ['property_management.landlord', 'property_management.agent'],
   canViewPropertySales: ['property_management.agent'],
@@ -435,7 +436,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails", "canCreateTenantPersonalDetails", "canEditTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits", "canCreatePropertyOwners", "canEditPropertyOwners", "canCreateProperties", "canEditProperties", "canCreatePropertyUnits", "canEditPropertyUnits",
   "canCreateTenancies", "canEditTenancies", "canEndTenancies", "canReactivateTenancies", "canManageTenancies", "canEditRentPeriods", "canRecordRentPayment", "canRecordTenantDeposit",
-  "canRefundTenantDeposit", "canApplyTenantDepositToRent", "canVoidRentPayment", "canManageRentPayment", "canViewRentPaymentPlans", "canManageRentPaymentPlans", "canCreateRentPaymentPlans", "canCancelRentPaymentPlans", "canViewRentPromises", "canManageRentPromises", "canViewTenantNotes", "canManageTenantNotes", "canEditTenantNotes", "canCompleteTenantNotes",
+  "canRefundTenantDeposit", "canApplyTenantDepositToRent", "canVoidRentPayment", "canManageRentPayment", "canViewRentPaymentPlans", "canManageRentPaymentPlans", "canCreateRentPaymentPlans", "canCancelRentPaymentPlans", "canViewRentPromises", "canManageRentPromises", "canViewTenantNotes", "canManageTenantNotes", "canEditTenantNotes", "canCompleteTenantNotes", "canAddTenantNoteFollowUps",
   "canViewPropertyReports", "canRecordOwnerPayout", "canViewPropertySales", "canCreatePropertySale",
   "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
   "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
@@ -1116,6 +1117,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canManageTenantNotes: { name: 'Record tenant communication notes', description: 'Add new tenant communication notes.' },
   canEditTenantNotes: { name: 'Edit tenant communication notes', description: 'Correct the interaction details, note text, related tenancy, priority, and follow-up date of an existing tenant note.' },
   canCompleteTenantNotes: { name: 'Complete tenant follow-ups', description: 'Mark an open tenant follow-up as completed.' },
+  canAddTenantNoteFollowUps: { name: 'Add tenant note follow-ups', description: 'Append a dated follow-up entry to an existing tenant communication note.' },
   canViewPropertyReports: { name: 'View property reports', description: 'View collections, outstanding rent, arrears aging, statements, and persistent arrears.' },
   canViewPropertySales: { name: 'View plot sales', description: 'View plot sale contracts, installment schedules, receipts, and balances.' },
   canCreatePropertySale: { name: 'Create plot sale', description: 'Create a full-payment or installment sale for an owned or landlord-owned plot.' },
@@ -1361,7 +1363,7 @@ function permissionCategoryForKey(key) {
     'canCreateWithdrawal',
   ].includes(key)) return 'transactions';
   if (key.startsWith('canUse')) return 'payment_methods';
-  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('TenantPersonalDetails') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('TenantPersonalDetails') || key.includes('TenantNotes') || key.includes('TenantNote') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
   if (key.includes('Report') || key === 'canExportReport') return 'reports';
   if (key.includes('Receipt')) return 'receipts';
   if (key.includes('Sale') || key === 'canGiveDiscount') return 'sales';

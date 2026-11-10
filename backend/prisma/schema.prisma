@@ -172,6 +172,7 @@ model Tenant {
   managedProperties               ManagedProperty[]
   propertyTenancies               PropertyTenancy[]
   propertyTenantNotes             PropertyTenantNote[]
+  propertyTenantNoteFollowUps     PropertyTenantNoteFollowUp[]
   propertyTenantIdentities        PropertyTenantIdentity[]
   rentCharges                     RentCharge[]
   propertyRentPayments            PropertyRentPayment[]
@@ -520,6 +521,7 @@ model User {
   rentPaymentPlansCreated             PropertyRentPaymentPlan[]     @relation("PropertyRentPaymentPlanCreator")
   rentPromisesCreated                 PropertyRentPromise[]         @relation("PropertyRentPromiseCreator")
   propertyTenantNotesCreated          PropertyTenantNote[]          @relation("PropertyTenantNoteCreator")
+  propertyTenantNoteFollowUpsCreated  PropertyTenantNoteFollowUp[]  @relation("PropertyTenantNoteFollowUpCreator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -761,31 +763,31 @@ model UserPermission {
   canViewProcurement                     Boolean  @default(false)
   canFollowMarketplaceSellers            Boolean  @default(false)
   canManageSupplierNetwork               Boolean  @default(false)
-  canEditMarketplaceSellerProfile         Boolean  @default(false)
-  canRequestSupplierRelationship          Boolean  @default(false)
-  canManageSupplierRelationships          Boolean  @default(false)
+  canEditMarketplaceSellerProfile        Boolean  @default(false)
+  canRequestSupplierRelationship         Boolean  @default(false)
+  canManageSupplierRelationships         Boolean  @default(false)
   canManageMarketplaceCatalogue          Boolean  @default(false)
   canCreateMarketplaceListing            Boolean  @default(false)
   canChangeMarketplacePrice              Boolean  @default(false)
   canCreateMarketplacePromotion          Boolean  @default(false)
   canRunMarketplaceAds                   Boolean  @default(false)
   canManageMarketplacePromotions         Boolean  @default(false)
-  canPauseMarketplaceCampaign             Boolean  @default(false)
-  canResumeMarketplaceCampaign            Boolean  @default(false)
-  canCancelMarketplaceCampaign            Boolean  @default(false)
+  canPauseMarketplaceCampaign            Boolean  @default(false)
+  canResumeMarketplaceCampaign           Boolean  @default(false)
+  canCancelMarketplaceCampaign           Boolean  @default(false)
   canCreateProcurementRFQ                Boolean  @default(false)
   canRespondToProcurementRFQ             Boolean  @default(false)
   canManageProcurementQuotes             Boolean  @default(false)
-  canSelectProcurementQuote               Boolean  @default(false)
+  canSelectProcurementQuote              Boolean  @default(false)
   canCreateProcurementOrder              Boolean  @default(false)
   canApproveProcurementOrder             Boolean  @default(false)
   canAcknowledgeProcurementOrder         Boolean  @default(false)
   canReceiveProcurementGoods             Boolean  @default(false)
   canSubmitProcurementInvoice            Boolean  @default(false)
   canReviewProcurementInvoice            Boolean  @default(false)
-  canViewProcurementInvoice               Boolean  @default(false)
-  canApproveProcurementInvoice            Boolean  @default(false)
-  canRejectProcurementInvoice             Boolean  @default(false)
+  canViewProcurementInvoice              Boolean  @default(false)
+  canApproveProcurementInvoice           Boolean  @default(false)
+  canRejectProcurementInvoice            Boolean  @default(false)
   canApproveProcurementPayment           Boolean  @default(false)
   canRecordProcurementPayment            Boolean  @default(false)
   // Staff
@@ -849,7 +851,7 @@ model UserPermission {
   canPayHRPayroll                        Boolean  @default(false)
   canManageHRPayrollSettings             Boolean  @default(false)
   canManageHRPayroll                     Boolean  @default(false)
-  canManageHROpeningBalances              Boolean  @default(false)
+  canManageHROpeningBalances             Boolean  @default(false)
   // Branches
   canCreateBranch                        Boolean  @default(false)
   canViewBranch                          Boolean  @default(false)
@@ -1041,6 +1043,7 @@ model UserPermission {
   canManageTenantNotes                   Boolean  @default(false)
   canEditTenantNotes                     Boolean  @default(false)
   canCompleteTenantNotes                 Boolean  @default(false)
+  canAddTenantNoteFollowUps              Boolean  @default(false)
   canViewPropertyReports                 Boolean  @default(false)
   canRecordOwnerPayout                   Boolean  @default(false)
   canViewPropertySales                   Boolean  @default(false)
@@ -1212,53 +1215,53 @@ enum InvitationStatus {
 
 // Products/Inventory
 model Product {
-  id               String        @id @default(cuid())
-  name             String
+  id                  String        @id @default(cuid())
+  name                String
   // =====================
   // ITEM TYPE (Product or Service)
   // =====================
-  itemType         ItemType      @default(product)
+  itemType            ItemType      @default(product)
   // Service-specific fields (null for products/rentals)
-  serviceCategory  String? // e.g. "IT Services", "Legal Services", "Consulting"
-  estimatedHours   Float? // Estimated duration for service delivery
-  duration         String? // Human-readable duration: "2 hours", "1 week", etc.
+  serviceCategory     String? // e.g. "IT Services", "Legal Services", "Consulting"
+  estimatedHours      Float? // Estimated duration for service delivery
+  duration            String? // Human-readable duration: "2 hours", "1 week", etc.
   // =====================
   // RENTAL-SPECIFIC FIELDS (null for products/services)
   // =====================
-  rentalPrice      Float? // Hire charge per period (e.g. per day)
-  rentalPeriod     RentalPeriod? // Default billing period for this item
-  depositAmount    Float? // Security deposit required
-  replacementValue Float? // Cost if item is lost/damaged beyond repair
+  rentalPrice         Float? // Hire charge per period (e.g. per day)
+  rentalPeriod        RentalPeriod? // Default billing period for this item
+  depositAmount       Float? // Security deposit required
+  replacementValue    Float? // Cost if item is lost/damaged beyond repair
   // =====================
   // PRODUCT FIELDS (ignored for services, used for rental stock tracking)
   // =====================
-  sku              String?
-  barcode          String?
-  size             String?
-  brand            String?
-  design           String?
-  batchNumber      String?
-  description      String?
-  price            Float
-  cost             Float?
-  quantity         Decimal       @default(0) @db.Decimal(18, 6)
-  minStock         Int           @default(10)
-  categoryId       String?
-  category         Category?     @relation(fields: [categoryId], references: [id])
-  isUncategorized  Boolean       @default(false)
-  tenantId         String
-  branchId         String?
-  branch           Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  createdByUserId  String?
-  isActive         Boolean       @default(true)
-  image            String?
-  imagePublicId    String?
-  expiryDate       DateTime?
-  baseUnit         String        @default("Piece") // Base unit of measure: KG, Bottle, Piece, Tablet, etc.
+  sku                 String?
+  barcode             String?
+  size                String?
+  brand               String?
+  design              String?
+  batchNumber         String?
+  description         String?
+  price               Float
+  cost                Float?
+  quantity            Decimal       @default(0) @db.Decimal(18, 6)
+  minStock            Int           @default(10)
+  categoryId          String?
+  category            Category?     @relation(fields: [categoryId], references: [id])
+  isUncategorized     Boolean       @default(false)
+  tenantId            String
+  branchId            String?
+  branch              Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdByUserId     String?
+  isActive            Boolean       @default(true)
+  image               String?
+  imagePublicId       String?
+  expiryDate          DateTime?
+  baseUnit            String        @default("Piece") // Base unit of measure: KG, Bottle, Piece, Tablet, etc.
   contentsPerBaseUnit Float?
-  contentsUnit       String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  contentsUnit        String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   // Legacy relations (keep for compatibility)
   saleItems     SaleItem[]
@@ -1598,6 +1601,7 @@ model Customer {
   procurementSellerInvoices       ProcurementInvoice[]                     @relation("ProcurementInvoiceSellerCustomer")
   propertyTenancies               PropertyTenancy[]
   propertyTenantNotes             PropertyTenantNote[]
+  propertyTenantNoteFollowUps     PropertyTenantNoteFollowUp[]
   propertySales                   PropertySale[]
 
   creditNotes CreditNote[]
@@ -2729,15 +2733,15 @@ model Rental {
   historicalReference        String?
   isHistoricalReceivable     Boolean                     @default(false)
   historicalReceivableAmount Float                       @default(0)
-  cancellationChargePercent Float                       @default(0)
-  cancellationChargeAmount  Float                       @default(0)
-  cancellationTaxAmount     Float                       @default(0)
-  cancellationChargeBalance Float                       @default(0)
-  cancellationRefundDue     Float                       @default(0)
-  cancellationRefundedAmount Float                      @default(0)
-  cancellationReason        String?                     @db.Text
-  cancelledAt               DateTime?
-  cancelledById             String?
+  cancellationChargePercent  Float                       @default(0)
+  cancellationChargeAmount   Float                       @default(0)
+  cancellationTaxAmount      Float                       @default(0)
+  cancellationChargeBalance  Float                       @default(0)
+  cancellationRefundDue      Float                       @default(0)
+  cancellationRefundedAmount Float                       @default(0)
+  cancellationReason         String?                     @db.Text
+  cancelledAt                DateTime?
+  cancelledById              String?
   notes                      String?
   items                      RentalItem[]
   chargeLines                RentalChargeLine[]
@@ -2816,61 +2820,61 @@ model TenantCRMWorkspace {
 }
 
 model RentalAccountingConfig {
-  id                        String   @id @default(cuid())
-  tenantId                  String   @unique
-  tenant                    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  receivableAccountId       String
-  receivableAccount         Account  @relation("RentalReceivableAccount", fields: [receivableAccountId], references: [id])
-  revenueAccountId          String
-  revenueAccount            Account  @relation("RentalRevenueAccount", fields: [revenueAccountId], references: [id])
-  deferredRevenueAccountId  String
-  deferredRevenueAccount    Account  @relation("RentalDeferredRevenueAccount", fields: [deferredRevenueAccountId], references: [id])
-  depositLiabilityAccountId String
-  depositLiabilityAccount   Account  @relation("RentalDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id])
-  taxPayableAccountId       String
-  taxPayableAccount         Account  @relation("RentalTaxPayableAccount", fields: [taxPayableAccountId], references: [id])
-  openingEquityAccountId    String
-  openingEquityAccount      Account  @relation("RentalOpeningEquityAccount", fields: [openingEquityAccountId], references: [id])
-  renterCreditPayableAccountId String?
+  id                              String   @id @default(cuid())
+  tenantId                        String   @unique
+  tenant                          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  receivableAccountId             String
+  receivableAccount               Account  @relation("RentalReceivableAccount", fields: [receivableAccountId], references: [id])
+  revenueAccountId                String
+  revenueAccount                  Account  @relation("RentalRevenueAccount", fields: [revenueAccountId], references: [id])
+  deferredRevenueAccountId        String
+  deferredRevenueAccount          Account  @relation("RentalDeferredRevenueAccount", fields: [deferredRevenueAccountId], references: [id])
+  depositLiabilityAccountId       String
+  depositLiabilityAccount         Account  @relation("RentalDepositLiabilityAccount", fields: [depositLiabilityAccountId], references: [id])
+  taxPayableAccountId             String
+  taxPayableAccount               Account  @relation("RentalTaxPayableAccount", fields: [taxPayableAccountId], references: [id])
+  openingEquityAccountId          String
+  openingEquityAccount            Account  @relation("RentalOpeningEquityAccount", fields: [openingEquityAccountId], references: [id])
+  renterCreditPayableAccountId    String?
   cancellationFeeRevenueAccountId String?
-  inventoryAccountId        String?
-  costOfGoodsSoldAccountId  String?
-  salesRevenueAccountId     String?
-  isEnabled                 Boolean  @default(true)
-  isSystemManaged           Boolean  @default(true)
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  inventoryAccountId              String?
+  costOfGoodsSoldAccountId        String?
+  salesRevenueAccountId           String?
+  isEnabled                       Boolean  @default(true)
+  isSystemManaged                 Boolean  @default(true)
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
 
   @@map("rental_accounting_configs")
 }
 
 model RentalPayment {
-  id             String       @id @default(cuid())
-  tenantId       String
-  tenant         Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  rentalId       String
-  rental         Rental       @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  id                 String            @id @default(cuid())
+  tenantId           String
+  tenant             Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rentalId           String
+  rental             Rental            @relation(fields: [rentalId], references: [id], onDelete: Cascade)
   rentalCreditNoteId String?
-  rentalCreditNote RentalCreditNote? @relation(fields: [rentalCreditNoteId], references: [id], onDelete: Restrict)
-  cashAccountId  String?
-  cashAccount    CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
-  userId         String
-  user           User         @relation(fields: [userId], references: [id])
-  kind           String       @default("rental_payment") // rental_payment, rental_advance, deposit, deposit_refund, deposit_forfeiture
-  receiptNo      String
-  idempotencyKey String
-  amount         Float
-  balanceAfter   Float        @default(0)
-  paymentMethod  String?
-  mobileProvider String?
-  phoneNumber    String?
-  paymentDate    DateTime     @default(now())
-  transactionRef String?
-  notes          String?
-  status         String       @default("posted") // posted, void
-  voidReason     String?
-  voidedAt       DateTime?
-  createdAt      DateTime     @default(now())
+  rentalCreditNote   RentalCreditNote? @relation(fields: [rentalCreditNoteId], references: [id], onDelete: Restrict)
+  cashAccountId      String?
+  cashAccount        CashAccount?      @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  userId             String
+  user               User              @relation(fields: [userId], references: [id])
+  kind               String            @default("rental_payment") // rental_payment, rental_advance, deposit, deposit_refund, deposit_forfeiture
+  receiptNo          String
+  idempotencyKey     String
+  amount             Float
+  balanceAfter       Float             @default(0)
+  paymentMethod      String?
+  mobileProvider     String?
+  phoneNumber        String?
+  paymentDate        DateTime          @default(now())
+  transactionRef     String?
+  notes              String?
+  status             String            @default("posted") // posted, void
+  voidReason         String?
+  voidedAt           DateTime?
+  createdAt          DateTime          @default(now())
 
   @@unique([tenantId, receiptNo])
   @@unique([tenantId, idempotencyKey])
@@ -2880,7 +2884,7 @@ model RentalPayment {
 }
 
 model RentalCreditNote {
-  id             String         @id @default(cuid())
+  id             String          @id @default(cuid())
   tenantId       String
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rentalId       String
@@ -2985,45 +2989,45 @@ model PropertyUnit {
 }
 
 model PropertyTenancy {
-  id              String                    @id @default(cuid())
-  agreementRef    String?
-  tenantId        String
-  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  unitId          String
-  unit            PropertyUnit              @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  tenantName      String
-  customerId      String?
-  customer        Customer?                 @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  email           String?
-  phone           String?
-  alternatePhone  String?
-  nationalId      String?
-  maritalStatus   String?
-  spouseNames     String?
-  childrenCount   Int?
-  householdSize   Int?
-  placeOfOrigin   String?
-  startDate       DateTime
-  endDate         DateTime?
-  dueDay          Int                       @default(1)
-  rentAmount      Float
+  id                    String                    @id @default(cuid())
+  agreementRef          String?
+  tenantId              String
+  tenant                Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unitId                String
+  unit                  PropertyUnit              @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  tenantName            String
+  customerId            String?
+  customer              Customer?                 @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  email                 String?
+  phone                 String?
+  alternatePhone        String?
+  nationalId            String?
+  maritalStatus         String?
+  spouseNames           String?
+  childrenCount         Int?
+  householdSize         Int?
+  placeOfOrigin         String?
+  startDate             DateTime
+  endDate               DateTime?
+  dueDay                Int                       @default(1)
+  rentAmount            Float
   advanceMonthsRequired Int?
   depositMonthsRequired Int?
-  currency        String                    @default("UGX")
-  depositRequired Float                     @default(0)
-  depositHeld     Float                     @default(0)
-  status          String                    @default("active")
-  agreementNotes  String?
-  charges         RentCharge[]
-  payments        PropertyRentPayment[]
-  paymentPlans    PropertyRentPaymentPlan[]
-  promises        PropertyRentPromise[]
-  profileNotes    PropertyTenantNote[]
-  identity        PropertyTenantIdentity?
-  reminders       PropertyRentReminder[]
-  rentRateHistory PropertyRentRateHistory[]
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
+  currency              String                    @default("UGX")
+  depositRequired       Float                     @default(0)
+  depositHeld           Float                     @default(0)
+  status                String                    @default("active")
+  agreementNotes        String?
+  charges               RentCharge[]
+  payments              PropertyRentPayment[]
+  paymentPlans          PropertyRentPaymentPlan[]
+  promises              PropertyRentPromise[]
+  profileNotes          PropertyTenantNote[]
+  identity              PropertyTenantIdentity?
+  reminders             PropertyRentReminder[]
+  rentRateHistory       PropertyRentRateHistory[]
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
 
   @@index([tenantId, status, dueDay])
   @@index([unitId, status])
@@ -3182,26 +3186,47 @@ model PropertyRentPromise {
 }
 
 model PropertyTenantNote {
-  id          String           @id @default(cuid())
+  id          String                       @id @default(cuid())
   tenantId    String
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customerId  String
-  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer    Customer                     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   tenancyId   String?
-  tenancy     PropertyTenancy? @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
+  tenancy     PropertyTenancy?             @relation(fields: [tenancyId], references: [id], onDelete: SetNull)
   createdById String
-  createdBy   User             @relation("PropertyTenantNoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  kind        String           @default("communication")
-  priority    String           @default("normal")
-  body        String           @db.Text
+  createdBy   User                         @relation("PropertyTenantNoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  kind        String                       @default("communication")
+  priority    String                       @default("normal")
+  body        String                       @db.Text
   followUpAt  DateTime?
-  status      String           @default("open")
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  status      String                       @default("open")
+  followUps   PropertyTenantNoteFollowUp[]
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
 
   @@index([tenantId, customerId, status, followUpAt])
   @@index([tenantId, customerId, createdAt])
   @@map("property_tenant_notes")
+}
+
+model PropertyTenantNoteFollowUp {
+  id             String             @id @default(cuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  noteId         String
+  note           PropertyTenantNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User               @relation("PropertyTenantNoteFollowUpCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  idempotencyKey String?
+  body           String             @db.Text
+  followUpAt     DateTime?
+  createdAt      DateTime           @default(now())
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, customerId, noteId, createdAt])
+  @@map("property_tenant_note_follow_ups")
 }
 
 model PropertyRentPromiseChargeAllocation {
