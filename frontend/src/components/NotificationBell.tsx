@@ -69,6 +69,7 @@ function timeAgo(date: string | Date): string {
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [advisorTips, setAdvisorTips] = useState<NotificationItem[]>([])
   const [advisorTipQueue, setAdvisorTipQueue] = useState<NotificationItem[]>([])
   const unreadCount = notifications.filter(n => !n.isRead).length
   const [loading, setLoading] = useState(false)
@@ -101,6 +102,7 @@ export function NotificationBell() {
     dailyTipsAttemptRef.current = null
     startedAtRef.current = Date.now()
     setNotifications([])
+    setAdvisorTips([])
     setAdvisorTipQueue([])
   }, [user?.id])
 
@@ -136,12 +138,35 @@ export function NotificationBell() {
       if (!res.ok) return []
       const data = await res.json()
       const arr = Array.isArray(data) ? data : (data.notifications || [])
-      return arr.map((n: any) => ({
+      return arr.filter((n: any) => n.type !== 'advisor_tip').map((n: any) => ({
         id: n.id,
         metadata: n.metadata,
         title: sanitizeNotificationText(n.title, 'Notification'),
         message: sanitizeNotificationText(n.message),
         type: (n.type || 'info') as any,
+        isRead: n.isRead ?? false,
+        createdAt: n.createdAt || new Date().toISOString(),
+        channel: n.channel,
+        source: 'api' as const,
+        link: notificationLink(n.metadata?.link),
+      }))
+    } catch {
+      return []
+    }
+  }, [])
+
+  const fetchApiAdvisorTips = useCallback(async (): Promise<NotificationItem[]> => {
+    try {
+      const res = await apiFetch('/api/notifications/advisor-tips')
+      if (!res.ok) return []
+      const data = await res.json()
+      const arr = Array.isArray(data) ? data : (data.notifications || [])
+      return arr.map((n: any) => ({
+        id: n.id,
+        metadata: n.metadata,
+        title: sanitizeNotificationText(n.title, 'Advisor tip'),
+        message: sanitizeNotificationText(n.message),
+        type: 'advisor_tip',
         isRead: n.isRead ?? false,
         createdAt: n.createdAt || new Date().toISOString(),
         channel: n.channel,
@@ -326,6 +351,7 @@ export function NotificationBell() {
     setLoading(true)
     try {
       let apiNotifs: NotificationItem[] = []
+      let apiTips: NotificationItem[] = []
       let localNotifs: NotificationItem[] = []
 
       if (online) {
@@ -339,8 +365,13 @@ export function NotificationBell() {
             if (response?.ok) dailyTipsDoneRef.current = tipDayKey
           }
         }
-        const [api, local] = await Promise.all([fetchApiNotifications(), fetchLocalNotifications()])
+        const [api, tips, local] = await Promise.all([
+          fetchApiNotifications(),
+          hasPermission('canUseBusinessAI') ? fetchApiAdvisorTips() : Promise.resolve([]),
+          fetchLocalNotifications(),
+        ])
         apiNotifs = api
+        apiTips = tips
         localNotifs = local
       } else {
         localNotifs = await fetchLocalNotifications()
@@ -383,20 +414,38 @@ export function NotificationBell() {
       const withReminder = await addDailyReminderIfNeeded(merged)
       if (userIdRef.current !== loadingForUser) return
 
+      const advisorMap = new Map<string, NotificationItem>()
+      for (const item of apiTips) advisorMap.set(notificationKey(item), item)
+      for (const item of localNotifs.filter(item => item.type === 'advisor_tip')) {
+        if (!advisorMap.has(notificationKey(item))) advisorMap.set(notificationKey(item), item)
+      }
+      for (const [key, item] of immediateRef.current) {
+        if (item.type === 'advisor_tip') advisorMap.set(key, item)
+      }
+      const loadedTips = Array.from(advisorMap.values())
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .map(item => ({ ...item, isRead: item.isRead || readKeysRef.current.has(notificationKey(item)) }))
+
       for (const item of withReminder) {
         const key = notificationKey(item)
-        if (!item.isRead && (item.type === 'advisor_tip' || loadedRef.current || new Date(item.createdAt).getTime() >= startedAtRef.current)) announce(item)
+        if (!item.isRead && (loadedRef.current || new Date(item.createdAt).getTime() >= startedAtRef.current)) announce(item)
         else announcedRef.current.add(key)
       }
+      for (const item of loadedTips) {
+        if (!item.isRead && !announcedRef.current.has(notificationKey(item))) announce(item)
+      }
       loadedRef.current = true
-      setNotifications(withReminder.map(item => ({ ...item, isRead: item.isRead || readKeysRef.current.has(notificationKey(item)) })))
+      setNotifications(withReminder
+        .filter(item => item.type !== 'advisor_tip')
+        .map(item => ({ ...item, isRead: item.isRead || readKeysRef.current.has(notificationKey(item)) })))
+      setAdvisorTips(loadedTips)
     } catch {
       // ignore
     } finally {
       loadInFlightRef.current = false
       setLoading(false)
     }
-  }, [online, user?.id, hasPermission, announce, fetchApiNotifications, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
+  }, [online, user?.id, hasPermission, announce, fetchApiNotifications, fetchApiAdvisorTips, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
 
   // Initial load + polling plus immediate events emitted by completed workflows.
   useEffect(() => {
@@ -432,7 +481,11 @@ export function NotificationBell() {
       const key = notificationKey(item)
       announce(item)
       immediateRef.current.set(key, item)
-      setNotifications(prev => prev.some(existing => notificationKey(existing) === key) ? prev : [item, ...prev])
+      if (item.type === 'advisor_tip') {
+        setAdvisorTips(prev => prev.some(existing => notificationKey(existing) === key) ? prev : [item, ...prev])
+      } else {
+        setNotifications(prev => prev.some(existing => notificationKey(existing) === key) ? prev : [item, ...prev])
+      }
     }
     window.addEventListener('jibusales:notification', handleImmediateNotification)
     return () => window.removeEventListener('jibusales:notification', handleImmediateNotification)
@@ -495,10 +548,14 @@ export function NotificationBell() {
 
   // Mark single as read
   const handleMarkRead = async (id: string) => {
-    const item = notifications.find(n => n.id === id)
+    const item = [...notifications, ...advisorTips].find(n => n.id === id)
     if (!item || item.isRead) return
     readKeysRef.current.add(notificationKey(item))
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+    if (item.type === 'advisor_tip') {
+      setAdvisorTips(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+    } else {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+    }
     setAdvisorTipQueue(previous => previous.filter(tip => tip.id !== id))
 
     // Update local DB
@@ -523,7 +580,6 @@ export function NotificationBell() {
   const handleMarkAllRead = async () => {
     notifications.forEach(item => readKeysRef.current.add(notificationKey(item)))
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
-    setAdvisorTipQueue([])
 
     // Update local DB
     try {
@@ -555,8 +611,7 @@ export function NotificationBell() {
   }
 
   const openAdvisorTips = () => {
-    const tip = notifications.find(item => item.type === 'advisor_tip' && !item.isRead)
-      || notifications.find(item => item.type === 'advisor_tip')
+    const tip = advisorTips.find(item => !item.isRead) || advisorTips[0]
     setOpen(false)
     if (tip) {
       setAdvisorTipQueue(previous => previous.some(item => item.id === tip.id) ? previous : [tip, ...previous])
@@ -566,7 +621,7 @@ export function NotificationBell() {
   }
 
   const allNotifications = notifications
-  const unreadAdvisorCount = notifications.filter(item => item.type === 'advisor_tip' && !item.isRead).length
+  const unreadAdvisorCount = advisorTips.filter(item => !item.isRead).length
 
   return (
     <>

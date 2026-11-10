@@ -73,12 +73,19 @@ export default function CommunicationPage() {
     try {
       if (online) {
         const res = await apiFetch('/api/notifications')
-        if (res.ok) setNotifications(await res.json())
+        if (res.ok) {
+          const data = await res.json()
+          setNotifications((Array.isArray(data) ? data : []).filter((item: any) => item.type !== 'advisor_tip'))
+        }
       } else {
-        setNotifications(await getLocalNotifications() as any)
+        const local = await getLocalNotifications() as any[]
+        setNotifications(local.filter(item => item.type !== 'advisor_tip'))
       }
     } catch (err) {
-      try { setNotifications(await getLocalNotifications() as any) } catch {}
+      try {
+        const local = await getLocalNotifications() as any[]
+        setNotifications(local.filter(item => item.type !== 'advisor_tip'))
+      } catch {}
     }
     finally { setLoading(false) }
   }

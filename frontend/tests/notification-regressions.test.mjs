@@ -64,6 +64,20 @@ test('notification polling pauses in hidden tabs and AI daily tips are not poste
   assert.match(bell, /Date\.now\(\) - previousAttempt\.at >= 5 \* 60 \* 1000/);
 });
 
+test('Advisor tips stay out of business updates and use their own feed and unread count', () => {
+  const bell = readFileSync(root + '/components/NotificationBell.tsx', 'utf8');
+  const communication = readFileSync(root + '/pages/CommunicationPage.tsx', 'utf8');
+  const backend = readFileSync(new URL('../../backend/routes/notifications.js', import.meta.url), 'utf8');
+  assert.match(bell, /apiFetch\('\/api\/notifications\/advisor-tips'\)/);
+  assert.match(bell, /const \[advisorTips, setAdvisorTips\]/);
+  assert.match(bell, /const unreadAdvisorCount = advisorTips\.filter/);
+  assert.match(bell, /\.filter\(item => item\.type !== 'advisor_tip'\)/);
+  assert.match(communication, /filter\(\(item: any\) => item\.type !== 'advisor_tip'\)/);
+  assert.match(backend, /router\.get\("\/advisor-tips", authenticateToken, requirePermission\("canUseBusinessAI"\)/);
+  assert.match(backend, /businessNotifications = notifications\.filter\(\(notification\) => notification\.type !== "advisor_tip"\)/);
+  assert.match(backend, /isRead: false, type: \{ not: "advisor_tip" \}/);
+});
+
 test('login greetings use the account holder name, including older first/last-name profiles', () => {
   assert.equal(loginGreeting({ name: '  Delice  ', fname: 'Other', lname: 'Name' }), 'Welcome back, Delice!');
   assert.equal(loginGreeting({ name: ' ', fname: ' Aimable ', lname: ' Cyuzuzo ' }), 'Welcome back, Aimable Cyuzuzo!');

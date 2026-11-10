@@ -22,9 +22,24 @@ router.get("/", authenticateToken, loadUserPermissions, async (req, res) => {
       },
       orderBy: { createdAt: "desc" },
     });
-    res.json(await filterPropertyManagementNotifications(tenantId, notifications, req.user, req.userPermissions));
+    const businessNotifications = notifications.filter((notification) => notification.type !== "advisor_tip");
+    res.json(await filterPropertyManagementNotifications(tenantId, businessNotifications, req.user, req.userPermissions));
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch notifications" });
+  }
+});
+
+// Advisor tips have their own feed and are intentionally excluded from business updates.
+router.get("/advisor-tips", authenticateToken, requirePermission("canUseBusinessAI"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const tips = await prisma.notification.findMany({
+      where: { tenantId, userId: req.user.id, type: "advisor_tip" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(tips);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch Advisor tips" });
   }
 });
 
@@ -81,7 +96,7 @@ router.put("/read-all", authenticateToken, async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
     await prisma.notification.updateMany({
-      where: { tenantId, userId: req.user.id, isRead: false },
+      where: { tenantId, userId: req.user.id, isRead: false, type: { not: "advisor_tip" } },
       data: { isRead: true },
     });
     res.json({ message: "All notifications marked as read" });
@@ -95,7 +110,7 @@ router.get("/unread-count", authenticateToken, loadUserPermissions, async (req, 
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     const notifications = await prisma.notification.findMany({
-      where: { tenantId, userId: req.user.id, isRead: false },
+      where: { tenantId, userId: req.user.id, isRead: false, type: { not: "advisor_tip" } },
       select: { metadata: true },
     });
     const visible = await filterPropertyManagementNotifications(tenantId, notifications, req.user, req.userPermissions);
