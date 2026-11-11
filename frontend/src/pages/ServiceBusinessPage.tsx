@@ -24,7 +24,7 @@ interface ServiceJobCard {
   sale?: { receiptNo: string; status: string; user?: { fname: string; lname: string } } | null
 }
 
-interface Appointment { id: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; scheduledDate: string; scheduledTime: string; endTime?: string | null; duration: string | null; status: string; price: number; actualPrice: number; notes?: string | null; salonChairId?: string | null; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
+interface Appointment { id: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; scheduledDate: string; scheduledTime: string; endTime?: string | null; duration: string | null; status: string; bookingType?: string; price: number; actualPrice: number; notes?: string | null; salonStylistId?: string | null; salonChairId?: string | null; salonStylist?: { id: string; name: string } | null; salonChair?: { id: string; name: string; code?: string | null } | null; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
 interface WorkOrder { id: string; orderNo: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; status: string; priority: string; serviceCategory?: string | null; estimatedCost: number; actualCost: number; laborCost: number; partsCost: number; startDate: string | null; endDate: string | null; diagnostics?: string | null; warrantyInfo?: string | null; notes?: string | null; product?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
 interface ServiceContract { id: string; contractNo: string; title: string; description?: string | null; serviceCategory?: string | null; customer: { id: string; name: string }; startDate: string; endDate: string | null; renewalDate?: string | null; autoRenew: boolean; nextBillingDate?: string | null; value: number; billingCycle: string; discountPercent: number; status: string; terms?: string | null }
 interface CarWashRecord { id: string; createdAt: string; customerName: string; title: string; estimatedCost: number; technicianId?: string | null; notes?: string | null }
@@ -98,13 +98,17 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
   const [editingCarWashId, setEditingCarWashId] = useState<string | null>(null)
   const [editingGarageId, setEditingGarageId] = useState<string | null>(null)
   const [showApptModal, setShowApptModal] = useState(false)
+  const [assignmentFor, setAssignmentFor] = useState<Appointment | null>(null)
+  const [assignmentDraft, setAssignmentDraft] = useState({ salonStylistId: '', salonChairId: '' })
+  const [savingAssignment, setSavingAssignment] = useState(false)
   const [showWOModal, setShowWOModal] = useState(false)
   const [showContractModal, setShowContractModal] = useState(false)
   const [showTechModal, setShowTechModal] = useState(false)
   const [showJobCardModal, setShowJobCardModal] = useState(false)
   const [showFeedbackModal, setShowFeedbackModal] = useState(false)
   const [salonChairs, setSalonChairs] = useState<{ id: string; name: string; code?: string | null; branchId?: string | null; branch?: { name: string } | null }[]>([])
-  const [apptForm, setApptForm] = useState({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' })
+  const [salonStylists, setSalonStylists] = useState<{ id: string; name: string; isActive: boolean }[]>([])
+  const [apptForm, setApptForm] = useState({ bookingType: 'appointment', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonStylistId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' })
   const [woForm, setWoForm] = useState({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 })
   const [contractForm, setContractForm] = useState({ contractNo: '', customerId: '', title: '', description: '', serviceCategory: '', startDate: '', endDate: '', renewalDate: '', autoRenew: false, value: 0, billingCycle: 'monthly', discountPercent: 0, terms: '' })
   const [techForm, setTechForm] = useState({ employeeId: '', name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' })
@@ -152,7 +156,7 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
   useEffect(() => { loadData() }, [loadData])
 
   useEffect(() => {
-    if (tab !== 'appointments' || !canAccessFeature('salon.chair_scheduling') || !hasPermission('canViewSalonChair')) {
+    if (tab !== 'appointments' || !canAccessFeature('salon.chair_scheduling') || !(hasPermission('canViewSalonChair') || hasPermission('canAssignSalonChair'))) {
       setSalonChairs([])
       return
     }
@@ -161,12 +165,22 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
       .catch(() => setSalonChairs([]))
   }, [tab, canAccessFeature, hasPermission])
 
+  useEffect(() => {
+    if (tab !== 'appointments' || !canAccessFeature('salon_spa') || !(hasPermission('canViewSalonStylist') || hasPermission('canAssignSalonStylist'))) {
+      setSalonStylists([])
+      return
+    }
+    apiFetch('/api/salon/stylists').then(async response => response.ok ? response.json() : [])
+      .then(rows => setSalonStylists(Array.isArray(rows) ? rows.filter((stylist: any) => stylist.isActive) : []))
+      .catch(() => setSalonStylists([]))
+  }, [tab, canAccessFeature, hasPermission])
+
   const createAppt = async () => {
-    if (!apptForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
+    if (apptForm.bookingType !== 'walk_in' && !apptForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
     if (!apptForm.scheduledDate) { toast({ variant: 'destructive', title: 'Date is required' }); return }
     if (!apptForm.scheduledTime) { toast({ variant: 'destructive', title: 'Time is required' }); return }
     try { await apiFetch('/api/service/appointments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(apptForm) })
-    setShowApptModal(false); setApptForm({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' }); loadData() } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Failed to create appointment' }) }
+    setShowApptModal(false); setApptForm({ bookingType: 'appointment', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonStylistId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' }); loadData() } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Failed to create appointment' }) }
   }
   const createWO = async () => {
     if (savingService) return
@@ -186,6 +200,28 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
   }
   const updateApptStatus = async (id: string, status: string) => {
     await apiFetch(`/api/service/appointments/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); loadData()
+  }
+  const openSalonAssignment = (appointment: Appointment) => {
+    setAssignmentFor(appointment)
+    setAssignmentDraft({ salonStylistId: appointment.salonStylistId || 'none', salonChairId: appointment.salonChairId || 'none' })
+  }
+  const saveSalonAssignment = async () => {
+    if (!assignmentFor) return
+    const canAssignStylist = canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist')
+    const canAssignChair = canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair')
+    const payload: Record<string, string | null> = {}
+    if (canAssignStylist) payload.salonStylistId = assignmentDraft.salonStylistId === 'none' ? null : assignmentDraft.salonStylistId
+    if (canAssignChair) payload.salonChairId = assignmentDraft.salonChairId === 'none' ? null : assignmentDraft.salonChairId
+    if (!Object.keys(payload).length) return toast({ variant: 'destructive', title: 'You do not have permission to change Salon assignments.' })
+    setSavingAssignment(true)
+    try {
+      await apiFetch(`/api/service/appointments/${assignmentFor.id}/salon-assignment`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      toast({ title: 'Stylist and chair assignment updated' })
+      setAssignmentFor(null)
+      await loadData()
+    } catch (error) {
+      toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not update Salon assignment' })
+    } finally { setSavingAssignment(false) }
   }
   const updateWOStatus = async (id: string, status: string) => {
     await apiFetch(`/api/service/work-orders/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); loadData()
@@ -349,6 +385,18 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
     setWoForm(prev => ({ ...prev, productId: id, title: service?.product_name || prev.title, description: service?.description ?? '', serviceCategory: service?.serviceCategory || service?.categoryName || '', estimatedCost: Number(service?.unit_price ?? 0) }))
   }
 
+  const applyAppointmentService = (id: string) => {
+    const service = serviceOptions.find(item => String(item.id) === id)
+    setApptForm(previous => ({ ...previous, productId: id, title: service?.product_name || previous.title, description: service?.description || '', price: Number(service?.unit_price ?? previous.price) }))
+  }
+
+  const openWalkIn = () => {
+    const now = new Date()
+    const localNow = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+    setApptForm({ bookingType: 'walk_in', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonStylistId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: localNow.toISOString().slice(0, 10), scheduledTime: localNow.toISOString().slice(11, 16), endTime: '', duration: '', price: 0, notes: '' })
+    setShowApptModal(true)
+  }
+
   const applyJobCardService = (id: string) => {
     const service = serviceOptions.find(item => String(item.id) === id)
     setJobCardForm(prev => ({ ...prev, productId: id, serviceTitle: service?.product_name || prev.serviceTitle, serviceDescription: service?.description ?? '', laborCost: Number(service?.unit_price ?? 0) }))
@@ -443,23 +491,24 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
 
       {tab === 'appointments' && (
         <div className="space-y-4">
-          {can('Create', 'appointments') && <Button onClick={() => setShowApptModal(true)}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>}
+          {can('Create', 'appointments') && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => { setApptForm({ bookingType: 'appointment', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonStylistId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' }); setShowApptModal(true) }}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>{canAccessFeature('salon_spa') && <Button onClick={openWalkIn}><Plus className="mr-1 h-4 w-4" /> Walk-in Service</Button>}</div>}
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm min-w-[780px]">
-              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Stylist</th>{canAccessFeature('salon.chair_scheduling') && hasPermission('canViewSalonChair') && <th className="p-2 text-left">Chair</th>}<th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
+              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th>{(!canAccessFeature('salon_spa') || hasPermission('canViewSalonStylist') || hasPermission('canAssignSalonStylist')) && <th className="p-2 text-left">{canAccessFeature('salon_spa') ? 'Stylist' : 'Technician'}</th>}{canAccessFeature('salon.chair_scheduling') && (hasPermission('canViewSalonChair') || hasPermission('canAssignSalonChair')) && <th className="p-2 text-left">Chair</th>}<th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
-                {appointments.length === 0 && <tr className="border-t"><td colSpan={canAccessFeature('salon.chair_scheduling') && hasPermission('canViewSalonChair') ? 9 : 8} className="p-8 text-center text-muted-foreground">No appointments yet</td></tr>}
+                {appointments.length === 0 && <tr className="border-t"><td colSpan={7 + ((!canAccessFeature('salon_spa') || hasPermission('canViewSalonStylist') || hasPermission('canAssignSalonStylist')) ? 1 : 0) + ((canAccessFeature('salon.chair_scheduling') && (hasPermission('canViewSalonChair') || hasPermission('canAssignSalonChair'))) ? 1 : 0)} className="p-8 text-center text-muted-foreground">No appointments yet</td></tr>}
                 {appointments.map(a => (
                   <tr key={a.id} className="border-t">
                     <td className="p-2">{new Date(a.scheduledDate).toLocaleDateString()}</td>
                     <td className="p-2">{a.scheduledTime}{a.endTime ? `-${a.endTime}` : ''}</td>
-                    <td className="p-2">{a.customerName}<div className="text-xs text-muted-foreground">{a.customerPhone}</div></td>
+                    <td className="p-2">{a.customerName}{a.bookingType === 'walk_in' && <Badge variant="secondary" className="ml-2">Walk-in</Badge>}<div className="text-xs text-muted-foreground">{a.customerPhone}</div></td>
                     <td className="p-2">{a.title}</td>
-                    <td className="p-2">{a.technician ? `${a.technician.fname} ${a.technician.lname}` : '-'}</td>
-                    {canAccessFeature('salon.chair_scheduling') && hasPermission('canViewSalonChair') && <td className="p-2">{salonChairs.find(chair => chair.id === a.salonChairId)?.name || '—'}</td>}
+                    {(!canAccessFeature('salon_spa') || hasPermission('canViewSalonStylist') || hasPermission('canAssignSalonStylist')) && <td className="p-2">{a.salonStylist?.name || (a.technician ? `${a.technician.fname} ${a.technician.lname}` : 'Unassigned')}</td>}
+                    {canAccessFeature('salon.chair_scheduling') && (hasPermission('canViewSalonChair') || hasPermission('canAssignSalonChair')) && <td className="p-2">{a.salonChair?.name || salonChairs.find(chair => chair.id === a.salonChairId)?.name || '—'}</td>}
                     <td className="p-2 text-right">{a.status === 'completed' ? (a.actualPrice || a.price).toFixed(0) : a.price.toFixed(0)}</td>
                     <td className="p-2"><Badge className={statusColors[a.status]}>{a.status}</Badge></td>
                     <td className="p-2 space-x-1">
+                      {a.status !== 'completed' && a.status !== 'cancelled' && ((canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist')) || (canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair'))) && <Button size="sm" variant="outline" onClick={() => openSalonAssignment(a)}>Assign</Button>}
                       {a.status === 'scheduled' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'confirmed')}>Confirm</Button>}
                       {a.status === 'confirmed' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'in_progress')}>Start</Button>}
                       {a.status === 'in_progress' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'completed')}>Complete</Button>}
@@ -780,23 +829,24 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
 
       <Dialog open={showApptModal && can('Create', 'appointments')} onOpenChange={setShowApptModal}>
         <DialogContent>
-          <DialogHeader><DialogTitle>New Appointment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{apptForm.bookingType === 'walk_in' ? 'Start Walk-in Service' : 'New Appointment'}</DialogTitle><DialogDescription>{apptForm.bookingType === 'walk_in' ? 'Record a customer who arrived without an appointment. The service starts now.' : 'Schedule a customer and assign the service team.'}</DialogDescription></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Customer Name</Label><Input value={apptForm.customerName} onChange={e => setApptForm({ ...apptForm, customerName: e.target.value })} /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div><Label>Customer Name {apptForm.bookingType === 'walk_in' ? '(optional)' : ''}</Label><Input value={apptForm.customerName} onChange={e => setApptForm({ ...apptForm, customerName: e.target.value })} placeholder={apptForm.bookingType === 'walk_in' ? 'Walk-in customer' : 'Customer name'} /></div>
+            {apptForm.bookingType !== 'walk_in' && <div className="grid grid-cols-2 gap-3">
               <div><Label>Phone</Label><Input value={apptForm.customerPhone} onChange={e => setApptForm({ ...apptForm, customerPhone: e.target.value })} /></div>
               <div><Label>Email</Label><Input value={apptForm.customerEmail} onChange={e => setApptForm({ ...apptForm, customerEmail: e.target.value })} /></div>
-            </div>
-            <div><Label>Title</Label><Input value={apptForm.title} onChange={e => setApptForm({ ...apptForm, title: e.target.value })} placeholder="e.g. Bridal Makeup, Consultation" /></div>
-            <div><Label>Description</Label><Input value={apptForm.description} onChange={e => setApptForm({ ...apptForm, description: e.target.value })} /></div>
-            <div><Label>Technician</Label>
+            </div>}
+            {serviceOptions.length > 0 && <div><Label>Service menu</Label><Select value={apptForm.productId || 'none'} onValueChange={value => applyAppointmentService(value === 'none' ? '' : value)}><SelectTrigger><SelectValue placeholder="Choose service" /></SelectTrigger><SelectContent><SelectItem value="none">Enter a service manually</SelectItem>{serviceOptions.map(service => <SelectItem key={service.id} value={service.id}>{service.product_name} · {formatCurrency(Number(service.unit_price || 0))}</SelectItem>)}</SelectContent></Select></div>}
+            {canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist') ? <div><Label>Stylist</Label><Select value={apptForm.salonStylistId || 'none'} onValueChange={value => setApptForm(previous => ({ ...previous, salonStylistId: value === 'none' ? '' : value }))}><SelectTrigger><SelectValue placeholder="Assign stylist" /></SelectTrigger><SelectContent><SelectItem value="none">Unassigned</SelectItem>{salonStylists.map(stylist => <SelectItem key={stylist.id} value={stylist.id}>{stylist.name}</SelectItem>)}</SelectContent></Select>{salonStylists.length === 0 && <p className="mt-1 text-xs text-muted-foreground">Add a stylist profile first; HR is optional.</p>}</div> : <div><Label>Technician</Label>
               <Select disabled={!can('Assign')} value={apptForm.technicianId} onValueChange={v => setApptForm({ ...apptForm, technicianId: v })}>
                 <SelectTrigger><SelectValue placeholder="Assign technician" /></SelectTrigger><SelectContent>
-                  {technicianOptions.filter(tech => tab === 'job-cards' || tech.userId).map(tech => <SelectItem key={tech.id} value={tab === 'job-cards' ? tech.id : tech.userId!}>{tech.name}</SelectItem>)}
+                  {technicianOptions.filter(tech => tech.userId).map(tech => <SelectItem key={tech.id} value={tech.userId!}>{tech.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </div>
-            {salonChairs.length > 0 && <div><Label>Chair / station</Label>
+             </div>}
+            <div><Label>Service / Title</Label><Input value={apptForm.title} onChange={e => setApptForm({ ...apptForm, title: e.target.value })} placeholder="e.g. Haircut, Bridal Makeup" /></div>
+            <div><Label>Service details</Label><Input value={apptForm.description} onChange={e => setApptForm({ ...apptForm, description: e.target.value })} /></div>
+            {canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair') && salonChairs.length > 0 && <div><Label>Chair / station</Label>
               <Select value={apptForm.salonChairId || 'none'} onValueChange={value => {
                 const chair = salonChairs.find(option => option.id === value)
                 setApptForm({ ...apptForm, salonChairId: value === 'none' ? '' : value, branchId: chair?.branchId || '' })
@@ -818,7 +868,18 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
             <div><Label>Price</Label><Input type="number" value={apptForm.price} onChange={e => setApptForm({ ...apptForm, price: +e.target.value })} /></div>
             <div><Label>Notes</Label><Input value={apptForm.notes} onChange={e => setApptForm({ ...apptForm, notes: e.target.value })} /></div>
           </div>
-          <DialogFooter><Button onClick={createAppt}>Create Appointment</Button></DialogFooter>
+          <DialogFooter><Button onClick={createAppt}>{apptForm.bookingType === 'walk_in' ? 'Start Service' : 'Create Appointment'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(assignmentFor)} onOpenChange={open => { if (!open && !savingAssignment) setAssignmentFor(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Assign stylist and chair</DialogTitle><DialogDescription>{assignmentFor ? `${assignmentFor.customerName} · ${assignmentFor.title} · ${formatDisplayDate(assignmentFor.scheduledDate)}` : 'Update appointment staffing.'}</DialogDescription></DialogHeader>
+          <div className="space-y-4">
+            {canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist') && <div><Label>Stylist</Label><Select value={assignmentDraft.salonStylistId} onValueChange={value => setAssignmentDraft(previous => ({ ...previous, salonStylistId: value }))}><SelectTrigger><SelectValue placeholder="Select stylist" /></SelectTrigger><SelectContent><SelectItem value="none">Unassigned</SelectItem>{salonStylists.map(stylist => <SelectItem key={stylist.id} value={stylist.id}>{stylist.name}</SelectItem>)}</SelectContent></Select></div>}
+            {canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair') && <div><Label>Chair / station</Label><Select value={assignmentDraft.salonChairId} onValueChange={value => setAssignmentDraft(previous => ({ ...previous, salonChairId: value }))}><SelectTrigger><SelectValue placeholder="Select chair" /></SelectTrigger><SelectContent><SelectItem value="none">Unassigned</SelectItem>{salonChairs.map(chair => <SelectItem key={chair.id} value={chair.id}>{chair.name}{chair.code ? ` (${chair.code})` : ''}{chair.branch?.name ? ` · ${chair.branch.name}` : ''}</SelectItem>)}</SelectContent></Select></div>}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setAssignmentFor(null)} disabled={savingAssignment}>Cancel</Button><Button onClick={() => void saveSalonAssignment()} disabled={savingAssignment}>{savingAssignment ? 'Saving…' : 'Save assignment'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

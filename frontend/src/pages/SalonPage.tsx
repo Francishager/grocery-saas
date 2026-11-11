@@ -7,12 +7,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Armchair, Award, Loader2, Plus, RefreshCw, Save } from 'lucide-react'
 
 type Chair = { id: string; name: string; code?: string | null; location?: string | null; branchId?: string | null; branch?: { id: string; name: string } | null; isActive: boolean; notes?: string | null }
 type Stylist = { id: string; name: string; employeeId?: string | null; commissionType: 'percent' | 'fixed'; commissionValue: number }
-type Commission = { id: string; stylistName: string; serviceName: string; serviceRevenue: number; commissionAmount: number; status: string; completedAt: string; payrollReference?: string | null; appointment: { customerName: string; scheduledDate: string; scheduledTime: string; branch?: { name: string } | null } }
+type Commission = { id: string; stylistName: string; serviceName: string; serviceRevenue: number; commissionAmount: number; status: string; completedAt: string; payrollReference?: string | null; paymentReference?: string | null; appointment: { customerName: string; scheduledDate: string; scheduledTime: string; branch?: { name: string } | null } }
 type Branch = { id: string; name: string }
+type PayoutAccount = { id: string; name: string; type: string; balance: number }
 
 async function request(path: string, init?: RequestInit) {
   const response = await apiFetch(path, init)
@@ -33,6 +35,10 @@ export default function SalonPage({ section }: { section: 'chairs' | 'commission
   const [chairForm, setChairForm] = useState({ name: '', code: '', location: '', branchId: '', notes: '' })
   const [editingChair, setEditingChair] = useState<string | null>(null)
   const [ruleDrafts, setRuleDrafts] = useState<Record<string, { type: 'percent' | 'fixed'; value: string }>>({})
+  const [payoutAccounts, setPayoutAccounts] = useState<PayoutAccount[]>([])
+  const [paymentFor, setPaymentFor] = useState<Commission | null>(null)
+  const [paymentAccountId, setPaymentAccountId] = useState('')
+  const [paymentReference, setPaymentReference] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -45,15 +51,19 @@ export default function SalonPage({ section }: { section: 'chairs' | 'commission
         setChairs(Array.isArray(rows) ? rows : [])
         setBranches(Array.isArray(branchData?.branches) ? branchData.branches : Array.isArray(branchData) ? branchData : [])
       } else {
-        const data = await request('/api/salon/commissions')
+        const [data, accounts] = await Promise.all([
+          request('/api/salon/commissions'),
+          hasPermission('canPaySalonCommission') ? request('/api/salon/payment-accounts').catch(() => []) : Promise.resolve([]),
+        ])
         setTechnicians(data.technicians || [])
         setCommissions(data.commissions || [])
+        setPayoutAccounts(Array.isArray(accounts) ? accounts : [])
         setRuleDrafts(Object.fromEntries((data.technicians || []).map((person: Stylist) => [person.id, { type: person.commissionType || 'percent', value: String(person.commissionValue || 0) }])))
       }
     } catch (error) {
       toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to load Salon & Spa data' })
     } finally { setLoading(false) }
-  }, [section, toast])
+  }, [section, toast, hasPermission])
 
   useEffect(() => { void load() }, [load])
 
@@ -90,6 +100,18 @@ export default function SalonPage({ section }: { section: 'chairs' | 'commission
     finally { setSaving(false) }
   }
 
+  const payCommission = async () => {
+    if (!paymentFor || !paymentAccountId) return toast({ variant: 'destructive', title: 'Choose an authorized payment account' })
+    setSaving(true)
+    try {
+      await request(`/api/salon/commissions/${paymentFor.id}/pay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cashAccountId: paymentAccountId, reference: paymentReference }) })
+      toast({ title: `Commission paid to ${paymentFor.stylistName}` })
+      setPaymentFor(null); setPaymentAccountId(''); setPaymentReference('')
+      await load()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not pay commission' }) }
+    finally { setSaving(false) }
+  }
+
   const deactivateChair = async (chair: Chair) => {
     setSaving(true)
     try { await request(`/api/salon/chairs/${chair.id}/deactivate`, { method: 'POST' }); toast({ title: 'Chair deactivated' }); await load() }
@@ -117,8 +139,19 @@ export default function SalonPage({ section }: { section: 'chairs' | 'commission
 
     {loading ? <div className="flex min-h-40 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading {title.toLowerCase()}…</div> : section === 'chairs' ? <Card className="rounded-md"><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[680px] text-sm"><thead className="bg-muted/60 text-left"><tr><th className="p-3">Chair</th><th className="p-3">Code</th><th className="p-3">Location</th><th className="p-3">Branch</th><th className="p-3">Status</th><th className="p-3 text-right">Actions</th></tr></thead><tbody>{chairs.map(chair => <tr key={chair.id} className="border-t"><td className="p-3 font-medium">{chair.name}</td><td className="p-3">{chair.code || '—'}</td><td className="p-3">{chair.location || '—'}</td><td className="p-3">{chair.branch?.name || 'All branches'}</td><td className="p-3"><Badge variant={chair.isActive ? 'default' : 'secondary'}>{chair.isActive ? 'Active' : 'Inactive'}</Badge></td><td className="p-3 text-right">{chair.isActive && <div className="flex justify-end gap-2">{hasPermission('canEditSalonChair') && <Button size="sm" variant="outline" onClick={() => { setEditingChair(chair.id); setChairForm({ name: chair.name, code: chair.code || '', location: chair.location || '', branchId: chair.branchId || '', notes: chair.notes || '' }) }}>Edit</Button>}{hasPermission('canDeactivateSalonChair') && <Button size="sm" variant="outline" disabled={saving} onClick={() => void deactivateChair(chair)}>Deactivate</Button>}</div>}</td></tr>)}</tbody></table>{chairs.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">No chairs configured yet.</p>}</CardContent></Card> : <>
       {canConfigureCommissions && <Card className="rounded-md"><CardHeader><CardTitle className="text-base">Stylist commission rules</CardTitle></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[640px] text-sm"><thead className="bg-muted/60 text-left"><tr><th className="p-3">Stylist</th><th className="p-3">Employee</th><th className="p-3">Basis</th><th className="p-3">Value</th><th className="p-3" /></tr></thead><tbody>{technicians.map(person => <tr key={person.id} className="border-t"><td className="p-3 font-medium">{person.name}</td><td className="p-3">{person.employeeId || 'Not linked to HR'}</td><td className="p-3"><select className="h-9 rounded-md border bg-background px-2" value={ruleDrafts[person.id]?.type || 'percent'} onChange={e => setRuleDrafts(v => ({ ...v, [person.id]: { ...v[person.id], type: e.target.value as 'percent' | 'fixed' } }))}><option value="percent">Percent of service price</option><option value="fixed">Fixed per completed service</option></select></td><td className="p-3"><Input className="w-32" type="number" min="0" max={ruleDrafts[person.id]?.type === 'percent' ? 100 : undefined} step="0.01" value={ruleDrafts[person.id]?.value || '0'} onChange={e => setRuleDrafts(v => ({ ...v, [person.id]: { ...v[person.id], value: e.target.value } }))} /></td><td className="p-3 text-right"><Button size="sm" onClick={() => void saveRule(person)} disabled={saving}><Save className="mr-2 h-4 w-4" />Save</Button></td></tr>)}</tbody></table>{technicians.length === 0 && <p className="p-6 text-sm text-muted-foreground">Create and link stylists in Service Business → Technicians first.</p>}</CardContent></Card>}
-      <Card className="rounded-md"><CardHeader><CardTitle className="text-base">Completed service commissions</CardTitle></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[760px] text-sm"><thead className="bg-muted/60 text-left"><tr><th className="p-3">Completed</th><th className="p-3">Stylist</th><th className="p-3">Client</th><th className="p-3">Service</th><th className="p-3 text-right">Service revenue</th><th className="p-3 text-right">Commission</th><th className="p-3">Status</th><th className="p-3" /></tr></thead><tbody>{commissions.map(item => <tr key={item.id} className="border-t"><td className="p-3">{new Date(item.completedAt).toLocaleDateString()}</td><td className="p-3">{item.stylistName}</td><td className="p-3">{item.appointment?.customerName || '—'}</td><td className="p-3">{item.serviceName}</td><td className="p-3 text-right tabular-nums">{item.serviceRevenue.toLocaleString()}</td><td className="p-3 text-right font-semibold tabular-nums">{item.commissionAmount.toLocaleString()}</td><td className="p-3"><Badge variant={item.status === 'approved' ? 'default' : item.status === 'voided' ? 'destructive' : 'secondary'}>{item.status.replace(/_/g, ' ')}</Badge></td><td className="p-3 text-right">{item.status === 'pending' && hasPermission('canApproveSalonCommission') && <Button size="sm" variant="outline" onClick={() => void approve(item)} disabled={saving}>Approve</Button>}</td></tr>)}</tbody></table>{commissions.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">Commissions are recorded when a salon appointment is completed and the assigned stylist has a commission rule.</p>}</CardContent></Card>
-      <p className="text-xs text-muted-foreground">Approved commissions can be selected into an employee’s payroll for the same service-completion month. They are not treated as paid until payroll is posted and paid.</p>
+      <Card className="rounded-md"><CardHeader><CardTitle className="text-base">Completed service commissions</CardTitle></CardHeader><CardContent className="overflow-x-auto p-0"><table className="w-full min-w-[820px] text-sm"><thead className="bg-muted/60 text-left"><tr><th className="p-3">Completed</th><th className="p-3">Stylist</th><th className="p-3">Client</th><th className="p-3">Service</th><th className="p-3 text-right">Service revenue</th><th className="p-3 text-right">Commission</th><th className="p-3">Status</th><th className="p-3" /></tr></thead><tbody>{commissions.map(item => <tr key={item.id} className="border-t"><td className="p-3">{new Date(item.completedAt).toLocaleDateString()}</td><td className="p-3">{item.stylistName}</td><td className="p-3">{item.appointment?.customerName || '—'}</td><td className="p-3">{item.serviceName}</td><td className="p-3 text-right tabular-nums">{item.serviceRevenue.toLocaleString()}</td><td className="p-3 text-right font-semibold tabular-nums">{item.commissionAmount.toLocaleString()}</td><td className="p-3"><Badge variant={['approved', 'paid_directly', 'included_in_payroll'].includes(item.status) ? 'default' : item.status === 'voided' ? 'destructive' : 'secondary'}>{item.status.replace(/_/g, ' ')}</Badge>{item.paymentReference && <span className="mt-1 block text-xs text-muted-foreground">{item.paymentReference}</span>}</td><td className="p-3 text-right">{item.status === 'pending' && hasPermission('canApproveSalonCommission') && <Button size="sm" variant="outline" onClick={() => void approve(item)} disabled={saving}>Approve</Button>}{item.status === 'approved' && hasPermission('canPaySalonCommission') && <Button size="sm" onClick={() => { setPaymentFor(item); setPaymentAccountId(payoutAccounts[0]?.id || ''); setPaymentReference('') }} disabled={!payoutAccounts.length || saving}>Pay stylist</Button>}</td></tr>)}</tbody></table>{commissions.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">Commissions are recorded when a salon appointment is completed and the assigned stylist has a commission rule.</p>}</CardContent></Card>
+      <p className="text-xs text-muted-foreground">Approved commissions can be paid directly here or included in HR payroll when the HR module is enabled and the stylist is linked to an employee.</p>
     </>}
+    <Dialog open={Boolean(paymentFor)} onOpenChange={open => { if (!open && !saving) setPaymentFor(null) }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Pay stylist commission</DialogTitle><DialogDescription>{paymentFor ? `${paymentFor.stylistName} · ${paymentFor.serviceName} · ${paymentFor.commissionAmount.toLocaleString()}` : 'Select a payment account.'}</DialogDescription></DialogHeader>
+        <div className="space-y-4">
+          <div><Label>Pay from</Label><select className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm" value={paymentAccountId} onChange={event => setPaymentAccountId(event.target.value)}><option value="">Select permitted account</option>{payoutAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.type.replace(/_/g, ' ')} · {Number(account.balance || 0).toLocaleString()}</option>)}</select>{!payoutAccounts.length && <p className="mt-1 text-xs text-destructive">No transaction account is available under your payment permissions.</p>}</div>
+          <div><Label>Payment reference (optional)</Label><Input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} placeholder="Receipt or transfer reference" /></div>
+          <p className="text-xs text-muted-foreground">This posts the commission expense and reduces the selected account in the general ledger.</p>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={() => setPaymentFor(null)} disabled={saving}>Cancel</Button><Button onClick={() => void payCommission()} disabled={saving || !paymentAccountId}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Confirm payment</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 }

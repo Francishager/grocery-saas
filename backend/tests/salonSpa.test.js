@@ -8,7 +8,7 @@ test('Salon & Spa is opt-in and server routes enforce module, subfeature, and ac
   const router = await read('../routes/salon.js');
   const schemaSetup = await read('../src/scripts/ensure-salon-spa-schema.js');
   assert.match(router, /router\.use\(authenticateToken, requireTenant, requireFeature\('salon_spa'\)\)/);
-  for (const permission of ['canViewSalonChair', 'canCreateSalonChair', 'canEditSalonChair', 'canDeactivateSalonChair', 'canViewSalonCommission', 'canConfigureSalonCommission', 'canApproveSalonCommission', 'canIncludeSalonCommissionInPayroll']) {
+  for (const permission of ['canViewSalonChair', 'canCreateSalonChair', 'canEditSalonChair', 'canDeactivateSalonChair', 'canAssignSalonChair', 'canViewSalonCommission', 'canConfigureSalonCommission', 'canApproveSalonCommission', 'canIncludeSalonCommissionInPayroll', 'canPaySalonCommission', 'canAssignSalonStylist']) {
     assert.match(router, new RegExp(permission));
     assert.match(schemaSetup, new RegExp(`'${permission}'`));
   }
@@ -51,4 +51,49 @@ test('completed appointments snapshot commissions and approved commissions can o
   assert.match(payroll, /status: 'included_in_payroll'/);
   assert.match(payroll, /claimed\.count !== ids\.length/);
   assert.match(payroll, /payrollAdjustment\.createMany/);
+});
+
+test('Salon walk-ins use Salon stylist profiles and do not require an HR employee', async () => {
+  const serviceRoutes = await read('../routes/service.js');
+  const salonRoutes = await read('../routes/salon.js');
+  const schema = await read('../prisma/schema.prisma');
+  const migration = await read('../src/scripts/ensure-salon-spa-schema.js');
+  assert.match(serviceRoutes, /bookingType === 'walk_in' \? 'Walk-in customer'/);
+  assert.match(serviceRoutes, /status: bookingType === 'walk_in' \? 'in_progress' : 'scheduled'/);
+  assert.match(serviceRoutes, /salonStylistId \? \{ id: appointment\.salonStylistId \}/);
+  assert.match(schema, /salonStylistId\s+String\?/);
+  assert.match(schema, /bookingType\s+String\s+@default\("appointment"\)/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "salonStylistId" TEXT/);
+  assert.match(salonRoutes, /const employeeId = String\(req\.body\.employeeId \|\| ''\)\.trim\(\) \|\| null/);
+  assert.match(salonRoutes, /canPaySalonCommission/);
+});
+
+test('direct stylist commission payouts are permission checked, idempotent GL postings and excluded from payroll', async () => {
+  const salonRoutes = await read('../routes/salon.js');
+  const permissions = await read('../src/utils/servicePermissions.js');
+  const payroll = await read('../src/services/payrollService.js');
+  assert.match(permissions, /id: "canPaySalonCommission"/);
+  assert.match(salonRoutes, /requirePermission\('canPaySalonCommission'\)/);
+  assert.match(salonRoutes, /canUseTransactionAccountForPayment\(req, cashAccount, cashAccount\.type\)/);
+  assert.match(salonRoutes, /sourceType: 'SALON_COMMISSION_DIRECT_PAYOUT'/);
+  assert.match(salonRoutes, /debit: commission\.commissionAmount/);
+  assert.match(salonRoutes, /credit: commission\.commissionAmount/);
+  assert.match(salonRoutes, /status: 'paid_directly'/);
+  assert.match(payroll, /status: 'approved'/);
+  assert.match(salonRoutes, /ensureSalonCommissionExpenseAccount/);
+  assert.match(salonRoutes, /ensureSalonCashLedgerAccount/);
+});
+
+test('Salon coordinator can be delegated stylist and chair assignment separately from general appointment editing', async () => {
+  const serviceRoutes = await read('../routes/service.js');
+  const permissions = await read('../src/utils/servicePermissions.js');
+  const frontendPermissions = await read('../../frontend/src/lib/servicePermissions.ts');
+  for (const key of ['canAssignSalonStylist', 'canAssignSalonChair']) {
+    assert.match(permissions, new RegExp(`id: "${key}"`));
+    assert.match(frontendPermissions, new RegExp(`id: "${key}"`));
+  }
+  assert.match(serviceRoutes, /appointments\/:id\/salon-assignment/);
+  assert.match(serviceRoutes, /You do not have permission to assign a Salon stylist/);
+  assert.match(serviceRoutes, /You do not have permission to assign a Salon chair/);
+  assert.match(serviceRoutes, /validateChairSlot\(tx, \{ tenantId: tenant, chairId/);
 });

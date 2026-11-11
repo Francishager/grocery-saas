@@ -88,13 +88,13 @@ async function validateChairSlot(db, { tenantId, chairId, branchId, date, time, 
 }
 
 async function saveSalonCommission(appointment) {
-  if (appointment.status !== 'completed' || !appointment.technicianId) {
+  if (appointment.status !== 'completed' || (!appointment.salonStylistId && !appointment.technicianId)) {
     await prisma.salonCommission.updateMany({ where: { appointmentId: appointment.id, status: { in: ['pending', 'approved'] } }, data: { status: 'voided' } });
     return;
   }
   const features = await getTenantFeatures(appointment.tenantId);
   if (!hasFeatureAccess(features, 'salon_spa') || !hasFeatureAccess(features, 'salon.stylist_commissions')) return;
-  const stylist = await prisma.serviceTechnician.findFirst({ where: { tenantId: appointment.tenantId, userId: appointment.technicianId, isActive: true } });
+  const stylist = await prisma.serviceTechnician.findFirst({ where: { tenantId: appointment.tenantId, isActive: true, ...(appointment.salonStylistId ? { id: appointment.salonStylistId } : { userId: appointment.technicianId }) } });
   if (!stylist || stylist.commissionValue <= 0) return;
   const serviceRevenue = Math.max(0, Number(appointment.actualPrice || appointment.price || 0));
   const commissionAmount = Math.min(serviceRevenue, Number((stylist.commissionType === 'fixed' ? stylist.commissionValue : serviceRevenue * stylist.commissionValue / 100).toFixed(2)));
@@ -195,23 +195,81 @@ const validateReferences = tab => async (req, res, next) => {
 // ===== APPOINTMENTS =====
 router.get("/appointments", authenticateToken, requirePermission(servicePermission('appointments', 'View')), requireAnyFeature(["service.appointments", "salon_spa"]), async (req, res) => {
   try {
-    const appts = await prisma.appointment.findMany({ where: { tenantId: t(req) }, include: { customer: true, product: true, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { scheduledDate: "desc" } });
+    const appts = await prisma.appointment.findMany({ where: { tenantId: t(req) }, include: { customer: true, product: true, salonStylist: { select: { id: true, name: true } }, salonChair: { select: { id: true, name: true, code: true } }, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { scheduledDate: "desc" } });
     res.json(appts);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+router.put('/appointments/:id/salon-assignment', authenticateToken, requireAnyPermission(['canAssignSalonStylist', 'canAssignSalonChair']), requireAnyFeature(['service.appointments', 'salon_spa']), async (req, res) => {
+  try {
+    const hasField = key => Object.prototype.hasOwnProperty.call(req.body || {}, key);
+    const assignsStylist = hasField('salonStylistId');
+    const assignsChair = hasField('salonChairId');
+    const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+    const permissionRecord = req.userPermissions || {};
+    const permitted = key => req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role) || permissions.includes('*') || permissions.includes(key) || permissionRecord[key] === true;
+    if (!assignsStylist && !assignsChair) return res.status(400).json({ error: 'Choose a stylist or chair assignment to update.' });
+    if (assignsStylist && !permitted('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign Salon stylists.' });
+    if (assignsChair && !permitted('canAssignSalonChair')) return res.status(403).json({ error: 'You do not have permission to assign Salon chairs.' });
+
+    const tenant = t(req);
+    const features = await getTenantFeatures(tenant);
+    if (assignsStylist && !hasFeatureAccess(features, 'salon_spa')) return res.status(403).json({ error: 'Salon & Spa is not enabled for this business.' });
+    if (assignsChair && (!hasFeatureAccess(features, 'salon_spa') || !hasFeatureAccess(features, 'salon.chair_scheduling'))) return res.status(403).json({ error: 'Salon chair scheduling is not enabled for this business.' });
+
+    const appointment = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: tenant } });
+    if (!appointment) return res.status(404).json({ error: 'Appointment not found.' });
+    if (['completed', 'cancelled'].includes(appointment.status)) return res.status(409).json({ error: 'Assignments cannot be changed after an appointment is completed or cancelled.' });
+
+    const stylistId = assignsStylist ? String(req.body.salonStylistId || '').trim() || null : appointment.salonStylistId;
+    const chairId = assignsChair ? String(req.body.salonChairId || '').trim() || null : appointment.salonChairId;
+    const stylist = stylistId ? await prisma.serviceTechnician.findFirst({ where: { id: stylistId, tenantId: tenant, isActive: true }, select: { id: true, branchId: true } }) : null;
+    if (stylistId && !stylist) return res.status(400).json({ error: 'Choose an active stylist belonging to this business.' });
+    const chair = chairId ? await prisma.salonChair.findFirst({ where: { id: chairId, tenantId: tenant, isActive: true }, select: { id: true, branchId: true } }) : null;
+    if (chairId && !chair) return res.status(400).json({ error: 'Choose an active chair belonging to this business.' });
+    const assignmentBranchId = chair?.branchId || stylist?.branchId || appointment.branchId || null;
+    for (const resource of [stylist, chair]) {
+      if (resource?.branchId && appointment.branchId && resource.branchId !== appointment.branchId) return res.status(400).json({ error: 'The assigned stylist or chair belongs to a different branch.' });
+    }
+    const data = {
+      ...(assignsStylist ? { salonStylistId: stylistId } : {}),
+      ...(assignsChair ? { salonChairId: chairId } : {}),
+      ...(assignmentBranchId && !appointment.branchId ? { branchId: assignmentBranchId } : {}),
+    };
+    const updated = chairId
+      ? await prisma.$transaction(async tx => {
+          const dayKey = appointment.scheduledDate.toISOString().slice(0, 10);
+          await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `${tenant}:${chairId}:${dayKey}`);
+          await validateChairSlot(tx, { tenantId: tenant, chairId, branchId: assignmentBranchId, date: appointment.scheduledDate, time: appointment.scheduledTime, endTime: appointment.endTime, duration: appointment.duration, excludeId: appointment.id });
+          return tx.appointment.update({ where: { id: appointment.id }, data });
+        })
+      : await prisma.appointment.update({ where: { id: appointment.id }, data });
+    res.json(updated);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Could not update Salon assignment.' });
+  }
+});
+
 router.post("/appointments", authenticateToken, requirePermission(servicePermission('appointments', 'Create')), requireServiceAssignment('appointments'), requireAnyFeature(["service.appointments", "salon_spa"]), validateReferences('appointments'), async (req, res) => {
   try {
-    const { customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, scheduledDate, scheduledTime, endTime, duration, price, branchId, notes } = req.body;
+    const { customerId, customerPhone, customerEmail, productId, technicianId, title, description, scheduledDate, scheduledTime, endTime, duration, price, branchId, notes } = req.body;
+    const bookingType = req.body.bookingType === 'walk_in' ? 'walk_in' : 'appointment';
+    const customerName = String(req.body.customerName || '').trim() || (bookingType === 'walk_in' ? 'Walk-in customer' : '');
+    const salonStylistId = req.body.salonStylistId || null;
     const salonChairId = req.body.salonChairId || null;
-    if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
+    const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+    const platformAdmin = req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role);
+    if (salonStylistId && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign a Salon stylist.' });
+    if (salonChairId && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonChair')) return res.status(403).json({ error: 'You do not have permission to assign a Salon chair.' });
+    if (!customerName) return res.status(400).json({ error: 'Customer name is required' });
     if (!scheduledDate) return res.status(400).json({ error: 'Date is required' });
     if (!scheduledTime) return res.status(400).json({ error: 'Time is required' });
+    if (salonStylistId && !await prisma.serviceTechnician.findFirst({ where: { id: salonStylistId, tenantId: t(req), isActive: true }, select: { id: true } })) return res.status(400).json({ error: 'Select an active stylist belonging to this business.' });
     if (salonChairId) {
       const salonFeatures = await getTenantFeatures(t(req));
       if (!hasFeatureAccess(salonFeatures, 'salon_spa') || !hasFeatureAccess(salonFeatures, 'salon.chair_scheduling')) return res.status(403).json({ error: 'Chair scheduling is not enabled for this business.' });
     }
-    const data = { customerId: customerId || null, customerName, customerPhone, customerEmail, productId: productId || null, technicianId: technicianId || null, title, description, scheduledDate: new Date(scheduledDate), scheduledTime, endTime, duration, price: Number(price || 0), branchId: branchId || null, salonChairId, notes, tenantId: t(req) };
+    const data = { customerId: customerId || null, customerName, customerPhone: customerPhone || null, customerEmail: customerEmail || null, productId: productId || null, technicianId: technicianId || null, salonStylistId, bookingType, title: String(title || (bookingType === 'walk_in' ? 'Walk-in service' : '')).trim(), description: description || null, scheduledDate: new Date(scheduledDate), scheduledTime, endTime: endTime || null, duration: duration || null, price: Number(price || 0), branchId: branchId || null, salonChairId, notes: notes || null, status: bookingType === 'walk_in' ? 'in_progress' : 'scheduled', tenantId: t(req) };
     const appt = salonChairId
       ? await prisma.$transaction(async tx => {
           const dayKey = new Date(scheduledDate).toISOString().slice(0, 10);
@@ -228,7 +286,13 @@ router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appoint
   try {
     const existing = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
     if (!existing) return res.status(404).json({ error: 'Appointment not found' });
-    const { status, technicianId, scheduledDate, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason } = req.body;
+    const { status, technicianId, salonStylistId: requestedStylistId, scheduledDate, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason } = req.body;
+    const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+    const platformAdmin = req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role);
+    if (requestedStylistId !== undefined && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign a Salon stylist.' });
+    if (req.body.salonChairId !== undefined && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonChair')) return res.status(403).json({ error: 'You do not have permission to assign a Salon chair.' });
+    const nextStylistId = requestedStylistId === undefined ? existing.salonStylistId : requestedStylistId || null;
+    if (nextStylistId && !await prisma.serviceTechnician.findFirst({ where: { id: nextStylistId, tenantId: t(req), isActive: true }, select: { id: true } })) return res.status(400).json({ error: 'Select an active stylist belonging to this business.' });
     const salonChairId = req.body.salonChairId === undefined ? existing.salonChairId : req.body.salonChairId || null;
     if (salonChairId) {
       const salonFeatures = await getTenantFeatures(t(req));
@@ -237,6 +301,7 @@ router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appoint
     const next = {
       status: status ?? existing.status,
       technicianId: technicianId === undefined ? existing.technicianId : technicianId || null,
+      salonStylistId: nextStylistId,
       salonChairId,
       scheduledDate: scheduledDate ? new Date(scheduledDate) : existing.scheduledDate,
       scheduledTime: scheduledTime ?? existing.scheduledTime,

@@ -1157,6 +1157,9 @@ model UserPermission {
   canConfigureSalonCommission            Boolean  @default(false)
   canApproveSalonCommission               Boolean  @default(false)
   canIncludeSalonCommissionInPayroll      Boolean  @default(false)
+  canPaySalonCommission                   Boolean  @default(false)
+  canAssignSalonStylist                   Boolean  @default(false)
+  canAssignSalonChair                     Boolean  @default(false)
   canViewSalonStylist                     Boolean  @default(false)
   canCreateSalonStylist                   Boolean  @default(false)
   canEditSalonStylist                     Boolean  @default(false)
@@ -5378,8 +5381,11 @@ model Appointment {
   product         Product?  @relation(fields: [productId], references: [id])
   technicianId    String? // assigned user/staff
   technician      User?     @relation("AppointmentTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  salonStylistId  String?
+  salonStylist    ServiceTechnician? @relation("SalonAppointmentStylist", fields: [salonStylistId], references: [id], onDelete: SetNull)
   salonChairId    String?
   salonChair      SalonChair? @relation(fields: [salonChairId], references: [id], onDelete: SetNull)
+  bookingType     String    @default("appointment") // appointment, walk_in
   title           String
   description     String?
   scheduledDate   DateTime
@@ -5556,6 +5562,7 @@ model ServiceTechnician {
 
   jobCards ServiceJobCard[]
   salonCommissions SalonCommission[]
+  salonAppointments Appointment[] @relation("SalonAppointmentStylist")
 
   @@index([tenantId, branchId])
   @@index([tenantId, isActive])
@@ -5600,6 +5607,12 @@ model SalonCommission {
   status           String            @default("pending") // pending, approved, voided, included_in_payroll
   completedAt      DateTime
   payrollReference String?
+  paymentJournalEntryId String? @unique
+  paidAt           DateTime?
+  paidByUserId     String?
+  paymentAccountId String?
+  paymentMethod    String?
+  paymentReference String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
