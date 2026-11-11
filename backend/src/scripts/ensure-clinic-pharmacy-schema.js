@@ -2,7 +2,7 @@ import prisma from '../db.js';
 
 const permissions = [
   'canViewClinic', 'canViewClinicPatients', 'canViewClinicAppointments', 'canViewClinicEncounters', 'canViewClinicPrescriptions',
-  'canManageClinicPatients', 'canManageClinicAppointments', 'canManageClinicEncounters', 'canManageClinicPrescriptions',
+  'canManageClinicPatients', 'canManageClinicAppointments', 'canManageClinicEncounters', 'canManageClinicPrescriptions', 'canViewClinicReports',
   'canViewPharmacy', 'canViewPharmacyCatalogue', 'canViewPharmacyBatches', 'canViewPharmacyPrescriptions', 'canViewPharmacyDispenses',
   'canManagePharmacyCatalogue', 'canManagePharmacyBatches', 'canDispensePharmacyPrescriptions', 'canViewPharmacyReports',
 ];

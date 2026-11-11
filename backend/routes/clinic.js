@@ -28,6 +28,22 @@ router.get('/dashboard', requirePermission('canViewClinic'), async (req, res) =>
   } catch (error) { fail(res, error, 'Could not load clinic summary.'); }
 });
 
+router.get('/reports', requirePermission('canViewClinicReports'), async (req, res) => {
+  try {
+    const tenant = tenantId(req);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? new Date(`${req.query.from}T00:00:00.000Z`) : new Date('1970-01-01T00:00:00.000Z');
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || '')) ? new Date(`${req.query.to}T00:00:00.000Z`) : new Date('2100-01-01T00:00:00.000Z');
+    to.setUTCDate(to.getUTCDate() + 1);
+    const [patients, appointmentStatus, encounterCount, prescriptionStatus] = await Promise.all([
+      prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM clinic_patient_profiles WHERE "tenantId" = ${tenant}`,
+      prisma.$queryRaw`SELECT status, COUNT(*)::int AS count FROM clinic_appointments WHERE "tenantId" = ${tenant} AND "startsAt" >= ${from} AND "startsAt" < ${to} GROUP BY status ORDER BY status`,
+      prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM clinic_encounters WHERE "tenantId" = ${tenant} AND "createdAt" >= ${from} AND "createdAt" < ${to}`,
+      prisma.$queryRaw`SELECT status, COUNT(*)::int AS count FROM clinic_prescriptions WHERE "tenantId" = ${tenant} AND "createdAt" >= ${from} AND "createdAt" < ${to} GROUP BY status ORDER BY status`,
+    ]);
+    res.json({ summary: { patients: patients[0]?.count || 0, appointments: appointmentStatus.reduce((sum, row) => sum + Number(row.count || 0), 0), encounters: encounterCount[0]?.count || 0, prescriptions: prescriptionStatus.reduce((sum, row) => sum + Number(row.count || 0), 0) }, appointmentsByStatus: appointmentStatus, prescriptionsByStatus: prescriptionStatus, period: { from: req.query.from || null, to: req.query.to || null } });
+  } catch (error) { fail(res, error, 'Could not load clinic reports.'); }
+});
+
 router.get('/patients', requirePermission('canViewClinicPatients'), async (req, res) => {
   try {
     const rows = await prisma.$queryRaw`SELECT p.id, p."customerId", p."medicalRecordNo", p."dateOfBirth", p.gender, p."bloodGroup", p.allergies, p."emergencyContact", p."emergencyPhone", p."createdAt", c.name, c.phone, c.email, c.address FROM clinic_patient_profiles p JOIN customers c ON c.id = p."customerId" WHERE p."tenantId" = ${tenantId(req)} ORDER BY c.name ASC LIMIT 1000`;

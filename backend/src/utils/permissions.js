@@ -278,6 +278,7 @@ const PERMISSION_TO_FEATURES = {
   canManageClinicAppointments: ['clinic_management'],
   canManageClinicEncounters: ['clinic_management'],
   canManageClinicPrescriptions: ['clinic_management'],
+  canViewClinicReports: ['clinic_management'],
   canViewPharmacy: ['pharmacy_management'],
   canViewPharmacyCatalogue: ['pharmacy_management'],
   canViewPharmacyBatches: ['pharmacy_management'],
@@ -463,7 +464,7 @@ export const ALL_PERMISSION_KEYS = [
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant", "canViewBarQueue", "canUpdateBarQueue",
   // Clinic Management
-  "canViewClinic", "canViewClinicPatients", "canViewClinicAppointments", "canViewClinicEncounters", "canViewClinicPrescriptions", "canManageClinicPatients", "canManageClinicAppointments", "canManageClinicEncounters", "canManageClinicPrescriptions",
+  "canViewClinic", "canViewClinicPatients", "canViewClinicAppointments", "canViewClinicEncounters", "canViewClinicPrescriptions", "canManageClinicPatients", "canManageClinicAppointments", "canManageClinicEncounters", "canManageClinicPrescriptions", "canViewClinicReports",
   // Pharmacy Management
   "canViewPharmacy", "canViewPharmacyCatalogue", "canViewPharmacyBatches", "canViewPharmacyPrescriptions", "canViewPharmacyDispenses", "canManagePharmacyCatalogue", "canManagePharmacyBatches", "canDispensePharmacyPrescriptions", "canViewPharmacyReports",
   // Fuel Station
@@ -553,6 +554,7 @@ const PERMISSION_DETAIL_OVERRIDES = {
     canViewClinicAppointments: 'View clinic appointments', canManageClinicAppointments: 'Schedule and update clinic appointments',
     canViewClinicEncounters: 'View clinical encounters and notes', canManageClinicEncounters: 'Create clinical encounters and treatment notes',
     canViewClinicPrescriptions: 'View clinic prescriptions', canManageClinicPrescriptions: 'Create clinic prescriptions',
+    canViewClinicReports: 'View clinic operational reports',
     canViewPharmacyCatalogue: 'View medicines in the shared inventory catalogue', canManagePharmacyCatalogue: 'Maintain pharmacy catalogue links to inventory products',
     canViewPharmacyBatches: 'View medicine batch and expiry details', canManagePharmacyBatches: 'Allocate existing inventory quantities to medicine batches',
     canViewPharmacyPrescriptions: 'View prescriptions in the pharmacy queue', canViewPharmacyDispenses: 'View completed pharmacy dispensing records',

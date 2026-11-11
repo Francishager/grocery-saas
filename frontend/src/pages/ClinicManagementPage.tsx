@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 
 type Row = Record<string, any>
-const tabs = ['Overview', 'Patients', 'Appointments', 'Encounters', 'Prescriptions'] as const
-type Tab = typeof tabs[number]
+const tabs = ['Patients', 'Appointments', 'Encounters', 'Prescriptions'] as const
+type Tab = typeof tabs[number] | 'Overview'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init)
@@ -21,7 +21,7 @@ const inputClass = 'h-10 rounded-md border border-input bg-background px-3 text-
 
 export default function ClinicManagementPage() {
   const { hasPermission } = useJWTAuth()
-  const [tab, setTab] = useState<Tab>('Overview')
+  const [tab, setTab] = useState<Tab>('Patients')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -44,7 +44,6 @@ export default function ClinicManagementPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     const jobs: Array<Promise<void>> = []
-    if (hasPermission('canViewClinic')) jobs.push(request<any>('/api/clinic/dashboard').then(data => setSummary(data)))
     if (hasPermission('canViewClinicPatients')) jobs.push(request<any>('/api/clinic/patients').then(data => setPatients(data.patients || [])))
     if (hasPermission('canViewClinicAppointments')) jobs.push(request<any>('/api/clinic/appointments').then(data => setAppointments(data.appointments || [])))
     if (hasPermission('canViewClinicEncounters')) jobs.push(request<any>('/api/clinic/encounters').then(data => setEncounters(data.encounters || [])))

@@ -20,7 +20,7 @@ import { useOnlineStatus } from '@/db/hooks'
 import { getLocalProducts, getLocalSales, getLocalSettings } from '@/db/hybrid'
 import { queueMutation } from '@/db/sync'
 import { db } from '@/db/index'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import SaleServiceJobsEditor, { type SaleTechnician } from '@/components/SaleServiceJobsEditor'
 import { ToastAction } from '@/components/ui/toast'
@@ -102,6 +102,11 @@ export default function SalesPage() {
   const { hasPermission, user } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const prescriptionId = searchParams.get('prescriptionId')
+  const prescriptionLoadRef = useRef('')
+  const [prescriptionContext, setPrescriptionContext] = useState<any>(null)
+  const [prescriptionContextError, setPrescriptionContextError] = useState('')
   const multiUnitEnabled = hasFeature('inventory.multi_unit')
   const canCreateSaleJobs = hasFeature('service.job_cards') && hasPermission('canCreateServiceJobCard')
   const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canCreateCustomerCreditLimit') || hasPermission('canEditCustomerCreditLimit'))
@@ -236,6 +241,43 @@ export default function SalesPage() {
     const timer = setTimeout(() => { void loadInventory(searchQuery.trim()) }, 200)
     return () => { clearTimeout(timer); ++inventoryRequestRef.current }
   }, [searchQuery, online, user?.branchId])
+
+  useEffect(() => {
+    if (!prescriptionId || !online || !inventory.length || prescriptionLoadRef.current === prescriptionId) return
+    prescriptionLoadRef.current = prescriptionId
+    let active = true
+    apiFetch(`/api/pharmacy/prescriptions/${encodeURIComponent(prescriptionId)}/sale-context`)
+      .then(async response => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'Could not load prescription items.')
+        if (!active) return
+        const prescription = data.prescription
+        const cartItems: CartItem[] = []
+        const missing: string[] = []
+        for (const line of prescription.items || []) {
+          const product = inventory.find(item => String(item.id) === String(line.productId))
+          if (!product) { missing.push(line.productName); continue }
+          const isUncategorized = Boolean((product as any).isUncategorized || (!product.categoryId && !((product as any).category?.id) && !((product as any).category)))
+          if (isUncategorized) { missing.push(`${line.productName} (needs a category)`); continue }
+          const existingCartItem = cartItems.find(item => String(item.productId) === String(product.id))
+          if (existingCartItem) { existingCartItem.qty += Number(line.remainingQuantity); continue }
+          cartItems.push({
+            id: String(product.id), productId: product.id, product_id: product.product_id,
+            name: product.product_name, qty: Number(line.remainingQuantity),
+            selling_price: Number(product.unit_price), cost_price: Number(product.cost_price),
+            unitName: null, conversionFactor: null, cashDiscount: 0, itemType: product.itemType,
+            includedServices: product.itemType === 'service' ? [{ id: String(product.id), name: product.product_name, description: product.description }] : product.includedServices || [],
+            serviceJobs: [],
+          })
+        }
+        setPrescriptionContext({ ...prescription, items: prescription.items || [] })
+        setCustomerName(prescription.patientName || '')
+        setCart(cartItems)
+        setPrescriptionContextError(missing.length ? `Not added to cart: ${missing.join(', ')}. Check inventory and add them before checkout.` : '')
+      })
+      .catch(error => { if (active) setPrescriptionContextError(error instanceof Error ? error.message : 'Could not prepare the prescription sale.') })
+    return () => { active = false }
+  }, [prescriptionId, online, inventory, user?.branchId])
 
   const resetProductSearch = () => {
     setSearchQuery('')
@@ -524,6 +566,10 @@ export default function SalesPage() {
       toast({ variant: 'destructive', title: 'Cart is empty', description: 'Add at least one item to checkout.' })
       return
     }
+    if (prescriptionContext?.id && !online) {
+      toast({ variant: 'destructive', title: 'Connect to complete this prescription sale', description: 'Prescription-linked sales need an online receipt so the clinic receives the confirmed fulfillment.' })
+      return
+    }
     if (transactionCurrency !== baseCurrency && (!online || unitsPerBase <= 0 || !freshRateAvailable)) {
       toast({ variant: 'destructive', title: 'Exchange rate unavailable', description: !online ? 'Foreign-currency checkout requires an internet connection.' : 'Refresh a current exchange-rate quote before checkout.' })
       return
@@ -627,6 +673,28 @@ export default function SalesPage() {
         currency: transactionCurrency,
         unitsPerBase,
       })
+      if (prescriptionContext?.id && result?.sale?.id) {
+        const soldByProduct = new Map<string, number>()
+        cart.forEach(item => soldByProduct.set(String(item.productId), (soldByProduct.get(String(item.productId)) || 0) + Number(item.qty) * Number(item.conversionFactor || 1)))
+        const fulfillmentItems = (prescriptionContext.items || []).flatMap((line: any) => {
+          const key = String(line.productId)
+          const available = soldByProduct.get(key) || 0
+          const quantityDispensed = Math.min(Number(line.remainingQuantity), available)
+          soldByProduct.set(key, Math.max(0, available - quantityDispensed))
+          return quantityDispensed > 0 ? [{ prescriptionItemId: line.prescriptionItemId, quantityDispensed, outcome: 'dispensed' }] : []
+        })
+        if (fulfillmentItems.length) {
+          try {
+            await apiFetch(`/api/pharmacy/prescriptions/${encodeURIComponent(prescriptionContext.id)}/fulfillments`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ saleId: result.sale.id, items: fulfillmentItems }),
+            }).then(async response => { if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'Sale saved, but prescription fulfillment needs review.') } })
+            toast({ title: 'Prescription fulfilled', description: 'The completed receipt was linked to the prescription and shared back with the clinic.' })
+          } catch (error) {
+            toast({ variant: 'destructive', title: 'Sale completed; fulfillment needs review', description: error instanceof Error ? error.message : 'Open Pharmacy Management to reconcile the prescription.' })
+          }
+        }
+      }
       const completedSaleId = String(result?.sale?.id || result?.sale?.receiptNo || Date.now())
       const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(result?.foreignTotal ?? transactionTotal, transactionCurrency)
       window.dispatchEvent(new CustomEvent('jibusales:notification', {
@@ -649,6 +717,11 @@ export default function SalesPage() {
       })
       loadRecentSales()
       resetProductSearch()
+      if (prescriptionContext) {
+        setPrescriptionContext(null)
+        prescriptionLoadRef.current = ''
+        navigate('/tenant/sales', { replace: true })
+      }
     } catch (error: any) {
       browserPrintWindow?.close()
       toast({
@@ -748,6 +821,9 @@ export default function SalesPage() {
 
   return (
     <div className="space-y-6">
+      {prescriptionId && <div className={`rounded-md border p-3 text-sm ${prescriptionContextError ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-cyan-300 bg-cyan-50 text-cyan-950'}`} role={prescriptionContextError ? 'alert' : 'status'}>
+        {prescriptionContextError || (prescriptionContext ? `Prescription ${prescriptionContext.reference} is loaded for ${prescriptionContext.patientName}. Review the prescribed items and prices, then complete the sale to update the clinic.` : 'Loading prescription items into the sale...')}
+      </div>}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Sales</h1>
         {branches.find(branch => branch.id === defaultBranchId(user, branches)) && (

@@ -612,6 +612,33 @@ const CATEGORIES: ReportCategory[] = [
     ]
   },
   {
+    id: 'clinic', label: 'Clinic Reports', icon: Calendar, permission: 'canViewClinicReports', feature: 'clinic_management',
+    items: [
+      { id: 'clinicOperationsSummary', label: 'Clinic Operations Summary', apiFn: reportsApiV2.clinicOperations, renderType: 'summary',
+        summaryKeys: [
+          { key: 'patients', label: 'Clinic Patients', format: 'number' },
+          { key: 'appointments', label: 'Appointments', format: 'number' },
+          { key: 'encounters', label: 'Clinical Encounters', format: 'number' },
+          { key: 'prescriptions', label: 'Prescriptions', format: 'number' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'pharmacy', label: 'Pharmacy Reports', icon: Package, permission: 'canViewPharmacyReports', feature: 'pharmacy_management',
+    items: [
+      { id: 'pharmacyOperationsSummary', label: 'Pharmacy Operations Summary', apiFn: reportsApiV2.pharmacyOperations, renderType: 'summary',
+        summaryKeys: [
+          { key: 'activeBatches', label: 'Active Batches', format: 'number' },
+          { key: 'batchUnits', label: 'Units in Batches', format: 'number' },
+          { key: 'expiredBatches', label: 'Expired Batches', format: 'number' },
+          { key: 'expiringSoon', label: 'Expiring Within 90 Days', format: 'number' },
+          { key: 'fulfillmentEvents', label: 'Prescription Fulfillments', format: 'number' },
+        ]
+      },
+    ]
+  },
+  {
     id: 'analysis', label: 'Business Analysis', icon: BarChart3, permission: 'canViewFinancialReport',
     items: [
       { id: 'executiveSummary', label: 'Executive Summary & Insights', apiFn: reportsApiV2.executiveSummary, renderType: 'table' as any },

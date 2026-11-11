@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { AlertTriangle, BadgeCheck, Loader2, Package, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BadgeCheck, Loader2, Package, RefreshCw } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useNavigate } from 'react-router-dom'
 
 type Row = Record<string, any>
-const tabs = ['Overview', 'Medicine catalogue', 'Batches & expiry', 'Prescriptions', 'Dispensing history'] as const
-type Tab = typeof tabs[number]
+const tabs = ['Prescription queue', 'Medicine catalogue', 'Batches & expiry'] as const
+type Tab = typeof tabs[number] | 'Overview' | 'Prescriptions' | 'Dispensing history'
 const inputClass = 'h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -19,12 +20,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export default function PharmacyManagementPage() {
+  const navigate = useNavigate()
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const clinicPharmacyLinkEnabled = hasFeature('clinic_management')
   const canAccessPrescriptionQueue = hasPermission('canViewPharmacyPrescriptions') || hasPermission('canDispensePharmacyPrescriptions')
-  const visibleTabs = clinicPharmacyLinkEnabled && canAccessPrescriptionQueue ? tabs : tabs.filter(item => item !== 'Prescriptions' && item !== 'Dispensing history')
-  const [tab, setTab] = useState<Tab>('Overview')
+  const visibleTabs = clinicPharmacyLinkEnabled && canAccessPrescriptionQueue ? tabs : tabs.filter(item => item !== 'Prescription queue')
+  const [tab, setTab] = useState<Tab>(clinicPharmacyLinkEnabled && canAccessPrescriptionQueue ? 'Prescription queue' : 'Medicine catalogue')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -34,51 +36,30 @@ export default function PharmacyManagementPage() {
   const [inventoryProducts, setInventoryProducts] = useState<Row[]>([])
   const [batches, setBatches] = useState<Row[]>([])
   const [prescriptions, setPrescriptions] = useState<Row[]>([])
-  const [dispenses, setDispenses] = useState<Row[]>([])
-  const [saleOptions, setSaleOptions] = useState<Record<string, Row[]>>({})
+  const [dispenses] = useState<Row[]>([])
+  const [saleOptions] = useState<Record<string, Row[]>>({})
   const [fulfillmentDrafts, setFulfillmentDrafts] = useState<Record<string, Record<string, { quantity: string; outcome: string; reason: string }>>>({})
+  const [saleForPrescription, setSaleForPrescription] = useState<Record<string, string>>({})
   const [batchForm, setBatchForm] = useState({ productId: '', batchNumber: '', expiryDate: '', quantity: '', unitCost: '' })
   const [catalogueForm, setCatalogueForm] = useState({ productId: '', activeIngredient: '', strength: '', dosageForm: '', manufacturer: '', controlledClass: '', prescriptionRequired: true })
-  const [saleForPrescription, setSaleForPrescription] = useState<Record<string, string>>({})
   const pendingPrescriptionCount = prescriptions.filter(row => ['open', 'partially_dispensed'].includes(row.status)).length
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     const jobs: Array<Promise<void>> = []
-    if (hasPermission('canViewPharmacy')) jobs.push(request<any>('/api/pharmacy/dashboard').then(data => setSummary(data)))
     if (hasPermission('canViewPharmacyCatalogue') || hasPermission('canManagePharmacyBatches')) jobs.push(request<any>('/api/pharmacy/catalogue').then(data => setMedicines(data.medicines || [])))
     if (hasPermission('canManagePharmacyCatalogue')) jobs.push(request<any>('/api/pharmacy/inventory-products').then(data => setInventoryProducts(data.products || [])))
     if (hasPermission('canViewPharmacyBatches')) jobs.push(request<any>('/api/pharmacy/batches').then(data => setBatches(data.batches || [])))
-    if (clinicPharmacyLinkEnabled && canAccessPrescriptionQueue) jobs.push(request<any>('/api/pharmacy/prescriptions').then(async data => {
-      const rows: Row[] = data.prescriptions || []
-      setPrescriptions(rows)
-      setFulfillmentDrafts(previous => {
-        const next = { ...previous }
-        rows.filter(row => ['open', 'partially_dispensed'].includes(row.status)).forEach(row => {
-          const lines = { ...(next[row.id] || {}) }
-          row.items?.forEach((line: Row) => {
-            if (!lines[line.id]) lines[line.id] = { quantity: String(line.remainingQuantity || 0), outcome: 'dispensed', reason: '' }
-          })
-          next[row.id] = lines
-        })
-        return next
-      })
-      if (hasPermission('canDispensePharmacyPrescriptions')) {
-        const patientIds = [...new Set(rows.filter(row => ['open', 'partially_dispensed'].includes(row.status)).map(row => row.customerId))]
-        const pairs = await Promise.all(patientIds.map(async patientId => {
-          try { const result = await request<any>(`/api/pharmacy/sale-options?patientId=${encodeURIComponent(patientId)}`); return [patientId, result.sales || []] as const }
-          catch { return [patientId, []] as const }
-        }))
-        setSaleOptions(Object.fromEntries(pairs))
-      }
-    }))
-    if (clinicPharmacyLinkEnabled && hasPermission('canViewPharmacyDispenses')) jobs.push(request<any>('/api/pharmacy/dispenses').then(data => setDispenses(data.dispenses || [])))
+    if (clinicPharmacyLinkEnabled && canAccessPrescriptionQueue) jobs.push(request<any>('/api/pharmacy/prescriptions').then(data => setPrescriptions(data.prescriptions || [])))
     const results = await Promise.allSettled(jobs)
     if (results.some(result => result.status === 'rejected')) setError('Some pharmacy data could not be refreshed. Check permissions and retry.')
     setLoading(false)
   }, [hasPermission, clinicPharmacyLinkEnabled, canAccessPrescriptionQueue])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if ((!clinicPharmacyLinkEnabled || !canAccessPrescriptionQueue) && tab === 'Prescription queue') setTab('Medicine catalogue')
+  }, [clinicPharmacyLinkEnabled, canAccessPrescriptionQueue, tab])
   useEffect(() => {
     if (!clinicPharmacyLinkEnabled || !canAccessPrescriptionQueue) return
     let active = true
@@ -87,25 +68,7 @@ export default function PharmacyManagementPage() {
       try {
         const data = await request<any>('/api/pharmacy/prescriptions')
         if (!active) return
-        const rows: Row[] = data.prescriptions || []
-        setPrescriptions(rows)
-        setFulfillmentDrafts(previous => {
-          const next = { ...previous }
-          rows.filter(row => ['open', 'partially_dispensed'].includes(row.status)).forEach(row => {
-            const lines = { ...(next[row.id] || {}) }
-            row.items?.forEach((line: Row) => { if (!lines[line.id]) lines[line.id] = { quantity: String(line.remainingQuantity || 0), outcome: 'dispensed', reason: '' } })
-            next[row.id] = lines
-          })
-          return next
-        })
-        if (hasPermission('canDispensePharmacyPrescriptions')) {
-          const patientIds = [...new Set(rows.filter(row => ['open', 'partially_dispensed'].includes(row.status)).map(row => row.customerId))]
-          const pairs = await Promise.all(patientIds.map(async patientId => {
-            try { const result = await request<any>(`/api/pharmacy/sale-options?patientId=${encodeURIComponent(patientId)}`); return [patientId, result.sales || []] as const }
-            catch { return [patientId, []] as const }
-          }))
-          if (active) setSaleOptions(Object.fromEntries(pairs))
-        }
+        setPrescriptions(data.prescriptions || [])
       } catch { /* Keep the last loaded queue visible through brief network interruptions. */ }
     }
     const interval = window.setInterval(() => { void refreshQueue() }, 30_000)
@@ -128,35 +91,41 @@ export default function PharmacyManagementPage() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not add medicine.') }
     finally { setSaving(false) }
   }
-  const dispense = async (prescription: Row) => {
-    const items = (prescription.items || []).map((line: Row) => {
-      const draft = fulfillmentDrafts[prescription.id]?.[line.id] || { quantity: String(line.remainingQuantity || 0), outcome: 'dispensed', reason: '' }
-      return { prescriptionItemId: line.id, quantityDispensed: Number(draft.quantity || 0), outcome: Number(draft.quantity || 0) > 0 ? 'dispensed' : draft.outcome, reason: draft.reason }
-    }).filter((line: Row) => line.quantityDispensed > 0 || line.outcome !== 'dispensed')
-    if (!items.length) { setError('Enter a supplied quantity or record why a medicine was not supplied.'); return }
-    const needsSale = items.some((item: Row) => item.quantityDispensed > 0)
-    const selectedSale = saleForPrescription[prescription.id]
-    if (needsSale && !selectedSale) { setError('Select a completed receipt for the medicines being supplied.'); return }
-    setSaving(true); setError(''); setNotice('')
-    try {
-      const [sourceType, sourceId] = selectedSale ? selectedSale.split(':') : ['', '']
-      const saleLink = !needsSale ? {} : sourceType === 'credit_sale' ? { saleRecordId: sourceId } : { saleId: sourceId }
-      const result = await request<any>(`/api/pharmacy/prescriptions/${prescription.id}/fulfillments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...saleLink, items }) })
-      setNotice(`${result.message} ${result.receiptNo ? `Receipt ${result.receiptNo}.` : ''}`); await load()
-    } catch (e) { setError(e instanceof Error ? e.message : 'Could not record dispense.') }
-    finally { setSaving(false) }
-  }
   const expiresLabel = (value: string | null) => value ? new Date(value).toLocaleDateString() : 'No expiry recorded'
   const expired = (value: string | null) => Boolean(value && new Date(value) < new Date(new Date().setHours(0, 0, 0, 0)))
+  const dispense = async (_prescription?: Row) => setError('Prescription fulfillment is completed through Sales. Open the prescription queue and start a sale.')
 
   return <main className="mx-auto w-full max-w-screen-2xl space-y-5 p-4 md:p-6">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4"><div><p className="text-xs font-semibold uppercase text-cyan-700">Medicines & dispensing</p><h1 className="mt-1 text-2xl font-semibold text-foreground">Pharmacy Management</h1><p className="mt-1 text-sm text-muted-foreground">Inventory-linked medicines, batch traceability, expiry monitoring, and prescription dispensing.</p></div><Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button></header>
     <nav className="flex max-w-full gap-1 overflow-x-auto border-b border-border" aria-label="Pharmacy sections">{visibleTabs.map(item => <button key={item} onClick={() => setTab(item)} className={`shrink-0 border-b-2 px-3 py-2.5 text-sm ${tab === item ? 'border-cyan-700 font-semibold text-cyan-800' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>{item}</button>)}</nav>
     {error && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</div>}{notice && <div role="status" className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {loading ? <div className="flex min-h-48 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading pharmacy data</div> : <>
+      {tab === 'Prescription queue' && clinicPharmacyLinkEnabled && canAccessPrescriptionQueue && <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div><h2 className="text-lg font-semibold">Clinic prescriptions</h2><p className="text-sm text-muted-foreground">Dispensing queue only. Patient charts and clinical records remain in Clinic Management.</p></div>
+          <span className="rounded-full border border-border px-3 py-1 text-sm font-medium">{pendingPrescriptionCount} awaiting fulfillment</span>
+        </div>
+        {prescriptions.filter(row => ['open', 'partially_dispensed'].includes(row.status)).map(prescription => <article key={prescription.id} className="rounded-md border border-border bg-card p-4">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h3 className="font-semibold">{prescription.reference}</h3><span className="text-sm text-muted-foreground">{prescription.patientName}</span><span className="rounded bg-muted px-2 py-0.5 text-xs capitalize">{prescription.status.replaceAll('_', ' ')}</span></div>
+              <p className="mt-1 text-xs text-muted-foreground">Issued {new Date(prescription.createdAt).toLocaleString()}</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {(prescription.items || []).filter((line: Row) => Number(line.remainingQuantity) > 0).map((line: Row) => <div key={line.id} className="rounded border border-border/70 p-3">
+                  <p className="font-medium">{line.productName}</p>
+                  <p className="mt-1 text-sm tabular-nums">{line.remainingQuantity} {line.baseUnit || ''} remaining</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{[line.dosage, line.frequency, line.durationDays ? `${line.durationDays} days` : null].filter(Boolean).join(' · ') || 'Follow prescription directions'}</p>
+                </div>)}
+              </div>
+            </div>
+            {hasPermission('canDispensePharmacyPrescriptions') && <Button className="shrink-0" onClick={() => navigate(`/tenant/sales?prescriptionId=${encodeURIComponent(prescription.id)}`)}>Open in Sales<ArrowRight className="ml-2 h-4 w-4" /></Button>}
+          </div>
+        </article>)}
+        {pendingPrescriptionCount === 0 && <div className="rounded-md border border-dashed border-border px-4 py-12 text-center"><p className="font-medium">No prescriptions waiting</p><p className="mt-1 text-sm text-muted-foreground">New prescriptions shared by the clinic will appear here.</p></div>}
+      </section>}
       {tab === 'Overview' && <><section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[
         ['Active batches', summary.batches], ['Batch units', Number(summary.batchUnits).toLocaleString()], ['Expiring within 90 days', summary.expiringWithin90Days], ['Prescriptions to dispense', pendingPrescriptionCount], ['Dispensed today', summary.dispensedToday],
-      ].map(([label, value]: any) => <div key={label} className="rounded-md border border-border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-3 text-2xl font-semibold text-foreground">{value}</p></div>)}</section>{clinicPharmacyLinkEnabled && canAccessPrescriptionQueue && <button type="button" onClick={() => setTab('Prescriptions')} className="flex w-full items-center justify-between gap-4 rounded-md border border-cyan-300 bg-cyan-50 p-4 text-left text-cyan-950 hover:bg-cyan-100"><span><span className="block font-semibold">Clinic prescription queue</span><span className="mt-1 block text-sm">Open and partially supplied prescriptions from Clinic Management</span></span><span className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-semibold">{pendingPrescriptionCount} pending</span></button>}<section className="grid gap-4 xl:grid-cols-2"><div className="rounded-md border border-border p-4"><div className="flex items-center gap-2 font-semibold"><Package className="h-4 w-4 text-cyan-700" />Reorder watch</div><p className="mt-2 text-sm text-muted-foreground">Medicine quantities and purchases remain in the shared inventory and supplier workflows. Use stock-in/purchase first; batch registration allocates that stock for expiry and traceability without changing the ledger.</p></div><div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Clinical safety</div><p className="mt-2">Prescriptions are not medical advice. Confirm patient identity, prescription, medicine, dose, batch, expiry, and quantity before dispensing. Sales in POS create the official receipt and accounting entry; dispensing records the clinical fulfillment only.</p></div></section></>}
+      ].map(([label, value]: any) => <div key={label} className="rounded-md border border-border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-3 text-2xl font-semibold text-foreground">{value}</p></div>)}</section>{clinicPharmacyLinkEnabled && canAccessPrescriptionQueue && <section className="space-y-3 rounded-md border border-border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="font-semibold">Clinic prescription queue</h2><p className="text-sm text-muted-foreground">Prescription-only work queue. Patient profiles and clinical history stay in Clinic Management.</p></div><span className="rounded-full bg-muted px-3 py-1 text-sm font-semibold">{pendingPrescriptionCount} pending</span></div>{prescriptions.filter(p => ['open', 'partially_dispensed'].includes(p.status)).slice(0, 8).map(p => <article key={p.id} className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{p.reference} · {p.patientName}</p><p className="text-xs text-muted-foreground">{new Date(p.createdAt).toLocaleString()} · {p.status.replaceAll('_', ' ')}</p><div className="mt-2 flex flex-wrap gap-2">{p.items?.map((line: Row) => <span key={line.id} className="rounded-sm bg-muted px-2 py-1 text-xs">{line.productName} · {line.remainingQuantity} {line.baseUnit || ''} remaining</span>)}</div></div>{hasPermission('canDispensePharmacyPrescriptions') && <Button className="shrink-0" onClick={() => navigate(`/tenant/sales?prescriptionId=${encodeURIComponent(p.id)}`)}>Open in Sales<ArrowRight className="ml-2 h-4 w-4" /></Button>}</article>)}{pendingPrescriptionCount === 0 && <p className="border-t border-border pt-3 text-sm text-muted-foreground">No prescriptions are waiting for pharmacy fulfillment.</p>}</section>}<section className="grid gap-4 xl:grid-cols-2"><div className="rounded-md border border-border p-4"><div className="flex items-center gap-2 font-semibold"><Package className="h-4 w-4 text-cyan-700" />Reorder watch</div><p className="mt-2 text-sm text-muted-foreground">Medicine quantities and purchases remain in the shared inventory and supplier workflows. Use stock-in/purchase first; batch registration allocates that stock for expiry and traceability without changing the ledger.</p></div><div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"><div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Clinical safety</div><p className="mt-2">Prescriptions are not medical advice. Verify the issued prescription, medicine, dose, batch, expiry, and quantity. Sales in POS create the official receipt and accounting entry.</p></div></section></>}
       {tab === 'Medicine catalogue' && <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.7fr)]">{hasPermission('canManagePharmacyCatalogue') && <form onSubmit={addCatalogueItem} className="order-1 space-y-3 rounded-md border border-border p-4 xl:order-2"><h2 className="font-semibold">Add medicine</h2><p className="text-sm text-muted-foreground">Link an existing inventory product. Stock and prices remain in shared inventory.</p><select required className={inputClass + ' w-full'} value={catalogueForm.productId} onChange={e => setCatalogueForm({ ...catalogueForm, productId: e.target.value })}><option value="">Choose inventory product</option>{inventoryProducts.filter(p => !medicines.some(m => m.productId === p.id)).map(p => <option key={p.id} value={p.id}>{p.name} · {Number(p.quantity)} {p.baseUnit}</option>)}</select><Input placeholder="Active ingredient" value={catalogueForm.activeIngredient} onChange={e => setCatalogueForm({ ...catalogueForm, activeIngredient: e.target.value })} /><div className="grid gap-3 sm:grid-cols-2"><Input placeholder="Strength" value={catalogueForm.strength} onChange={e => setCatalogueForm({ ...catalogueForm, strength: e.target.value })} /><Input placeholder="Dosage form" value={catalogueForm.dosageForm} onChange={e => setCatalogueForm({ ...catalogueForm, dosageForm: e.target.value })} /></div><div className="grid gap-3 sm:grid-cols-2"><Input placeholder="Manufacturer" value={catalogueForm.manufacturer} onChange={e => setCatalogueForm({ ...catalogueForm, manufacturer: e.target.value })} /><Input placeholder="Controlled classification" value={catalogueForm.controlledClass} onChange={e => setCatalogueForm({ ...catalogueForm, controlledClass: e.target.value })} /></div><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={catalogueForm.prescriptionRequired} onChange={e => setCatalogueForm({ ...catalogueForm, prescriptionRequired: e.target.checked })} />Prescription required</label><Button className="w-full" disabled={saving}>Add to medicine catalogue</Button></form>}
         <div className="overflow-hidden rounded-md border border-border"><div className="border-b border-border px-4 py-3 font-semibold">Medicine catalogue</div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Medicine</th><th className="p-3">Ingredient / strength</th><th className="p-3">Form</th><th className="p-3">On hand</th><th className="p-3">Price</th><th className="p-3">Rx</th></tr></thead><tbody>{medicines.map(m => <tr key={m.productId} className="border-t border-border"><td className="p-3 font-medium">{m.name}<span className="block text-xs text-muted-foreground">{m.sku || m.barcode || 'No SKU'}</span></td><td className="p-3">{[m.activeIngredient, m.strength].filter(Boolean).join(' · ') || '—'}</td><td className="p-3">{m.dosageForm || '—'}</td><td className="p-3">{Number(m.quantity)} {m.baseUnit}</td><td className="p-3">{Number(m.price).toLocaleString()}</td><td className="p-3">{m.prescriptionRequired ? 'Required' : 'No'}</td></tr>)}{!medicines.length && <tr><td colSpan={6} className="p-8 text-center text-muted-foreground">No medicines have been linked to inventory yet.</td></tr>}</tbody></table></div></div></div>}
       {tab === 'Batches & expiry' && <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.7fr)]">{hasPermission('canManagePharmacyBatches') && <form onSubmit={addBatch} className="order-1 space-y-3 rounded-md border border-border p-4 xl:order-2"><h2 className="font-semibold">Allocate received stock to batch</h2><p className="text-sm text-muted-foreground">This assigns existing inventory only. It does not increase stock or post a second purchase.</p><select required className={inputClass + ' w-full'} value={batchForm.productId} onChange={e => setBatchForm({ ...batchForm, productId: e.target.value })}><option value="">Choose medicine</option>{medicines.map(m => <option key={m.productId} value={m.productId}>{m.name} · available {Number(m.quantity)} {m.baseUnit}</option>)}</select><Input required placeholder="Batch / lot number" value={batchForm.batchNumber} onChange={e => setBatchForm({ ...batchForm, batchNumber: e.target.value })} /><div className="grid gap-3 sm:grid-cols-2"><Input required type="number" min="0.000001" step="any" placeholder="Quantity to allocate" value={batchForm.quantity} onChange={e => setBatchForm({ ...batchForm, quantity: e.target.value })} /><Input type="date" aria-label="Expiry date" value={batchForm.expiryDate} onChange={e => setBatchForm({ ...batchForm, expiryDate: e.target.value })} /></div><Input type="number" min="0" step="any" placeholder="Unit cost (optional)" value={batchForm.unitCost} onChange={e => setBatchForm({ ...batchForm, unitCost: e.target.value })} /><Button className="w-full" disabled={saving}>Register batch</Button></form>}

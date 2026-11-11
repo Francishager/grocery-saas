@@ -31,6 +31,22 @@ router.get('/dashboard', requirePermission('canViewPharmacy'), async (req, res) 
   } catch (error) { fail(res, error, 'Could not load pharmacy summary.'); }
 });
 
+router.get('/reports', requirePermission('canViewPharmacyReports'), async (req, res) => {
+  try {
+    const tenant = tenantId(req);
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || '')) ? new Date(`${req.query.from}T00:00:00.000Z`) : new Date('1970-01-01T00:00:00.000Z');
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || '')) ? new Date(`${req.query.to}T00:00:00.000Z`) : new Date('2100-01-01T00:00:00.000Z');
+    to.setUTCDate(to.getUTCDate() + 1);
+    const [batchSummary, expiry, fulfillmentOutcomes, fulfilledProducts] = await Promise.all([
+      prisma.$queryRaw`SELECT COUNT(*) FILTER (WHERE status = 'active')::int AS batches, COALESCE(SUM("quantityRemaining") FILTER (WHERE status = 'active'), 0)::numeric AS units FROM pharmacy_batches WHERE "tenantId" = ${tenant}`,
+      prisma.$queryRaw`SELECT COUNT(*) FILTER (WHERE "expiryDate" < CURRENT_DATE)::int AS expired, COUNT(*) FILTER (WHERE "expiryDate" >= CURRENT_DATE AND "expiryDate" < CURRENT_DATE + INTERVAL '90 days')::int AS "expiringSoon" FROM pharmacy_batches WHERE "tenantId" = ${tenant} AND status = 'active'`,
+      prisma.$queryRaw`SELECT outcome, COUNT(*)::int AS count, COALESCE(SUM("quantityDispensed"), 0)::numeric AS quantity FROM clinic_prescription_fulfillments WHERE "tenantId" = ${tenant} AND "createdAt" >= ${from} AND "createdAt" < ${to} GROUP BY outcome ORDER BY outcome`,
+      prisma.$queryRaw`SELECT p.name AS "medicine", COALESCE(SUM(f."quantityDispensed"), 0)::numeric AS quantity FROM clinic_prescription_fulfillments f JOIN products p ON p.id = f."productId" WHERE f."tenantId" = ${tenant} AND f."createdAt" >= ${from} AND f."createdAt" < ${to} AND f.outcome = 'dispensed' GROUP BY p.name ORDER BY quantity DESC LIMIT 20`,
+    ]);
+    res.json({ summary: { activeBatches: batchSummary[0]?.batches || 0, batchUnits: batchSummary[0]?.units || 0, expiredBatches: expiry[0]?.expired || 0, expiringSoon: expiry[0]?.expiringSoon || 0, fulfillmentEvents: fulfillmentOutcomes.reduce((sum, row) => sum + Number(row.count || 0), 0) }, fulfillmentOutcomes, fulfilledProducts, period: { from: req.query.from || null, to: req.query.to || null } });
+  } catch (error) { fail(res, error, 'Could not load pharmacy reports.'); }
+});
+
 router.get('/catalogue', requireAnyPermission(['canViewPharmacyCatalogue', 'canManagePharmacyCatalogue', 'canViewPharmacyBatches', 'canManagePharmacyBatches']), async (req, res) => {
   try {
     const medicines = await prisma.$queryRaw`SELECT c.id AS "catalogueId", c."productId", c."activeIngredient", c.strength, c."dosageForm", c.manufacturer, c."prescriptionRequired", c."controlledClass", p.name, p.sku, p.barcode, p.quantity, p.price, p.cost, p."baseUnit", p."branchId", cat.name AS "categoryName" FROM pharmacy_catalogue c JOIN products p ON p.id = c."productId" LEFT JOIN categories cat ON cat.id = p."categoryId" WHERE c."tenantId" = ${tenantId(req)} AND p."tenantId" = ${tenantId(req)} AND p."isActive" = TRUE ORDER BY p.name ASC LIMIT 2000`;
@@ -104,18 +120,48 @@ router.post('/batches', requirePermission('canManagePharmacyBatches'), async (re
 
 router.get('/prescriptions', requireAllFeatures('clinic_management', 'pharmacy_management'), requireAnyPermission(['canViewPharmacyPrescriptions', 'canDispensePharmacyPrescriptions']), async (req, res) => {
   try {
-    const prescriptions = await prisma.$queryRaw`SELECT r.*, c.name AS "patientName", c.phone AS "patientPhone" FROM clinic_prescriptions r JOIN customers c ON c.id = r."customerId" WHERE r."tenantId" = ${tenantId(req)} ORDER BY CASE WHEN r.status IN ('open', 'partially_dispensed') THEN 0 ELSE 1 END, r."createdAt" DESC LIMIT 500`;
-    const lines = await prisma.$queryRaw`SELECT i.*, p.name AS "productName", p.baseUnit FROM clinic_prescription_items i JOIN clinic_prescriptions r ON r.id = i."prescriptionId" JOIN products p ON p.id = i."productId" WHERE r."tenantId" = ${tenantId(req)} ORDER BY i.id`;
-    const events = await prisma.$queryRaw`SELECT * FROM clinic_prescription_fulfillments WHERE "tenantId" = ${tenantId(req)} ORDER BY "createdAt"`;
+    const prescriptions = await prisma.$queryRaw`SELECT r.id, r.reference, c.name AS "patientName", r.status, r."createdAt" FROM clinic_prescriptions r JOIN customers c ON c.id = r."customerId" WHERE r."tenantId" = ${tenantId(req)} ORDER BY CASE WHEN r.status IN ('open', 'partially_dispensed') THEN 0 ELSE 1 END, r."createdAt" DESC LIMIT 500`;
+    const lines = await prisma.$queryRaw`SELECT i.id, i."prescriptionId", i."productId", i.quantity, i.dosage, i.frequency, i."durationDays", i.instructions, p.name AS "productName", p.baseUnit FROM clinic_prescription_items i JOIN clinic_prescriptions r ON r.id = i."prescriptionId" JOIN products p ON p.id = i."productId" WHERE r."tenantId" = ${tenantId(req)} ORDER BY i.id`;
+    const events = await prisma.$queryRaw`SELECT "prescriptionItemId", "quantityDispensed" FROM clinic_prescription_fulfillments WHERE "tenantId" = ${tenantId(req)}`;
     const legacy = await prisma.$queryRaw`SELECT d.id, d."prescriptionId", l."productId", SUM(l.quantity)::numeric AS quantity, d."dispensedAt" AS "createdAt" FROM pharmacy_dispenses d JOIN pharmacy_dispense_lines l ON l."dispenseId" = d.id WHERE d."tenantId" = ${tenantId(req)} AND NOT EXISTS (SELECT 1 FROM clinic_prescription_fulfillments f WHERE f."prescriptionId" = d."prescriptionId") GROUP BY d.id, d."prescriptionId", l."productId", d."dispensedAt"`;
-    const prescriptionsWithItems = prescriptions.map(p => ({ ...p, items: lines.filter(line => line.prescriptionId === p.id).map(item => {
-      const fulfillmentHistory = events.filter(event => event.prescriptionItemId === item.id);
-      const legacyDispenses = legacy.filter(event => event.prescriptionId === p.id && event.productId === item.productId);
-      const dispensedQuantity = fulfillmentHistory.reduce((sum, event) => sum + Number(event.quantityDispensed), 0) + legacyDispenses.reduce((sum, event) => sum + Number(event.quantity), 0);
-      return { ...item, dispensedQuantity, remainingQuantity: Math.max(Number(item.quantity) - dispensedQuantity, 0), fulfillmentHistory, legacyDispenses };
-    }) }));
+    const prescriptionsWithItems = prescriptions.map(p => {
+      const legacyByProduct = new Map();
+      legacy.filter(event => event.prescriptionId === p.id).forEach(event => legacyByProduct.set(event.productId, Number(legacyByProduct.get(event.productId) || 0) + Number(event.quantity || 0)));
+      const items = lines.filter(line => line.prescriptionId === p.id).map(item => {
+        const posted = events.filter(event => event.prescriptionItemId === item.id).reduce((sum, event) => sum + Number(event.quantityDispensed || 0), 0);
+        const legacyRemaining = Number(legacyByProduct.get(item.productId) || 0);
+        const legacyApplied = Math.min(Math.max(Number(item.quantity) - posted, 0), legacyRemaining);
+        legacyByProduct.set(item.productId, legacyRemaining - legacyApplied);
+        const dispensedQuantity = posted + legacyApplied;
+        return { ...item, dispensedQuantity, remainingQuantity: Math.max(Number(item.quantity) - dispensedQuantity, 0) };
+      });
+      return { ...p, items };
+    });
     res.json({ prescriptions: prescriptionsWithItems });
   } catch (error) { fail(res, error, 'Could not load pharmacy prescriptions.'); }
+});
+
+router.get('/prescriptions/:id/sale-context', requireAllFeatures('clinic_management', 'pharmacy_management'), requirePermission('canDispensePharmacyPrescriptions'), async (req, res) => {
+  try {
+    const tenant = tenantId(req);
+    const rows = await prisma.$queryRaw`SELECT r.id, r.reference, c.name AS "patientName", r.status FROM clinic_prescriptions r JOIN customers c ON c.id = r."customerId" WHERE r.id = ${req.params.id} AND r."tenantId" = ${tenant}`;
+    const prescription = rows[0];
+    if (!prescription) return res.status(404).json({ error: 'Prescription not found.' });
+    if (!['open', 'partially_dispensed'].includes(prescription.status)) return res.status(409).json({ error: 'This prescription is no longer open for a sale.' });
+    const lines = await prisma.$queryRaw`SELECT i.id AS "prescriptionItemId", i."productId", i.quantity, i.dosage, i.frequency, i."durationDays", i.instructions, p.name AS "productName", p."baseUnit" FROM clinic_prescription_items i JOIN products p ON p.id = i."productId" WHERE i."prescriptionId" = ${prescription.id}`;
+    const fulfillment = await prisma.$queryRaw`SELECT "prescriptionItemId", SUM("quantityDispensed")::numeric AS quantity FROM clinic_prescription_fulfillments WHERE "tenantId" = ${tenant} AND "prescriptionId" = ${prescription.id} GROUP BY "prescriptionItemId"`;
+    const legacy = await prisma.$queryRaw`SELECT l."productId", SUM(l.quantity)::numeric AS quantity FROM pharmacy_dispenses d JOIN pharmacy_dispense_lines l ON l."dispenseId" = d.id WHERE d."tenantId" = ${tenant} AND d."prescriptionId" = ${prescription.id} AND NOT EXISTS (SELECT 1 FROM clinic_prescription_fulfillments f WHERE f."prescriptionId" = d."prescriptionId") GROUP BY l."productId"`;
+    const dispensedByLine = new Map(fulfillment.map(row => [row.prescriptionItemId, Number(row.quantity || 0)]));
+    const legacyByProduct = new Map(legacy.map(row => [row.productId, Number(row.quantity || 0)]));
+    const saleLines = lines.map(line => {
+      const recorded = Number(dispensedByLine.get(line.prescriptionItemId) || 0);
+      const legacyRemaining = Number(legacyByProduct.get(line.productId) || 0);
+      const legacyTake = Math.min(Math.max(Number(line.quantity) - recorded, 0), legacyRemaining);
+      if (legacyTake > 0) legacyByProduct.set(line.productId, legacyRemaining - legacyTake);
+      return { ...line, remainingQuantity: Math.max(Number(line.quantity) - recorded - legacyTake, 0) };
+    }).filter(line => line.remainingQuantity > 0);
+    res.json({ prescription: { id: prescription.id, reference: prescription.reference, patientName: prescription.patientName, items: saleLines } });
+  } catch (error) { fail(res, error, 'Could not prepare this prescription for sale.'); }
 });
 
 router.get('/sale-options', requireAllFeatures('clinic_management', 'pharmacy_management'), requirePermission('canDispensePharmacyPrescriptions'), async (req, res) => {

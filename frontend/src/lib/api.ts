@@ -767,6 +767,8 @@ export const reportsApi = {
 export type ReportParams = Record<string, string | number | boolean | undefined>
 
 export const reportsApiV2 = {
+  clinicOperations: (params?: ReportParams) => api.get<any>('/api/clinic/reports', { params }),
+  pharmacyOperations: (params?: ReportParams) => api.get<any>('/api/pharmacy/reports', { params }),
   propertyManagement: (params?: ReportParams) => api.get<any>('/api/property-management/reports', { params }),
   propertyTenancies: () => api.get<any[]>('/api/property-management/reports/tenancies'),
   propertyTenancyStatement: (tenancyId: string) => api.get<any>(`/api/property-management/tenancies/${encodeURIComponent(tenancyId)}/statement`),

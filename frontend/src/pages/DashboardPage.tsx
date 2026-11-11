@@ -35,7 +35,7 @@ export default function DashboardPage() {
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
   const [dashboardView, setDashboardView] = useState<DashboardView>('overview')
-  const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any; rentals: any }>({ property: null, restaurant: null, hr: null, rentals: null })
+  const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any; rentals: any; clinic: any; pharmacy: any }>({ property: null, restaurant: null, hr: null, rentals: null, clinic: null, pharmacy: null })
   const { toast } = useToast()
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
@@ -59,7 +59,9 @@ export default function DashboardPage() {
   const canViewRestaurant = hasFeature('restaurant') && hasPermission('canViewRestaurant')
   const canViewHR = hasFeature('hr') && hasPermission('canViewHR')
   const canViewRentals = hasFeature('rentals') && hasPermission('canViewRental')
-  const dashboardModules = [canViewProperty && (hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord' : 'Property Management'), canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management', canViewRentals && 'Rentals'].filter(Boolean) as string[]
+  const canViewClinic = hasFeature('clinic_management') && hasPermission('canViewClinic')
+  const canViewPharmacy = hasFeature('pharmacy_management') && hasPermission('canViewPharmacy')
+  const dashboardModules = [canViewProperty && (hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord' : 'Property Management'), canViewRestaurant && 'Restaurant & Bar', canViewHR && 'HR Management', canViewRentals && 'Rentals', canViewClinic && 'Clinic', canViewPharmacy && 'Pharmacy'].filter(Boolean) as string[]
   const availableDashboards: Array<{ id: DashboardView; label: string }> = [
     { id: 'overview', label: 'Overview' },
     ...(hasFeature('sales') && canViewSalesDashboard ? [{ id: 'sales' as const, label: 'Sales' }] : []),
@@ -86,8 +88,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let active = true
-    setModuleSnapshots({ property: null, restaurant: null, hr: null, rentals: null })
-    const loadSnapshot = async (key: 'property' | 'restaurant' | 'hr' | 'rentals', path: string, enabled: boolean) => {
+    setModuleSnapshots({ property: null, restaurant: null, hr: null, rentals: null, clinic: null, pharmacy: null })
+    const loadSnapshot = async (key: 'property' | 'restaurant' | 'hr' | 'rentals' | 'clinic' | 'pharmacy', path: string, enabled: boolean) => {
       if (!enabled) return
       try {
         const response = await apiFetch(path)
@@ -100,9 +102,11 @@ export default function DashboardPage() {
       loadSnapshot('restaurant', '/api/restaurant/dashboard', canViewRestaurant),
       loadSnapshot('hr', '/api/hr/dashboard', canViewHR),
       loadSnapshot('rentals', '/api/rentals/dashboard/summary', canViewRentals),
+      loadSnapshot('clinic', '/api/clinic/dashboard', canViewClinic),
+      loadSnapshot('pharmacy', '/api/pharmacy/dashboard', canViewPharmacy),
     ])
     return () => { active = false }
-  }, [canViewProperty, canViewRestaurant, canViewHR, canViewRentals, scopeKey])
+  }, [canViewProperty, canViewRestaurant, canViewHR, canViewRentals, canViewClinic, canViewPharmacy, scopeKey])
 
   useEffect(() => {
     if (availableDashboards.some(view => view.id === dashboardView)) return
@@ -383,7 +387,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {showOperations && (moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals) && <section className="space-y-4" aria-label="Operations dashboard">
+      {showOperations && (moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals || moduleSnapshots.clinic || moduleSnapshots.pharmacy) && <section className="space-y-4" aria-label="Operations dashboard">
         {moduleSnapshots.property && <div className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div><h2 className="text-lg font-semibold">{hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property portfolio'}</h2><p className="text-sm text-muted-foreground">Rent roll, occupancy, landlord clients, and managed-unit health.</p></div>
@@ -435,6 +439,27 @@ export default function DashboardPage() {
             <ModuleMetric label="Rental balance due" value={formatCurrency(moduleSnapshots.rentals.outstandingBalance || 0)} detail={`${formatCurrency(moduleSnapshots.rentals.depositsHeld || 0)} deposits held`} />
             <ModuleMetric label="Collections this month" value={formatCurrency(moduleSnapshots.rentals.collectionsThisMonth || 0)} detail={`${Number(moduleSnapshots.rentals.receiptsThisMonth || 0).toLocaleString()} receipts`} />
             <ModuleMetric label="Returns today" value={moduleSnapshots.rentals.returnsToday ?? 0} />
+          </div>
+        </div>}
+
+        {moduleSnapshots.clinic && <div className="space-y-3">
+          <div><h2 className="text-lg font-semibold">Clinic activity</h2><p className="text-sm text-muted-foreground">Care operations at a glance. Financial performance remains in the shared Finance view and Reports.</p></div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ModuleMetric label="Clinic patients" value={moduleSnapshots.clinic.patients ?? 0} />
+            <ModuleMetric label="Appointments today" value={moduleSnapshots.clinic.appointmentsToday ?? 0} />
+            <ModuleMetric label="Encounters today" value={moduleSnapshots.clinic.encountersToday ?? 0} />
+            <ModuleMetric label="Open prescriptions" value={moduleSnapshots.clinic.openPrescriptions ?? 0} />
+          </div>
+        </div>}
+
+        {moduleSnapshots.pharmacy && <div className="space-y-3">
+          <div><h2 className="text-lg font-semibold">Pharmacy activity</h2><p className="text-sm text-muted-foreground">Medicine availability and prescription fulfillment. Revenue, COGS, and expenses use the shared accounting reports.</p></div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <ModuleMetric label="Active batches" value={moduleSnapshots.pharmacy.batches ?? 0} />
+            <ModuleMetric label="Medicine units in batches" value={Number(moduleSnapshots.pharmacy.batchUnits || 0).toLocaleString()} />
+            <ModuleMetric label="Expiring within 90 days" value={moduleSnapshots.pharmacy.expiringWithin90Days ?? 0} />
+            <ModuleMetric label="Prescriptions to dispense" value={moduleSnapshots.pharmacy.prescriptionsToDispense ?? 0} />
+            <ModuleMetric label="Dispensed today" value={moduleSnapshots.pharmacy.dispensedToday ?? 0} />
           </div>
         </div>}
       </section>}
