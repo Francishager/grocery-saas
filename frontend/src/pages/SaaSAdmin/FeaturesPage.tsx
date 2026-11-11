@@ -1,7 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
-import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Fuel, Factory, Sprout, Database, Code, Gift, Store, Search } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Wine, Fuel, Factory, Sprout, Database, Code, Gift, Store, Search } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
 
@@ -164,12 +164,17 @@ const MODULES = [
     ]
   },
   {
+    id: 'bar', name: 'Bar', icon: Wine, color: 'text-rose-700 bg-rose-100', features: [
+      { name: 'bar', displayName: 'Bar Management' },
+    ]
+  },
+  {
     id: 'restaurant', name: 'Restaurant & Bar', icon: UtensilsCrossed, color: 'text-orange-600 bg-orange-100', features: [
       { name: 'restaurant', displayName: 'Restaurant Module' },
       { name: 'restaurant.tables', displayName: 'Table Management' },
       { name: 'restaurant.orders', displayName: 'Orders' },
       { name: 'restaurant.kitchen', displayName: 'Kitchen Display' },
-      { name: 'restaurant.bar', displayName: 'Bar Display' },
+      { name: 'restaurant.bar', displayName: 'Legacy Bar Display (existing plans)' },
       { name: 'restaurant.waiters', displayName: 'Waiters' },
       { name: 'restaurant.reservations', displayName: 'Reservations' },
       { name: 'restaurant.recipes', displayName: 'Recipes / Bill of Materials' },

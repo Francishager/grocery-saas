@@ -183,12 +183,17 @@ const MODULES = [
     ]
   },
   {
+    id: 'bar', name: 'Bar', features: [
+      { name: 'bar', displayName: 'Bar Management' },
+    ]
+  },
+  {
     id: 'restaurant', name: 'Restaurant & Bar', features: [
       { name: 'restaurant', displayName: 'Restaurant Module' },
       { name: 'restaurant.tables', displayName: 'Table Management' },
       { name: 'restaurant.orders', displayName: 'Orders' },
       { name: 'restaurant.kitchen', displayName: 'Kitchen Display' },
-      { name: 'restaurant.bar', displayName: 'Bar Display' },
+      { name: 'restaurant.bar', displayName: 'Legacy Bar Display (existing plans)' },
       { name: 'restaurant.waiters', displayName: 'Waiters' },
       { name: 'restaurant.reservations', displayName: 'Reservations' },
       { name: 'restaurant.recipes', displayName: 'Recipes / Bill of Materials' },

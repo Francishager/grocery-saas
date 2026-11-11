@@ -109,6 +109,12 @@ const restaurantSubItems = [
   { to: '/tenant/restaurant/tips', label: 'Tips', icon: DollarSign, permission: 'canViewRestaurant', feature: 'restaurant.tips' },
 ]
 
+const barSubItems = [
+  { to: '/tenant/bar/orders', label: 'Orders', icon: ClipboardList, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/queue', label: 'Bar Queue', icon: Wine, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/menu', label: 'Bar Menu', icon: UtensilsCrossed, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'bar' },
+]
+
 const navItems = [
   { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard', feature: 'dashboard' },
   { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
@@ -122,6 +128,7 @@ const navItems = [
   { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: 'canViewCRM', feature: 'crm', isStandaloneCRM: true },
   { to: '/tenant/property-management/portfolio', label: 'Property Management', icon: Building2, isPropertyManagement: true },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
+  { to: '/tenant/bar/queue', label: 'Bar', icon: Wine, feature: 'bar', permission: ['canViewRestaurant', 'canViewBarQueue'], isBar: true },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
   { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },
   { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
@@ -386,6 +393,7 @@ export function TenantLayout() {
   const [fuelStationExpanded, setFuelStationExpanded] = useState(false)
   const [receivablesExpanded, setReceivablesExpanded] = useState(false)
   const [restaurantExpanded, setRestaurantExpanded] = useState(false)
+  const [barExpanded, setBarExpanded] = useState(false)
   const [propertyManagementExpanded, setPropertyManagementExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
   const [salonExpanded, setSalonExpanded] = useState(false)
@@ -582,6 +590,7 @@ export function TenantLayout() {
     setFuelStationExpanded(group === 'fuel')
     setReceivablesExpanded(group === 'receivables')
     setRestaurantExpanded(group === 'restaurant')
+    setBarExpanded(group === 'bar')
     setPropertyManagementExpanded(group === 'property-management')
     setServiceExpanded(group === 'service')
     setSalonExpanded(group === 'salon')
@@ -601,6 +610,7 @@ export function TenantLayout() {
   const toggleService = () => toggleExpandedGroup('service', serviceExpanded)
   const toggleSalon = () => toggleExpandedGroup('salon', salonExpanded)
   const toggleRestaurant = () => toggleExpandedGroup('restaurant', restaurantExpanded)
+  const toggleBar = () => toggleExpandedGroup('bar', barExpanded)
   const togglePropertyManagement = () => toggleExpandedGroup('property-management', propertyManagementExpanded)
   const toggleProcurement = () => toggleExpandedGroup('procurement', procurementExpanded)
   const toggleHR = () => toggleExpandedGroup('hr', hrExpanded)
@@ -616,6 +626,7 @@ export function TenantLayout() {
     else if (path.startsWith('/tenant/receivables')) group = 'receivables'
     else if (path.startsWith('/tenant/service')) group = 'service'
     else if (path.startsWith('/tenant/salon')) group = 'salon'
+    else if (path.startsWith('/tenant/bar')) group = 'bar'
     else if (path.startsWith('/tenant/restaurant')) group = 'restaurant'
     else if (path.startsWith('/tenant/property-management')) group = 'property-management'
     else if (path.startsWith('/tenant/procurement')) group = 'procurement'
@@ -657,6 +668,7 @@ export function TenantLayout() {
   const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible).filter(item =>
     !waiterMode || ['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(item.to)
   )
+  const visibleBarSubItems = canAccessFeature('bar') ? barSubItems.filter(subItemVisible) : []
   const propertyManagementSubItems = [
     ...(canAccessFeature('property_management.landlord') ? [
       { to: '/tenant/property-management/my-properties', label: 'My Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreateProperties', 'canEditProperties', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
@@ -695,6 +707,7 @@ export function TenantLayout() {
     if (item.isRentals) return visibleRentalSubItems.length > 0
     if (item.isSalon) return canAccessFeature('salon_spa') && visibleSalonSubItems.length > 0
     if (item.isRestaurant) return visibleRestaurantSubItems.length > 0
+    if (item.isBar) return visibleBarSubItems.length > 0
     if (item.isService && canAccessFeature('salon_spa')) return false
     if (item.isStandalonePlanner) return !canAccessFeature('rentals') && canAccessFeature('planner') && hasRequiredPermission(item.permission)
     if (item.isStandaloneCRM) return !canAccessFeature('rentals') && canAccessFeature('crm') && hasRequiredPermission(item.permission)
@@ -720,6 +733,7 @@ export function TenantLayout() {
       if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
       if (item.isService && visibleServiceSubItems.length > 0) return true
       if (item.isRestaurant && visibleRestaurantSubItems.length > 0) return true
+      if (item.isBar && visibleBarSubItems.length > 0) return true
       if (item.isHR && visibleHRSubItems.length > 0) return true
       if (item.isSettings && visibleSettingsSubItems.length > 0) return true
       if (item.isReports && visibleReportCategories.length > 0) return true
@@ -1008,6 +1022,17 @@ export function TenantLayout() {
                       const isExact = location.pathname + location.search === sub.to.replace('/tenant', '') || location.pathname + location.search === sub.to
                       return cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive && isExact ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')
                     }}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isBar ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={barExpanded} onClick={toggleBar}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', barExpanded || location.pathname.startsWith('/tenant/bar') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {barExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {barExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleBarSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
                   </div>}
                 </div>
               ) : item.isReports ? (

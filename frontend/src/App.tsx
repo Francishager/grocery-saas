@@ -254,6 +254,8 @@ function App() {
           <Route path="restaurant/dashboard" element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="restaurant/bar" element={<FeatureGuard feature="restaurant.bar" permission={['canViewRestaurant', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
           <Route path="restaurant/:tab" element={<FeatureGuard feature="restaurant" permission="canViewRestaurant"><RestaurantPage /></FeatureGuard>} />
+          <Route path="bar" element={<Navigate to="/tenant/bar/queue" replace />} />
+          <Route path="bar/:tab" element={<FeatureGuard feature="bar" permission={['canViewRestaurant', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
           <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
           <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station" permission="canViewFuelStation"><FuelStationPage /></FeatureGuard>} />
           <Route path="manufacturing" element={<FeatureGuard feature="manufacturing"><ManufacturingPage /></FeatureGuard>} />

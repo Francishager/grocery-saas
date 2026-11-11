@@ -1,7 +1,7 @@
 import express from 'express'
 import prisma from '../src/db.js'
 import { authenticateToken, requireAnyPermission, requirePermission } from '../middleware/auth.js'
-import { getTenantFeatures, hasFeatureAccess, requireFeature } from '../middleware/featureCheck.js'
+import { getTenantFeatures, hasFeatureAccess, requireAnyFeature, requireFeature } from '../middleware/featureCheck.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { resolveEffectivePermissions } from '../src/utils/permissions.js'
 import multer from 'multer'
@@ -13,6 +13,15 @@ import { createRateLimiter } from '../src/middleware/rateLimit.js'
 
 const router = express.Router()
 const HR_WAITER_LINK_PERMISSIONS = ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee']
+function hasBarOnlyAccess(req) {
+  const features = req.tenantFeatures || new Set()
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+  return hasFeatureAccess(features, 'bar') && (
+    !hasFeatureAccess(features, 'restaurant') ||
+    !hasFeatureAccess(features, 'restaurant.orders') ||
+    (!permissions.includes('*') && !permissions.includes('canViewRestaurant'))
+  )
+}
 const waiterPinLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 6,
@@ -244,7 +253,7 @@ router.delete('/waiters/:id', authenticateToken, requirePermission('canDeleteRes
 })
 
 // Menu images use the existing product record so all business views share one image URL.
-router.post('/menu/:productId/image', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant'), parseMenuImage, async (req, res) => {
+router.post('/menu/:productId/image', authenticateToken, requirePermission('canEditRestaurant'), requireAnyFeature(['restaurant', 'bar']), parseMenuImage, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' })
     if (!isSupportedMenuImage(req.file.buffer)) return res.status(400).json({ error: 'The selected file is not a valid JPEG, PNG, or WebP image.' })
@@ -268,7 +277,7 @@ router.post('/menu/:productId/image', authenticateToken, requirePermission('canE
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.delete('/menu/:productId/image', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant'), async (req, res) => {
+router.delete('/menu/:productId/image', authenticateToken, requirePermission('canEditRestaurant'), requireAnyFeature(['restaurant', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const product = await prisma.product.findFirst({ where: scopedWhere(scope, { id: req.params.productId }), select: { id: true, imagePublicId: true } })
@@ -282,11 +291,12 @@ router.delete('/menu/:productId/image', authenticateToken, requirePermission('ca
 // =====================================================
 // ORDERS
 // =====================================================
-router.get('/menu', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant'), async (req, res) => {
+router.get('/menu', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canViewBarQueue']), requireAnyFeature(['restaurant', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
+    const standaloneBar = hasBarOnlyAccess(req)
     const entries = await prisma.restaurantMenuEntry.findMany({
-      where: scopedWhere(scope, { product: { isActive: true } }),
+      where: scopedWhere(scope, { product: { isActive: true }, ...(standaloneBar ? { station: 'bar' } : {}) }),
       include: { product: { include: { category: { select: { id: true, name: true } } } } },
       orderBy: [{ sortOrder: 'asc' }, { category: 'asc' }, { createdAt: 'asc' }],
     })
@@ -294,13 +304,15 @@ router.get('/menu', authenticateToken, requirePermission('canViewRestaurant'), r
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.post('/menu', authenticateToken, requirePermission('canCreateRestaurant'), requireFeature('restaurant'), async (req, res) => {
+router.post('/menu', authenticateToken, requirePermission('canCreateRestaurant'), requireAnyFeature(['restaurant', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const productId = String(req.body?.productId || '').trim()
     const category = String(req.body?.category || '').trim().slice(0, 80) || 'General'
     const description = String(req.body?.description || '').trim().slice(0, 500) || null
-    const station = req.body?.station === 'bar' ? 'bar' : 'kitchen'
+    const standaloneBar = hasBarOnlyAccess(req)
+    if (standaloneBar && req.body?.station && req.body.station !== 'bar') return res.status(400).json({ error: 'Standalone Bar menus can only use the bar service station.' })
+    const station = standaloneBar || req.body?.station === 'bar' ? 'bar' : 'kitchen'
     const price = Number(req.body?.price)
     if (!productId) return res.status(400).json({ error: 'Choose an inventory item to add to the menu.' })
     if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Enter a valid non-negative menu price.' })
@@ -317,11 +329,14 @@ router.post('/menu', authenticateToken, requirePermission('canCreateRestaurant')
   }
 })
 
-router.put('/menu/:id', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant'), async (req, res) => {
+router.put('/menu/:id', authenticateToken, requirePermission('canEditRestaurant'), requireAnyFeature(['restaurant', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const current = await prisma.restaurantMenuEntry.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
     if (!current) return res.status(404).json({ error: 'Menu entry not found.' })
+    const standaloneBar = hasBarOnlyAccess(req)
+    if (standaloneBar && current.station !== 'bar') return res.status(404).json({ error: 'Bar menu entry not found.' })
+    if (standaloneBar && req.body?.station && req.body.station !== 'bar') return res.status(400).json({ error: 'Standalone Bar menus can only use the bar service station.' })
     const price = req.body?.price === undefined ? current.price : Number(req.body.price)
     if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Enter a valid non-negative menu price.' })
     const entry = await prisma.restaurantMenuEntry.update({
@@ -340,17 +355,18 @@ router.put('/menu/:id', authenticateToken, requirePermission('canEditRestaurant'
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.delete('/menu/:id', authenticateToken, requirePermission('canDeleteRestaurant'), requireFeature('restaurant'), async (req, res) => {
+router.delete('/menu/:id', authenticateToken, requirePermission('canDeleteRestaurant'), requireAnyFeature(['restaurant', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
-    const current = await prisma.restaurantMenuEntry.findFirst({ where: scopedWhere(scope, { id: req.params.id }), select: { id: true } })
+    const standaloneBar = hasBarOnlyAccess(req)
+    const current = await prisma.restaurantMenuEntry.findFirst({ where: scopedWhere(scope, { id: req.params.id, ...(standaloneBar ? { station: 'bar' } : {}) }), select: { id: true } })
     if (!current) return res.status(404).json({ error: 'Menu entry not found.' })
     await prisma.restaurantMenuEntry.delete({ where: { id: current.id } })
     res.json({ message: 'Menu entry removed. Inventory and historical sales were not deleted.' })
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.get('/orders', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
+router.get('/orders', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canViewBarQueue']), requireAnyFeature(['restaurant.orders', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const { status, tableId } = req.query
@@ -358,6 +374,7 @@ router.get('/orders', authenticateToken, requirePermission('canViewRestaurant'),
       ...(status ? { status } : {}),
       ...(tableId ? { tableId } : {})
     })
+    const standaloneBar = hasBarOnlyAccess(req)
     const orders = await prisma.restaurantOrder.findMany({
       where,
       include: {
@@ -370,11 +387,13 @@ router.get('/orders', authenticateToken, requirePermission('canViewRestaurant'),
       },
       orderBy: { createdAt: 'desc' }
     })
-    res.json(orders)
+    res.json(standaloneBar
+      ? orders.filter(order => order.items.some(item => item.station === 'bar')).map(order => ({ ...order, items: order.items.filter(item => item.station === 'bar') }))
+      : orders)
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.get('/orders/:id', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
+router.get('/orders/:id', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canViewBarQueue']), requireAnyFeature(['restaurant.orders', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const order = await prisma.restaurantOrder.findFirst({
@@ -382,11 +401,15 @@ router.get('/orders/:id', authenticateToken, requirePermission('canViewRestauran
       include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, user: { select: { fname: true, lname: true } }, tips: true, delivery: true, customer: true }
     })
     if (!order) return res.status(404).json({ message: 'Order not found' })
+    if (hasBarOnlyAccess(req)) {
+      if (!order.items.some(item => item.station === 'bar')) return res.status(404).json({ message: 'Order not found' })
+      order.items = order.items.filter(item => item.station === 'bar')
+    }
     res.json(order)
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
+router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant'), requireAnyFeature(['restaurant.orders', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const { tableId, waiterId, customerId, orderType, items, specialInstructions } = req.body
@@ -401,6 +424,8 @@ router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant
     })
     const menuByProductId = new Map(menuEntries.map(entry => [entry.productId, entry]))
     if (menuEntries.length !== menuProductIds.length) return res.status(400).json({ error: 'One or more selected items are unavailable or not on the restaurant menu.' })
+    const standaloneBar = hasBarOnlyAccess(req)
+    if (standaloneBar && menuEntries.some(entry => entry.station !== 'bar')) return res.status(403).json({ error: 'Standalone Bar orders can only include items assigned to the bar station.' })
     const waiterFeatureEnabled = hasFeatureAccess(req.tenantFeatures || new Set(), 'restaurant.waiters')
     if (waiterId) {
       if (!waiterFeatureEnabled) return res.status(403).json({ error: 'Waiter selection is not enabled for this business.' })
@@ -463,11 +488,20 @@ router.post('/orders', authenticateToken, requirePermission('canCreateRestaurant
 })
 
 // Update order status
-router.put('/orders/:id/status', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
+router.put('/orders/:id/status', authenticateToken, requireAnyPermission(['canEditRestaurant', 'canUpdateBarQueue']), requireAnyFeature(['restaurant.orders', 'bar']), async (req, res) => {
   try {
     const { status } = req.body
+    if (!['preparing', 'ready', 'served', 'completed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid order status.' })
+    const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+    if (status === 'cancelled' && !granted.includes('*') && !granted.includes('canDeleteRestaurant')) return res.status(403).json({ error: 'You do not have permission to cancel orders.' })
+    if (!granted.includes('*') && !granted.includes('canEditRestaurant') && !['preparing', 'ready', 'served'].includes(status)) return res.status(403).json({ error: 'Bar queue permission only allows preparation status updates.' })
+    const scope = await resolveBranchScope(prisma, req)
+    const standaloneBar = hasBarOnlyAccess(req)
+    const existingOrder = await prisma.restaurantOrder.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true } })
+    if (!existingOrder || (standaloneBar && existingOrder.items.some(item => item.station !== 'bar'))) return res.status(404).json({ message: 'Order not found' })
+    if (standaloneBar && !granted.includes('*') && !granted.includes('canEditRestaurant') && !granted.includes('canUpdateBarQueue')) return res.status(403).json({ error: 'You do not have permission to update bar orders.' })
     const order = await prisma.restaurantOrder.update({
-      where: { id: req.params.id },
+      where: { id: existingOrder.id },
       data: { status },
       include: { items: true, table: true }
     })
@@ -514,8 +548,10 @@ router.put('/orders/:id/items/:itemId/status', authenticateToken, requireAnyPerm
     if (existing.station === 'bar' && !granted.includes('*') && !granted.includes('canEditRestaurant') && !granted.includes('canUpdateBarQueue')) return res.status(403).json({ error: 'You do not have permission to update bar tickets.' })
     if (existing.station !== 'bar' && !granted.includes('*') && !granted.includes('canEditRestaurant')) return res.status(403).json({ error: 'You do not have permission to update kitchen tickets.' })
     const features = await getTenantFeatures(scope.tenantId)
-    const stationFeature = existing.station === 'bar' ? 'restaurant.bar' : 'restaurant.kitchen'
-    if (!hasFeatureAccess(features, stationFeature)) {
+    const stationFeatureEnabled = existing.station === 'bar'
+      ? hasFeatureAccess(features, 'bar') || hasFeatureAccess(features, 'restaurant.bar')
+      : hasFeatureAccess(features, 'restaurant.kitchen')
+    if (!stationFeatureEnabled) {
       return res.status(403).json({ error: 'This service station is not enabled for this business' })
     }
     const item = await prisma.restaurantOrderItem.update({ where: { id: existing.id }, data: { status } })
@@ -545,7 +581,7 @@ router.put('/orders/:id/move', authenticateToken, requirePermission('canEditRest
 })
 
 // Complete order and create sale
-router.post('/orders/:id/complete', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.orders'), async (req, res) => {
+router.post('/orders/:id/complete', authenticateToken, requirePermission('canEditRestaurant'), requireAnyFeature(['restaurant.orders', 'bar']), async (req, res) => {
   try {
     const { paymentMethod, discount, tipAmount, tipWaiterId } = req.body
     const scope = await resolveBranchScope(prisma, req)
@@ -554,6 +590,7 @@ router.post('/orders/:id/complete', authenticateToken, requirePermission('canEdi
       include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
     })
     if (!order) return res.status(404).json({ message: 'Order not found' })
+    if (hasBarOnlyAccess(req) && order.items.some(item => item.station !== 'bar')) return res.status(404).json({ message: 'Order not found' })
     if (order.status === 'completed') return res.status(400).json({ message: 'Order already completed' })
 
     const finalDiscount = discount || 0
@@ -688,7 +725,7 @@ router.get('/kitchen/orders', authenticateToken, requirePermission('canViewResta
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.get('/bar/orders', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canViewBarQueue']), requireFeature('restaurant.bar'), async (req, res) => {
+router.get('/bar/orders', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canViewBarQueue']), requireAnyFeature(['restaurant.bar', 'bar']), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const orders = await prisma.restaurantOrder.findMany({

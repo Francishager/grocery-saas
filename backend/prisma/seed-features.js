@@ -161,6 +161,7 @@ async function seedFeatures() {
     { name: 'restaurant.delivery', displayName: 'Delivery', module: 'restaurant', category: 'advanced', description: 'Delivery orders and tracking' },
     { name: 'restaurant.tips', displayName: 'Tips', module: 'restaurant', category: 'advanced', description: 'Tips management for waiters' },
     { name: 'restaurant.reports', displayName: 'Restaurant Reports', module: 'restaurant', category: 'advanced', description: 'Restaurant-specific reports' },
+    { name: 'bar', displayName: 'Bar', module: 'bar', category: 'module', description: 'Independent bar orders, menu, and bar service queue' },
 
     // ===== Fuel Station =====
     { name: 'fuel_station', displayName: 'Fuel Station', module: 'fuel_station', category: 'advanced', description: 'Fuel station management' },

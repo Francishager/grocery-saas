@@ -302,10 +302,10 @@ export const permissions: Permission[] = [
   
   // Restaurant & Bar
   { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },
-  { id: 'canCreateRestaurant', name: 'Create Restaurant', description: 'Create restaurant orders, tables, reservations', category: 'restaurant', accessesBusinessData: true },
-  { id: 'canEditRestaurant', name: 'Edit Restaurant', description: 'Edit restaurant orders and settings', category: 'restaurant', accessesBusinessData: true },
-  { id: 'canDeleteRestaurant', name: 'Delete Restaurant', description: 'Delete restaurant records', category: 'restaurant', accessesBusinessData: true },
-  { id: 'canViewBarQueue', name: 'View Bar Queue', description: 'View and print drink-station tickets without accessing restaurant management pages.', category: 'bar_operations', accessesBusinessData: true },
+  { id: 'canCreateRestaurant', name: 'Create Restaurant or Bar Orders', description: 'Create orders in enabled restaurant or standalone bar workflows.', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canEditRestaurant', name: 'Edit Restaurant or Bar Orders', description: 'Edit orders in enabled restaurant or standalone bar workflows.', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canDeleteRestaurant', name: 'Cancel Restaurant or Bar Orders', description: 'Cancel orders in enabled restaurant or standalone bar workflows.', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canViewBarQueue', name: 'View Bar Queue and Orders', description: 'View and print bar tickets and orders without Restaurant access.', category: 'bar_operations', accessesBusinessData: true },
   { id: 'canUpdateBarQueue', name: 'Update Bar Ticket Status', description: 'Advance bar-station ticket items through preparation and serving.', category: 'bar_operations', accessesBusinessData: true },
 
   // Fuel Station

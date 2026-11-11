@@ -56,19 +56,24 @@ export default function RestaurantPage() {
   const { tab: routeTab } = useParams()
   const { hasPermission } = useAuth()
   const { hasFeature } = useFeatureAccess()
+  const standaloneBar = hasFeature('bar') && !hasFeature('restaurant')
+  const activeRouteTab = standaloneBar && routeTab === 'queue' ? 'bar' : routeTab
   const canViewRestaurantOps = hasPermission('canViewRestaurant')
-  const canViewRestaurant = canViewRestaurantOps || (routeTab === 'bar' && hasPermission('canViewBarQueue'))
+  const canViewRestaurant = canViewRestaurantOps || hasPermission('canViewBarQueue')
   const canCreateRestaurant = hasPermission('canCreateRestaurant')
   const canEditRestaurant = hasPermission('canEditRestaurant')
   const canUpdateBarQueue = canEditRestaurant || hasPermission('canUpdateBarQueue')
+  const canUpdateOrder = (order: Order) => canEditRestaurant || (hasPermission('canUpdateBarQueue') && order.items.length > 0 && order.items.every(item => item.station === 'bar'))
   const canDeleteRestaurant = hasPermission('canDeleteRestaurant')
   const canAdjustStockOut = hasPermission('canAdjustStock')
   const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
   const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
-  const [tab, setActiveTab] = useState(routeTab || 'dashboard')
+  const [tab, setActiveTab] = useState(activeRouteTab || 'dashboard')
   const setTab = (nextTab: string) => {
     setActiveTab(nextTab)
-    if (routeTab !== nextTab) navigate(`/tenant/restaurant/${nextTab}`)
+    const basePath = standaloneBar ? '/tenant/bar' : '/tenant/restaurant'
+    const pathTab = standaloneBar && nextTab === 'bar' ? 'queue' : nextTab
+    if (activeRouteTab !== nextTab) navigate(`${basePath}/${pathTab}`)
   }
   const [tables, setTables] = useState<Table[]>([])
   const [waiters, setWaiters] = useState<Waiter[]>([])
@@ -170,7 +175,13 @@ export default function RestaurantPage() {
     reservations: 'restaurant.reservations', recipes: 'restaurant.recipes', delivery: 'restaurant.delivery',
     waiters: 'restaurant.waiters', 'happy-hour': 'restaurant.happy_hour', combos: 'restaurant.combos', tips: 'restaurant.tips',
   }
-  const canAccessTab = (value: string) => (value === 'bar' ? (canViewRestaurantOps || hasPermission('canViewBarQueue')) : canViewRestaurantOps) && hasFeature(tabFeature[value] || 'restaurant') &&
+  const featureAllowedForTab = (value: string) => {
+    if (value === 'bar') return hasFeature('bar') || hasFeature('restaurant.bar')
+    if (value === 'orders') return hasFeature('restaurant.orders') || hasFeature('bar')
+    if (value === 'menu') return hasFeature('restaurant') || hasFeature('bar')
+    return hasFeature(tabFeature[value] || 'restaurant')
+  }
+  const canAccessTab = (value: string) => (value === 'bar' || (standaloneBar && ['orders', 'menu'].includes(value)) ? canViewRestaurant : canViewRestaurantOps) && featureAllowedForTab(value) &&
     (value !== 'stockroom' || hasPermission('canViewProduct'))
 
   const fetchData = useCallback(async () => {
@@ -179,10 +190,10 @@ export default function RestaurantPage() {
       const [tablesRes, waitersRes, productsRes, statsRes, hrEmployeesRes, menuRes] = await Promise.all([
         hasFeature('restaurant.tables') && canViewRestaurantOps ? apiFetch('/api/restaurant/tables') : Promise.resolve(null),
         hasFeature('restaurant.waiters') && canViewRestaurantOps ? apiFetch('/api/restaurant/waiters') : Promise.resolve(null),
-        hasFeature('restaurant') && hasPermission('canViewProduct') ? apiFetch('/api/inventory?limit=500') : Promise.resolve(null),
+        (hasFeature('restaurant') || hasFeature('bar')) && hasPermission('canViewProduct') ? apiFetch('/api/inventory?limit=500') : Promise.resolve(null),
         hasFeature('restaurant') && canViewRestaurantOps ? apiFetch('/api/restaurant/dashboard') : Promise.resolve(null),
         canLinkWaiterToHr ? apiFetch('/api/restaurant/waiters/hr-employees') : Promise.resolve(null),
-        hasFeature('restaurant') && canViewRestaurantOps ? apiFetch('/api/restaurant/menu') : Promise.resolve(null),
+        (hasFeature('restaurant') || hasFeature('bar')) && canViewRestaurant ? apiFetch('/api/restaurant/menu') : Promise.resolve(null),
       ])
       if (tablesRes?.ok) setTables(await tablesRes.json())
       else if (!hasFeature('restaurant.tables')) setTables([])
@@ -196,23 +207,23 @@ export default function RestaurantPage() {
       if (menuRes?.ok) setMenuEntries(await menuRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [canLinkWaiterToHr, canViewRestaurantOps, hasFeature, hasPermission, online])
+  }, [canLinkWaiterToHr, canViewRestaurant, canViewRestaurantOps, hasFeature, hasPermission, online])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   useEffect(() => {
     const allowedTabs = ['dashboard', 'tables', 'orders', 'kitchen', 'bar', 'menu', 'stockroom', 'reservations', 'recipes', 'delivery', 'waiters', 'happy-hour', 'combos', 'tips']
-    if (!routeTab || !allowedTabs.includes(routeTab)) {
-      navigate('/tenant/restaurant/dashboard', { replace: true })
+    if (!activeRouteTab || !allowedTabs.includes(activeRouteTab)) {
+      navigate(standaloneBar ? '/tenant/bar/queue' : '/tenant/restaurant/dashboard', { replace: true })
       return
     }
-    if (!canAccessTab(routeTab)) {
+    if (!canAccessTab(activeRouteTab)) {
       const fallback = allowedTabs.find(canAccessTab)
-      if (fallback) navigate(`/tenant/restaurant/${fallback}`, { replace: true })
+      if (fallback) navigate(`${standaloneBar ? '/tenant/bar' : '/tenant/restaurant'}/${standaloneBar && fallback === 'bar' ? 'queue' : fallback}`, { replace: true })
       return
     }
-    setActiveTab(routeTab)
-  }, [routeTab, navigate, canViewRestaurant, hasFeature, hasPermission])
+    setActiveTab(activeRouteTab)
+  }, [activeRouteTab, routeTab, navigate, standaloneBar, canViewRestaurant, hasFeature, hasPermission])
 
   useEffect(() => {
     if (activeWaiterId && waiters.length > 0 && !waiters.some(waiter => waiter.id === activeWaiterId && waiter.isActive)) {
@@ -768,7 +779,7 @@ export default function RestaurantPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold flex items-center gap-2"><UtensilsCrossed className="h-6 w-6" /> Restaurant & Bar</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2">{standaloneBar ? <Wine className="h-6 w-6" /> : <UtensilsCrossed className="h-6 w-6" />} {standaloneBar ? 'Bar' : 'Restaurant & Bar'}</h1>
         {waiters.some(waiter => waiter.isActive) && <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Serving as</span>
           <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}>
@@ -808,7 +819,7 @@ export default function RestaurantPage() {
             <div className="flex flex-wrap gap-2">
               {canAccessTab('tables') && <Button variant="outline" onClick={() => setTab('tables')}><Table2 className="mr-2 h-4 w-4" /> Floor</Button>}
               {canAccessTab('kitchen') && <Button variant="outline" onClick={() => setTab('kitchen')}><ChefHat className="mr-2 h-4 w-4" /> Kitchen</Button>}
-              {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
+              {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: standaloneBar ? 'takeaway' : 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -917,8 +928,8 @@ export default function RestaurantPage() {
 
         <TabsContent value="menu">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-            <div><h2 className="font-semibold">Restaurant menu</h2><p className="text-sm text-muted-foreground">Curate what guests can order here; each menu item stays linked to its stock and recipe record.</p></div>
-            {canCreateRestaurant && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
+            <div><h2 className="font-semibold">{standaloneBar ? 'Bar menu' : 'Restaurant menu'}</h2><p className="text-sm text-muted-foreground">Curate available items; menu entries stay linked to inventory and sales.</p></div>
+            {canCreateRestaurant && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: standaloneBar ? 'bar' : 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
           </div>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search menu items" className="pl-9" /></div>
@@ -970,7 +981,7 @@ export default function RestaurantPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-            {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
+            {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId, orderType: standaloneBar ? 'takeaway' : orderForm.orderType }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
           </div>
           <div className="space-y-3">
             {paginatedOrders.map(o => (
@@ -983,11 +994,11 @@ export default function RestaurantPage() {
                   {o.tipAmount > 0 && <div className="flex justify-between text-sm"><span>Tip</span><span>{o.tipAmount.toLocaleString()}</span></div>}
                   <div className="flex justify-between font-medium border-t pt-2 mt-1"><span>Total</span><span>{o.total.toLocaleString()}</span></div>
                   <div className="flex flex-wrap gap-2 mt-3">
-                    {canEditRestaurant && o.status === 'pending' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'preparing')}>Start Preparing</Button>}
-                    {canEditRestaurant && o.status === 'preparing' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'ready')}>Mark Ready</Button>}
-                    {canEditRestaurant && o.status === 'ready' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'served')}>Mark Served</Button>}
+                    {canUpdateOrder(o) && o.status === 'pending' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'preparing')}>Start Preparing</Button>}
+                    {canUpdateOrder(o) && o.status === 'preparing' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'ready')}>Mark Ready</Button>}
+                    {canUpdateOrder(o) && o.status === 'ready' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'served')}>Mark Served</Button>}
                     {canEditRestaurant && o.status === 'served' && <Button size="sm" onClick={() => openCompleteModal(o)}><CheckCircle className="h-3 w-3 mr-1" /> Complete & Pay</Button>}
-                    {canEditRestaurant && o.status === 'served' && <Button size="sm" variant="outline" onClick={() => openSplitModal(o)}><Split className="h-3 w-3 mr-1" /> Split Bill</Button>}
+                    {canEditRestaurant && hasFeature('restaurant.split_bills') && o.status === 'served' && <Button size="sm" variant="outline" onClick={() => openSplitModal(o)}><Split className="h-3 w-3 mr-1" /> Split Bill</Button>}
                     {canEditRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && o.table && <Button size="sm" variant="outline" onClick={() => openMoveModal(o)}><ArrowRightLeft className="h-3 w-3 mr-1" /> Move Table</Button>}
                     {canDeleteRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel</Button>}
                   </div>
@@ -1241,7 +1252,7 @@ export default function RestaurantPage() {
 
       <Dialog open={showMenuEntryModal} onOpenChange={open => { setShowMenuEntryModal(open); if (!open) setEditingMenuEntry(null) }}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>{editingMenuEntry ? 'Edit restaurant menu item' : 'Add restaurant menu item'}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingMenuEntry ? `Edit ${standaloneBar ? 'bar' : 'restaurant'} menu item` : `Add ${standaloneBar ? 'bar' : 'restaurant'} menu item`}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label>Tracked inventory item</Label>
@@ -1257,7 +1268,7 @@ export default function RestaurantPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div><Label>Menu price</Label><Input type="number" min="0" step="0.01" value={menuForm.price} onChange={event => setMenuForm(current => ({ ...current, price: event.target.value }))} /></div>
               <div><Label>Menu category</Label><Input value={menuForm.category} onChange={event => setMenuForm(current => ({ ...current, category: event.target.value }))} placeholder="Meals, Drinks, Sides" /></div>
-              <div><Label>Preparation station</Label><Select value={menuForm.station} onValueChange={station => setMenuForm(current => ({ ...current, station }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>
+              {!standaloneBar && <div><Label>Preparation station</Label><Select value={menuForm.station} onValueChange={station => setMenuForm(current => ({ ...current, station }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>}
             </div>
             <div><Label>Description</Label><Input value={menuForm.description} onChange={event => setMenuForm(current => ({ ...current, description: event.target.value }))} placeholder="Menu description or serving notes" /></div>
           </div>
@@ -1270,9 +1281,9 @@ export default function RestaurantPage() {
         <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>New Order</DialogTitle></DialogHeader>
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger disabled={waiterIdentityConfirmed} aria-label={waiterIdentityConfirmed ? 'Serving waiter is locked until sign out' : 'Select serving waiter'}><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{!waiterKioskMode && <SelectItem value="unassigned">Select waiter</SelectItem>}{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>
-              <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
+              {!standaloneBar && <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>}
+              {!standaloneBar && <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger disabled={waiterIdentityConfirmed} aria-label={waiterIdentityConfirmed ? 'Serving waiter is locked until sign out' : 'Select serving waiter'}><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{!waiterKioskMode && <SelectItem value="unassigned">Select waiter</SelectItem>}{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>}
+              <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{!standaloneBar && <SelectItem value="dine_in">Dine In</SelectItem>}<SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
             </div>
             <div><Label>Items</Label>
               <Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search food and drinks" className="mb-2" />

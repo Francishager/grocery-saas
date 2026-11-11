@@ -187,7 +187,13 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
 
 router.get('/businesses', authenticateToken, async (req, res) => {
   try {
-    const memberships = await prisma.tenantMembership.findMany({ where: { userId: req.user.id, isActive: true, role: 'owner' }, include: { tenant: { select: { id: true, name: true, slug: true, businessType: true, status: true, logo: true } } } });
+    let memberships = []
+    try {
+      memberships = await prisma.tenantMembership.findMany({ where: { userId: req.user.id, isActive: true, role: 'owner' }, include: { tenant: { select: { id: true, name: true, slug: true, businessType: true, status: true, logo: true } } } })
+    } catch (membershipError) {
+      // Keep the active business usable while startup repairs a legacy membership table.
+      console.error('Business membership lookup failed; returning current business only:', membershipError.message)
+    }
     const byId = new Map();
     for (const item of memberships.map((membership) => membership.tenant)) if (item) byId.set(item.id, item);
     if (req.user.tenantId && !byId.has(req.user.tenantId)) {
