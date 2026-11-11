@@ -623,7 +623,8 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
         const data = await response.json().catch(() => ({}))
         if (cancelled) return
         if (response.ok && data.user) {
-          setUser(data.user)
+          const nextUser = data.user as User
+          setUser(previous => JSON.stringify(previous) === JSON.stringify(nextUser) ? previous : nextUser)
           persistAuth(data.user, activeTokens)
         } else if (response.status === 401 || response.status === 403) {
           revokeAccess(data.message || data.error || 'Please sign in again.')

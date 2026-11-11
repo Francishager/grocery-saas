@@ -78,6 +78,20 @@ const salonSubItems = [
   { to: '/tenant/salon/commissions', label: 'Stylist Commissions', icon: Award, permission: 'canViewSalonCommission', feature: 'salon.stylist_commissions' },
 ]
 
+const clinicSubItems = [
+  { to: '/tenant/clinic/patients', label: 'Patients', icon: Users, feature: 'clinic_management', permission: ['canViewClinicPatients', 'canManageClinicPatients'] },
+  { to: '/tenant/clinic/appointments', label: 'Appointments', icon: CalendarClock, feature: 'clinic_management', permission: ['canViewClinicAppointments', 'canManageClinicAppointments'] },
+  { to: '/tenant/clinic/encounters', label: 'Clinical Encounters', icon: Activity, feature: 'clinic_management', permission: ['canViewClinicEncounters', 'canManageClinicEncounters'] },
+  { to: '/tenant/clinic/prescriptions', label: 'Prescriptions', icon: FileText, feature: 'clinic_management', permission: ['canViewClinicPrescriptions', 'canManageClinicPrescriptions'] },
+]
+
+const pharmacySubItems = [
+  { to: '/tenant/pharmacy/queue', label: 'Prescription Queue', icon: ClipboardList, feature: 'pharmacy_management', allFeatures: ['clinic_management'], permission: ['canViewPharmacyPrescriptions', 'canDispensePharmacyPrescriptions'] },
+  { to: '/tenant/pharmacy/catalogue', label: 'Medicine Catalogue', icon: Package, feature: 'pharmacy_management', permission: ['canViewPharmacyCatalogue', 'canManagePharmacyCatalogue'] },
+  { to: '/tenant/pharmacy/batches', label: 'Batches & Expiry', icon: Clock, feature: 'pharmacy_management', permission: ['canViewPharmacyBatches', 'canManagePharmacyBatches'] },
+  { to: '/tenant/pharmacy/history', label: 'Dispensing History', icon: Receipt, feature: 'pharmacy_management', allFeatures: ['clinic_management'], permission: 'canViewPharmacyDispenses' },
+]
+
 const procurementBuyerItems = [
   { to: '/tenant/procurement/buying/marketplace', label: 'Marketplace', icon: Store, permission: 'canViewProcurement', feature: 'procurement.buyer' },
   { to: '/tenant/procurement/buying/rfqs', label: 'Quote requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.buyer' },
@@ -129,8 +143,8 @@ const navItems = [
   { to: '/tenant/property-management/portfolio', label: 'Property Management', icon: Building2, isPropertyManagement: true },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
   { to: '/tenant/bar/queue', label: 'Bar', icon: Wine, feature: 'bar', permission: ['canViewRestaurant', 'canViewBarQueue'], isBar: true },
-  { to: '/tenant/clinic', label: 'Clinic Management', icon: Activity, feature: 'clinic_management', permission: ['canViewClinic', 'canViewClinicPatients', 'canViewClinicAppointments', 'canViewClinicEncounters', 'canViewClinicPrescriptions', 'canManageClinicPatients', 'canManageClinicAppointments', 'canManageClinicEncounters', 'canManageClinicPrescriptions'] },
-  { to: '/tenant/pharmacy', label: 'Pharmacy Management', icon: Package, feature: 'pharmacy_management', permission: ['canViewPharmacy', 'canViewPharmacyCatalogue', 'canViewPharmacyBatches', 'canViewPharmacyPrescriptions', 'canViewPharmacyDispenses', 'canManagePharmacyCatalogue', 'canManagePharmacyBatches', 'canDispensePharmacyPrescriptions', 'canViewPharmacyReports'] },
+  { to: '/tenant/clinic/patients', label: 'Clinic Management', icon: Activity, feature: 'clinic_management', isClinic: true },
+  { to: '/tenant/pharmacy/catalogue', label: 'Pharmacy Management', icon: Package, feature: 'pharmacy_management', isPharmacy: true },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
   { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },
   { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
@@ -399,6 +413,8 @@ export function TenantLayout() {
   const [propertyManagementExpanded, setPropertyManagementExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
   const [salonExpanded, setSalonExpanded] = useState(false)
+  const [clinicExpanded, setClinicExpanded] = useState(false)
+  const [pharmacyExpanded, setPharmacyExpanded] = useState(false)
   const [procurementExpanded, setProcurementExpanded] = useState(false)
   const [procurementBuyerExpanded, setProcurementBuyerExpanded] = useState(false)
   const [procurementSellerExpanded, setProcurementSellerExpanded] = useState(false)
@@ -596,6 +612,8 @@ export function TenantLayout() {
     setPropertyManagementExpanded(group === 'property-management')
     setServiceExpanded(group === 'service')
     setSalonExpanded(group === 'salon')
+    setClinicExpanded(group === 'clinic')
+    setPharmacyExpanded(group === 'pharmacy')
     setProcurementExpanded(group === 'procurement')
     setHRExpanded(group === 'hr')
   }
@@ -611,6 +629,8 @@ export function TenantLayout() {
   const toggleReceivables = () => toggleExpandedGroup('receivables', receivablesExpanded)
   const toggleService = () => toggleExpandedGroup('service', serviceExpanded)
   const toggleSalon = () => toggleExpandedGroup('salon', salonExpanded)
+  const toggleClinic = () => toggleExpandedGroup('clinic', clinicExpanded)
+  const togglePharmacy = () => toggleExpandedGroup('pharmacy', pharmacyExpanded)
   const toggleRestaurant = () => toggleExpandedGroup('restaurant', restaurantExpanded)
   const toggleBar = () => toggleExpandedGroup('bar', barExpanded)
   const togglePropertyManagement = () => toggleExpandedGroup('property-management', propertyManagementExpanded)
@@ -628,6 +648,8 @@ export function TenantLayout() {
     else if (path.startsWith('/tenant/receivables')) group = 'receivables'
     else if (path.startsWith('/tenant/service')) group = 'service'
     else if (path.startsWith('/tenant/salon')) group = 'salon'
+    else if (path.startsWith('/tenant/clinic')) group = 'clinic'
+    else if (path.startsWith('/tenant/pharmacy')) group = 'pharmacy'
     else if (path.startsWith('/tenant/bar')) group = 'bar'
     else if (path.startsWith('/tenant/restaurant')) group = 'restaurant'
     else if (path.startsWith('/tenant/property-management')) group = 'property-management'
@@ -649,11 +671,12 @@ export function TenantLayout() {
     return permissions.some((perm) => hasPermission(perm))
   }
 
-  function subItemVisible(item: { feature?: string | string[] | null; permission?: string | string[] }) {
+  function subItemVisible(item: { feature?: string | string[] | null; allFeatures?: string[]; permission?: string | string[] }) {
     if (item.feature) {
       const features = Array.isArray(item.feature) ? item.feature : [item.feature]
       if (!features.some((feature) => canAccessFeature(feature))) return false
     }
+    if (item.allFeatures?.some((feature) => !canAccessFeature(feature))) return false
     if (item.permission && !hasRequiredPermission(item.permission)) return false
     return true
   }
@@ -667,6 +690,8 @@ export function TenantLayout() {
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
   const visibleSalonSubItems = salonSubItems.filter(subItemVisible)
+  const visibleClinicSubItems = clinicSubItems.filter(subItemVisible)
+  const visiblePharmacySubItems = pharmacySubItems.filter(subItemVisible)
   const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible).filter(item =>
     !waiterMode || ['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(item.to)
   )
@@ -708,6 +733,8 @@ export function TenantLayout() {
     if (item.isPropertyManagement) return visiblePropertyManagementSubItems.length > 0
     if (item.isRentals) return visibleRentalSubItems.length > 0
     if (item.isSalon) return canAccessFeature('salon_spa') && visibleSalonSubItems.length > 0
+    if (item.isClinic) return canAccessFeature('clinic_management') && visibleClinicSubItems.length > 0
+    if (item.isPharmacy) return canAccessFeature('pharmacy_management') && visiblePharmacySubItems.length > 0
     if (item.isRestaurant) return visibleRestaurantSubItems.length > 0
     if (item.isBar) return visibleBarSubItems.length > 0
     if (item.isService && canAccessFeature('salon_spa')) return false
@@ -1035,6 +1062,28 @@ export function TenantLayout() {
                   </button>
                   {barExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
                     {visibleBarSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isClinic ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={clinicExpanded} onClick={toggleClinic}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', clinicExpanded || location.pathname.startsWith('/tenant/clinic') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {clinicExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {clinicExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleClinicSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isPharmacy ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={pharmacyExpanded} onClick={togglePharmacy}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', pharmacyExpanded || location.pathname.startsWith('/tenant/pharmacy') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {pharmacyExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {pharmacyExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visiblePharmacySubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
                   </div>}
                 </div>
               ) : item.isReports ? (

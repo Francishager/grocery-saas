@@ -10,6 +10,13 @@ import { useNavigate } from 'react-router-dom'
 type Row = Record<string, any>
 const tabs = ['Prescription queue', 'Medicine catalogue', 'Batches & expiry'] as const
 type Tab = typeof tabs[number] | 'Overview' | 'Prescriptions' | 'Dispensing history'
+type PharmacySection = 'queue' | 'catalogue' | 'batches' | 'history'
+const sectionTabs: Record<PharmacySection, Tab> = {
+  queue: 'Prescription queue',
+  catalogue: 'Medicine catalogue',
+  batches: 'Batches & expiry',
+  history: 'Dispensing history',
+}
 const inputClass = 'h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -19,14 +26,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T
 }
 
-export default function PharmacyManagementPage() {
+export default function PharmacyManagementPage({ section }: { section: PharmacySection }) {
   const navigate = useNavigate()
   const { hasPermission } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
   const clinicPharmacyLinkEnabled = hasFeature('clinic_management')
   const canAccessPrescriptionQueue = hasPermission('canViewPharmacyPrescriptions') || hasPermission('canDispensePharmacyPrescriptions')
-  const visibleTabs = clinicPharmacyLinkEnabled && canAccessPrescriptionQueue ? tabs : tabs.filter(item => item !== 'Prescription queue')
-  const [tab, setTab] = useState<Tab>(clinicPharmacyLinkEnabled && canAccessPrescriptionQueue ? 'Prescription queue' : 'Medicine catalogue')
+  const tab = sectionTabs[section]
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -36,7 +42,7 @@ export default function PharmacyManagementPage() {
   const [inventoryProducts, setInventoryProducts] = useState<Row[]>([])
   const [batches, setBatches] = useState<Row[]>([])
   const [prescriptions, setPrescriptions] = useState<Row[]>([])
-  const [dispenses] = useState<Row[]>([])
+  const [dispenses, setDispenses] = useState<Row[]>([])
   const [saleOptions] = useState<Record<string, Row[]>>({})
   const [fulfillmentDrafts, setFulfillmentDrafts] = useState<Record<string, Record<string, { quantity: string; outcome: string; reason: string }>>>({})
   const [saleForPrescription, setSaleForPrescription] = useState<Record<string, string>>({})
@@ -47,21 +53,24 @@ export default function PharmacyManagementPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     const jobs: Array<Promise<void>> = []
-    if (hasPermission('canViewPharmacyCatalogue') || hasPermission('canManagePharmacyBatches')) jobs.push(request<any>('/api/pharmacy/catalogue').then(data => setMedicines(data.medicines || [])))
-    if (hasPermission('canManagePharmacyCatalogue')) jobs.push(request<any>('/api/pharmacy/inventory-products').then(data => setInventoryProducts(data.products || [])))
-    if (hasPermission('canViewPharmacyBatches')) jobs.push(request<any>('/api/pharmacy/batches').then(data => setBatches(data.batches || [])))
-    if (clinicPharmacyLinkEnabled && canAccessPrescriptionQueue) jobs.push(request<any>('/api/pharmacy/prescriptions').then(data => setPrescriptions(data.prescriptions || [])))
+    if (section === 'queue' && clinicPharmacyLinkEnabled && canAccessPrescriptionQueue) jobs.push(request<any>('/api/pharmacy/prescriptions').then(data => setPrescriptions(data.prescriptions || [])))
+    if (section === 'catalogue') {
+      if (hasPermission('canViewPharmacyCatalogue') || hasPermission('canManagePharmacyCatalogue')) jobs.push(request<any>('/api/pharmacy/catalogue').then(data => setMedicines(data.medicines || [])))
+      if (hasPermission('canManagePharmacyCatalogue')) jobs.push(request<any>('/api/pharmacy/inventory-products').then(data => setInventoryProducts(data.products || [])))
+    }
+    if (section === 'batches') {
+      if (hasPermission('canViewPharmacyBatches') || hasPermission('canManagePharmacyBatches')) jobs.push(request<any>('/api/pharmacy/batches').then(data => setBatches(data.batches || [])))
+      if (hasPermission('canManagePharmacyBatches')) jobs.push(request<any>('/api/pharmacy/catalogue').then(data => setMedicines(data.medicines || [])))
+    }
+    if (section === 'history' && clinicPharmacyLinkEnabled) jobs.push(request<any>('/api/pharmacy/dispenses').then(data => setDispenses(data.dispenses || [])))
     const results = await Promise.allSettled(jobs)
     if (results.some(result => result.status === 'rejected')) setError('Some pharmacy data could not be refreshed. Check permissions and retry.')
     setLoading(false)
-  }, [hasPermission, clinicPharmacyLinkEnabled, canAccessPrescriptionQueue])
+  }, [hasPermission, clinicPharmacyLinkEnabled, canAccessPrescriptionQueue, section])
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    if ((!clinicPharmacyLinkEnabled || !canAccessPrescriptionQueue) && tab === 'Prescription queue') setTab('Medicine catalogue')
-  }, [clinicPharmacyLinkEnabled, canAccessPrescriptionQueue, tab])
-  useEffect(() => {
-    if (!clinicPharmacyLinkEnabled || !canAccessPrescriptionQueue) return
+    if (section !== 'queue' || !clinicPharmacyLinkEnabled || !canAccessPrescriptionQueue) return
     let active = true
     const refreshQueue = async () => {
       if (document.visibilityState === 'hidden') return
@@ -71,10 +80,10 @@ export default function PharmacyManagementPage() {
         setPrescriptions(data.prescriptions || [])
       } catch { /* Keep the last loaded queue visible through brief network interruptions. */ }
     }
-    const interval = window.setInterval(() => { void refreshQueue() }, 30_000)
+    const interval = window.setInterval(() => { void refreshQueue() }, 60_000)
     window.addEventListener('focus', refreshQueue)
     return () => { active = false; window.clearInterval(interval); window.removeEventListener('focus', refreshQueue) }
-  }, [clinicPharmacyLinkEnabled, canAccessPrescriptionQueue, hasPermission])
+  }, [section, clinicPharmacyLinkEnabled, canAccessPrescriptionQueue])
   const addBatch = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError(''); setNotice('')
     try {
@@ -97,7 +106,6 @@ export default function PharmacyManagementPage() {
 
   return <main className="mx-auto w-full max-w-screen-2xl space-y-5 p-4 md:p-6">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4"><div><p className="text-xs font-semibold uppercase text-cyan-700">Medicines & dispensing</p><h1 className="mt-1 text-2xl font-semibold text-foreground">Pharmacy Management</h1><p className="mt-1 text-sm text-muted-foreground">Inventory-linked medicines, batch traceability, expiry monitoring, and prescription dispensing.</p></div><Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button></header>
-    <nav className="flex max-w-full gap-1 overflow-x-auto border-b border-border" aria-label="Pharmacy sections">{visibleTabs.map(item => <button key={item} onClick={() => setTab(item)} className={`shrink-0 border-b-2 px-3 py-2.5 text-sm ${tab === item ? 'border-cyan-700 font-semibold text-cyan-800' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>{item}</button>)}</nav>
     {error && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</div>}{notice && <div role="status" className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {loading ? <div className="flex min-h-48 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading pharmacy data</div> : <>
       {tab === 'Prescription queue' && clinicPharmacyLinkEnabled && canAccessPrescriptionQueue && <section className="space-y-4">

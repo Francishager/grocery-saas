@@ -34,10 +34,12 @@ test('container runs additive schema checks from its startup script without dest
   assert.match(startupScript, /ensure-salon-spa-schema\.js/);
   assert.match(startupScript, /ensure-tenant-memberships-schema\.js/);
   assert.match(startupScript, /ensure-bar-feature\.js/);
+  assert.match(startupScript, /ensure-clinic-pharmacy-schema\.js/);
   for (const migration of [
     'ensure-salon-spa-schema.js',
     'ensure-tenant-memberships-schema.js',
     'ensure-bar-feature.js',
+    'ensure-clinic-pharmacy-schema.js',
   ]) {
     assert.ok(startupScript.indexOf(migration) < startupScript.indexOf('=== Starting Node App ==='));
   }

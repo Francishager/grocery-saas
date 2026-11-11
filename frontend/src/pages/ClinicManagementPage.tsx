@@ -9,6 +9,13 @@ import { Textarea } from '@/components/ui/textarea'
 type Row = Record<string, any>
 const tabs = ['Patients', 'Appointments', 'Encounters', 'Prescriptions'] as const
 type Tab = typeof tabs[number] | 'Overview'
+type ClinicSection = 'patients' | 'appointments' | 'encounters' | 'prescriptions'
+const sectionTabs: Record<ClinicSection, Tab> = {
+  patients: 'Patients',
+  appointments: 'Appointments',
+  encounters: 'Encounters',
+  prescriptions: 'Prescriptions',
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init)
@@ -19,9 +26,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 const inputClass = 'h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground'
 
-export default function ClinicManagementPage() {
+export default function ClinicManagementPage({ section }: { section: ClinicSection }) {
   const { hasPermission } = useJWTAuth()
-  const [tab, setTab] = useState<Tab>('Patients')
+  const tab = sectionTabs[section]
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -44,16 +51,26 @@ export default function ClinicManagementPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     const jobs: Array<Promise<void>> = []
-    if (hasPermission('canViewClinicPatients')) jobs.push(request<any>('/api/clinic/patients').then(data => setPatients(data.patients || [])))
-    if (hasPermission('canViewClinicAppointments')) jobs.push(request<any>('/api/clinic/appointments').then(data => setAppointments(data.appointments || [])))
-    if (hasPermission('canViewClinicEncounters')) jobs.push(request<any>('/api/clinic/encounters').then(data => setEncounters(data.encounters || [])))
-    if (hasPermission('canViewClinicPrescriptions')) jobs.push(request<any>('/api/clinic/prescriptions').then(data => setPrescriptions(data.prescriptions || [])))
-    if (hasPermission('canManageClinicPrescriptions')) jobs.push(request<any>('/api/clinic/catalogue').then(data => setMedicines(data.medicines || [])).catch(() => {}))
+    const canLoadPatients = hasPermission('canViewClinicPatients') || hasPermission('canManageClinicPatients')
+    if (section === 'patients' && canLoadPatients) jobs.push(request<any>('/api/clinic/patients').then(data => setPatients(data.patients || [])))
+    if (section === 'appointments') {
+      if (hasPermission('canViewClinicAppointments') || hasPermission('canManageClinicAppointments')) jobs.push(request<any>('/api/clinic/appointments').then(data => setAppointments(data.appointments || [])))
+      if (canLoadPatients && hasPermission('canManageClinicAppointments')) jobs.push(request<any>('/api/clinic/patients').then(data => setPatients(data.patients || [])))
+    }
+    if (section === 'encounters') {
+      if (hasPermission('canViewClinicEncounters') || hasPermission('canManageClinicEncounters')) jobs.push(request<any>('/api/clinic/encounters').then(data => setEncounters(data.encounters || [])))
+      if (canLoadPatients && hasPermission('canManageClinicEncounters')) jobs.push(request<any>('/api/clinic/patients').then(data => setPatients(data.patients || [])))
+    }
+    if (section === 'prescriptions') {
+      if (hasPermission('canViewClinicPrescriptions') || hasPermission('canManageClinicPrescriptions')) jobs.push(request<any>('/api/clinic/prescriptions').then(data => setPrescriptions(data.prescriptions || [])))
+      if (canLoadPatients && hasPermission('canManageClinicPrescriptions')) jobs.push(request<any>('/api/clinic/patients').then(data => setPatients(data.patients || [])))
+      if (hasPermission('canManageClinicPrescriptions')) jobs.push(request<any>('/api/clinic/catalogue').then(data => setMedicines(data.medicines || [])).catch(() => {}))
+    }
     const results = await Promise.allSettled(jobs)
     const failed = results.some(result => result.status === 'rejected')
     if (failed) setError('Some clinic records could not be refreshed. Check this user’s clinic permissions and retry.')
     setLoading(false)
-  }, [hasPermission])
+  }, [hasPermission, section])
 
   useEffect(() => { void load() }, [load])
   const save = async (path: string, body: unknown, success: string) => {
@@ -87,7 +104,6 @@ export default function ClinicManagementPage() {
       <div><p className="text-xs font-semibold uppercase text-emerald-700">Care operations</p><h1 className="mt-1 text-2xl font-semibold text-foreground">Clinic Management</h1><p className="mt-1 text-sm text-muted-foreground">Patient records, appointments, clinical encounters and prescriptions.</p></div>
       <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button>
     </header>
-    <nav className="flex max-w-full gap-1 overflow-x-auto border-b border-border" aria-label="Clinic sections">{tabs.map(item => <button key={item} onClick={() => setTab(item)} className={`shrink-0 border-b-2 px-3 py-2.5 text-sm ${tab === item ? 'border-emerald-600 font-semibold text-emerald-700' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>{item}</button>)}</nav>
     {error && <div role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
     {notice && <div role="status" className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {loading ? <div className="flex min-h-48 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />Loading clinic records</div> : <>

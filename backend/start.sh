@@ -39,5 +39,7 @@ echo "=== Preparing shared business membership schema ==="
 node src/scripts/ensure-tenant-memberships-schema.js
 echo "=== Preparing standalone Bar feature catalog ==="
 node src/scripts/ensure-bar-feature.js
+echo "=== Preparing Clinic & Pharmacy schema ==="
+node src/scripts/ensure-clinic-pharmacy-schema.js
 echo "=== Starting Node App ==="
 exec node --trace-warnings src/app.js

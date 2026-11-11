@@ -62,6 +62,12 @@ test('transient working-hours verification failures do not log staff out', () =>
   assert.doesNotMatch(accessCheck[0], /else if\s*\(staffSession[^)]*\)\s*\{\s*revokeAccess/);
 });
 
+test('30-second session verification preserves user identity when permissions have not changed', () => {
+  const context = readFileSync(sourceRoot + '/contexts/JWTAuthContext.tsx', 'utf8');
+  assert.match(context, /setUser\(previous\s*=>\s*JSON\.stringify\(previous\)\s*===\s*JSON\.stringify\(nextUser\)\s*\?\s*previous\s*:\s*nextUser\)/);
+  assert.match(context, /window\.setInterval\(refreshUser, 30000\)/);
+});
+
 test('expired SaaS Admin sessions return to the SaaS login page, not business login', () => {
   const apiSource = readFileSync(sourceRoot + '/lib/api.ts', 'utf8');
   assert.match(apiSource, /function clearStoredAuth\(\): string \| null[\s\S]*?return role/);
