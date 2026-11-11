@@ -33,5 +33,11 @@ run_rental_schema_step src/scripts/ensure-rental-historical-entry-schema.js
 run_rental_schema_step src/scripts/ensure-rental-credit-notes-schema.js
 run_rental_schema_step src/scripts/ensure-rental-credit-note-permissions-schema.js
 run_rental_schema_step src/scripts/ensure-rental-cancellation-schema.js
+echo "=== Preparing Salon & Spa schema ==="
+node src/scripts/ensure-salon-spa-schema.js
+echo "=== Preparing shared business membership schema ==="
+node src/scripts/ensure-tenant-memberships-schema.js
+echo "=== Preparing standalone Bar feature catalog ==="
+node src/scripts/ensure-bar-feature.js
 echo "=== Starting Node App ==="
 exec node --trace-warnings src/app.js

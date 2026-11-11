@@ -296,7 +296,7 @@ const MODULES = [
 
 const FEATURE_SECTIONS = [
   { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
-  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for property, salon, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'salon_spa', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
+  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for bar, property, salon, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['bar', 'restaurant', 'salon_spa', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
   { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, planning, customer relationships, administration, security and developer tools.', modules: ['hr', 'business_tools', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
 ]
 
