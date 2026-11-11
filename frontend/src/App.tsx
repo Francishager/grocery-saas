@@ -16,6 +16,8 @@ const ForgotPasswordPage = lazy(() => import('@/pages/auth/ForgotPasswordPage'))
 const AcceptInvitation = lazy(() => import('@/pages/auth/AcceptInvitation'))
 const UnauthorizedPage = lazy(() => import('@/pages/auth/UnauthorizedPage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const ClinicManagementPage = lazy(() => import('@/pages/ClinicManagementPage'))
+const PharmacyManagementPage = lazy(() => import('@/pages/PharmacyManagementPage'))
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'))
 const SalesPage = lazy(() => import('@/pages/SalesPage'))
 const InventoryPage = lazy(() => import('@/pages/InventoryPage'))
@@ -262,6 +264,8 @@ function App() {
           <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
           <Route path="service" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
+          <Route path="clinic" element={<FeatureGuard feature="clinic_management" permission={['canViewClinic', 'canViewClinicPatients', 'canViewClinicAppointments', 'canViewClinicEncounters', 'canViewClinicPrescriptions', 'canManageClinicPatients', 'canManageClinicAppointments', 'canManageClinicEncounters', 'canManageClinicPrescriptions']}><ClinicManagementPage /></FeatureGuard>} />
+          <Route path="pharmacy" element={<FeatureGuard feature="pharmacy_management" permission={['canViewPharmacy', 'canViewPharmacyCatalogue', 'canViewPharmacyBatches', 'canViewPharmacyPrescriptions', 'canViewPharmacyDispenses', 'canManagePharmacyCatalogue', 'canManagePharmacyBatches', 'canDispensePharmacyPrescriptions', 'canViewPharmacyReports']}><PharmacyManagementPage /></FeatureGuard>} />
           <Route path="salon/appointments" element={<FeatureGuard feature="salon_spa" permission={servicePagePermissions('appointments')}><ServiceBusinessPage initialTab="appointments" /></FeatureGuard>} />
           <Route path="salon/stylists" element={<FeatureGuard feature="salon_spa" permission="canViewSalonStylist"><SalonStylistsPage /></FeatureGuard>} />
           <Route path="salon/chairs" element={<FeatureGuard feature="salon_spa"><FeatureGuard feature="salon.chair_scheduling" permission="canViewSalonChair"><SalonPage section="chairs" /></FeatureGuard></FeatureGuard>} />

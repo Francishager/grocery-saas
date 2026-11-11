@@ -269,6 +269,24 @@ const PERMISSION_TO_FEATURES = {
   canCreatePropertyLandPurchase: ['property_management.agent'],
   canRecordPropertyLandPurchasePayment: ['property_management.agent'],
   canViewRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
+  canViewClinic: ['clinic_management'],
+  canViewClinicPatients: ['clinic_management'],
+  canViewClinicAppointments: ['clinic_management'],
+  canViewClinicEncounters: ['clinic_management'],
+  canViewClinicPrescriptions: ['clinic_management'],
+  canManageClinicPatients: ['clinic_management'],
+  canManageClinicAppointments: ['clinic_management'],
+  canManageClinicEncounters: ['clinic_management'],
+  canManageClinicPrescriptions: ['clinic_management'],
+  canViewPharmacy: ['pharmacy_management'],
+  canViewPharmacyCatalogue: ['pharmacy_management'],
+  canViewPharmacyBatches: ['pharmacy_management'],
+  canViewPharmacyPrescriptions: ['pharmacy_management'],
+  canViewPharmacyDispenses: ['pharmacy_management'],
+  canManagePharmacyCatalogue: ['pharmacy_management'],
+  canManagePharmacyBatches: ['pharmacy_management'],
+  canDispensePharmacyPrescriptions: ['pharmacy_management'],
+  canViewPharmacyReports: ['pharmacy_management'],
   canCreateRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
   canEditRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
   canDeleteRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
@@ -444,6 +462,10 @@ export const ALL_PERMISSION_KEYS = [
   "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
   // Restaurant & Bar
   "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant", "canViewBarQueue", "canUpdateBarQueue",
+  // Clinic Management
+  "canViewClinic", "canViewClinicPatients", "canViewClinicAppointments", "canViewClinicEncounters", "canViewClinicPrescriptions", "canManageClinicPatients", "canManageClinicAppointments", "canManageClinicEncounters", "canManageClinicPrescriptions",
+  // Pharmacy Management
+  "canViewPharmacy", "canViewPharmacyCatalogue", "canViewPharmacyBatches", "canViewPharmacyPrescriptions", "canViewPharmacyDispenses", "canManagePharmacyCatalogue", "canManagePharmacyBatches", "canDispensePharmacyPrescriptions", "canViewPharmacyReports",
   // Fuel Station
   "canViewFuelStation", "canCreateFuelStation", "canEditFuelStation", "canDeleteFuelStation",
   // Manufacturing
@@ -499,6 +521,8 @@ export const PERMISSION_CATEGORIES = [
   { id: 'services', name: 'Services' },
   { id: 'rentals', name: 'Rentals' },
   { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'clinic_management', name: 'Clinic Management' },
+  { id: 'pharmacy_management', name: 'Pharmacy Management' },
   { id: 'bar_operations', name: 'Bar Operations' },
   { id: 'fuel_station', name: 'Fuel Station' },
   { id: 'manufacturing', name: 'Manufacturing' },
@@ -525,6 +549,14 @@ const PERMISSION_DETAIL_OVERRIDES = {
     canEditMarketplaceSellerProfile: 'Edit marketplace seller profile', canRequestSupplierRelationship: 'Request supplier relationships', canManageSupplierRelationships: 'Approve, reject, and suspend supplier relationships',
     canPauseMarketplaceCampaign: 'Pause marketplace campaigns', canResumeMarketplaceCampaign: 'Resume marketplace campaigns', canCancelMarketplaceCampaign: 'Cancel marketplace campaigns', canSelectProcurementQuote: 'Select a supplier quote',
     canViewProcurementInvoice: 'View supplier invoices for matching', canApproveProcurementInvoice: 'Approve supplier invoices and create payables', canRejectProcurementInvoice: 'Reject supplier invoices',
+    canViewClinicPatients: 'View clinic patient demographics and medical record numbers', canManageClinicPatients: 'Register and update clinic patient profiles',
+    canViewClinicAppointments: 'View clinic appointments', canManageClinicAppointments: 'Schedule and update clinic appointments',
+    canViewClinicEncounters: 'View clinical encounters and notes', canManageClinicEncounters: 'Create clinical encounters and treatment notes',
+    canViewClinicPrescriptions: 'View clinic prescriptions', canManageClinicPrescriptions: 'Create clinic prescriptions',
+    canViewPharmacyCatalogue: 'View medicines in the shared inventory catalogue', canManagePharmacyCatalogue: 'Maintain pharmacy catalogue links to inventory products',
+    canViewPharmacyBatches: 'View medicine batch and expiry details', canManagePharmacyBatches: 'Allocate existing inventory quantities to medicine batches',
+    canViewPharmacyPrescriptions: 'View prescriptions in the pharmacy queue', canViewPharmacyDispenses: 'View completed pharmacy dispensing records',
+    canDispensePharmacyPrescriptions: 'Verify and dispense a prescription against a completed sale', canViewPharmacyReports: 'View pharmacy operational reports',
   }).map(([key, name]) => [key, { name, description: `Allow the user to ${String(name).toLowerCase()}.` }])),
   canUseBusinessAI: {
     name: 'Use AI business advisor',
@@ -1354,6 +1386,8 @@ function permissionCategoryForKey(key) {
   if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
   if (key === 'canViewTeamMessaging' || key === 'canSendTeamMessages') return 'team_messaging';
   if (key.includes('Procurement') || key.includes('SupplierNetwork') || key.includes('Marketplace')) return 'procurement';
+  if (key.includes('Clinic')) return 'clinic_management';
+  if (key.includes('Pharmacy')) return 'pharmacy_management';
   const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
   if (servicePermission) return servicePermission.category;
   if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';

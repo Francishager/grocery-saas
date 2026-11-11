@@ -16,6 +16,7 @@ import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivabl
 import { customerProfileAccess, customerProfilePayload } from '../utils/customerProfileAccess.js';
 import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
 import { getRateToBase, normalizeCurrencyCode } from '../services/currencyRates.js';
+import { allocatePharmacySaleBatches } from '../services/pharmacyBatchService.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -459,6 +460,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       });
 
       created.serviceJobCards = await createSaleServiceJobs(tx, created, saleItems);
+      await allocatePharmacySaleBatches(tx, { tenantId: scope.tenantId, branchId: scope.branchId, sourceId: created.id, sourceType: 'cash', items: saleItems });
 
       // Deduct stock in base units (skip service items)
       for (const item of saleItems) {
@@ -603,6 +605,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       });
 
       created.serviceJobCards = await createSaleServiceJobs(tx, created, saleItems);
+      await allocatePharmacySaleBatches(tx, { tenantId: scope.tenantId, branchId: scope.branchId, sourceId: created.id, sourceType: 'cash', items: saleItems });
 
       // Deduct stock in base units (skip service items)
       for (const item of saleItems) {

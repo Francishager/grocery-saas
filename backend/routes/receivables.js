@@ -21,6 +21,7 @@ import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustom
 import { ensureRentalAccounting, ensureRentalCashLedgerAccount, postRentalJournal, rentalReceiptLines } from '../src/services/rentalAccountingService.js'
 import { applyAvailableCustomerCredit, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
 import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
+import { allocatePharmacySaleBatches } from '../src/services/pharmacyBatchService.js'
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
@@ -1950,6 +1951,8 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           User: userSelect
         }
       })
+
+      await allocatePharmacySaleBatches(tx, { tenantId: scope.tenantId, branchId: scope.branchId, sourceId: createdSale.id, sourceType: 'credit', items: saleItems });
 
       await tx.saleRecordItem.createMany({
         data: saleItems.map(item => ({

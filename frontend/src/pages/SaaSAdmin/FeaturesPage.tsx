@@ -142,6 +142,16 @@ const MODULES = [
     ]
   },
   {
+    id: 'clinic_management', name: 'Clinic Management', icon: ClipboardList, color: 'text-emerald-700 bg-emerald-100', features: [
+      { name: 'clinic_management', displayName: 'Clinic Management' },
+    ]
+  },
+  {
+    id: 'pharmacy_management', name: 'Pharmacy Management', icon: Package, color: 'text-cyan-700 bg-cyan-100', features: [
+      { name: 'pharmacy_management', displayName: 'Pharmacy Management' },
+    ]
+  },
+  {
     id: 'multi_branch', name: 'Multi-Branch', icon: GitBranch, color: 'text-lime-600 bg-lime-100', features: [
       { name: 'multi_branch', displayName: 'Multi-Branch' },
       { name: 'multi_branch.transfers', displayName: 'Branch Transfers' },
@@ -296,7 +306,7 @@ const MODULES = [
 
 const FEATURE_SECTIONS = [
   { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
-  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for bar, property, salon, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['bar', 'restaurant', 'salon_spa', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
+  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for healthcare, bar, property, salon, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['clinic_management', 'pharmacy_management', 'bar', 'restaurant', 'salon_spa', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
   { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, planning, customer relationships, administration, security and developer tools.', modules: ['hr', 'business_tools', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
 ]
 
