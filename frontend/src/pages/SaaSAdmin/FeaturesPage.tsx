@@ -135,6 +135,13 @@ const MODULES = [
     ]
   },
   {
+    id: 'salon_spa', name: 'Salon & Spa', icon: Clock, color: 'text-pink-600 bg-pink-100', features: [
+      { name: 'salon_spa', displayName: 'Salon & Spa Operations' },
+      { name: 'salon.chair_scheduling', displayName: 'Chair Scheduling' },
+      { name: 'salon.stylist_commissions', displayName: 'Stylist Commissions' },
+    ]
+  },
+  {
     id: 'multi_branch', name: 'Multi-Branch', icon: GitBranch, color: 'text-lime-600 bg-lime-100', features: [
       { name: 'multi_branch', displayName: 'Multi-Branch' },
       { name: 'multi_branch.transfers', displayName: 'Branch Transfers' },
@@ -284,7 +291,7 @@ const MODULES = [
 
 const FEATURE_SECTIONS = [
   { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
-  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for property, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
+  { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for property, salon, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['restaurant', 'salon_spa', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
   { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, planning, customer relationships, administration, security and developer tools.', modules: ['hr', 'business_tools', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
 ]
 

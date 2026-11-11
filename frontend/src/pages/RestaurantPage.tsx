@@ -56,9 +56,11 @@ export default function RestaurantPage() {
   const { tab: routeTab } = useParams()
   const { hasPermission } = useAuth()
   const { hasFeature } = useFeatureAccess()
-  const canViewRestaurant = hasPermission('canViewRestaurant')
+  const canViewRestaurantOps = hasPermission('canViewRestaurant')
+  const canViewRestaurant = canViewRestaurantOps || (routeTab === 'bar' && hasPermission('canViewBarQueue'))
   const canCreateRestaurant = hasPermission('canCreateRestaurant')
   const canEditRestaurant = hasPermission('canEditRestaurant')
+  const canUpdateBarQueue = canEditRestaurant || hasPermission('canUpdateBarQueue')
   const canDeleteRestaurant = hasPermission('canDeleteRestaurant')
   const canAdjustStockOut = hasPermission('canAdjustStock')
   const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
@@ -168,19 +170,19 @@ export default function RestaurantPage() {
     reservations: 'restaurant.reservations', recipes: 'restaurant.recipes', delivery: 'restaurant.delivery',
     waiters: 'restaurant.waiters', 'happy-hour': 'restaurant.happy_hour', combos: 'restaurant.combos', tips: 'restaurant.tips',
   }
-  const canAccessTab = (value: string) => canViewRestaurant && hasFeature(tabFeature[value] || 'restaurant') &&
+  const canAccessTab = (value: string) => (value === 'bar' ? (canViewRestaurantOps || hasPermission('canViewBarQueue')) : canViewRestaurantOps) && hasFeature(tabFeature[value] || 'restaurant') &&
     (value !== 'stockroom' || hasPermission('canViewProduct'))
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       const [tablesRes, waitersRes, productsRes, statsRes, hrEmployeesRes, menuRes] = await Promise.all([
-        hasFeature('restaurant.tables') && canViewRestaurant ? apiFetch('/api/restaurant/tables') : Promise.resolve(null),
-        hasFeature('restaurant.waiters') && canViewRestaurant ? apiFetch('/api/restaurant/waiters') : Promise.resolve(null),
+        hasFeature('restaurant.tables') && canViewRestaurantOps ? apiFetch('/api/restaurant/tables') : Promise.resolve(null),
+        hasFeature('restaurant.waiters') && canViewRestaurantOps ? apiFetch('/api/restaurant/waiters') : Promise.resolve(null),
         hasFeature('restaurant') && hasPermission('canViewProduct') ? apiFetch('/api/inventory?limit=500') : Promise.resolve(null),
-        hasFeature('restaurant') && canViewRestaurant ? apiFetch('/api/restaurant/dashboard') : Promise.resolve(null),
+        hasFeature('restaurant') && canViewRestaurantOps ? apiFetch('/api/restaurant/dashboard') : Promise.resolve(null),
         canLinkWaiterToHr ? apiFetch('/api/restaurant/waiters/hr-employees') : Promise.resolve(null),
-        hasFeature('restaurant') && canViewRestaurant ? apiFetch('/api/restaurant/menu') : Promise.resolve(null),
+        hasFeature('restaurant') && canViewRestaurantOps ? apiFetch('/api/restaurant/menu') : Promise.resolve(null),
       ])
       if (tablesRes?.ok) setTables(await tablesRes.json())
       else if (!hasFeature('restaurant.tables')) setTables([])
@@ -194,7 +196,7 @@ export default function RestaurantPage() {
       if (menuRes?.ok) setMenuEntries(await menuRes.json())
     } catch (e) { console.error(e) }
     setLoading(false)
-  }, [canLinkWaiterToHr, canViewRestaurant, hasFeature, hasPermission, online])
+  }, [canLinkWaiterToHr, canViewRestaurantOps, hasFeature, hasPermission, online])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -1036,9 +1038,9 @@ export default function RestaurantPage() {
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name}</span>
                         <div className="flex gap-1">
-                          {canEditRestaurant && i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
-                          {canEditRestaurant && i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
-                          {canEditRestaurant && i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
+                          {canUpdateBarQueue && i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
+                          {canUpdateBarQueue && i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
+                          {canUpdateBarQueue && i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
                           <Badge className={statusColors[i.status]}>{i.status}</Badge>
                         </div>
                       </div>

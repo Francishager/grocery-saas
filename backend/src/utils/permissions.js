@@ -441,7 +441,7 @@ export const ALL_PERMISSION_KEYS = [
   "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
   "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
   // Restaurant & Bar
-  "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant",
+  "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant", "canViewBarQueue", "canUpdateBarQueue",
   // Fuel Station
   "canViewFuelStation", "canCreateFuelStation", "canEditFuelStation", "canDeleteFuelStation",
   // Manufacturing
@@ -497,6 +497,7 @@ export const PERMISSION_CATEGORIES = [
   { id: 'services', name: 'Services' },
   { id: 'rentals', name: 'Rentals' },
   { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'bar_operations', name: 'Bar Operations' },
   { id: 'fuel_station', name: 'Fuel Station' },
   { id: 'manufacturing', name: 'Manufacturing' },
   { id: 'agriculture', name: 'Agriculture' },
@@ -1133,6 +1134,8 @@ const PERMISSION_DETAIL_OVERRIDES = {
     name: 'View restaurant operations',
     description: 'Open restaurant orders, tables, kitchen activity, and restaurant summaries.',
   },
+  canViewBarQueue: { name: 'View bar queue', description: 'View and print bar-station tickets without access to restaurant management pages.' },
+  canUpdateBarQueue: { name: 'Update bar ticket status', description: 'Advance bar items through preparation and serving.' },
   canCreateRestaurant: {
     name: 'Create restaurant orders',
     description: 'Record dine-in, takeaway, or delivery restaurant orders.',
@@ -1394,6 +1397,10 @@ function permissionCategoryForKey(key) {
   if (key.includes('Planner')) return 'planner';
   if (key.includes('CRM')) return 'crm';
   if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('BarQueue')) return 'bar_operations';
+  if (key.includes('SalonStylist')) return 'salon_stylists';
+  if (key.includes('SalonChair')) return 'salon_chairs';
+  if (key.includes('SalonCommission')) return 'salon_commissions';
   if (key.includes('Restaurant')) return 'restaurant';
   if (key.includes('FuelStation')) return 'fuel_station';
   if (key.includes('Manufacturing')) return 'manufacturing';

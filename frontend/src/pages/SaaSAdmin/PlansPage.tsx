@@ -154,6 +154,13 @@ const MODULES = [
     ]
   },
   {
+    id: 'salon_spa', name: 'Salon & Spa', features: [
+      { name: 'salon_spa', displayName: 'Salon & Spa Operations' },
+      { name: 'salon.chair_scheduling', displayName: 'Chair Scheduling' },
+      { name: 'salon.stylist_commissions', displayName: 'Stylist Commissions' },
+    ]
+  },
+  {
     id: 'multi_branch', name: 'Multi-Branch', features: [
       { name: 'multi_branch', displayName: 'Multi-Branch' },
       { name: 'multi_branch.transfers', displayName: 'Branch Transfers' },

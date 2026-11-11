@@ -5,6 +5,7 @@ import { AppFeedback } from '@/lib/appFeedback'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { RoleRoute } from '@/guard/RoleRoute'
 import { FeatureGuard } from '@/components/FeatureGuard'
+import { servicePagePermissions } from '@/lib/servicePermissions'
 import { PwaRefreshControl } from '@/components/PwaRefreshControl'
  
 
@@ -64,6 +65,8 @@ const FuelStationPage = lazy(() => import('@/pages/FuelStationPage'))
 const ManufacturingPage = lazy(() => import('@/pages/ManufacturingPage'))
 const AgriculturePage = lazy(() => import('@/pages/AgriculturePage'))
 const ServiceBusinessPage = lazy(() => import('@/pages/ServiceBusinessPage'))
+const SalonPage = lazy(() => import('@/pages/SalonPage'))
+const SalonStylistsPage = lazy(() => import('@/pages/SalonStylistsPage'))
 const PublicServiceFeedbackPage = lazy(() => import('@/pages/PublicServiceFeedbackPage'))
 const UserProfilePage = lazy(() => import('@/pages/UserProfilePage'))
 const ReferralPage = lazy(() => import('@/pages/ReferralPage'))
@@ -249,6 +252,7 @@ function App() {
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
           <Route path="restaurant" element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="restaurant/dashboard" element={<Navigate to="/tenant/dashboard" replace />} />
+          <Route path="restaurant/bar" element={<FeatureGuard feature="restaurant.bar" permission={['canViewRestaurant', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
           <Route path="restaurant/:tab" element={<FeatureGuard feature="restaurant" permission="canViewRestaurant"><RestaurantPage /></FeatureGuard>} />
           <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
           <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station" permission="canViewFuelStation"><FuelStationPage /></FeatureGuard>} />
@@ -256,6 +260,10 @@ function App() {
           <Route path="agriculture" element={<FeatureGuard feature="agriculture"><AgriculturePage /></FeatureGuard>} />
           <Route path="service" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
+          <Route path="salon/appointments" element={<FeatureGuard feature="salon_spa" permission={servicePagePermissions('appointments')}><ServiceBusinessPage initialTab="appointments" /></FeatureGuard>} />
+          <Route path="salon/stylists" element={<FeatureGuard feature="salon_spa" permission="canViewSalonStylist"><SalonStylistsPage /></FeatureGuard>} />
+          <Route path="salon/chairs" element={<FeatureGuard feature="salon_spa"><FeatureGuard feature="salon.chair_scheduling" permission="canViewSalonChair"><SalonPage section="chairs" /></FeatureGuard></FeatureGuard>} />
+          <Route path="salon/commissions" element={<FeatureGuard feature="salon_spa"><FeatureGuard feature="salon.stylist_commissions" permission="canViewSalonCommission"><SalonPage section="commissions" /></FeatureGuard></FeatureGuard>} />
           <Route path="reports" element={<FeatureGuard feature={['reports', 'property_management.landlord', 'property_management.agent']}><ReportsPage /></FeatureGuard>} />
           <Route path="audit" element={<FeatureGuard feature="audit"><AuditLogPage /></FeatureGuard>} />
           <Route path="branches" element={<FeatureGuard feature="multi_branch"><BranchesPage /></FeatureGuard>} />

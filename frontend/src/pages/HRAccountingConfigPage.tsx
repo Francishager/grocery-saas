@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api"
 import { formatCurrency } from "@/lib/utils"
 import { useToast } from "@/hooks/use-toast"
 import { useJWTAuth } from "@/contexts/JWTAuthContext"
+import { useFeatureAccess } from "@/services/featureAccessService"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -76,7 +77,7 @@ function payrollPreviewKey(form: Record<string, any>, period: string) {
   return JSON.stringify([period, form.employeeId, ...[
     "basicSalary", "allowances", "bonus", "overtime", "otherEarnings",
     "paye", "socialSecurityTax", "healthInsurance", "otherDeductions", "salaryAdvanceRecovery",
-  ].map((key) => Number(form[key] || 0))])
+  ].map((key) => Number(form[key] || 0)), Boolean(form.includeSalonCommissions)])
 }
 
 const HR_ACCOUNTING_VIEWS = new Set(["overview", "mappings", "calculator", "payroll", "payments", "advances"])
@@ -328,6 +329,7 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
   const navigate = useNavigate()
   const { toast } = useToast()
   const { user, hasPermission } = useJWTAuth()
+  const { canAccessFeature } = useFeatureAccess()
   const assignedCashAccountId = userCashAccountId(user)
   const activeTab = HR_ACCOUNTING_VIEWS.has(String(view ?? tab)) ? String(view ?? tab) : "overview"
   const isOwner = user?.role === "owner" || user?.role === "saas_admin"
@@ -337,6 +339,7 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
   const canApprovePayroll = isOwner || canUseLegacyPayroll || hasPermission("canApproveHRPayroll")
   const canPostPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPostHRPayroll")
   const canPayPayroll = isOwner || canUseLegacyPayroll || hasPermission("canPayHRPayroll")
+  const canIncludeSalonCommissions = canAccessFeature('salon.stylist_commissions') && hasPermission('canIncludeSalonCommissionInPayroll')
   const canUseOtherCashAccount = hasPermission("canUseOtherCashAccount")
   const canUseAnyTransactionAccount = hasPermission("canUseAnyTransactionAccount")
   const canIssueAdvance = canCreatePayroll || canPayPayroll
@@ -383,8 +386,10 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
     healthInsurance: "",
     otherDeductions: "",
     salaryAdvanceRecovery: "",
+    includeSalonCommissions: false,
     notes: "",
   })
+  const [salonCommissionTotal, setSalonCommissionTotal] = useState(0)
   const [payrollPreviewOverride, setPayrollPreviewOverride] = useState<{ key: string; preview: SalaryPreview } | null>(null)
   const [paymentForm, setPaymentForm] = useState({
     payrollId: "",
@@ -417,10 +422,13 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
     () => employees.find((employee) => employee.id === payrollForm.employeeId),
     [employees, payrollForm.employeeId]
   )
-  const matchesSalaryPreview = payrollPreviewOverride?.key === payrollPreviewKey(payrollForm, payrollPeriod)
+  const matchesSalaryPreview = !payrollForm.includeSalonCommissions && payrollPreviewOverride?.key === payrollPreviewKey(payrollForm, payrollPeriod)
   const salaryCalculator = useMemo(
     () => {
-      const base = calculateUgandaPayroll(payrollForm, selectedEmployee, payrollPeriod)
+      const base = calculateUgandaPayroll({
+        ...payrollForm,
+        otherEarnings: Number(payrollForm.otherEarnings || 0) + (payrollForm.includeSalonCommissions ? salonCommissionTotal : 0),
+      }, selectedEmployee, payrollPeriod)
       if (!matchesSalaryPreview || !payrollPreviewOverride) return base
       const calculation = payrollPreviewOverride.preview.calculation
       return { ...base, ...calculation, scheduleLabel: calculation.payeScheduleLabel || base.scheduleLabel }
@@ -436,12 +444,26 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
       payrollForm.healthInsurance,
       payrollForm.otherDeductions,
       payrollForm.salaryAdvanceRecovery,
+      payrollForm.includeSalonCommissions,
+      salonCommissionTotal,
       selectedEmployee?.id,
       selectedEmployee?.taxId,
       selectedEmployee?.socialSecurityNumber,
       payrollPeriod,
     ]
   )
+
+  useEffect(() => {
+    if (!canIncludeSalonCommissions || !payrollForm.includeSalonCommissions || !payrollForm.employeeId || !/^\d{4}-(0[1-9]|1[0-2])$/.test(payrollPeriod)) {
+      setSalonCommissionTotal(0)
+      return
+    }
+    let cancelled = false
+    fetchJson(`/api/salon/commissions/eligible?employeeId=${encodeURIComponent(payrollForm.employeeId)}&period=${encodeURIComponent(payrollPeriod)}`)
+      .then(data => { if (!cancelled) setSalonCommissionTotal(Number(data.total || 0)) })
+      .catch(() => { if (!cancelled) setSalonCommissionTotal(0) })
+    return () => { cancelled = true }
+  }, [canIncludeSalonCommissions, payrollForm.includeSalonCommissions, payrollForm.employeeId, payrollPeriod])
 
   const isConfigured = Boolean(
     config?.isConfigured ||
@@ -727,6 +749,7 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
           bonus: Number(payrollForm.bonus || 0),
           overtime: Number(payrollForm.overtime || 0),
           otherEarnings: Number(payrollForm.otherEarnings || 0),
+          includeSalonCommissions: Boolean(canIncludeSalonCommissions && payrollForm.includeSalonCommissions),
           paye: Number(payrollForm.paye || 0),
           socialSecurityTax: Number(payrollForm.socialSecurityTax || 0),
           healthInsurance: Number(payrollForm.healthInsurance || 0),
@@ -1121,6 +1144,12 @@ export default function HRAccountingConfigPage({ view }: { view?: string } = {})
                   ))}
                 </div>
               </div>
+              {canIncludeSalonCommissions && <div className="rounded-md border p-3">
+                <label className="flex cursor-pointer items-start gap-3 text-sm">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={Boolean(payrollForm.includeSalonCommissions)} onChange={event => { setPayrollPreviewOverride(null); setPayrollForm(prev => ({ ...prev, includeSalonCommissions: event.target.checked })) }} />
+                  <span><strong>Include approved stylist commissions</strong><span className="mt-1 block text-muted-foreground">{payrollForm.includeSalonCommissions ? `${money(salonCommissionTotal)} will be added to this employee’s earnings for ${payrollPeriod}.` : 'Approved salon commissions can be included in the stylist’s payroll for their service-completion month.'} Commissions are claimed once when payroll is created.</span></span>
+                </label>
+              </div>}
               <div className="grid gap-4 md:grid-cols-5">
                 {[
                   ["allowances", "Allowances"],

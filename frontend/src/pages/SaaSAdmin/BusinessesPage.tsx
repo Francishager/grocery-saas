@@ -33,6 +33,7 @@ interface Plan {
   currency: string
   billingCycle: string
 }
+interface SharedLogin { id: string; isActive: boolean; isPrimaryOwner?: boolean; user: { id: string; email: string; fname?: string | null; lname?: string | null } }
 
 export const BusinessesPage: React.FC = () => {
   const [tenants, setTenants] = useState<Tenant[]>([])
@@ -49,6 +50,9 @@ export const BusinessesPage: React.FC = () => {
   const [subStart, setSubStart] = useState('')
   const [subEnd, setSubEnd] = useState('')
   const [autoEnd, setAutoEnd] = useState(true)
+  const [sharedLogins, setSharedLogins] = useState<SharedLogin[]>([])
+  const [sharedEmail, setSharedEmail] = useState('')
+  const [sharedBusy, setSharedBusy] = useState(false)
   const navigate = useNavigate()
 
   const fetchTenants = async () => {
@@ -71,6 +75,48 @@ export const BusinessesPage: React.FC = () => {
       .then(data => setPlans(Array.isArray(data) ? data : data.plans || []))
       .catch(() => {})
   }, [])
+
+  const loadSharedLogins = async (tenantId: string) => {
+    try {
+      const response = await apiFetch(`/api/admin/tenants/${tenantId}/shared-logins`, {})
+      const data = await response.json().catch(() => ({}))
+      if (response.ok) setSharedLogins(Array.isArray(data.sharedLogins) ? data.sharedLogins : [])
+    } catch {}
+  }
+
+  useEffect(() => {
+    setSharedEmail('')
+    setSharedLogins([])
+    if (selected?.id) void loadSharedLogins(selected.id)
+  }, [selected?.id])
+
+  const grantSharedLogin = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selected || !sharedEmail.trim()) return
+    setSharedBusy(true)
+    try {
+      const response = await apiFetch(`/api/admin/tenants/${selected.id}/shared-logins`, { method: 'POST', body: JSON.stringify({ email: sharedEmail.trim() }) })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Could not grant shared access.')
+      appNotify(data.message || 'Shared login granted.')
+      setSharedEmail('')
+      await loadSharedLogins(selected.id)
+    } catch (error) {
+      appNotify(error instanceof Error ? error.message : 'Could not grant shared access.')
+    } finally { setSharedBusy(false) }
+  }
+
+  const revokeSharedLogin = async (membershipId: string) => {
+    if (!selected || !(await appConfirm('Revoke this shared login for the business?'))) return
+    setSharedBusy(true)
+    try {
+      const response = await apiFetch(`/api/admin/tenants/${selected.id}/shared-logins/${membershipId}`, { method: 'DELETE' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || 'Could not revoke access.')
+      await loadSharedLogins(selected.id)
+    } catch (error) { appNotify(error instanceof Error ? error.message : 'Could not revoke access.') }
+    finally { setSharedBusy(false) }
+  }
 
   const handleAction = async (id: string, action: 'activate' | 'suspend') => {
     if (!(await appConfirm(`Are you sure you want to ${action} this tenant?`))) return
@@ -261,6 +307,21 @@ export const BusinessesPage: React.FC = () => {
               <div className="flex justify-between"><span className="text-gray-500">Sub. Start</span><span>{selected.subscriptionStart ? fmtDate(selected.subscriptionStart) : '-'}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Sub. End</span><span>{selected.subscriptionEnd ? fmtDate(selected.subscriptionEnd) : '-'}</span></div>
             </div>
+            <section className="mt-5 border-t pt-4" aria-label="Shared business login management">
+              <h3 className="text-sm font-semibold">Shared owner login</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Link an existing business-owner login. It will switch into this business with its own books and features.</p>
+              <form onSubmit={grantSharedLogin} className="mt-3 flex gap-2">
+                <input type="email" required value={sharedEmail} onChange={event => setSharedEmail(event.target.value)} placeholder="Existing owner email" className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm" />
+                <button disabled={sharedBusy} className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">Grant</button>
+              </form>
+              <div className="mt-3 max-h-28 space-y-2 overflow-y-auto">
+                {sharedLogins.filter(item => item.isActive).map(item => <div key={item.id} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate">{item.user.email}{item.isPrimaryOwner ? ' · primary owner' : ''}</span>
+                  {!item.isPrimaryOwner && <button type="button" disabled={sharedBusy} onClick={() => void revokeSharedLogin(item.id)} className="shrink-0 text-destructive hover:underline disabled:opacity-50">Revoke</button>}
+                </div>)}
+                {!sharedLogins.some(item => item.isActive) && <p className="text-xs text-muted-foreground">No additional shared logins.</p>}
+              </div>
+            </section>
             <div className="mt-4 flex gap-2">
               <button onClick={() => navigate(`/saas/businesses/${selected.id}`)} className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
                 View Full Details

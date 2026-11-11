@@ -80,7 +80,8 @@ function getRoleDefaults(role) {
     // Rentals
     canViewRental: false, canCreateRental: false, canEditRental: false, canDeleteRental: false, canProcessRentalReturn: false, canViewRentalReport: false,
     // Restaurant
-    canViewRestaurant: false, canCreateRestaurant: false, canEditRestaurant: false, canDeleteRestaurant: false, canViewRestaurantReport: false,
+    canViewRestaurant: false, canCreateRestaurant: false, canEditRestaurant: false, canDeleteRestaurant: false, canViewRestaurantReport: false, canViewBarQueue: false, canUpdateBarQueue: false,
+    canViewSalonStylist: false, canCreateSalonStylist: false, canEditSalonStylist: false, canDeactivateSalonStylist: false,
     // Fuel Station
     canViewFuelStation: false, canCreateFuelStation: false, canEditFuelStation: false, canDeleteFuelStation: false, canViewFuelStationReport: false,
     // Manufacturing

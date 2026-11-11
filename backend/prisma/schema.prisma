@@ -63,6 +63,7 @@ model Branch {
   harvests              Harvest[]
   farmExpenses          FarmExpense[]
   appointments          Appointment[]
+  salonChairs           SalonChair[]
   workOrders            WorkOrder[]
   serviceContracts      ServiceContract[]
   serviceJobCards       ServiceJobCard[]
@@ -130,15 +131,16 @@ model Tenant {
   trialEndsAt       DateTime?
 
   // =====================
-  // OWNERSHIP (1-1)
+  // OWNERSHIP (many businesses may share one owner identity)
   // =====================
-  ownerId String? @unique
+  ownerId String?
   owner   User?   @relation("TenantOwner", fields: [ownerId], references: [id])
 
   // =====================
   // USERS (1-MANY)
   // =====================
   users User[] @relation("TenantUsers")
+  memberships TenantMembership[]
 
   // =====================
   // BRANCHES
@@ -274,6 +276,8 @@ model Tenant {
   // SERVICE ENGINE
   // =====================
   appointments       Appointment[]
+  salonChairs        SalonChair[]
+  salonCommissions   SalonCommission[]
   workOrders         WorkOrder[]
   serviceContracts   ServiceContract[]
   serviceJobCards    ServiceJobCard[]
@@ -501,7 +505,8 @@ model User {
   // =========================
   // TENANT OWNERSHIP (1 user owns 1 tenant)
   // =========================
-  ownedTenant Tenant? @relation("TenantOwner")
+  ownedTenants Tenant[] @relation("TenantOwner")
+  tenantMemberships TenantMembership[]
 
   isActive                            Boolean                       @default(true)
   workingHours                        Json?
@@ -668,6 +673,25 @@ model AdvisorArtifact {
   @@unique([conversationId, requestId])
   @@index([conversationId, createdAt])
   @@map("advisor_artifacts")
+}
+
+// Explicit cross-business access for a shared login. Membership grants owner-level
+// access only; staff permissions remain tenant-local and are never reused here.
+model TenantMembership {
+  id          String   @id @default(cuid())
+  userId      String
+  tenantId    String
+  role        String   @default("owner")
+  isActive    Boolean  @default(true)
+  grantedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId, isActive])
+  @@map("tenant_memberships")
 }
 
 enum UserRole {
@@ -1124,6 +1148,21 @@ model UserPermission {
   canRespondServiceFeedback              Boolean  @default(false)
   canModerateServiceFeedback             Boolean  @default(false)
   canDeleteServiceFeedback               Boolean  @default(false)
+  // Salon & Spa
+  canViewSalonChair                      Boolean  @default(false)
+  canCreateSalonChair                    Boolean  @default(false)
+  canEditSalonChair                      Boolean  @default(false)
+  canDeactivateSalonChair                Boolean  @default(false)
+  canViewSalonCommission                 Boolean  @default(false)
+  canConfigureSalonCommission            Boolean  @default(false)
+  canApproveSalonCommission               Boolean  @default(false)
+  canIncludeSalonCommissionInPayroll      Boolean  @default(false)
+  canViewSalonStylist                     Boolean  @default(false)
+  canCreateSalonStylist                   Boolean  @default(false)
+  canEditSalonStylist                     Boolean  @default(false)
+  canDeactivateSalonStylist               Boolean  @default(false)
+  canViewBarQueue                         Boolean  @default(false)
+  canUpdateBarQueue                       Boolean  @default(false)
   canGenerateServiceFeedbackQR           Boolean  @default(false)
   canViewServiceFeedbackReport           Boolean  @default(false)
   canViewServiceCarWash                  Boolean  @default(false)
@@ -5339,6 +5378,8 @@ model Appointment {
   product         Product?  @relation(fields: [productId], references: [id])
   technicianId    String? // assigned user/staff
   technician      User?     @relation("AppointmentTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  salonChairId    String?
+  salonChair      SalonChair? @relation(fields: [salonChairId], references: [id], onDelete: SetNull)
   title           String
   description     String?
   scheduledDate   DateTime
@@ -5352,6 +5393,7 @@ model Appointment {
   reminderSent    Boolean   @default(false) // SMS/email reminder sent
   completedAt     DateTime?
   cancelledReason String?
+  commission      SalonCommission?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -5500,6 +5542,8 @@ model ServiceTechnician {
   skills          String[]  @default([]) // e.g., ["electrical", "plumbing", "HVAC", "hair styling"]
   specializations String[]  @default([]) // e.g., ["bridal makeup", "color treatment", "engine repair"]
   hourlyRate      Float     @default(0)
+  commissionType  String    @default("percent") // percent, fixed
+  commissionValue Float     @default(0)
   availability    String    @default("full_time") // full_time, part_time, on_call, unavailable
   rating          Float     @default(0) // average rating from feedback
   totalJobs       Int       @default(0)
@@ -5511,10 +5555,57 @@ model ServiceTechnician {
   updatedAt       DateTime  @updatedAt
 
   jobCards ServiceJobCard[]
+  salonCommissions SalonCommission[]
 
   @@index([tenantId, branchId])
   @@index([tenantId, isActive])
   @@map("service_technicians")
+}
+
+model SalonChair {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name      String
+  code      String?
+  location  String?
+  isActive  Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments Appointment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, branchId, isActive])
+  @@map("salon_chairs")
+}
+
+model SalonCommission {
+  id               String            @id @default(cuid())
+  tenantId         String
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appointmentId    String            @unique
+  appointment      Appointment       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  stylistId        String?
+  stylist          ServiceTechnician? @relation(fields: [stylistId], references: [id], onDelete: SetNull)
+  stylistName      String
+  serviceName      String
+  serviceRevenue   Float
+  commissionType   String
+  commissionValue  Float
+  commissionAmount Float
+  status           String            @default("pending") // pending, approved, voided, included_in_payroll
+  completedAt      DateTime
+  payrollReference String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([tenantId, completedAt, status])
+  @@index([tenantId, stylistId, status])
+  @@map("salon_commissions")
 }
 
 // =====================================================

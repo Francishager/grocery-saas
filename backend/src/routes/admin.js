@@ -1179,6 +1179,64 @@ router.post("/billing/pesapal/register-ipn", authenticateToken, requirePlatformA
     res.status(502).json({ error: err.message || "Failed to register Pesapal IPN" });
   }
 });
+
+router.get('/tenants/:id/shared-logins', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const [rows, tenant] = await Promise.all([prisma.tenantMembership.findMany({
+      where: { tenantId: req.params.id, role: 'owner' },
+      include: { user: { select: { id: true, email: true, fname: true, lname: true } } },
+      orderBy: { createdAt: 'asc' },
+    }), prisma.tenant.findUnique({ where: { id: req.params.id }, select: { ownerId: true } })]);
+    res.json({ sharedLogins: rows.map(({ id, isActive, createdAt, user }) => ({ id, isActive, createdAt, user, isPrimaryOwner: tenant?.ownerId === user.id })) });
+  } catch (error) {
+    console.error('Tenant shared login list failed:', error.message);
+    res.status(500).json({ error: 'Could not load shared business logins.' });
+  }
+});
+
+router.post('/tenants/:id/shared-logins', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Enter the existing account email.' });
+    const [tenant, user] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true, name: true } }),
+      prisma.user.findUnique({ where: { email }, select: { id: true, email: true, fname: true, lname: true, role: true, tenantId: true } }),
+    ]);
+    if (!tenant) return res.status(404).json({ error: 'Business not found.' });
+    if (!user) return res.status(404).json({ error: 'No JibuSales account exists for that email. Create the account first, then grant access.' });
+    if (['saas_admin', 'platform_staff'].includes(user.role)) return res.status(400).json({ error: 'Platform accounts cannot be linked as business owners.' });
+    if (user.role !== 'owner') return res.status(400).json({ error: 'Shared business switching is for owner accounts. Staff access remains assigned within each business.' });
+    const existingOwner = await prisma.tenant.findFirst({ where: { ownerId: user.id }, select: { id: true } });
+    if (!existingOwner && !user.tenantId) return res.status(400).json({ error: 'This login is not yet an active business owner account.' });
+    const membership = await prisma.tenantMembership.upsert({
+      where: { userId_tenantId: { userId: user.id, tenantId: tenant.id } },
+      create: { userId: user.id, tenantId: tenant.id, role: 'owner', isActive: true, grantedById: req.user.id },
+      update: { role: 'owner', isActive: true, grantedById: req.user.id },
+    });
+    await auditLog({ tenantId: 'platform', targetTenantId: tenant.id, userId: req.user.id, userEmail: req.user.email || '', action: 'shared_business_login_granted', model: 'TenantMembership', recordId: membership.id, changes: { linkedUserEmail: user.email }, ip: req.ip, severity: 'warning' }).catch(() => {});
+    res.status(201).json({ message: `Shared login granted to ${user.email}.`, sharedLogin: { id: membership.id, user: { id: user.id, email: user.email, fname: user.fname, lname: user.lname }, isActive: true } });
+  } catch (error) {
+    console.error('Tenant shared login grant failed:', error.message);
+    res.status(500).json({ error: 'Could not grant shared business access.' });
+  }
+});
+
+router.delete('/tenants/:id/shared-logins/:membershipId', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const [membership, tenant] = await Promise.all([
+      prisma.tenantMembership.findFirst({ where: { id: req.params.membershipId, tenantId: req.params.id } }),
+      prisma.tenant.findUnique({ where: { id: req.params.id }, select: { ownerId: true } }),
+    ]);
+    if (!membership) return res.status(404).json({ error: 'Shared login not found.' });
+    if (tenant?.ownerId === membership.userId) return res.status(409).json({ error: 'This login is the business primary owner. Transfer primary ownership before revoking it.' });
+    await prisma.tenantMembership.update({ where: { id: membership.id }, data: { isActive: false } });
+    await auditLog({ tenantId: 'platform', targetTenantId: membership.tenantId, userId: req.user.id, userEmail: req.user.email || '', action: 'shared_business_login_revoked', model: 'TenantMembership', recordId: membership.id, changes: { linkedUserId: membership.userId }, ip: req.ip, severity: 'warning' }).catch(() => {});
+    res.json({ message: 'Shared business access revoked.' });
+  } catch (error) {
+    console.error('Tenant shared login revoke failed:', error.message);
+    res.status(500).json({ error: 'Could not revoke shared business access.' });
+  }
+});
 router.put("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
 router.patch("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
 router.post("/tenants/:id/suspend", authenticateToken, requirePlatformAdmin, (req, res) => changeTenantStatus(req, res, "suspended"));
@@ -1297,9 +1355,11 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     if (!business?.name?.trim()) return res.status(400).json({ error: "Business name is required" });
     if (!business?.businessType) return res.status(400).json({ error: "Business type is required" });
     if (!business?.planId) return res.status(400).json({ error: "Subscription plan is required" });
-    if (!owner?.email?.trim()) return res.status(400).json({ error: "Owner email is required" });
-    if (!owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
-    if (owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
+    const ownerEmail = String(owner?.email || '').trim().toLowerCase();
+    const reuseOwnerAccount = owner?.reuseExistingAccount === true;
+    if (!ownerEmail) return res.status(400).json({ error: "Owner email is required" });
+    if (!reuseOwnerAccount && !owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
+    if (!reuseOwnerAccount && owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
     const startTrial = business.startTrial === true;
     const trialDays = startTrial ? Number(business.trialDays) : null;
@@ -1316,25 +1376,27 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       return res.status(400).json({ error: "Choose supplier, manufacturer, or both, and provide a marketplace category." });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email: owner.email } });
-    if (existingUser) return res.status(409).json({ error: "Owner email already exists" });
+    const existingUser = await prisma.user.findUnique({ where: { email: ownerEmail } });
+    if (existingUser && !reuseOwnerAccount) return res.status(409).json({ error: "Owner email already exists. Select the existing owner login option to attach this business." });
+    if (reuseOwnerAccount && !existingUser) return res.status(404).json({ error: "No existing JibuSales login was found for that email." });
+    if (reuseOwnerAccount && (existingUser.role !== 'owner' || !existingUser.isActive)) return res.status(400).json({ error: "Only an active business-owner login can be reused." });
 
     const slug = (business.slug || business.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-    const parsedName = splitName(owner.name);
-    const ownerFname = owner.fname || parsedName.fname || owner.email.split("@")[0];
-    const ownerLname = owner.lname || parsedName.lname || "";
+    const parsedName = splitName(owner.name || `${existingUser?.fname || ''} ${existingUser?.lname || ''}`);
+    const ownerFname = existingUser?.fname || owner.fname || parsedName.fname || ownerEmail.split("@")[0];
+    const ownerLname = existingUser?.lname || owner.lname || parsedName.lname || "";
 
-    const tempPassword = owner.password || generateTempPassword(12);
-    const hashed = await bcrypt.hash(tempPassword, 12);
-    const otp = generateOTP();
-    const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const tempPassword = reuseOwnerAccount ? null : (owner.password || generateTempPassword(12));
+    const hashed = reuseOwnerAccount ? null : await bcrypt.hash(tempPassword, 12);
+    const otp = reuseOwnerAccount ? null : generateOTP();
+    const otpExpires = reuseOwnerAccount ? null : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const { tenant } = await prisma.$transaction(async (tx) => {
       const createdTenant = await tx.tenant.create({
         data: {
           name: business.name,
           slug,
-          email: business.email || owner.email,
+          email: business.email || ownerEmail,
           phone: business.phone || null,
           address: business.address,
           businessType: business.businessType || null,
@@ -1346,11 +1408,16 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
         },
       });
 
-      const user = await tx.user.create({
-        data: { email: owner.email, password: hashed, fname: ownerFname, lname: ownerLname, phone: owner.phone, tenantId: createdTenant.id, role: "owner", otpCode: otp, otpExpires },
+      const user = reuseOwnerAccount ? existingUser : await tx.user.create({
+        data: { email: ownerEmail, password: hashed, fname: ownerFname, lname: ownerLname, phone: owner.phone, tenantId: createdTenant.id, role: "owner", otpCode: otp, otpExpires },
       });
 
       await tx.tenant.update({ where: { id: createdTenant.id }, data: { ownerId: user.id } });
+      await tx.tenantMembership.upsert({
+        where: { userId_tenantId: { userId: user.id, tenantId: createdTenant.id } },
+        create: { userId: user.id, tenantId: createdTenant.id, role: 'owner', isActive: true, grantedById: req.user.id },
+        update: { role: 'owner', isActive: true, grantedById: req.user.id },
+      });
       await ensureTenantAccountingSetup(tx, { tenantId: createdTenant.id, userId: user.id, enableNewSetups: true });
       if (marketplace) {
         await tx.procurementProfile.create({ data: {
@@ -1369,7 +1436,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
         });
       }
 
-      return { tenant: createdTenant, user };
+      return { tenant: createdTenant, user, reusedOwnerAccount: reuseOwnerAccount };
     });
 
     // Audit log: tenant provisioning (critical SaaS admin operation)
@@ -1387,7 +1454,8 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
           businessType: business.businessType,
           marketplaceSellerType: marketplace ? sellerType : null,
           marketplaceCategory: marketplace ? marketplaceCategory : null,
-          ownerEmail: owner.email,
+          ownerEmail,
+          reusedOwnerAccount: reuseOwnerAccount,
           planId: business.planId,
           status: startTrial ? "trial" : "active",
           trialDays: startTrial ? trialDays : null,
@@ -1403,8 +1471,10 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     let emailMessageId = null;
     let emailError = null;
     try {
-      const { subject, html } = getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
-      const delivery = await sendMail(owner.email, subject, html);
+      const emailContent = reuseOwnerAccount
+        ? { subject: `${business.name} added to your JibuSales login`, html: `<p>Hello ${ownerFname},</p><p><b>${business.name}</b> has been added to your existing JibuSales owner login.</p><p>Sign in with your existing credentials and use the business switcher to open its separate account.</p><p><a href="${frontendOrigin()}/login">Open JibuSales</a></p>` }
+        : getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      const delivery = await sendMail(ownerEmail, emailContent.subject, emailContent.html);
       emailSent = true;
       emailMessageId = delivery?.messageId || null;
     } catch (error) {
@@ -1419,7 +1489,8 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       status: startTrial ? "trial" : "active",
       trialDays: startTrial ? trialDays : null,
       trialEndsAt,
-      ownerEmail: owner.email,
+      ownerEmail,
+      reusedOwnerAccount,
       emailSent,
       emailMessageId,
       emailError,

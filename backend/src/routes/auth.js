@@ -79,6 +79,34 @@ function userPayload(user, userPerm, tenantFeatures = null) {
   };
 }
 
+async function getTenantSessionContext(user, tenantId) {
+  if (!tenantId) return { sessionUser: user, tenant: null, crossTenantOwner: false };
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  if (!tenant) return null;
+  let membership = null;
+  if (tenantId !== user.tenantId) {
+    membership = await prisma.tenantMembership.findUnique({
+      where: { userId_tenantId: { userId: user.id, tenantId } },
+      select: { role: true, isActive: true },
+    });
+    if (!membership?.isActive || membership.role !== 'owner') return null;
+  }
+  const crossTenantOwner = tenantId !== user.tenantId;
+  return {
+    tenant,
+    crossTenantOwner,
+    sessionUser: {
+      ...user,
+      tenantId,
+      tenant,
+      role: crossTenantOwner ? 'owner' : user.role,
+      branches: crossTenantOwner ? [] : (user.branches || []),
+      cashAccountId: crossTenantOwner ? null : user.cashAccountId,
+      cashAccount: crossTenantOwner ? null : user.cashAccount,
+    },
+  };
+}
+
 // Login
 router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => {
   try {
@@ -107,13 +135,16 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
+    const targetTenantId = user.tenantId;
+    const context = await getTenantSessionContext(user, targetTenantId);
+    if (!context) return res.status(403).json({ message: 'Business access has been removed.', code: 'TENANT_ACCESS_REVOKED' });
+    const tenantBlock = await enforceTenantSubscriptionAccess(context.tenant, context.sessionUser);
     const subscriptionPaymentAccess = tenantBlock?.code === 'SUBSCRIPTION_PAYMENT_REQUIRED';
     if (tenantBlock && !subscriptionPaymentAccess) {
       await logAuthenticationEvent(req, "login_blocked_subscription", user, 403);
       return res.status(403).json(tenantBlock);
     }
-    const hoursBlock = workingHoursAccessPayload(user, user.tenant);
+    const hoursBlock = workingHoursAccessPayload(context.sessionUser, context.tenant);
     if (hoursBlock && !subscriptionPaymentAccess) {
       await logAuthenticationEvent(req, "login_blocked_schedule", user, 403);
       return res.status(403).json(hoursBlock);
@@ -130,14 +161,14 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
     }
 
     // Fetch granular permissions BEFORE signing JWT so they're included in the token
-    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
-    const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();
+    const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const tenantFeatures = targetTenantId ? await getTenantFeatures(targetTenantId) : new Set();
 
     // Build permissions list: saas_admin gets wildcard, owner gets feature-aware access, others get explicit permissions from UserPermission table
-    const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
+    const jwtPermissions = resolveEffectivePermissions(context.sessionUser, userPerm, [], tenantFeatures);
 
     const tokens = createSessionTokens(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, branchId: primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: context.sessionUser.role, tenantId: targetTenantId, activeTenantId: targetTenantId, branchId: context.crossTenantOwner ? null : primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
       getJwtSecret()
     );
 
@@ -145,12 +176,65 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
     await logAuthenticationEvent(req, "login", user);
 
     res.json({
-      user: userPayload(user, userPerm, tenantFeatures),
+      user: userPayload(context.sessionUser, userPerm, tenantFeatures),
       tokens,
     });
   } catch (err) {
     console.error("Login error:", err.message);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.get('/businesses', authenticateToken, async (req, res) => {
+  try {
+    const memberships = await prisma.tenantMembership.findMany({ where: { userId: req.user.id, isActive: true, role: 'owner' }, include: { tenant: { select: { id: true, name: true, slug: true, businessType: true, status: true, logo: true } } } });
+    const byId = new Map();
+    for (const item of memberships.map((membership) => membership.tenant)) if (item) byId.set(item.id, item);
+    if (req.user.tenantId && !byId.has(req.user.tenantId)) {
+      const current = await prisma.tenant.findUnique({ where: { id: req.user.tenantId }, select: { id: true, name: true, slug: true, businessType: true, status: true, logo: true } });
+      if (current) byId.set(current.id, current);
+    }
+    res.json({ businesses: [...byId.values()], activeTenantId: req.user.tenantId });
+  } catch (error) {
+    console.error('Accessible businesses lookup failed:', error.message);
+    res.status(500).json({ error: 'Could not load your businesses.' });
+  }
+});
+
+router.post('/switch-business', authenticateToken, async (req, res) => {
+  try {
+    const targetTenantId = String(req.body?.tenantId || '').trim();
+    if (!targetTenantId) return res.status(400).json({ error: 'Choose a business to switch to.' });
+    const baseUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { tenant: true, cashAccount: { select: { id: true, name: true, type: true } }, branches: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] } },
+    });
+    if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
+    const context = await getTenantSessionContext(baseUser, targetTenantId);
+    if (!context) return res.status(403).json({ error: 'You do not have access to that business.', code: 'TENANT_ACCESS_DENIED' });
+    const tenantBlock = await enforceTenantSubscriptionAccess(context.tenant, context.sessionUser);
+    const subscriptionPaymentAccess = tenantBlock?.code === 'SUBSCRIPTION_PAYMENT_REQUIRED';
+    if (tenantBlock && !subscriptionPaymentAccess) return res.status(403).json(tenantBlock);
+    const hoursBlock = workingHoursAccessPayload(context.sessionUser, context.tenant);
+    if (hoursBlock && !subscriptionPaymentAccess) return res.status(403).json(hoursBlock);
+    const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: baseUser.id } });
+    const tenantFeatures = await getTenantFeatures(targetTenantId);
+    const permissions = resolveEffectivePermissions(context.sessionUser, userPerm, [], tenantFeatures);
+    const tokens = createSessionTokens({
+      id: baseUser.id, email: baseUser.email, role: context.sessionUser.role,
+      tenantId: targetTenantId, activeTenantId: targetTenantId,
+      branchId: context.crossTenantOwner ? null : primaryBranchId(baseUser),
+      isPlatformUser: false, permissions,
+    }, getJwtSecret());
+    const responseUser = {
+      ...userPayload(context.sessionUser, userPerm, tenantFeatures),
+      accessibleBusinesses: undefined,
+    };
+    await logAuthenticationEvent(req, 'business_switched', { ...baseUser, tenantId: targetTenantId });
+    return res.json({ user: responseUser, tokens, activeTenantId: targetTenantId });
+  } catch (error) {
+    console.error('Business switch failed:', error.message);
+    res.status(500).json({ error: 'Could not switch business. Please retry.' });
   }
 });
 
@@ -188,25 +272,28 @@ router.post("/refresh", refreshLimiter, async (req, res) => {
       return res.status(401).json({ message: "User not found or inactive" });
     }
 
-    const tenantBlock = await enforceTenantSubscriptionAccess(user.tenant, user);
+    const targetTenantId = decoded.activeTenantId || decoded.tenantId || user.tenantId;
+    const context = await getTenantSessionContext(user, targetTenantId);
+    if (!context) return res.status(403).json({ message: 'Business access has been removed.', code: 'TENANT_ACCESS_REVOKED' });
+    const tenantBlock = await enforceTenantSubscriptionAccess(context.tenant, context.sessionUser);
     const subscriptionPaymentAccess = tenantBlock?.code === 'SUBSCRIPTION_PAYMENT_REQUIRED';
     if (tenantBlock && !subscriptionPaymentAccess) return res.status(403).json(tenantBlock);
-    const hoursBlock = workingHoursAccessPayload(user, user.tenant);
+    const hoursBlock = workingHoursAccessPayload(context.sessionUser, context.tenant);
     if (hoursBlock && !subscriptionPaymentAccess) return res.status(403).json(hoursBlock);
 
-    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
-    const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();
+    const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const tenantFeatures = targetTenantId ? await getTenantFeatures(targetTenantId) : new Set();
 
     // Build permissions list: saas_admin gets wildcard, owner gets feature-aware access, others get explicit permissions from UserPermission table
-    const jwtPermissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
+    const jwtPermissions = resolveEffectivePermissions(context.sessionUser, userPerm, [], tenantFeatures);
 
     const tokens = createSessionTokens(
-      { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, branchId: primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: context.sessionUser.role, tenantId: targetTenantId, activeTenantId: targetTenantId, branchId: context.crossTenantOwner ? null : primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
       getJwtSecret()
     );
 
     res.json({
-      user: userPayload(user, userPerm, tenantFeatures),
+      user: userPayload(context.sessionUser, userPerm, tenantFeatures),
       tokens,
     });
   } catch (err) {
@@ -227,10 +314,13 @@ router.get("/me", authenticateToken, async (req, res) => {
       },
     });
     if (!user) return res.status(404).json({ error: "User not found" });
-    const userPerm = await prisma.userPermission.findUnique({ where: { userId: user.id } });
-    const tenantFeatures = user.tenantId ? await getTenantFeatures(user.tenantId) : new Set();
+    const context = await getTenantSessionContext(user, req.user.tenantId || user.tenantId);
+    if (!context) return res.status(403).json({ error: 'Business access has been removed.', code: 'TENANT_ACCESS_REVOKED' });
+    const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    const tenantFeatures = context.sessionUser.tenantId ? await getTenantFeatures(context.sessionUser.tenantId) : new Set();
     const { password: _, ...safe } = user;
-    res.json({ user: { ...safe, ...userPayload(user, userPerm, tenantFeatures) } });
+    const { password: __, ...safeContextUser } = context.sessionUser;
+    res.json({ user: { ...safe, ...safeContextUser, ...userPayload(context.sessionUser, userPerm, tenantFeatures) } });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -318,8 +408,10 @@ router.put("/profile", authenticateToken, async (req, res) => {
       },
     });
 
-    const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
-    res.json({ message: "Profile updated", user: userPayload(user, userPerm) });
+    const context = await getTenantSessionContext(user, req.user.tenantId || user.tenantId);
+    const userPerm = context?.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+    const tenantFeatures = context?.sessionUser.tenantId ? await getTenantFeatures(context.sessionUser.tenantId) : new Set();
+    res.json({ message: "Profile updated", user: userPayload(context?.sessionUser || user, userPerm, tenantFeatures) });
   } catch (err) {
     console.error("Update profile error:", err);
     res.status(500).json({ error: "Failed to update profile" });
@@ -367,8 +459,10 @@ router.post("/avatar", authenticateToken, upload.single("avatar"), async (req, r
           where: { id: req.user.id },
           include: { tenant: true, branches: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] } },
         });
-        const userPerm = await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
-        res.json({ message: "Avatar uploaded", avatar: avatarUrl, user: userPayload(user, userPerm) });
+        const context = await getTenantSessionContext(user, req.user.tenantId || user.tenantId);
+        const userPerm = context?.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
+        const tenantFeatures = context?.sessionUser.tenantId ? await getTenantFeatures(context.sessionUser.tenantId) : new Set();
+        res.json({ message: "Avatar uploaded", avatar: avatarUrl, user: userPayload(context?.sessionUser || user, userPerm, tenantFeatures) });
       }
     );
     stream.end(req.file.buffer);

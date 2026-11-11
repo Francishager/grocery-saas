@@ -47,6 +47,7 @@ export const permissionCategories = [
   { id: 'crm', name: 'CRM' },
   { id: 'property_management', name: 'Property Management' },
   { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'bar_operations', name: 'Bar Operations' },
   { id: 'fuel_station', name: 'Fuel Station' },
   { id: 'manufacturing', name: 'Manufacturing' },
   { id: 'agriculture', name: 'Agriculture' },
@@ -304,6 +305,8 @@ export const permissions: Permission[] = [
   { id: 'canCreateRestaurant', name: 'Create Restaurant', description: 'Create restaurant orders, tables, reservations', category: 'restaurant', accessesBusinessData: true },
   { id: 'canEditRestaurant', name: 'Edit Restaurant', description: 'Edit restaurant orders and settings', category: 'restaurant', accessesBusinessData: true },
   { id: 'canDeleteRestaurant', name: 'Delete Restaurant', description: 'Delete restaurant records', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canViewBarQueue', name: 'View Bar Queue', description: 'View and print drink-station tickets without accessing restaurant management pages.', category: 'bar_operations', accessesBusinessData: true },
+  { id: 'canUpdateBarQueue', name: 'Update Bar Ticket Status', description: 'Advance bar-station ticket items through preparation and serving.', category: 'bar_operations', accessesBusinessData: true },
 
   // Fuel Station
   { id: 'canViewFuelStation', name: 'View Fuel Station', description: 'Access fuel station module', category: 'fuel_station', accessesBusinessData: true },

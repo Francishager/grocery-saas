@@ -8,6 +8,7 @@ import { useState, useEffect, type ComponentType } from 'react'
 import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
 import { getApiBaseUrl } from '@/lib/apiConfig'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { appNotify } from '@/lib/appFeedback'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
@@ -70,6 +71,13 @@ const serviceSubItems = [
   { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'service' },
 ]
 
+const salonSubItems = [
+  { to: '/tenant/salon/appointments', label: 'Appointments', icon: CalendarClock, permission: servicePagePermissions('appointments'), feature: 'salon_spa' },
+  { to: '/tenant/salon/stylists', label: 'Stylists', icon: UserCog, permission: 'canViewSalonStylist', feature: 'salon_spa' },
+  { to: '/tenant/salon/chairs', label: 'Chair Schedule', icon: CalendarClock, permission: 'canViewSalonChair', feature: 'salon.chair_scheduling' },
+  { to: '/tenant/salon/commissions', label: 'Stylist Commissions', icon: Award, permission: 'canViewSalonCommission', feature: 'salon.stylist_commissions' },
+]
+
 const procurementBuyerItems = [
   { to: '/tenant/procurement/buying/marketplace', label: 'Marketplace', icon: Store, permission: 'canViewProcurement', feature: 'procurement.buyer' },
   { to: '/tenant/procurement/buying/rfqs', label: 'Quote requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.buyer' },
@@ -89,7 +97,7 @@ const restaurantSubItems = [
   { to: '/tenant/restaurant/tables', label: 'Floor & Tables', icon: Table2, permission: 'canViewRestaurant', feature: 'restaurant.tables' },
   { to: '/tenant/restaurant/orders', label: 'Orders', icon: ClipboardList, permission: 'canViewRestaurant', feature: 'restaurant.orders' },
   { to: '/tenant/restaurant/kitchen', label: 'Kitchen Queue', icon: ChefHat, permission: 'canViewRestaurant', feature: 'restaurant.kitchen' },
-  { to: '/tenant/restaurant/bar', label: 'Bar Queue', icon: Wine, permission: 'canViewRestaurant', feature: 'restaurant.bar' },
+  { to: '/tenant/restaurant/bar', label: 'Bar Queue', icon: Wine, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'restaurant.bar' },
   { to: '/tenant/restaurant/menu', label: 'Menu & Pricing', icon: UtensilsCrossed, permission: 'canViewRestaurant', feature: 'restaurant' },
   { to: '/tenant/inventory/products?hospitalityView=all', label: 'Inventory & Stockroom', icon: Package, permission: 'canViewProduct', feature: 'restaurant' },
   { to: '/tenant/restaurant/recipes', label: 'Recipes & Ingredients', icon: Beaker, permission: 'canViewRestaurant', feature: 'restaurant.recipes' },
@@ -118,6 +126,7 @@ const navItems = [
   { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },
   { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
   { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: ['appointments','work-orders','contracts','technicians','job-cards','feedback','car-wash','garage'].flatMap(servicePagePermissions), isService: true },
+  { to: '/tenant/salon/chairs', label: 'Salon & Spa', icon: Award, feature: 'salon_spa', isSalon: true },
   { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
   { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewAccounting', isAccounting: true },
   { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewHR', isHR: true },
@@ -379,6 +388,7 @@ export function TenantLayout() {
   const [restaurantExpanded, setRestaurantExpanded] = useState(false)
   const [propertyManagementExpanded, setPropertyManagementExpanded] = useState(false)
   const [serviceExpanded, setServiceExpanded] = useState(false)
+  const [salonExpanded, setSalonExpanded] = useState(false)
   const [procurementExpanded, setProcurementExpanded] = useState(false)
   const [procurementBuyerExpanded, setProcurementBuyerExpanded] = useState(false)
   const [procurementSellerExpanded, setProcurementSellerExpanded] = useState(false)
@@ -389,13 +399,36 @@ export function TenantLayout() {
   const [showOnboardingModal, setShowOnboardingModal] = useState(false)
   const [searchParams] = useSearchParams()
   const activeReportId = searchParams.get('report')
-  const { user, logout, hasPermission, hasCompletedOnboarding, refreshOnboardingStatus, tokens } = useJWTAuth()
+  const { user, logout, hasPermission, hasCompletedOnboarding, refreshOnboardingStatus, tokens, switchBusiness } = useJWTAuth()
   const tenantId = user?.tenantId || (user as any)?.tenant_id
+  const [businesses, setBusinesses] = useState<Array<{ id: string; name: string; businessType?: string | null }>>([])
+  const [switchingBusiness, setSwitchingBusiness] = useState(false)
   const onboardingStorageKey = user?.id ? `jibu_sales_onboarding_seen_${user.id}` : 'jibu_sales_onboarding_seen_guest'
   const { theme, toggleTheme } = useTheme()
   const { canAccessFeature, loading } = useFeatureAccess()
   const navigate = useNavigate()
   const location = useLocation()
+  useEffect(() => {
+    if (!tokens?.accessToken || !tenantId || user?.isPlatformUser) { setBusinesses([]); return }
+    const controller = new AbortController()
+    fetch(`${getApiBaseUrl()}/api/auth/businesses`, { headers: { Authorization: `Bearer ${tokens.accessToken}` }, signal: controller.signal })
+      .then(async response => response.ok ? response.json() : null)
+      .then(data => setBusinesses(Array.isArray(data?.businesses) ? data.businesses : []))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [tokens?.accessToken, tenantId, user?.isPlatformUser])
+  const handleBusinessSwitch = async (nextTenantId: string) => {
+    if (!nextTenantId || nextTenantId === tenantId) return
+    setSwitchingBusiness(true)
+    try {
+      await switchBusiness(nextTenantId)
+      navigate('/tenant/dashboard', { replace: true })
+    } catch (error) {
+      appNotify(error instanceof Error ? error.message : 'Could not switch business.')
+    } finally {
+      setSwitchingBusiness(false)
+    }
+  }
   const [waiterMode, setWaiterMode] = useState(() => sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
   const handleLogout = () => {
     sessionStorage.removeItem('restaurant.activeWaiterId')
@@ -551,6 +584,7 @@ export function TenantLayout() {
     setRestaurantExpanded(group === 'restaurant')
     setPropertyManagementExpanded(group === 'property-management')
     setServiceExpanded(group === 'service')
+    setSalonExpanded(group === 'salon')
     setProcurementExpanded(group === 'procurement')
     setHRExpanded(group === 'hr')
   }
@@ -565,6 +599,7 @@ export function TenantLayout() {
   const toggleFuelStation = () => toggleExpandedGroup('fuel', fuelStationExpanded)
   const toggleReceivables = () => toggleExpandedGroup('receivables', receivablesExpanded)
   const toggleService = () => toggleExpandedGroup('service', serviceExpanded)
+  const toggleSalon = () => toggleExpandedGroup('salon', salonExpanded)
   const toggleRestaurant = () => toggleExpandedGroup('restaurant', restaurantExpanded)
   const togglePropertyManagement = () => toggleExpandedGroup('property-management', propertyManagementExpanded)
   const toggleProcurement = () => toggleExpandedGroup('procurement', procurementExpanded)
@@ -580,6 +615,7 @@ export function TenantLayout() {
     else if (path.startsWith('/tenant/fuel-station')) group = 'fuel'
     else if (path.startsWith('/tenant/receivables')) group = 'receivables'
     else if (path.startsWith('/tenant/service')) group = 'service'
+    else if (path.startsWith('/tenant/salon')) group = 'salon'
     else if (path.startsWith('/tenant/restaurant')) group = 'restaurant'
     else if (path.startsWith('/tenant/property-management')) group = 'property-management'
     else if (path.startsWith('/tenant/procurement')) group = 'procurement'
@@ -617,6 +653,7 @@ export function TenantLayout() {
   const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
   const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
   const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
+  const visibleSalonSubItems = salonSubItems.filter(subItemVisible)
   const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible).filter(item =>
     !waiterMode || ['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(item.to)
   )
@@ -656,6 +693,9 @@ export function TenantLayout() {
     if (item.feature === 'dashboard') return canAccessFeature('dashboard')
     if (item.isPropertyManagement) return visiblePropertyManagementSubItems.length > 0
     if (item.isRentals) return visibleRentalSubItems.length > 0
+    if (item.isSalon) return canAccessFeature('salon_spa') && visibleSalonSubItems.length > 0
+    if (item.isRestaurant) return visibleRestaurantSubItems.length > 0
+    if (item.isService && canAccessFeature('salon_spa')) return false
     if (item.isStandalonePlanner) return !canAccessFeature('rentals') && canAccessFeature('planner') && hasRequiredPermission(item.permission)
     if (item.isStandaloneCRM) return !canAccessFeature('rentals') && canAccessFeature('crm') && hasRequiredPermission(item.permission)
     if (item.isInventory) return visibleInventorySubItems.length > 0
@@ -940,6 +980,17 @@ export function TenantLayout() {
                     </div>
                   )}
                 </div>
+              ) : item.isSalon ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={salonExpanded} onClick={toggleSalon}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', salonExpanded || location.pathname.startsWith('/tenant/salon') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {salonExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {salonExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleSalonSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
               ) : item.isRestaurant ? (
                 <div key={item.to}>
                   <button
@@ -1107,6 +1158,13 @@ export function TenantLayout() {
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
+            {businesses.length > 1 && <label className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-sm">
+              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="sr-only">Switch business</span>
+              <select aria-label="Switch business" value={tenantId || ''} disabled={switchingBusiness} onChange={event => void handleBusinessSwitch(event.target.value)} className="max-w-[min(42vw,15rem)] bg-transparent text-foreground outline-none disabled:opacity-60">
+                {businesses.map(business => <option key={business.id} value={business.id}>{business.name}</option>)}
+              </select>
+            </label>}
           </div>
           <div className="flex-1" />
           {!waiterMode && <><SyncIndicator />

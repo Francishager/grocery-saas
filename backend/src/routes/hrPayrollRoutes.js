@@ -7,7 +7,7 @@ import { Router } from "express";
 import payrollService from "../services/payrollService.js";
 import prisma from "../db.js";
 import { linkedCashAccountId } from "../utils/accountingSync.js";
-import { authenticateToken, requireAnyPermission, requireTenant, loadUserPermissions, canUseTransactionAccountForPayment } from "../../middleware/auth.js";
+import { authenticateToken, requireAnyPermission, requireTenant, loadUserPermissions, canUseTransactionAccountForPayment, requirePermission, requireFeature } from "../../middleware/auth.js";
 
 const router = Router();
 const tenantIdFromRequest = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id || req.tenantId;
@@ -28,6 +28,12 @@ const useSalaryCalculator = requireAnyPermission([
   "canCreateHRPayroll",
   "canManageHRPayroll",
 ]);
+const salonCommissionPayrollAccess = (req, res, next) => {
+  if (req.body?.includeSalonCommissions !== true) return next();
+  return requirePermission('canIncludeSalonCommissionInPayroll')(req, res, () =>
+    requireFeature('salon.stylist_commissions')(req, res, next)
+  );
+};
 
 // Check authentication and tenant
 router.use(authenticateToken, requireTenant);
@@ -36,7 +42,7 @@ router.use(authenticateToken, requireTenant);
  * POST /api/hr/payroll/calculate
  * Preview Uganda PAYE/NSSF salary calculations without creating payroll.
  */
-router.post("/calculate", useSalaryCalculator, async (req, res) => {
+router.post("/calculate", useSalaryCalculator, salonCommissionPayrollAccess, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const result = await payrollService.calculateSalaryPreview({
@@ -59,7 +65,7 @@ router.post("/calculate", useSalaryCalculator, async (req, res) => {
  * POST /api/hr/payroll
  * Create a new payroll record
  */
-router.post("/", requireAnyPermission(["canCreateHRPayroll", "canManageHRPayroll"]), async (req, res) => {
+router.post("/", requireAnyPermission(["canCreateHRPayroll", "canManageHRPayroll"]), salonCommissionPayrollAccess, async (req, res) => {
   try {
     const tenantId = tenantIdFromRequest(req);
     const userId = userIdFromRequest(req);
@@ -77,6 +83,7 @@ router.post("/", requireAnyPermission(["canCreateHRPayroll", "canManageHRPayroll
       otherDeductions,
       salaryAdvanceRecovery,
       notes,
+      includeSalonCommissions = false,
     } = req.body;
 
     if (!employeeId || !period) {
@@ -94,6 +101,7 @@ router.post("/", requireAnyPermission(["canCreateHRPayroll", "canManageHRPayroll
       bonus: bonus || 0,
       overtime: overtime || 0,
       otherEarnings: otherEarnings || 0,
+      includeSalonCommissions: includeSalonCommissions === true,
       paye: optionalNumber(paye),
       socialSecurityTax: optionalNumber(socialSecurityTax),
       healthInsurance: healthInsurance || 0,

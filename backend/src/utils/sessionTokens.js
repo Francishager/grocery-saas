@@ -5,7 +5,12 @@ export const REFRESH_TOKEN_TTL = "30d";
 
 export function createSessionTokens(userClaims, secret) {
   const accessToken = jwt.sign(userClaims, secret, { expiresIn: ACCESS_TOKEN_TTL_SECONDS });
-  const refreshToken = jwt.sign({ id: userClaims.id, type: "refresh" }, secret, { expiresIn: REFRESH_TOKEN_TTL });
+  const refreshToken = jwt.sign({
+    id: userClaims.id,
+    type: "refresh",
+    tenantId: userClaims.tenantId || null,
+    activeTenantId: userClaims.activeTenantId || userClaims.tenantId || null,
+  }, secret, { expiresIn: REFRESH_TOKEN_TTL });
 
   return {
     accessToken,

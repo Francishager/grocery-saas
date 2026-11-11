@@ -498,7 +498,7 @@ router.put('/orders/:id/status', authenticateToken, requirePermission('canEditRe
 })
 
 // Update individual item status (kitchen display)
-router.put('/orders/:id/items/:itemId/status', authenticateToken, requirePermission('canEditRestaurant'), async (req, res) => {
+router.put('/orders/:id/items/:itemId/status', authenticateToken, requireAnyPermission(['canEditRestaurant', 'canUpdateBarQueue']), async (req, res) => {
   try {
     const { status } = req.body
     if (!['pending', 'preparing', 'ready', 'served'].includes(status)) {
@@ -510,6 +510,9 @@ router.put('/orders/:id/items/:itemId/status', authenticateToken, requirePermiss
       select: { id: true, station: true },
     })
     if (!existing) return res.status(404).json({ error: 'Order item not found' })
+    const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+    if (existing.station === 'bar' && !granted.includes('*') && !granted.includes('canEditRestaurant') && !granted.includes('canUpdateBarQueue')) return res.status(403).json({ error: 'You do not have permission to update bar tickets.' })
+    if (existing.station !== 'bar' && !granted.includes('*') && !granted.includes('canEditRestaurant')) return res.status(403).json({ error: 'You do not have permission to update kitchen tickets.' })
     const features = await getTenantFeatures(scope.tenantId)
     const stationFeature = existing.station === 'bar' ? 'restaurant.bar' : 'restaurant.kitchen'
     if (!hasFeatureAccess(features, stationFeature)) {
@@ -685,7 +688,7 @@ router.get('/kitchen/orders', authenticateToken, requirePermission('canViewResta
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.get('/bar/orders', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.bar'), async (req, res) => {
+router.get('/bar/orders', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canViewBarQueue']), requireFeature('restaurant.bar'), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const orders = await prisma.restaurantOrder.findMany({

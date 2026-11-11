@@ -24,6 +24,7 @@ export interface User {
   /** Tenant ID for business users */
   tenantId?: string
   tenantStatus?: string | null
+  accessibleBusinesses?: Array<{ id: string; name: string; businessType?: string | null; status?: string; logo?: string | null }>
   cashAccountId?: string | null
   cashAccount?: { id: string; name: string; type: string } | null
 }
@@ -62,6 +63,8 @@ export interface JWTAuthContextValue {
   register: (data: { email: string; password: string; name: string }) => Promise<void>
   /** Refresh tokens */
   refreshTokens: () => Promise<boolean>
+  /** Switch to another SaaS-admin-authorized business */
+  switchBusiness: (tenantId: string) => Promise<void>
   /** Update user */
   updateUser: (updates: Partial<User>) => void
   /** Check if user has permission */
@@ -441,6 +444,34 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     }
   }, [resolvedApiEndpoint, onLogin])
 
+  const switchBusiness = useCallback(async (tenantId: string) => {
+    if (!tokens?.accessToken) throw new Error('Sign in again to switch businesses.')
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch(`${resolvedApiEndpoint}/switch-business`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokens.accessToken}` },
+        body: JSON.stringify({ tenantId }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || data.message || 'Could not switch business.')
+      setUser(data.user)
+      setTokens(data.tokens)
+      persistAuth(data.user, data.tokens)
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
+      featureAccessService.reset()
+      await refreshOnboardingStatus()
+      onLogin?.(data.user, data.tokens)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not switch business.'
+      setError(message)
+      throw err
+    } finally {
+      setLoading(false)
+    }
+  }, [tokens?.accessToken, resolvedApiEndpoint, refreshOnboardingStatus, onLogin])
+
   const refreshTokens = useCallback(async () => {
     if (!tokens?.refreshToken) return false
 
@@ -658,6 +689,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     logout,
     register,
     refreshTokens,
+    switchBusiness,
     updateUser,
     hasPermission,
     hasRole,

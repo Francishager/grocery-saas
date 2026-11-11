@@ -440,7 +440,19 @@ export const SERVICE_PERMISSION_DEFINITIONS = [
     "tab": "garage",
     "action": "UpdateStatus",
     "feature": "service"
-  }
+  },
+  { id: "canViewSalonChair", name: "View chair schedule", description: "View salon chairs and their appointment schedule.", category: "salon_chairs", tab: "salon-chairs", action: "View", feature: "salon.chair_scheduling" },
+  { id: "canCreateSalonChair", name: "Create salon chairs", description: "Add bookable chairs or stations.", category: "salon_chairs", tab: "salon-chairs", action: "Create", feature: "salon.chair_scheduling" },
+  { id: "canEditSalonChair", name: "Edit salon chairs", description: "Change chair names, locations, and branch assignments.", category: "salon_chairs", tab: "salon-chairs", action: "Edit", feature: "salon.chair_scheduling" },
+  { id: "canDeactivateSalonChair", name: "Deactivate salon chairs", description: "Deactivate chairs without deleting their appointment history.", category: "salon_chairs", tab: "salon-chairs", action: "Deactivate", feature: "salon.chair_scheduling" },
+  { id: "canViewSalonCommission", name: "View stylist commissions", description: "View commission rules and completed-service commission records.", category: "salon_commissions", tab: "salon-commissions", action: "View", feature: "salon.stylist_commissions" },
+  { id: "canConfigureSalonCommission", name: "Configure stylist commissions", description: "Set stylist commission rates and calculation methods.", category: "salon_commissions", tab: "salon-commissions", action: "Configure", feature: "salon.stylist_commissions" },
+  { id: "canApproveSalonCommission", name: "Approve stylist commissions", description: "Approve calculated commissions for payroll processing.", category: "salon_commissions", tab: "salon-commissions", action: "Approve", feature: "salon.stylist_commissions" },
+  { id: "canIncludeSalonCommissionInPayroll", name: "Include commissions in payroll", description: "Transfer approved commissions into employee payroll earnings.", category: "salon_commissions", tab: "salon-commissions", action: "Payroll", feature: "salon.stylist_commissions" },
+  { id: "canViewSalonStylist", name: "View salon stylists", description: "View stylist profiles used for salon appointments and commissions.", category: "salon_stylists", tab: "stylists", action: "View", feature: "salon_spa" },
+  { id: "canCreateSalonStylist", name: "Create salon stylists", description: "Add stylist profiles for salon appointments and commissions.", category: "salon_stylists", tab: "stylists", action: "Create", feature: "salon_spa" },
+  { id: "canEditSalonStylist", name: "Edit salon stylists", description: "Update stylist details and employee links.", category: "salon_stylists", tab: "stylists", action: "Edit", feature: "salon_spa" },
+  { id: "canDeactivateSalonStylist", name: "Deactivate salon stylists", description: "Deactivate a stylist while preserving their appointment and commission history.", category: "salon_stylists", tab: "stylists", action: "Deactivate", feature: "salon_spa" }
 ];
 export const SERVICE_PERMISSION_CATEGORIES = [
   {
@@ -474,6 +486,18 @@ export const SERVICE_PERMISSION_CATEGORIES = [
   {
     "id": "service_garage",
     "name": "Service Business - Garage Services"
+  },
+  {
+    "id": "salon_chairs",
+    "name": "Salon & Spa - Chair Scheduling"
+  },
+  {
+    "id": "salon_commissions",
+    "name": "Salon & Spa - Stylist Commissions"
+  },
+  {
+    "id": "salon_stylists",
+    "name": "Salon & Spa - Stylists"
   }
 ];
 export const servicePagePermissions = (tab: string) => SERVICE_PERMISSION_DEFINITIONS.filter(p => p.tab === tab && p.action !== 'Report').map(p => p.id);

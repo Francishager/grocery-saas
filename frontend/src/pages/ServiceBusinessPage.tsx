@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch as rawApiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
 import { SERVICE_PERMISSION_DEFINITIONS, servicePagePermissions, servicePermission } from '@/lib/servicePermissions'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,7 +24,7 @@ interface ServiceJobCard {
   sale?: { receiptNo: string; status: string; user?: { fname: string; lname: string } } | null
 }
 
-interface Appointment { id: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; scheduledDate: string; scheduledTime: string; endTime?: string | null; duration: string | null; status: string; price: number; actualPrice: number; notes?: string | null; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
+interface Appointment { id: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; scheduledDate: string; scheduledTime: string; endTime?: string | null; duration: string | null; status: string; price: number; actualPrice: number; notes?: string | null; salonChairId?: string | null; product?: { id: string; name: string } | null; customer?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
 interface WorkOrder { id: string; orderNo: string; customerName: string; customerPhone: string | null; customerEmail?: string | null; title: string; description?: string | null; status: string; priority: string; serviceCategory?: string | null; estimatedCost: number; actualCost: number; laborCost: number; partsCost: number; startDate: string | null; endDate: string | null; diagnostics?: string | null; warrantyInfo?: string | null; notes?: string | null; product?: { id: string; name: string } | null; technician?: { id: string; fname: string; lname: string } | null }
 interface ServiceContract { id: string; contractNo: string; title: string; description?: string | null; serviceCategory?: string | null; customer: { id: string; name: string }; startDate: string; endDate: string | null; renewalDate?: string | null; autoRenew: boolean; nextBillingDate?: string | null; value: number; billingCycle: string; discountPercent: number; status: string; terms?: string | null }
 interface CarWashRecord { id: string; createdAt: string; customerName: string; title: string; estimatedCost: number; technicianId?: string | null; notes?: string | null }
@@ -55,13 +56,14 @@ async function apiFetch(path: string, init?: RequestInit) {
   return response
 }
 
-export default function ServiceBusinessPage() {
+export default function ServiceBusinessPage({ initialTab }: { initialTab?: string } = {}) {
   const { tab: urlTab } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   const [completionDraft, setCompletionDraft] = useState('')
   const { hasPermission } = useJWTAuth()
-  const tab = urlTab || SERVICE_PERMISSION_DEFINITIONS.find(p => p.action !== 'Report' && hasPermission(p.id))?.tab || 'appointments'
+  const { canAccessFeature } = useFeatureAccess()
+  const tab = urlTab || initialTab || SERVICE_PERMISSION_DEFINITIONS.find(p => p.action !== 'Report' && hasPermission(p.id))?.tab || 'appointments'
   const can = useCallback((action: string, section = tab) => hasPermission(servicePermission(section, action)), [hasPermission, tab])
   const canOpen = servicePagePermissions(tab).some(hasPermission)
   const [technicianOptions, setTechnicianOptions] = useState<{ id: string; name: string; userId?: string | null; isCurrentUser?: boolean }[]>([])
@@ -101,7 +103,8 @@ export default function ServiceBusinessPage() {
   const [showTechModal, setShowTechModal] = useState(false)
   const [showJobCardModal, setShowJobCardModal] = useState(false)
   const [showFeedbackModal, setShowFeedbackModal] = useState(false)
-  const [apptForm, setApptForm] = useState({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' })
+  const [salonChairs, setSalonChairs] = useState<{ id: string; name: string; code?: string | null; branchId?: string | null; branch?: { name: string } | null }[]>([])
+  const [apptForm, setApptForm] = useState({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' })
   const [woForm, setWoForm] = useState({ orderNo: '', customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', priority: 'normal', serviceCategory: '', estimatedCost: 0 })
   const [contractForm, setContractForm] = useState({ contractNo: '', customerId: '', title: '', description: '', serviceCategory: '', startDate: '', endDate: '', renewalDate: '', autoRenew: false, value: 0, billingCycle: 'monthly', discountPercent: 0, terms: '' })
   const [techForm, setTechForm] = useState({ employeeId: '', name: '', email: '', phone: '', role: 'technician', skills: '', specializations: '', hourlyRate: 0, availability: 'full_time', hireDate: '', notes: '' })
@@ -148,12 +151,22 @@ export default function ServiceBusinessPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  useEffect(() => {
+    if (tab !== 'appointments' || !canAccessFeature('salon.chair_scheduling') || !hasPermission('canViewSalonChair')) {
+      setSalonChairs([])
+      return
+    }
+    apiFetch('/api/salon/chairs').then(async response => response.ok ? response.json() : [])
+      .then(rows => setSalonChairs(Array.isArray(rows) ? rows.filter((chair: any) => chair.isActive) : []))
+      .catch(() => setSalonChairs([]))
+  }, [tab, canAccessFeature, hasPermission])
+
   const createAppt = async () => {
     if (!apptForm.customerName.trim()) { toast({ variant: 'destructive', title: 'Customer name is required' }); return }
     if (!apptForm.scheduledDate) { toast({ variant: 'destructive', title: 'Date is required' }); return }
     if (!apptForm.scheduledTime) { toast({ variant: 'destructive', title: 'Time is required' }); return }
     try { await apiFetch('/api/service/appointments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(apptForm) })
-    setShowApptModal(false); setApptForm({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' }); loadData() } catch { toast({ variant: 'destructive', title: 'Failed to create appointment' }) }
+    setShowApptModal(false); setApptForm({ customerName: '', customerPhone: '', customerEmail: '', productId: '', technicianId: '', salonChairId: '', branchId: '', title: '', description: '', scheduledDate: '', scheduledTime: '', endTime: '', duration: '', price: 0, notes: '' }); loadData() } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Failed to create appointment' }) }
   }
   const createWO = async () => {
     if (savingService) return
@@ -177,7 +190,7 @@ export default function ServiceBusinessPage() {
   const updateWOStatus = async (id: string, status: string) => {
     await apiFetch(`/api/service/work-orders/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); loadData()
   }
-  const deleteAppt = async (id: string) => { try { await apiFetch(`/api/service/appointments/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
+  const deleteAppt = async (id: string) => { try { await apiFetch(`/api/service/appointments/${id}`, { method: 'DELETE' }); loadData() } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Unable to delete appointment' }) } }
   const deleteWO = async (id: string) => { try { await apiFetch(`/api/service/work-orders/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
   const deleteContract = async (id: string) => { try { await apiFetch(`/api/service/contracts/${id}`, { method: 'DELETE' }) } catch {} ; loadData() }
 
@@ -432,10 +445,10 @@ export default function ServiceBusinessPage() {
         <div className="space-y-4">
           {can('Create', 'appointments') && <Button onClick={() => setShowApptModal(true)}><Plus className="mr-1 h-4 w-4" /> New Appointment</Button>}
           <div className="rounded-md border overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
-              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Technician</th><th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
+            <table className="w-full text-sm min-w-[780px]">
+              <thead className="bg-muted"><tr><th className="p-2 text-left">Date</th><th className="p-2 text-left">Time</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Service</th><th className="p-2 text-left">Stylist</th>{canAccessFeature('salon.chair_scheduling') && hasPermission('canViewSalonChair') && <th className="p-2 text-left">Chair</th>}<th className="p-2 text-right">Price</th><th className="p-2 text-left">Status</th><th></th></tr></thead>
               <tbody>
-                {appointments.length === 0 && <tr className="border-t"><td colSpan={8} className="p-8 text-center text-muted-foreground">No appointments yet</td></tr>}
+                {appointments.length === 0 && <tr className="border-t"><td colSpan={canAccessFeature('salon.chair_scheduling') && hasPermission('canViewSalonChair') ? 9 : 8} className="p-8 text-center text-muted-foreground">No appointments yet</td></tr>}
                 {appointments.map(a => (
                   <tr key={a.id} className="border-t">
                     <td className="p-2">{new Date(a.scheduledDate).toLocaleDateString()}</td>
@@ -443,6 +456,7 @@ export default function ServiceBusinessPage() {
                     <td className="p-2">{a.customerName}<div className="text-xs text-muted-foreground">{a.customerPhone}</div></td>
                     <td className="p-2">{a.title}</td>
                     <td className="p-2">{a.technician ? `${a.technician.fname} ${a.technician.lname}` : '-'}</td>
+                    {canAccessFeature('salon.chair_scheduling') && hasPermission('canViewSalonChair') && <td className="p-2">{salonChairs.find(chair => chair.id === a.salonChairId)?.name || '—'}</td>}
                     <td className="p-2 text-right">{a.status === 'completed' ? (a.actualPrice || a.price).toFixed(0) : a.price.toFixed(0)}</td>
                     <td className="p-2"><Badge className={statusColors[a.status]}>{a.status}</Badge></td>
                     <td className="p-2 space-x-1">
@@ -782,6 +796,17 @@ export default function ServiceBusinessPage() {
                 </SelectContent>
               </Select>
             </div>
+            {salonChairs.length > 0 && <div><Label>Chair / station</Label>
+              <Select value={apptForm.salonChairId || 'none'} onValueChange={value => {
+                const chair = salonChairs.find(option => option.id === value)
+                setApptForm({ ...apptForm, salonChairId: value === 'none' ? '' : value, branchId: chair?.branchId || '' })
+              }}>
+                <SelectTrigger><SelectValue placeholder="No chair assigned" /></SelectTrigger><SelectContent>
+                  <SelectItem value="none">No chair assigned</SelectItem>
+                  {salonChairs.map(chair => <SelectItem key={chair.id} value={chair.id}>{chair.name}{chair.code ? ` (${chair.code})` : ''}{chair.branch?.name ? ` - ${chair.branch.name}` : ''}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>}
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Date</Label><Input type="date" value={apptForm.scheduledDate} onChange={e => setApptForm({ ...apptForm, scheduledDate: e.target.value })} /></div>
               <div><Label>Time</Label><Input type="time" value={apptForm.scheduledTime} onChange={e => setApptForm({ ...apptForm, scheduledTime: e.target.value })} /></div>

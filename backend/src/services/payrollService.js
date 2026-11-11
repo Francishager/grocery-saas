@@ -26,7 +26,17 @@ class PayrollService {
         });
         if (!employee) return { success: false, error: "Employee not found" };
       }
-      return calculateUgandaSalaryPreview(params, employee);
+      const input = { ...params };
+      if (params.includeSalonCommissions && employee) {
+        const periodStart = new Date(`${params.period}-01T00:00:00.000Z`);
+        const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 1));
+        const commissions = await prisma.salonCommission.findMany({
+          where: { tenantId: params.tenantId, status: 'approved', completedAt: { gte: periodStart, lt: periodEnd }, stylist: { employeeId: employee.id } },
+          select: { commissionAmount: true },
+        });
+        input.otherEarnings = Number(input.otherEarnings || 0) + commissions.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0);
+      }
+      return calculateUgandaSalaryPreview(input, employee);
     } catch (error) {
       if (error instanceof RangeError) return { success: false, error: error.message };
       throw error;
@@ -47,7 +57,7 @@ class PayrollService {
       allowances = 0,
       bonus = 0,
       overtime = 0,
-      otherEarnings = 0,
+      otherEarnings: enteredOtherEarnings = 0,
       paye,
       socialSecurityTax,
       healthInsurance = 0,
@@ -55,6 +65,7 @@ class PayrollService {
       salaryAdvanceRecovery = 0,
       notes,
       userId,
+      includeSalonCommissions = false,
     } = params;
 
     // Validate period format
@@ -93,6 +104,16 @@ class PayrollService {
         error: "Employee not found",
       };
     }
+
+    const commissionPeriodStart = new Date(`${period}-01T00:00:00.000Z`);
+    const commissionPeriodEnd = new Date(Date.UTC(commissionPeriodStart.getUTCFullYear(), commissionPeriodStart.getUTCMonth() + 1, 1));
+    const eligibleCommissions = includeSalonCommissions
+      ? await prisma.salonCommission.findMany({ where: {
+          tenantId, status: 'approved', completedAt: { gte: commissionPeriodStart, lt: commissionPeriodEnd }, stylist: { employeeId },
+        }, select: { id: true, commissionAmount: true, serviceName: true, completedAt: true } })
+      : [];
+    const commissionTotal = eligibleCommissions.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0);
+    const otherEarnings = Number(enteredOtherEarnings || 0) + commissionTotal;
 
     const statutoryDeductions = calculateUgandaPayrollDeductions({
       period,
@@ -168,6 +189,17 @@ class PayrollService {
             createdBy: userId,
           },
         });
+
+        if (eligibleCommissions.length) {
+          const ids = eligibleCommissions.map(item => item.id);
+          const claimed = await tx.salonCommission.updateMany({ where: { tenantId, id: { in: ids }, status: 'approved' }, data: { status: 'included_in_payroll', payrollReference: payroll.payrollNo } });
+          if (claimed.count !== ids.length) throw new Error('Some approved salon commissions were already included in another payroll. Refresh and retry.');
+          await tx.payrollAdjustment.createMany({ data: eligibleCommissions.map(item => ({
+            tenantId, payrollId: payroll.id, employeeId, type: 'other_earning',
+            description: `Salon commission: ${item.serviceName} (${item.completedAt.toISOString().slice(0, 10)})`,
+            amount: Number(item.commissionAmount || 0),
+          })) });
+        }
 
         // Create audit log
         await hrAccountingService.createAuditLog({

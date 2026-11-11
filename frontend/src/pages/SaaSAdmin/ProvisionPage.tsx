@@ -22,6 +22,7 @@ interface ProvisionResult {
   emailError?: string | null
   tempPassword?: string
   otp?: string
+  reusedOwnerAccount?: boolean
 }
 
 function generatePassword(length = 14) {
@@ -50,6 +51,7 @@ const createEmptyForm = () => ({
   ownerEmail: '',
   ownerPhone: '',
   ownerPassword: generatePassword(),
+  reuseExistingOwner: false,
 })
 
 type ProvisionForm = ReturnType<typeof createEmptyForm>
@@ -89,6 +91,7 @@ export const ProvisionPage: React.FC = () => {
       result.tenantId ? `Business ID: ${result.tenantId}` : null,
       result.slug ? `Slug: ${result.slug}` : null,
       result.ownerEmail ? `Owner email: ${result.ownerEmail}` : null,
+      result.reusedOwnerAccount ? 'Access: existing owner login; switch businesses after signing in' : null,
       result.tempPassword ? `Temporary password: ${result.tempPassword}` : null,
       result.otp ? `OTP: ${result.otp}` : null,
       'Login: /login',
@@ -129,9 +132,9 @@ export const ProvisionPage: React.FC = () => {
     if (!form.businessName.trim()) { setError('Business name is required'); return }
     if (!form.businessType) { setError('Business type is required'); return }
     if (!form.planId) { setError('Subscription plan is required'); return }
-    if (!form.ownerName.trim()) { setError('Owner name is required'); return }
+    if (!form.reuseExistingOwner && !form.ownerName.trim()) { setError('Owner name is required'); return }
     if (!form.ownerEmail.trim()) { setError('Owner email is required'); return }
-    if (!form.ownerPassword || form.ownerPassword.length < 12) { setError('Password must be at least 12 characters'); return }
+    if (!form.reuseExistingOwner && (!form.ownerPassword || form.ownerPassword.length < 12)) { setError('Password must be at least 12 characters'); return }
     setLoading(true)
     setError(null)
     setSuccess(false)
@@ -156,7 +159,7 @@ export const ProvisionPage: React.FC = () => {
             name: form.ownerName,
             email: form.ownerEmail,
             phone: form.ownerPhone || undefined,
-            password: form.ownerPassword || undefined,
+            ...(form.reuseExistingOwner ? { reuseExistingAccount: true } : { password: form.ownerPassword || undefined }),
           },
         }),
       })
@@ -188,15 +191,15 @@ export const ProvisionPage: React.FC = () => {
           </div>
         )}
         <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-left">
-          <p className="text-sm font-medium text-slate-900">Owner credentials backup</p>
-          <p className="mt-1 text-xs text-slate-500">The setup email is sent to the owner. Keep this one-time backup secure and share it only with them.</p>
+          <p className="text-sm font-medium text-slate-900">{result?.reusedOwnerAccount ? 'Existing owner login linked' : 'Owner credentials backup'}</p>
+          <p className="mt-1 text-xs text-slate-500">{result?.reusedOwnerAccount ? 'The owner keeps their existing credentials. This business has its own separate books and appears in their business switcher.' : 'The setup email is sent to the owner. Keep this one-time backup secure and share it only with them.'}</p>
           <div className="mt-3 space-y-1 text-sm text-slate-700">
             {result?.tenantId && <p><span className="font-medium">Business ID:</span> {result.tenantId}</p>}
             {result?.ownerEmail && <p><span className="font-medium">Owner email:</span> {result.ownerEmail}</p>}
             {result?.tempPassword && <p><span className="font-medium">Temporary password:</span> {result.tempPassword}</p>}
             {result?.otp && <p><span className="font-medium">OTP:</span> {result.otp}</p>}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
+          {!result?.reusedOwnerAccount && <div className="mt-4 flex flex-wrap gap-2">
             <button type="button" onClick={copyCredentials} className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-white">
               <Copy className="h-4 w-4" />
               Copy
@@ -205,7 +208,7 @@ export const ProvisionPage: React.FC = () => {
               <Share2 className="h-4 w-4" />
               Share
             </button>
-          </div>
+          </div>}
           {copyMessage && <p className="mt-2 text-xs text-slate-500">{copyMessage}</p>}
         </div>
         {result?.emailSent === false ? (
@@ -220,7 +223,7 @@ export const ProvisionPage: React.FC = () => {
           </div>
         ) : (
           <p className="mt-3 text-sm text-green-700">
-            The email provider accepted the setup email for {result?.ownerEmail || 'the owner'}. Inbox delivery can take a few minutes; check spam or junk if it does not appear. Credentials are available above.
+            {result?.reusedOwnerAccount ? `The owner was notified that ${form.businessName} is available under their existing login.` : `The email provider accepted the setup email for ${result?.ownerEmail || 'the owner'}. Inbox delivery can take a few minutes; check spam or junk if it does not appear. Credentials are available above.`}
           </p>
         )}
         <button
@@ -333,11 +336,15 @@ export const ProvisionPage: React.FC = () => {
 
         <div className="bg-white rounded-lg border p-6 space-y-4">
           <h2 className="text-lg font-semibold flex items-center gap-2"><User className="w-5 h-5" /> Owner Account</h2>
+          <label className="flex items-start gap-3 rounded-md border p-3">
+            <input type="checkbox" checked={form.reuseExistingOwner} onChange={event => handleChange('reuseExistingOwner', event.target.checked)} className="mt-1 h-4 w-4" />
+            <span><span className="block text-sm font-medium">Use an existing owner login</span><span className="mt-1 block text-xs text-gray-500">Attach this new business to the same owner identity. No new password or user account is created.</span></span>
+          </label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>
+            {!form.reuseExistingOwner && <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>}
             <div><label className="block text-sm font-medium mb-1">Owner Email *</label><input required type="email" value={form.ownerEmail} onChange={(e) => handleChange('ownerEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="john@freshmart.com" /></div>
-            <div><label className="block text-sm font-medium mb-1">Owner Phone</label><input type="tel" value={form.ownerPhone} onChange={(e) => handleChange('ownerPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" autoComplete="tel" /></div>
-            <div className="md:col-span-2">
+            {!form.reuseExistingOwner && <div><label className="block text-sm font-medium mb-1">Owner Phone</label><input type="tel" value={form.ownerPhone} onChange={(e) => handleChange('ownerPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" autoComplete="tel" /></div>}
+            {!form.reuseExistingOwner && <div className="md:col-span-2">
               <label className="block text-sm font-medium mb-1">Temporary Password</label>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative flex-1">
@@ -355,7 +362,7 @@ export const ProvisionPage: React.FC = () => {
                   Copy
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
         </div>
 

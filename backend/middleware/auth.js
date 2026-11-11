@@ -156,8 +156,22 @@ export const authenticateToken = async (req, res, next) => {
       select: { id: true, email: true, role: true, tenantId: true, isActive: true, workingHours: true },
     });
     if (!currentUser?.isActive) return res.status(401).json({ message: 'User not found or inactive', code: 'USER_INACTIVE' });
-    decoded = { ...decoded, ...currentUser };
-    const tenantId = currentUser.tenantId;
+    const requestedTenantId = decoded.activeTenantId || decoded.tenantId || currentUser.tenantId;
+    let effectiveRole = currentUser.role;
+    let crossTenantOwner = false;
+    if (requestedTenantId && requestedTenantId !== currentUser.tenantId) {
+      const membership = await prisma.tenantMembership.findUnique({
+        where: { userId_tenantId: { userId: currentUser.id, tenantId: requestedTenantId } },
+        select: { role: true, isActive: true },
+      });
+      if (!membership?.isActive || membership.role !== 'owner') {
+        return res.status(403).json({ message: 'You do not have access to this business.', code: 'TENANT_ACCESS_REVOKED' });
+      }
+      crossTenantOwner = true;
+      effectiveRole = 'owner';
+    }
+    const tenantId = requestedTenantId;
+    decoded = { ...decoded, ...currentUser, tenantId, activeTenantId: tenantId, role: effectiveRole };
     let tenant = null;
     if (tenantId) {
       tenant = await prisma.tenant.findUnique({
@@ -183,10 +197,10 @@ export const authenticateToken = async (req, res, next) => {
       if (hoursBlock) return res.status(403).json(hoursBlock);
     }
 
-    let userPerm = await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
+    let userPerm = crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: decoded.id } });
     const tenantFeatures = tenantId ? await getTenantFeatures(tenantId) : new Set();
 
-    if (!userPerm) {
+    if (!userPerm && !crossTenantOwner) {
       const defaultPermissions = ROLE_DEFAULTS[decoded.role] || ROLE_DEFAULTS.attendant || {};
       userPerm = await prisma.userPermission.create({
         data: {
