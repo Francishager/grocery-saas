@@ -47,14 +47,14 @@ router.get('/reports', requirePermission('canViewPharmacyReports'), async (req, 
   } catch (error) { fail(res, error, 'Could not load pharmacy reports.'); }
 });
 
-router.get('/catalogue', requireAnyPermission(['canViewPharmacyCatalogue', 'canManagePharmacyCatalogue', 'canViewPharmacyBatches', 'canManagePharmacyBatches']), async (req, res) => {
+router.get('/catalogue', requireAnyPermission(['canViewPharmacyCatalogue', 'canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue', 'canViewPharmacyBatches', 'canCreatePharmacyBatches']), async (req, res) => {
   try {
     const medicines = await prisma.$queryRaw`SELECT c.id AS "catalogueId", c."productId", c."activeIngredient", c.strength, c."dosageForm", c.manufacturer, c."prescriptionRequired", c."controlledClass", p.name, p.sku, p.barcode, p.quantity, p.price, p.cost, p."baseUnit", p."branchId", cat.name AS "categoryName" FROM pharmacy_catalogue c JOIN products p ON p.id = c."productId" LEFT JOIN categories cat ON cat.id = p."categoryId" WHERE c."tenantId" = ${tenantId(req)} AND p."tenantId" = ${tenantId(req)} AND p."isActive" = TRUE ORDER BY p.name ASC LIMIT 2000`;
     res.json({ medicines });
   } catch (error) { fail(res, error, 'Could not load pharmacy medicines.'); }
 });
 
-router.post('/catalogue', requirePermission('canManagePharmacyCatalogue'), async (req, res) => {
+router.post('/catalogue', requirePermission('canCreatePharmacyCatalogue'), async (req, res) => {
   const productId = text(req.body.productId);
   if (!productId) return res.status(400).json({ error: 'Select an existing inventory product to add to the medicine catalogue.' });
   try {
@@ -68,14 +68,14 @@ router.post('/catalogue', requirePermission('canManagePharmacyCatalogue'), async
   } catch (error) { fail(res, error, 'Could not add medicine to the pharmacy catalogue.'); }
 });
 
-router.get('/inventory-products', requirePermission('canManagePharmacyCatalogue'), async (req, res) => {
+router.get('/inventory-products', requireAnyPermission(['canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue']), async (req, res) => {
   try {
     const products = await prisma.product.findMany({ where: { tenantId: tenantId(req), isActive: true, itemType: 'product' }, select: { id: true, name: true, sku: true, quantity: true, baseUnit: true }, orderBy: { name: 'asc' }, take: 2000 });
     res.json({ products });
   } catch (error) { fail(res, error, 'Could not load inventory products.'); }
 });
 
-router.patch('/catalogue/:productId', requirePermission('canManagePharmacyCatalogue'), async (req, res) => {
+router.patch('/catalogue/:productId', requirePermission('canEditPharmacyCatalogue'), async (req, res) => {
   try {
     const result = await prisma.$executeRaw`UPDATE pharmacy_catalogue SET "activeIngredient" = COALESCE(${req.body.activeIngredient === undefined ? null : text(req.body.activeIngredient)}, "activeIngredient"), strength = COALESCE(${req.body.strength === undefined ? null : text(req.body.strength)}, strength), "dosageForm" = COALESCE(${req.body.dosageForm === undefined ? null : text(req.body.dosageForm)}, "dosageForm"), manufacturer = COALESCE(${req.body.manufacturer === undefined ? null : text(req.body.manufacturer)}, manufacturer), "prescriptionRequired" = COALESCE(${req.body.prescriptionRequired === undefined ? null : Boolean(req.body.prescriptionRequired)}, "prescriptionRequired"), "controlledClass" = COALESCE(${req.body.controlledClass === undefined ? null : text(req.body.controlledClass)}, "controlledClass"), notes = COALESCE(${req.body.notes === undefined ? null : text(req.body.notes)}, notes), "updatedAt" = NOW() WHERE "tenantId" = ${tenantId(req)} AND "productId" = ${req.params.productId}`;
     if (!result) return res.status(404).json({ error: 'Medicine not found in the pharmacy catalogue.' });
@@ -83,14 +83,14 @@ router.patch('/catalogue/:productId', requirePermission('canManagePharmacyCatalo
   } catch (error) { fail(res, error, 'Could not update pharmacy medicine details.'); }
 });
 
-router.get('/batches', requireAnyPermission(['canViewPharmacyBatches', 'canManagePharmacyBatches']), async (req, res) => {
+router.get('/batches', requireAnyPermission(['canViewPharmacyBatches', 'canCreatePharmacyBatches']), async (req, res) => {
   try {
     const rows = await prisma.$queryRaw`SELECT b.*, p.name AS "productName", p.sku, br.name AS "branchName" FROM pharmacy_batches b JOIN products p ON p.id = b."productId" LEFT JOIN branches br ON br.id = b."branchId" WHERE b."tenantId" = ${tenantId(req)} ORDER BY b."expiryDate" ASC NULLS LAST, b."createdAt" DESC LIMIT 2000`;
     res.json({ batches: rows });
   } catch (error) { fail(res, error, 'Could not load medicine batches.'); }
 });
 
-router.post('/batches', requirePermission('canManagePharmacyBatches'), async (req, res) => {
+router.post('/batches', requirePermission('canCreatePharmacyBatches'), async (req, res) => {
   const productId = text(req.body.productId);
   const batchNumber = text(req.body.batchNumber);
   const quantity = Number(req.body.quantity);

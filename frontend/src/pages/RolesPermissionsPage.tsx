@@ -41,6 +41,8 @@ const HIDDEN_LEGACY_PERMISSION_KEYS = new Set([
   'canManageTenantPersonalDetails', 'canManageRentPayment', 'canManageRentPaymentPlans',
   'canManageSupplierNetwork', 'canManageMarketplacePromotions', 'canManageProcurementQuotes',
   'canReviewProcurementInvoice', 'canUseAnyTransactionAccount', 'canUseOtherCashAccount',
+  'canManageClinicPatients', 'canManageClinicAppointments', 'canManageClinicEncounters', 'canManageClinicPrescriptions',
+  'canManagePharmacyCatalogue', 'canManagePharmacyBatches',
 ])
 
 const PERM_LABELS: Record<string, string> = {

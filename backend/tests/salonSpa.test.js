@@ -23,15 +23,18 @@ test('Salon & Spa is opt-in and server routes enforce module, subfeature, and ac
   assert.doesNotMatch(schemaSetup, /tenantFeature\.create|planFeature\.create/);
 });
 
-test('Bar queue has independent view/update permissions and does not grant restaurant-wide access', async () => {
+test('Bar menu, orders, and queue have independent action permissions', async () => {
   const restaurant = await read('../routes/restaurant.js');
   const permissions = await read('../src/utils/permissions.js');
   const schema = await read('../prisma/schema.prisma');
-  assert.match(restaurant, /router\.get\('\/bar\/orders'.*canViewRestaurant', 'canViewBarQueue/);
+  assert.match(restaurant, /router\.get\('\/bar\/orders'.*canViewRestaurant', 'canViewBarOrders', 'canViewBarQueue/);
   assert.match(restaurant, /canUpdateBarQueue/);
-  assert.match(permissions, /"canViewBarQueue", "canUpdateBarQueue"/);
-  assert.match(schema, /canViewBarQueue\s+Boolean\s+@default\(false\)/);
-  assert.match(schema, /canUpdateBarQueue\s+Boolean\s+@default\(false\)/);
+  for (const key of ['canViewBarMenu', 'canCreateBarMenu', 'canEditBarMenu', 'canDeleteBarMenu', 'canViewBarOrders', 'canCreateBarOrders', 'canEditBarOrders', 'canCancelBarOrders', 'canViewBarQueue', 'canUpdateBarQueue']) {
+    assert.match(permissions, new RegExp(`"${key}"`));
+    assert.match(schema, new RegExp(`${key}\\s+Boolean\\s+@default\\(false\\)`));
+  }
+  assert.match(restaurant, /requireAnyPermission\(\['canCreateRestaurant', 'canCreateBarOrders'\]\)/);
+  assert.match(restaurant, /requireAnyPermission\(\['canCreateRestaurant', 'canCreateBarMenu'\]\)/);
 });
 
 test('chair scheduling serializes concurrent bookings and rejects overlapping time slots', async () => {

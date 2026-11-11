@@ -1,6 +1,13 @@
 import prisma from '../db.js'
 
 try {
+  for (const permission of [
+    'canViewBarMenu', 'canCreateBarMenu', 'canEditBarMenu', 'canDeleteBarMenu',
+    'canViewBarOrders', 'canCreateBarOrders', 'canEditBarOrders', 'canCancelBarOrders',
+  ]) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS "${permission}" BOOLEAN NOT NULL DEFAULT FALSE`)
+  }
+
   await prisma.feature.upsert({
     where: { name: 'bar' },
     create: {

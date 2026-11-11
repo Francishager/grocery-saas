@@ -9,7 +9,7 @@ test('clinic and pharmacy are routed as permission-checked sidebar subpages', ()
   const app = readFileSync(sourceRoot + '/App.tsx', 'utf8');
   const sidebar = readFileSync(sourceRoot + '/components/layout/TenantLayout.tsx', 'utf8');
   for (const path of ['patients', 'appointments', 'encounters', 'prescriptions']) {
-    assert.match(app, new RegExp(`clinic/${path}.*can(View|Manage)Clinic`));
+    assert.match(app, new RegExp(`clinic/${path}.*can(View|Create|Edit)Clinic`));
     assert.match(sidebar, new RegExp(`/tenant/clinic/${path}`));
   }
   for (const path of ['queue', 'catalogue', 'batches', 'history']) {
@@ -32,6 +32,7 @@ test('clinic and pharmacy pages load only the active subpage data, not every mod
   assert.doesNotMatch(pharmacy, /aria-label="Pharmacy sections"/);
   assert.match(pharmacy, /section === 'queue'/);
   assert.match(pharmacy, /section === 'history'/);
+  assert.match(pharmacy, /method: editingProductId \? 'PATCH' : 'POST'/);
   assert.match(pharmacy, /setInterval\(\(\) => \{ void refreshQueue\(\) \}, 60_000\)/);
   assert.match(pharmacy, /section !== 'queue'/);
 });

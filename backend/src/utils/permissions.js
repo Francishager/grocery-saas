@@ -268,12 +268,18 @@ const PERMISSION_TO_FEATURES = {
   canViewPropertyLandPurchases: ['property_management.agent'],
   canCreatePropertyLandPurchase: ['property_management.agent'],
   canRecordPropertyLandPurchasePayment: ['property_management.agent'],
-  canViewRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
+  canViewRestaurant: ['restaurant', 'restaurant.orders'],
   canViewClinic: ['clinic_management'],
   canViewClinicPatients: ['clinic_management'],
+  canCreateClinicPatients: ['clinic_management'],
+  canEditClinicPatients: ['clinic_management'],
   canViewClinicAppointments: ['clinic_management'],
+  canCreateClinicAppointments: ['clinic_management'],
+  canEditClinicAppointments: ['clinic_management'],
   canViewClinicEncounters: ['clinic_management'],
+  canCreateClinicEncounters: ['clinic_management'],
   canViewClinicPrescriptions: ['clinic_management'],
+  canCreateClinicPrescriptions: ['clinic_management'],
   canManageClinicPatients: ['clinic_management'],
   canManageClinicAppointments: ['clinic_management'],
   canManageClinicEncounters: ['clinic_management'],
@@ -281,16 +287,27 @@ const PERMISSION_TO_FEATURES = {
   canViewClinicReports: ['clinic_management'],
   canViewPharmacy: ['pharmacy_management'],
   canViewPharmacyCatalogue: ['pharmacy_management'],
+  canCreatePharmacyCatalogue: ['pharmacy_management'],
+  canEditPharmacyCatalogue: ['pharmacy_management'],
   canViewPharmacyBatches: ['pharmacy_management'],
+  canCreatePharmacyBatches: ['pharmacy_management'],
   canViewPharmacyPrescriptions: ['pharmacy_management'],
   canViewPharmacyDispenses: ['pharmacy_management'],
   canManagePharmacyCatalogue: ['pharmacy_management'],
   canManagePharmacyBatches: ['pharmacy_management'],
   canDispensePharmacyPrescriptions: ['pharmacy_management'],
   canViewPharmacyReports: ['pharmacy_management'],
-  canCreateRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
-  canEditRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
-  canDeleteRestaurant: ['restaurant', 'restaurant.orders', 'bar'],
+  canViewBarMenu: ['bar', 'restaurant.bar'],
+  canCreateBarMenu: ['bar', 'restaurant.bar'],
+  canEditBarMenu: ['bar', 'restaurant.bar'],
+  canDeleteBarMenu: ['bar', 'restaurant.bar'],
+  canViewBarOrders: ['bar', 'restaurant.orders'],
+  canCreateBarOrders: ['bar', 'restaurant.orders'],
+  canEditBarOrders: ['bar', 'restaurant.orders'],
+  canCancelBarOrders: ['bar', 'restaurant.orders'],
+  canCreateRestaurant: ['restaurant', 'restaurant.orders'],
+  canEditRestaurant: ['restaurant', 'restaurant.orders'],
+  canDeleteRestaurant: ['restaurant', 'restaurant.orders'],
   canViewBarQueue: ['bar', 'restaurant.bar'],
   canUpdateBarQueue: ['bar', 'restaurant.bar'],
   canViewManufacturing: ['manufacturing', 'manufacturing.production_orders'],
@@ -361,6 +378,16 @@ const OWNER_CORE_PERMISSIONS = new Set([
 // Old grants remain stored for upgrade compatibility, but expand to granular
 // actions and are hidden from the permission editor.
 export const LEGACY_COMBINED_PERMISSION_GRANTS = {
+  canManageClinicPatients: ['canCreateClinicPatients', 'canEditClinicPatients'],
+  canManageClinicAppointments: ['canCreateClinicAppointments', 'canEditClinicAppointments'],
+  canManageClinicEncounters: ['canCreateClinicEncounters'],
+  canManageClinicPrescriptions: ['canCreateClinicPrescriptions'],
+  canManagePharmacyCatalogue: ['canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue'],
+  canManagePharmacyBatches: ['canCreatePharmacyBatches'],
+  canCreateRestaurant: ['canCreateBarMenu', 'canCreateBarOrders'],
+  canEditRestaurant: ['canEditBarMenu', 'canEditBarOrders'],
+  canDeleteRestaurant: ['canDeleteBarMenu', 'canCancelBarOrders'],
+  canViewRestaurant: ['canViewBarMenu', 'canViewBarOrders'],
   canManageCustomerCreditLimit: ['canCreateCustomerCreditLimit', 'canEditCustomerCreditLimit'],
   canEditStaff: ['canEditStaffDetails', 'canManageStaffPermissions', 'canManageWorkingHours'],
   canManageHRStructure: ['canCreateHRStructure', 'canEditHRStructure', 'canDeleteHRStructure'],
@@ -462,11 +489,11 @@ export const ALL_PERMISSION_KEYS = [
   "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
   "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
   // Restaurant & Bar
-  "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant", "canViewBarQueue", "canUpdateBarQueue",
+  "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant", "canViewBarMenu", "canCreateBarMenu", "canEditBarMenu", "canDeleteBarMenu", "canViewBarOrders", "canCreateBarOrders", "canEditBarOrders", "canCancelBarOrders", "canViewBarQueue", "canUpdateBarQueue",
   // Clinic Management
-  "canViewClinic", "canViewClinicPatients", "canViewClinicAppointments", "canViewClinicEncounters", "canViewClinicPrescriptions", "canManageClinicPatients", "canManageClinicAppointments", "canManageClinicEncounters", "canManageClinicPrescriptions", "canViewClinicReports",
+  "canViewClinic", "canViewClinicPatients", "canCreateClinicPatients", "canEditClinicPatients", "canViewClinicAppointments", "canCreateClinicAppointments", "canEditClinicAppointments", "canViewClinicEncounters", "canCreateClinicEncounters", "canViewClinicPrescriptions", "canCreateClinicPrescriptions", "canManageClinicPatients", "canManageClinicAppointments", "canManageClinicEncounters", "canManageClinicPrescriptions", "canViewClinicReports",
   // Pharmacy Management
-  "canViewPharmacy", "canViewPharmacyCatalogue", "canViewPharmacyBatches", "canViewPharmacyPrescriptions", "canViewPharmacyDispenses", "canManagePharmacyCatalogue", "canManagePharmacyBatches", "canDispensePharmacyPrescriptions", "canViewPharmacyReports",
+  "canViewPharmacy", "canViewPharmacyCatalogue", "canCreatePharmacyCatalogue", "canEditPharmacyCatalogue", "canViewPharmacyBatches", "canCreatePharmacyBatches", "canViewPharmacyPrescriptions", "canViewPharmacyDispenses", "canManagePharmacyCatalogue", "canManagePharmacyBatches", "canDispensePharmacyPrescriptions", "canViewPharmacyReports",
   // Fuel Station
   "canViewFuelStation", "canCreateFuelStation", "canEditFuelStation", "canDeleteFuelStation",
   // Manufacturing
@@ -514,6 +541,14 @@ export const PERMISSION_CATEGORIES = [
   { id: 'branches', name: 'Branches' },
   { id: 'reports', name: 'Reports' },
   { id: 'reports_sales', name: 'Sales Report Access' },
+  { id: 'bar_menu', name: 'Bar Menu' },
+  { id: 'bar_orders', name: 'Bar Orders' },
+  { id: 'clinic_patients', name: 'Clinic Patients' },
+  { id: 'clinic_appointments', name: 'Clinic Appointments' },
+  { id: 'clinic_encounters', name: 'Clinic Encounters' },
+  { id: 'clinic_prescriptions', name: 'Clinic Prescriptions' },
+  { id: 'pharmacy_catalogue', name: 'Pharmacy Catalogue' },
+  { id: 'pharmacy_batches', name: 'Pharmacy Batches & Expiry' },
   ...REPORT_GROUPS.map(([id]) => ({ id, name: id.replace('reports_', '').replace(/^./, c => c.toUpperCase()) + ' Report Access' })),
   { id: 'settings', name: 'Settings' },
   { id: 'subscription_billing', name: 'Subscription & Billing' },
@@ -550,15 +585,19 @@ const PERMISSION_DETAIL_OVERRIDES = {
     canEditMarketplaceSellerProfile: 'Edit marketplace seller profile', canRequestSupplierRelationship: 'Request supplier relationships', canManageSupplierRelationships: 'Approve, reject, and suspend supplier relationships',
     canPauseMarketplaceCampaign: 'Pause marketplace campaigns', canResumeMarketplaceCampaign: 'Resume marketplace campaigns', canCancelMarketplaceCampaign: 'Cancel marketplace campaigns', canSelectProcurementQuote: 'Select a supplier quote',
     canViewProcurementInvoice: 'View supplier invoices for matching', canApproveProcurementInvoice: 'Approve supplier invoices and create payables', canRejectProcurementInvoice: 'Reject supplier invoices',
-    canViewClinicPatients: 'View clinic patient demographics and medical record numbers', canManageClinicPatients: 'Register and update clinic patient profiles',
-    canViewClinicAppointments: 'View clinic appointments', canManageClinicAppointments: 'Schedule and update clinic appointments',
-    canViewClinicEncounters: 'View clinical encounters and notes', canManageClinicEncounters: 'Create clinical encounters and treatment notes',
-    canViewClinicPrescriptions: 'View clinic prescriptions', canManageClinicPrescriptions: 'Create clinic prescriptions',
+    canViewClinicPatients: 'View clinic patient demographics and medical record numbers', canCreateClinicPatients: 'Register new clinic patients', canEditClinicPatients: 'Edit clinic patient profiles',
+    canViewClinicAppointments: 'View clinic appointments', canCreateClinicAppointments: 'Schedule clinic appointments', canEditClinicAppointments: 'Update appointment status and details',
+    canViewClinicEncounters: 'View clinical encounters and notes', canCreateClinicEncounters: 'Record clinical encounters and treatment notes',
+    canViewClinicPrescriptions: 'View clinic prescriptions', canCreateClinicPrescriptions: 'Create clinic prescriptions',
+    canManageClinicPatients: 'Register and update clinic patient profiles (legacy permission)', canManageClinicAppointments: 'Schedule and update clinic appointments (legacy permission)',
+    canManageClinicEncounters: 'Create clinical encounters and treatment notes (legacy permission)', canManageClinicPrescriptions: 'Create clinic prescriptions (legacy permission)',
     canViewClinicReports: 'View clinic operational reports',
-    canViewPharmacyCatalogue: 'View medicines in the shared inventory catalogue', canManagePharmacyCatalogue: 'Maintain pharmacy catalogue links to inventory products',
-    canViewPharmacyBatches: 'View medicine batch and expiry details', canManagePharmacyBatches: 'Allocate existing inventory quantities to medicine batches',
+    canViewPharmacyCatalogue: 'View medicines in the shared inventory catalogue', canCreatePharmacyCatalogue: 'Link an inventory product as a pharmacy medicine', canEditPharmacyCatalogue: 'Edit pharmacy medicine details', canManagePharmacyCatalogue: 'Maintain pharmacy catalogue links to inventory products (legacy permission)',
+    canViewPharmacyBatches: 'View medicine batch and expiry details', canCreatePharmacyBatches: 'Allocate received inventory to a medicine batch', canManagePharmacyBatches: 'Allocate existing inventory quantities to medicine batches (legacy permission)',
     canViewPharmacyPrescriptions: 'View prescriptions in the pharmacy queue', canViewPharmacyDispenses: 'View completed pharmacy dispensing records',
     canDispensePharmacyPrescriptions: 'Verify and dispense a prescription against a completed sale', canViewPharmacyReports: 'View pharmacy operational reports',
+    canViewBarMenu: 'View bar menu items', canCreateBarMenu: 'Add items to the bar menu', canEditBarMenu: 'Edit bar menu items and availability', canDeleteBarMenu: 'Remove items from the bar menu',
+    canViewBarOrders: 'View bar orders and order details', canCreateBarOrders: 'Create bar orders', canEditBarOrders: 'Update bar orders and service status', canCancelBarOrders: 'Cancel open bar orders',
   }).map(([key, name]) => [key, { name, description: `Allow the user to ${String(name).toLowerCase()}.` }])),
   canUseBusinessAI: {
     name: 'Use AI business advisor',
@@ -1172,6 +1211,12 @@ const PERMISSION_DETAIL_OVERRIDES = {
   },
   canViewBarQueue: { name: 'View bar queue', description: 'View and print bar-station tickets without access to restaurant management pages.' },
   canUpdateBarQueue: { name: 'Update bar ticket status', description: 'Advance bar items through preparation and serving.' },
+  canManageClinicPatients: { name: 'Manage clinic patient profiles (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use separate register and edit permissions.' },
+  canManageClinicAppointments: { name: 'Manage clinic appointments (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use separate schedule and update permissions.' },
+  canManageClinicEncounters: { name: 'Manage clinic encounters (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use the record-encounter permission.' },
+  canManageClinicPrescriptions: { name: 'Manage clinic prescriptions (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use the create-prescription permission.' },
+  canManagePharmacyCatalogue: { name: 'Manage pharmacy catalogue (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use separate add and edit permissions.' },
+  canManagePharmacyBatches: { name: 'Manage pharmacy batches (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use the allocate-batch permission.' },
   canCreateRestaurant: {
     name: 'Create restaurant or bar orders',
     description: 'Create orders in enabled restaurant or standalone bar workflows.',
@@ -1388,8 +1433,22 @@ function permissionCategoryForKey(key) {
   if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
   if (key === 'canViewTeamMessaging' || key === 'canSendTeamMessages') return 'team_messaging';
   if (key.includes('Procurement') || key.includes('SupplierNetwork') || key.includes('Marketplace')) return 'procurement';
-  if (key.includes('Clinic')) return 'clinic_management';
-  if (key.includes('Pharmacy')) return 'pharmacy_management';
+  if (key.startsWith('canViewBar') || key.startsWith('canCreateBar') || key.startsWith('canEditBar') || key.startsWith('canDeleteBar') || key.startsWith('canCancelBar')) {
+    if (key.includes('Queue')) return 'bar_operations';
+    return key.includes('Menu') ? 'bar_menu' : 'bar_orders';
+  }
+  if (key.includes('Clinic')) {
+    if (key.includes('Patient')) return 'clinic_patients';
+    if (key.includes('Appointment')) return 'clinic_appointments';
+    if (key.includes('Encounter')) return 'clinic_encounters';
+    if (key.includes('Prescription')) return 'clinic_prescriptions';
+    return 'clinic_management';
+  }
+  if (key.includes('Pharmacy')) {
+    if (key.includes('Catalogue')) return 'pharmacy_catalogue';
+    if (key.includes('Batch')) return 'pharmacy_batches';
+    return 'pharmacy_management';
+  }
   const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
   if (servicePermission) return servicePermission.category;
   if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';

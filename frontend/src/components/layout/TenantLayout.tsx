@@ -79,16 +79,16 @@ const salonSubItems = [
 ]
 
 const clinicSubItems = [
-  { to: '/tenant/clinic/patients', label: 'Patients', icon: Users, feature: 'clinic_management', permission: ['canViewClinicPatients', 'canManageClinicPatients'] },
-  { to: '/tenant/clinic/appointments', label: 'Appointments', icon: CalendarClock, feature: 'clinic_management', permission: ['canViewClinicAppointments', 'canManageClinicAppointments'] },
-  { to: '/tenant/clinic/encounters', label: 'Clinical Encounters', icon: Activity, feature: 'clinic_management', permission: ['canViewClinicEncounters', 'canManageClinicEncounters'] },
-  { to: '/tenant/clinic/prescriptions', label: 'Prescriptions', icon: FileText, feature: 'clinic_management', permission: ['canViewClinicPrescriptions', 'canManageClinicPrescriptions'] },
+  { to: '/tenant/clinic/patients', label: 'Patients', icon: Users, feature: 'clinic_management', permission: ['canViewClinicPatients', 'canCreateClinicPatients', 'canEditClinicPatients'] },
+  { to: '/tenant/clinic/appointments', label: 'Appointments', icon: CalendarClock, feature: 'clinic_management', permission: ['canViewClinicAppointments', 'canCreateClinicAppointments', 'canEditClinicAppointments'] },
+  { to: '/tenant/clinic/encounters', label: 'Clinical Encounters', icon: Activity, feature: 'clinic_management', permission: ['canViewClinicEncounters', 'canCreateClinicEncounters'] },
+  { to: '/tenant/clinic/prescriptions', label: 'Prescriptions', icon: FileText, feature: 'clinic_management', permission: ['canViewClinicPrescriptions', 'canCreateClinicPrescriptions'] },
 ]
 
 const pharmacySubItems = [
   { to: '/tenant/pharmacy/queue', label: 'Prescription Queue', icon: ClipboardList, feature: 'pharmacy_management', allFeatures: ['clinic_management'], permission: ['canViewPharmacyPrescriptions', 'canDispensePharmacyPrescriptions'] },
-  { to: '/tenant/pharmacy/catalogue', label: 'Medicine Catalogue', icon: Package, feature: 'pharmacy_management', permission: ['canViewPharmacyCatalogue', 'canManagePharmacyCatalogue'] },
-  { to: '/tenant/pharmacy/batches', label: 'Batches & Expiry', icon: Clock, feature: 'pharmacy_management', permission: ['canViewPharmacyBatches', 'canManagePharmacyBatches'] },
+  { to: '/tenant/pharmacy/catalogue', label: 'Medicine Catalogue', icon: Package, feature: 'pharmacy_management', permission: ['canViewPharmacyCatalogue', 'canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue'] },
+  { to: '/tenant/pharmacy/batches', label: 'Batches & Expiry', icon: Clock, feature: 'pharmacy_management', permission: ['canViewPharmacyBatches', 'canCreatePharmacyBatches'] },
   { to: '/tenant/pharmacy/history', label: 'Dispensing History', icon: Receipt, feature: 'pharmacy_management', allFeatures: ['clinic_management'], permission: 'canViewPharmacyDispenses' },
 ]
 
@@ -111,7 +111,7 @@ const restaurantSubItems = [
   { to: '/tenant/restaurant/tables', label: 'Floor & Tables', icon: Table2, permission: 'canViewRestaurant', feature: 'restaurant.tables' },
   { to: '/tenant/restaurant/orders', label: 'Orders', icon: ClipboardList, permission: 'canViewRestaurant', feature: 'restaurant.orders' },
   { to: '/tenant/restaurant/kitchen', label: 'Kitchen Queue', icon: ChefHat, permission: 'canViewRestaurant', feature: 'restaurant.kitchen' },
-  { to: '/tenant/restaurant/bar', label: 'Bar Queue', icon: Wine, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'restaurant.bar' },
+  { to: '/tenant/restaurant/bar', label: 'Bar Queue', icon: Wine, permission: ['canViewRestaurant', 'canViewBarOrders', 'canViewBarQueue'], feature: 'restaurant.bar' },
   { to: '/tenant/restaurant/menu', label: 'Menu & Pricing', icon: UtensilsCrossed, permission: 'canViewRestaurant', feature: 'restaurant' },
   { to: '/tenant/inventory/products?hospitalityView=all', label: 'Inventory & Stockroom', icon: Package, permission: 'canViewProduct', feature: 'restaurant' },
   { to: '/tenant/restaurant/recipes', label: 'Recipes & Ingredients', icon: Beaker, permission: 'canViewRestaurant', feature: 'restaurant.recipes' },
@@ -124,9 +124,9 @@ const restaurantSubItems = [
 ]
 
 const barSubItems = [
-  { to: '/tenant/bar/orders', label: 'Orders', icon: ClipboardList, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'bar' },
-  { to: '/tenant/bar/queue', label: 'Bar Queue', icon: Wine, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'bar' },
-  { to: '/tenant/bar/menu', label: 'Bar Menu', icon: UtensilsCrossed, permission: ['canViewRestaurant', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/orders', label: 'Orders', icon: ClipboardList, permission: ['canViewBarOrders', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/queue', label: 'Bar Queue', icon: Wine, permission: ['canViewBarOrders', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/menu', label: 'Bar Menu', icon: UtensilsCrossed, permission: ['canViewBarMenu', 'canViewBarOrders'], feature: 'bar' },
 ]
 
 const navItems = [
@@ -142,7 +142,7 @@ const navItems = [
   { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: 'canViewCRM', feature: 'crm', isStandaloneCRM: true },
   { to: '/tenant/property-management/portfolio', label: 'Property Management', icon: Building2, isPropertyManagement: true },
   { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
-  { to: '/tenant/bar/queue', label: 'Bar', icon: Wine, feature: 'bar', permission: ['canViewRestaurant', 'canViewBarQueue'], isBar: true },
+  { to: '/tenant/bar/queue', label: 'Bar', icon: Wine, feature: 'bar', permission: ['canViewBarMenu', 'canViewBarOrders', 'canViewBarQueue'], isBar: true },
   { to: '/tenant/clinic/patients', label: 'Clinic Management', icon: Activity, feature: 'clinic_management', isClinic: true },
   { to: '/tenant/pharmacy/catalogue', label: 'Pharmacy Management', icon: Package, feature: 'pharmacy_management', isPharmacy: true },
   { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },

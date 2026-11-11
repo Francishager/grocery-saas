@@ -224,6 +224,41 @@ test('customer credit-limit create and edit permissions are present in the Prism
   assert.match(schema, /canEditCustomerCreditLimit\s+Boolean\s+@default\(false\)/);
 });
 
+test('clinic, pharmacy, and bar permissions expose independent supported actions', () => {
+  const groups = {
+    clinic_patients: ['canViewClinicPatients', 'canCreateClinicPatients', 'canEditClinicPatients'],
+    clinic_appointments: ['canViewClinicAppointments', 'canCreateClinicAppointments', 'canEditClinicAppointments'],
+    clinic_encounters: ['canViewClinicEncounters', 'canCreateClinicEncounters'],
+    clinic_prescriptions: ['canViewClinicPrescriptions', 'canCreateClinicPrescriptions'],
+    pharmacy_catalogue: ['canViewPharmacyCatalogue', 'canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue'],
+    pharmacy_batches: ['canViewPharmacyBatches', 'canCreatePharmacyBatches'],
+    bar_menu: ['canViewBarMenu', 'canCreateBarMenu', 'canEditBarMenu', 'canDeleteBarMenu'],
+    bar_orders: ['canViewBarOrders', 'canCreateBarOrders', 'canEditBarOrders', 'canCancelBarOrders'],
+  };
+  for (const [category, keys] of Object.entries(groups)) {
+    for (const key of keys) {
+      assert.ok(ALL_PERMISSION_KEYS.includes(key), `${key} is registered`);
+      assert.equal(PERMISSION_METADATA[key]?.category, category);
+      assert.ok(PERMISSION_METADATA[key]?.name);
+    }
+  }
+  assert.ok(ALL_PERMISSION_KEYS.includes('canDispensePharmacyPrescriptions'));
+  assert.ok(ALL_PERMISSION_KEYS.includes('canApproveSalonCommission'));
+});
+
+test('legacy clinic, pharmacy, and restaurant grants retain their old effective access', () => {
+  const granted = resolveEffectivePermissions(
+    { role: 'attendant' },
+    { canManageClinicPatients: true, canManagePharmacyCatalogue: true, canCreateRestaurant: true },
+    [],
+    new Set(['clinic_management', 'pharmacy_management', 'bar']),
+  );
+  for (const key of ['canCreateClinicPatients', 'canEditClinicPatients', 'canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue', 'canCreateBarMenu', 'canCreateBarOrders']) {
+    assert.ok(granted.includes(key), `${key} remains granted for a legacy assignment`);
+  }
+  assert.ok(!granted.includes('canEditBarOrders'), 'legacy create-order access does not grant order editing');
+});
+
 test('recording receivables stays unavailable when the SaaS tenant lacks the receivables feature', () => {
   const permissions = resolveEffectivePermissions({ role: 'attendant' }, { canCreateReceivable: true }, [], new Set(['customers']));
   assert.ok(!permissions.includes('canCreateReceivable'));

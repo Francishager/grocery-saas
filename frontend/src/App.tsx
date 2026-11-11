@@ -254,10 +254,10 @@ function App() {
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
           <Route path="restaurant" element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="restaurant/dashboard" element={<Navigate to="/tenant/dashboard" replace />} />
-          <Route path="restaurant/bar" element={<FeatureGuard feature="restaurant.bar" permission={['canViewRestaurant', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
+          <Route path="restaurant/bar" element={<FeatureGuard feature="restaurant.bar" permission={['canViewRestaurant', 'canViewBarOrders', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
           <Route path="restaurant/:tab" element={<FeatureGuard feature="restaurant" permission="canViewRestaurant"><RestaurantPage /></FeatureGuard>} />
           <Route path="bar" element={<Navigate to="/tenant/bar/queue" replace />} />
-          <Route path="bar/:tab" element={<FeatureGuard feature="bar" permission={['canViewRestaurant', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
+          <Route path="bar/:tab" element={<FeatureGuard feature="bar" permission={['canViewBarMenu', 'canViewBarOrders', 'canViewBarQueue']}><RestaurantPage /></FeatureGuard>} />
           <Route path="fuel-station" element={<Navigate to="/tenant/fuel-station/tanks" replace />} />
           <Route path="fuel-station/:tab" element={<FeatureGuard feature="fuel_station" permission="canViewFuelStation"><FuelStationPage /></FeatureGuard>} />
           <Route path="manufacturing" element={<FeatureGuard feature="manufacturing"><ManufacturingPage /></FeatureGuard>} />
@@ -265,14 +265,14 @@ function App() {
           <Route path="service" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="service/:tab" element={<FeatureGuard feature="service"><ServiceBusinessPage /></FeatureGuard>} />
           <Route path="clinic" element={<Navigate to="/tenant/clinic/patients" replace />} />
-          <Route path="clinic/patients" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicPatients', 'canManageClinicPatients']}><ClinicManagementPage section="patients" /></FeatureGuard>} />
-          <Route path="clinic/appointments" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicAppointments', 'canManageClinicAppointments']}><ClinicManagementPage section="appointments" /></FeatureGuard>} />
-          <Route path="clinic/encounters" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicEncounters', 'canManageClinicEncounters']}><ClinicManagementPage section="encounters" /></FeatureGuard>} />
-          <Route path="clinic/prescriptions" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicPrescriptions', 'canManageClinicPrescriptions']}><ClinicManagementPage section="prescriptions" /></FeatureGuard>} />
+          <Route path="clinic/patients" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicPatients', 'canCreateClinicPatients', 'canEditClinicPatients']}><ClinicManagementPage section="patients" /></FeatureGuard>} />
+          <Route path="clinic/appointments" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicAppointments', 'canCreateClinicAppointments', 'canEditClinicAppointments']}><ClinicManagementPage section="appointments" /></FeatureGuard>} />
+          <Route path="clinic/encounters" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicEncounters', 'canCreateClinicEncounters']}><ClinicManagementPage section="encounters" /></FeatureGuard>} />
+          <Route path="clinic/prescriptions" element={<FeatureGuard feature="clinic_management" permission={['canViewClinicPrescriptions', 'canCreateClinicPrescriptions']}><ClinicManagementPage section="prescriptions" /></FeatureGuard>} />
           <Route path="pharmacy" element={<Navigate to="/tenant/pharmacy/catalogue" replace />} />
           <Route path="pharmacy/queue" element={<FeatureGuard feature="pharmacy_management"><FeatureGuard feature="clinic_management" permission={['canViewPharmacyPrescriptions', 'canDispensePharmacyPrescriptions']}><PharmacyManagementPage section="queue" /></FeatureGuard></FeatureGuard>} />
-          <Route path="pharmacy/catalogue" element={<FeatureGuard feature="pharmacy_management" permission={['canViewPharmacyCatalogue', 'canManagePharmacyCatalogue']}><PharmacyManagementPage section="catalogue" /></FeatureGuard>} />
-          <Route path="pharmacy/batches" element={<FeatureGuard feature="pharmacy_management" permission={['canViewPharmacyBatches', 'canManagePharmacyBatches']}><PharmacyManagementPage section="batches" /></FeatureGuard>} />
+          <Route path="pharmacy/catalogue" element={<FeatureGuard feature="pharmacy_management" permission={['canViewPharmacyCatalogue', 'canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue']}><PharmacyManagementPage section="catalogue" /></FeatureGuard>} />
+          <Route path="pharmacy/batches" element={<FeatureGuard feature="pharmacy_management" permission={['canViewPharmacyBatches', 'canCreatePharmacyBatches']}><PharmacyManagementPage section="batches" /></FeatureGuard>} />
           <Route path="pharmacy/history" element={<FeatureGuard feature="pharmacy_management"><FeatureGuard feature="clinic_management" permission="canViewPharmacyDispenses"><PharmacyManagementPage section="history" /></FeatureGuard></FeatureGuard>} />
           <Route path="salon/appointments" element={<FeatureGuard feature="salon_spa" permission={servicePagePermissions('appointments')}><ServiceBusinessPage initialTab="appointments" /></FeatureGuard>} />
           <Route path="salon/stylists" element={<FeatureGuard feature="salon_spa" permission="canViewSalonStylist"><SalonStylistsPage /></FeatureGuard>} />

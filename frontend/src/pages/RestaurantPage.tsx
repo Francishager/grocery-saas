@@ -59,12 +59,17 @@ export default function RestaurantPage() {
   const standaloneBar = hasFeature('bar') && !hasFeature('restaurant')
   const activeRouteTab = standaloneBar && routeTab === 'queue' ? 'bar' : routeTab
   const canViewRestaurantOps = hasPermission('canViewRestaurant')
-  const canViewRestaurant = canViewRestaurantOps || hasPermission('canViewBarQueue')
-  const canCreateRestaurant = hasPermission('canCreateRestaurant')
-  const canEditRestaurant = hasPermission('canEditRestaurant')
+  const canViewRestaurant = standaloneBar
+    ? ['canViewBarMenu', 'canViewBarOrders', 'canViewBarQueue'].some(hasPermission)
+    : canViewRestaurantOps || hasPermission('canViewBarQueue')
+  const canCreateRestaurant = hasPermission('canCreateRestaurant') || (standaloneBar && hasPermission('canCreateBarOrders'))
+  const canCreateMenuItem = hasPermission('canCreateRestaurant') || (standaloneBar && hasPermission('canCreateBarMenu'))
+  const canEditRestaurant = hasPermission('canEditRestaurant') || (standaloneBar && hasPermission('canEditBarOrders'))
+  const canEditMenuItem = hasPermission('canEditRestaurant') || (standaloneBar && hasPermission('canEditBarMenu'))
+  const canDeleteMenuItem = hasPermission('canDeleteRestaurant') || (standaloneBar && hasPermission('canDeleteBarMenu'))
+  const canDeleteRestaurant = hasPermission('canDeleteRestaurant') || (standaloneBar && hasPermission('canCancelBarOrders'))
   const canUpdateBarQueue = canEditRestaurant || hasPermission('canUpdateBarQueue')
   const canUpdateOrder = (order: Order) => canEditRestaurant || (hasPermission('canUpdateBarQueue') && order.items.length > 0 && order.items.every(item => item.station === 'bar'))
-  const canDeleteRestaurant = hasPermission('canDeleteRestaurant')
   const canAdjustStockOut = hasPermission('canAdjustStock')
   const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
   const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
@@ -929,7 +934,7 @@ export default function RestaurantPage() {
         <TabsContent value="menu">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div><h2 className="font-semibold">{standaloneBar ? 'Bar menu' : 'Restaurant menu'}</h2><p className="text-sm text-muted-foreground">Curate available items; menu entries stay linked to inventory and sales.</p></div>
-            {canCreateRestaurant && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: standaloneBar ? 'bar' : 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
+            {canCreateMenuItem && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: standaloneBar ? 'bar' : 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
           </div>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search menu items" className="pl-9" /></div>
@@ -945,13 +950,13 @@ export default function RestaurantPage() {
                   <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={entry.product.name}>{entry.product.name}</p><p className="text-sm text-muted-foreground">{entry.category} · {entry.station === 'bar' ? 'Bar' : 'Kitchen'}</p>{entry.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.description}</p>}</div><div className="flex flex-col items-end gap-1"><Badge variant="outline">{entry.product.quantity} in stock</Badge>{!entry.isAvailable && <Badge variant="secondary">Paused</Badge>}</div></div>
                   <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span>{canCreateRestaurant && <Button size="sm" disabled={!entry.isAvailable || !canStartOrder} title={!canStartOrder ? 'Confirm Serving as before adding items to an order' : undefined} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button>}</div>
                   <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-                    {canEditRestaurant && !waiterMode && <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
+                    {canEditMenuItem && !waiterMode && <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
                       <ImagePlus className="h-3.5 w-3.5" /> {entry.product.image ? 'Change photo' : 'Add photo'}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(entry.productId, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
                     </label>}
-                    {canEditRestaurant && !waiterMode && <><Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
+                    {canEditMenuItem && !waiterMode && <><Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
                     <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause' : 'Resume'}</Button></>}
-                    {canDeleteRestaurant && !waiterMode && <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>}
+                    {canDeleteMenuItem && !waiterMode && <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>}
                   </div>
                 </CardContent>
               </Card>)}
@@ -1272,7 +1277,7 @@ export default function RestaurantPage() {
             </div>
             <div><Label>Description</Label><Input value={menuForm.description} onChange={event => setMenuForm(current => ({ ...current, description: event.target.value }))} placeholder="Menu description or serving notes" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry} disabled={editingMenuEntry ? !canEditRestaurant : !canCreateRestaurant}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry} disabled={editingMenuEntry ? !canEditMenuItem : !canCreateMenuItem}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

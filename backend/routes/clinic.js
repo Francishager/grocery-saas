@@ -44,7 +44,7 @@ router.get('/reports', requirePermission('canViewClinicReports'), async (req, re
   } catch (error) { fail(res, error, 'Could not load clinic reports.'); }
 });
 
-router.get('/patients', requirePermission('canViewClinicPatients'), async (req, res) => {
+router.get('/patients', requireAnyPermission(['canViewClinicPatients', 'canEditClinicPatients']), async (req, res) => {
   try {
     const rows = await prisma.$queryRaw`SELECT p.id, p."customerId", p."medicalRecordNo", p."dateOfBirth", p.gender, p."bloodGroup", p.allergies, p."emergencyContact", p."emergencyPhone", p."createdAt", c.name, c.phone, c.email, c.address FROM clinic_patient_profiles p JOIN customers c ON c.id = p."customerId" WHERE p."tenantId" = ${tenantId(req)} ORDER BY c.name ASC LIMIT 1000`;
     res.json({ patients: rows });
@@ -73,14 +73,14 @@ router.get('/patients/:customerId/medication-history', requirePermission('canVie
   } catch (error) { fail(res, error, 'Could not load patient medication history.'); }
 });
 
-router.get('/catalogue', requirePermission('canManageClinicPrescriptions'), async (req, res) => {
+router.get('/catalogue', requirePermission('canCreateClinicPrescriptions'), async (req, res) => {
   try {
     const medicines = await prisma.product.findMany({ where: { tenantId: tenantId(req), isActive: true, itemType: 'product' }, select: { id: true, name: true, sku: true, quantity: true, price: true, baseUnit: true, category: { select: { name: true } } }, orderBy: { name: 'asc' }, take: 2000 });
     res.json({ medicines });
   } catch (error) { fail(res, error, 'Could not load inventory items for prescriptions.'); }
 });
 
-router.patch('/patients/:customerId', requirePermission('canManageClinicPatients'), async (req, res) => {
+router.patch('/patients/:customerId', requirePermission('canEditClinicPatients'), async (req, res) => {
   const name = req.body.name === undefined ? undefined : text(req.body.name);
   if (name !== undefined && !name) return res.status(400).json({ error: 'Patient name cannot be empty.' });
   try {
@@ -99,7 +99,7 @@ router.patch('/patients/:customerId', requirePermission('canManageClinicPatients
   } catch (error) { fail(res, error, 'Could not update clinic patient.'); }
 });
 
-router.post('/patients', requirePermission('canManageClinicPatients'), async (req, res) => {
+router.post('/patients', requirePermission('canCreateClinicPatients'), async (req, res) => {
   const name = text(req.body.name);
   const medicalRecordNo = text(req.body.medicalRecordNo);
   if (!name || !medicalRecordNo) return res.status(400).json({ error: 'Patient name and medical record number are required.' });
@@ -125,7 +125,7 @@ router.get('/appointments', requirePermission('canViewClinicAppointments'), asyn
   } catch (error) { fail(res, error, 'Could not load clinic appointments.'); }
 });
 
-router.post('/appointments', requirePermission('canManageClinicAppointments'), async (req, res) => {
+router.post('/appointments', requirePermission('canCreateClinicAppointments'), async (req, res) => {
   const customerId = text(req.body.customerId);
   const reason = text(req.body.reason);
   const startsAt = new Date(req.body.startsAt);
@@ -141,7 +141,7 @@ router.post('/appointments', requirePermission('canManageClinicAppointments'), a
   } catch (error) { fail(res, error, 'Could not schedule clinic appointment.'); }
 });
 
-router.patch('/appointments/:id/status', requirePermission('canManageClinicAppointments'), async (req, res) => {
+router.patch('/appointments/:id/status', requirePermission('canEditClinicAppointments'), async (req, res) => {
   const status = text(req.body.status);
   if (!['scheduled', 'arrived', 'completed', 'cancelled', 'no_show'].includes(status)) return res.status(400).json({ error: 'Choose a valid appointment status.' });
   try {
@@ -158,7 +158,7 @@ router.get('/encounters', requirePermission('canViewClinicEncounters'), async (r
   } catch (error) { fail(res, error, 'Could not load clinical encounters.'); }
 });
 
-router.post('/encounters', requirePermission('canManageClinicEncounters'), async (req, res) => {
+router.post('/encounters', requirePermission('canCreateClinicEncounters'), async (req, res) => {
   const customerId = text(req.body.customerId);
   const chiefComplaint = text(req.body.chiefComplaint);
   if (!customerId || !chiefComplaint) return res.status(400).json({ error: 'Select a patient and enter the chief complaint.' });
@@ -189,7 +189,7 @@ router.get('/prescriptions', requirePermission('canViewClinicPrescriptions'), as
   } catch (error) { fail(res, error, 'Could not load prescriptions.'); }
 });
 
-router.post('/prescriptions', requirePermission('canManageClinicPrescriptions'), async (req, res) => {
+router.post('/prescriptions', requirePermission('canCreateClinicPrescriptions'), async (req, res) => {
   const customerId = text(req.body.customerId);
   const items = Array.isArray(req.body.items) ? req.body.items : [];
   if (!customerId || !items.length) return res.status(400).json({ error: 'Select a patient and at least one prescribed medicine.' });
