@@ -40,9 +40,20 @@ test('Bar menu, orders, and queue have independent action permissions', async ()
 test('chair scheduling serializes concurrent bookings and rejects overlapping time slots', async () => {
   const serviceRoutes = await read('../routes/service.js');
   assert.match(serviceRoutes, /pg_advisory_xact_lock/);
+  assert.match(serviceRoutes, /WITH lock AS MATERIALIZED \(SELECT pg_advisory_xact_lock\(hashtext\(\$1\)\)\) SELECT 1 AS locked FROM lock/);
+  assert.doesNotMatch(serviceRoutes, /\$queryRawUnsafe\('SELECT pg_advisory_xact_lock/);
   assert.match(serviceRoutes, /start < otherEnd && otherStart < end/);
   assert.match(serviceRoutes, /That chair is already booked during this time/);
   assert.match(serviceRoutes, /salonChairId/);
+});
+
+test('pharmacy prescription lines quote the product baseUnit column and waiter HR lookup is permission-gated', async () => {
+  const pharmacyRoutes = await read('../routes/pharmacy.js');
+  const restaurantRoutes = await read('../routes/restaurant.js');
+  assert.match(pharmacyRoutes, /p\."baseUnit" FROM clinic_prescription_items/);
+  assert.doesNotMatch(pharmacyRoutes, /p\.baseUnit FROM clinic_prescription_items/);
+  assert.match(restaurantRoutes, /router\.get\('\/waiters\/hr-employees'.*requireAnyPermission\(\['canViewRestaurant', 'canCreateRestaurant', 'canEditRestaurant'\]\)/);
+  assert.match(restaurantRoutes, /requireAnyPermission\(HR_WAITER_LINK_PERMISSIONS\)/);
 });
 
 test('completed appointments snapshot commissions and approved commissions can only be claimed once by payroll', async () => {

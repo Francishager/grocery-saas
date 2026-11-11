@@ -166,7 +166,7 @@ router.get('/waiters', authenticateToken, requirePermission('canViewRestaurant')
   } catch (error) { handleBranchError(res, error) }
 })
 
-router.get('/waiters/hr-employees', authenticateToken, requirePermission('canViewRestaurant'), requireFeature('restaurant.waiters'), requireFeature('hr'), requireAnyPermission(HR_WAITER_LINK_PERMISSIONS), async (req, res) => {
+router.get('/waiters/hr-employees', authenticateToken, requireAnyPermission(['canViewRestaurant', 'canCreateRestaurant', 'canEditRestaurant']), requireFeature('restaurant.waiters'), requireFeature('hr'), requireAnyPermission(HR_WAITER_LINK_PERMISSIONS), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req)
     const employees = await prisma.employee.findMany({

@@ -239,7 +239,7 @@ router.put('/appointments/:id/salon-assignment', authenticateToken, requireAnyPe
     const updated = chairId
       ? await prisma.$transaction(async tx => {
           const dayKey = appointment.scheduledDate.toISOString().slice(0, 10);
-          await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `${tenant}:${chairId}:${dayKey}`);
+          await tx.$queryRawUnsafe('WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext($1))) SELECT 1 AS locked FROM lock', `${tenant}:${chairId}:${dayKey}`);
           await validateChairSlot(tx, { tenantId: tenant, chairId, branchId: assignmentBranchId, date: appointment.scheduledDate, time: appointment.scheduledTime, endTime: appointment.endTime, duration: appointment.duration, excludeId: appointment.id });
           return tx.appointment.update({ where: { id: appointment.id }, data });
         })
@@ -273,7 +273,7 @@ router.post("/appointments", authenticateToken, requirePermission(servicePermiss
     const appt = salonChairId
       ? await prisma.$transaction(async tx => {
           const dayKey = new Date(scheduledDate).toISOString().slice(0, 10);
-          await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `${t(req)}:${salonChairId}:${dayKey}`);
+          await tx.$queryRawUnsafe('WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext($1))) SELECT 1 AS locked FROM lock', `${t(req)}:${salonChairId}:${dayKey}`);
           await validateChairSlot(tx, { tenantId: t(req), chairId: salonChairId, branchId, date: scheduledDate, time: scheduledTime, endTime, duration });
           return tx.appointment.create({ data });
         })
@@ -316,7 +316,7 @@ router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appoint
     const appt = salonChairId
       ? await prisma.$transaction(async tx => {
           const dayKey = next.scheduledDate.toISOString().slice(0, 10);
-          await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `${t(req)}:${salonChairId}:${dayKey}`);
+          await tx.$queryRawUnsafe('WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext($1))) SELECT 1 AS locked FROM lock', `${t(req)}:${salonChairId}:${dayKey}`);
           await validateChairSlot(tx, { tenantId: t(req), chairId: salonChairId, branchId: existing.branchId, date: next.scheduledDate, time: next.scheduledTime, endTime: next.endTime, duration: next.duration, excludeId: existing.id });
           return tx.appointment.update({ where: { id: existing.id }, data: next });
         })

@@ -30,20 +30,44 @@ interface DropdownMenuTriggerProps extends React.ButtonHTMLAttributes<HTMLButton
   children: React.ReactNode
   open?: boolean
   setOpen?: (open: boolean) => void
+  asChild?: boolean
 }
 
 export const DropdownMenuTrigger: React.FC<DropdownMenuTriggerProps> = ({
   children,
   open,
   setOpen,
+  asChild = false,
   className = '',
   ...props
 }) => {
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    props.onClick?.(event)
+    if (!event.defaultPrevented) setOpen?.(!open)
+  }
+
+  if (asChild && React.isValidElement(children)) {
+    const child = children as React.ReactElement<any>
+    const childOnClick = child.props.onClick as ((event: React.MouseEvent) => void) | undefined
+    return React.cloneElement(child, {
+      ...props,
+      type: 'button',
+      onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+        childOnClick?.(event)
+        handleClick(event)
+      },
+      'aria-haspopup': 'menu',
+      'aria-expanded': Boolean(open),
+    })
+  }
+
   return (
     <button
-      onClick={() => setOpen?.(!open)}
+      onClick={handleClick}
       className={`inline-flex items-center justify-center w-8 h-8 rounded-md hover:bg-gray-100 transition-colors ${className}`}
       type="button"
+      aria-haspopup="menu"
+      aria-expanded={Boolean(open)}
       {...props}
     >
       {children}
@@ -54,14 +78,31 @@ export const DropdownMenuTrigger: React.FC<DropdownMenuTriggerProps> = ({
 interface DropdownMenuContentProps {
   children: React.ReactNode
   open?: boolean
+  setOpen?: (open: boolean) => void
+  align?: 'start' | 'center' | 'end'
+  sideOffset?: number
+  className?: string
 }
 
-export const DropdownMenuContent: React.FC<DropdownMenuContentProps> = ({ children, open }) => {
+export const DropdownMenuContent: React.FC<DropdownMenuContentProps> = ({
+  children,
+  open,
+  setOpen,
+  align = 'end',
+  sideOffset = 8,
+  className = '',
+}) => {
   if (!open) return null
 
   return (
-    <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
-      {children}
+    <div
+      role="menu"
+      className={`absolute z-50 w-48 rounded-md border border-border bg-popover text-popover-foreground shadow-lg ${align === 'start' ? 'left-0' : align === 'center' ? 'left-1/2 -translate-x-1/2' : 'right-0'} ${className}`}
+      style={{ marginTop: sideOffset }}
+    >
+      {React.Children.map(children, child => React.isValidElement(child)
+        ? React.cloneElement(child as React.ReactElement<any>, { setOpen })
+        : child)}
     </div>
   )
 }
@@ -69,18 +110,26 @@ export const DropdownMenuContent: React.FC<DropdownMenuContentProps> = ({ childr
 interface DropdownMenuItemProps {
   children: React.ReactNode
   onClick?: () => void
+  onSelect?: () => void
   className?: string
+  setOpen?: (open: boolean) => void
+  disabled?: boolean
 }
 
 export const DropdownMenuItem: React.FC<DropdownMenuItemProps> = ({
   children,
   onClick,
+  onSelect,
   className = '',
+  setOpen,
+  disabled = false,
 }) => {
   return (
     <button
-      onClick={onClick}
-      className={`w-full text-left px-4 py-2 hover:bg-gray-100 transition-colors text-sm ${className}`}
+      role="menuitem"
+      onClick={() => { onClick?.(); onSelect?.(); setOpen?.(false) }}
+      disabled={disabled}
+      className={`w-full text-left px-4 py-2 hover:bg-accent hover:text-accent-foreground transition-colors text-sm disabled:pointer-events-none disabled:opacity-50 ${className}`}
       type="button"
     >
       {children}

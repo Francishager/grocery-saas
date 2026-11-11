@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import prisma from '../src/db.js';
-import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js';
+import { authenticateToken, requireAnyPermission, requirePermission, requireTenant } from '../middleware/auth.js';
 import { requireFeature } from '../middleware/featureCheck.js';
 
 const router = Router();

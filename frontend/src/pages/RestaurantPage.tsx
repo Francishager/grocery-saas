@@ -72,7 +72,7 @@ export default function RestaurantPage() {
   const canUpdateOrder = (order: Order) => canEditRestaurant || (hasPermission('canUpdateBarQueue') && order.items.length > 0 && order.items.every(item => item.station === 'bar'))
   const canAdjustStockOut = hasPermission('canAdjustStock')
   const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
-  const canLinkWaiterToHr = hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
+  const canLinkWaiterToHr = canViewRestaurantOps && hasFeature('restaurant.waiters') && hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
   const [tab, setActiveTab] = useState(activeRouteTab || 'dashboard')
   const setTab = (nextTab: string) => {
     setActiveTab(nextTab)

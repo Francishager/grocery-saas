@@ -36,3 +36,16 @@ test('clinic and pharmacy pages load only the active subpage data, not every mod
   assert.match(pharmacy, /setInterval\(\(\) => \{ void refreshQueue\(\) \}, 60_000\)/);
   assert.match(pharmacy, /section !== 'queue'/);
 });
+
+test('clinic prescriptions support multiple medicines and row actions are permission-scoped menus', () => {
+  const clinic = readFileSync(sourceRoot + '/pages/ClinicManagementPage.tsx', 'utf8');
+  const pharmacy = readFileSync(sourceRoot + '/pages/PharmacyManagementPage.tsx', 'utf8');
+  const salon = readFileSync(sourceRoot + '/pages/SalonStylistsPage.tsx', 'utf8');
+  assert.match(clinic, /prescriptionForm\.items\.map\(\(item, index\)/);
+  assert.match(clinic, /Add another medicine/);
+  assert.match(clinic, /items: prescriptionForm\.items\.map/);
+  assert.match(clinic, /<DropdownMenuItem onClick=\{\(\) => \{ setEditingPatientId/);
+  assert.match(pharmacy, /<DropdownMenuItem onClick=\{\(\) => \{ setEditingProductId/);
+  assert.match(salon, /<DropdownMenuItem onClick=\{\(\) => \{ setEditingId/);
+  assert.match(salon, /Deactivate stylist/);
+});
