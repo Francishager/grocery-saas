@@ -9,6 +9,7 @@
     "test:trash": "node --test tests/trash.test.js",
     "test:fuel": "node --test tests/fuelStation.test.js",
     "test:reports": "node --test tests/reportAccounting.test.js tests/reportingHelpers.test.js tests/daily-report.test.js tests/weeklySalesReport.test.js tests/saleTaxAllocation.test.js tests/report-contracts.test.js tests/dashboard.test.js tests/cogs.test.js tests/receivable-sales-view.test.js tests/accounting-sync.test.js tests/outstanding-receivables.test.js tests/transfers.test.js tests/aging-report.test.js tests/customer-receipt-allocation.test.js",
+    "test:provisioning": "node --test tests/tenantProvisioning.test.js",
     "test:permissions": "node --test tests/manualJournalPolicy.test.js",
     "test:platform-observability": "node --test tests/platformRuntimeMetrics.test.js",
     "test:scaling-safety": "node --test tests/postgresAdvisoryLock.test.js",

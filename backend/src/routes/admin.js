@@ -1392,7 +1392,7 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     const otp = reuseOwnerAccount ? null : generateOTP();
     const otpExpires = reuseOwnerAccount ? null : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    const { tenant } = await prisma.$transaction(async (tx) => {
+    const { tenant, reusedOwnerAccount } = await prisma.$transaction(async (tx) => {
       const createdTenant = await tx.tenant.create({
         data: {
           name: business.name,
