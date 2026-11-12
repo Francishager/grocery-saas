@@ -1,0 +1,74 @@
+import type { ReceiptPreview } from '@/lib/api'
+
+export interface ReceiptPreviewFallback {
+  id?: string
+  receiptNo?: string
+  business?: Partial<ReceiptPreview['business']> & { name?: string }
+  branch?: ReceiptPreview['branch']
+  cashier?: string
+  customerName?: string
+  paymentMethod?: string
+  createdAt?: string
+  baseCurrency?: string
+  transactionCurrency?: string
+  foreignTotal?: number
+  exchangeRateToBase?: number
+  exchangeRateAsOf?: string | null
+  exchangeRateSource?: string | null
+  subtotal?: number
+  discount?: number
+  tax?: number
+  total?: number
+  amountPaid?: number | null
+  changeGiven?: number | null
+  items?: Array<{
+    id?: string
+    name?: string
+    sku?: string | null
+    quantity?: number
+    price?: number
+    total?: number
+  }>
+}
+
+export function buildReceiptPreviewFromData(data: ReceiptPreviewFallback): ReceiptPreview {
+  return {
+    id: data.id || 'receipt-preview',
+    receiptNo: data.receiptNo || 'Receipt',
+    business: {
+      name: data.business?.name || 'Business',
+      email: data.business?.email ?? null,
+      phone: data.business?.phone ?? null,
+      address: data.business?.address ?? null,
+      logo: data.business?.logo ?? null,
+      receiptHeader: data.business?.receiptHeader ?? null,
+      receiptFooter: data.business?.receiptFooter ?? null,
+      currency: data.business?.currency,
+    },
+    branch: data.branch ?? null,
+    cashier: data.cashier || '-',
+    customerName: data.customerName ?? null,
+    paymentMethod: data.paymentMethod || 'cash',
+    createdAt: data.createdAt || new Date().toISOString(),
+    baseCurrency: data.baseCurrency || data.business?.currency || 'UGX',
+    transactionCurrency: data.transactionCurrency || data.baseCurrency || data.business?.currency || 'UGX',
+    foreignTotal: data.foreignTotal ?? data.total ?? 0,
+    exchangeRateToBase: data.exchangeRateToBase || 1,
+    exchangeRateAsOf: data.exchangeRateAsOf ?? null,
+    exchangeRateSource: data.exchangeRateSource ?? null,
+    subtotal: data.subtotal ?? 0,
+    discount: data.discount ?? 0,
+    tax: data.tax ?? 0,
+    total: data.total ?? 0,
+    amountPaid: data.amountPaid ?? null,
+    changeGiven: data.changeGiven ?? null,
+    items: (data.items || []).map((item, index) => ({
+      id: item.id || `item-${index}`,
+      name: item.name || 'Item',
+      sku: item.sku ?? null,
+      quantity: item.quantity ?? 0,
+      price: item.price ?? 0,
+      total: item.total ?? 0,
+    })),
+  }
+}

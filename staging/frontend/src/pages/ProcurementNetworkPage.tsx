@@ -1,0 +1,641 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Building2, ChevronsUpDown, ChevronLeft, ChevronRight, CircleDollarSign, Clock3, Globe2, Handshake, LoaderCircle, Megaphone, Package, Plus, Printer, RefreshCw, Search, Send, Share2, ShieldCheck, Sparkles, Store, Tags, UserPlus, UserRoundCheck, X } from 'lucide-react'
+import { apiFetch } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { Textarea } from '@/components/ui/textarea'
+
+type Section = 'marketplace' | 'rfqs' | 'orders' | 'relationships' | 'profile' | 'seller-profile'
+type LineDraft = { productId: string; productName: string; specification: string; quantity: string; unit: string; acceptableAlternatives: string; custom: boolean }
+type Business = { id: string; name: string; slug: string; businessType?: string | null; logo?: string | null }
+type Listing = { id: string; name: string; description: string; category: string; unit: string; price: string; currency: string; minimumQty: string; availableQty?: string | null; leadTimeDays?: number | null; visibility: string; status?: string; updatedAt?: string; business?: Business }
+type RFQ = { id: string; title: string; notes: string; visibility: string; status: string; currency: string; isMine: boolean; lines: Array<{ id: string; productId?: string | null; productName: string; specification: string; quantity: string; unit: string; referencePrice?: string | null; referenceCurrency?: string | null; sourceCampaignId?: string | null }>; buyer?: Business; quoteCount: number; myQuote?: { id: string; status: string; version: number } | null }
+type Relationship = { id: string; status: string; direction: string; counterparty?: Business }
+type Campaign = { id: string; campaignType: 'promotion' | 'ad'; title: string; message: string; startsAt: string; endsAt?: string | null; status: string; images?: string[]; listing?: { id: string; name: string; description: string; unit: string; minimumQty: string; price: string; currency: string }; business?: Business }
+type SellerStory = { id: string; name: string; logo?: string | null; slides: Array<{ image: string; title: string; message: string; campaignType: Campaign['campaignType'] }> }
+type SellerProfileView = { profile: { tenantId: string; sellerType: string; category: string; description: string; website?: string | null; discoverable: boolean; business?: Business }; listings: Listing[]; campaigns: Campaign[] }
+type OfferRequestDraft = { listing: Pick<Listing, 'id' | 'name' | 'description' | 'unit' | 'price' | 'currency' | 'minimumQty'>; campaignId?: string; campaignTitle?: string; campaignMessage?: string; quantity: string; deliveryAddress: string; notes: string }
+
+const blankLine: LineDraft = { productId: '', productName: '', specification: '', quantity: '1', unit: 'Piece', acceptableAlternatives: '', custom: false }
+function uninvoicedQuantity(order: any, line: any) {
+  const invoiced = (order.invoices || []).filter((invoice: any) => ['submitted', 'approved'].includes(invoice.status))
+    .flatMap((invoice: any) => invoice.lines || [])
+    .filter((invoiceLine: any) => invoiceLine.orderLineId === line.id)
+    .reduce((sum: number, invoiceLine: any) => sum + Number(invoiceLine.quantity || 0), 0)
+  return Math.max(0, Number(line.receivedQuantity || 0) - invoiced)
+}
+function uninvoicedTax(order: any) {
+  const amount = order.lines.reduce((sum: number, line: any) => {
+    const quantity = uninvoicedQuantity(order, line)
+    return sum + Number((quantity * Number(line.unitPrice || 0) * Number(line.taxRate || 0) / 100).toFixed(2))
+  }, 0)
+  return Number(amount.toFixed(2))
+}
+function orderNeedsAction(order: any, side: 'buyer' | 'seller') {
+  if (side === 'buyer') {
+    return ['pending_approval', 'approved'].includes(order.status)
+      || (['acknowledged', 'partially_received'].includes(order.status) && order.lines.some((line: any) => Number(line.receivedQuantity || 0) < Number(line.orderedQuantity || 0)))
+      || (order.invoices || []).some((invoice: any) => invoice.status === 'submitted')
+  }
+  return order.status === 'sent'
+    || (['acknowledged', 'partially_received', 'received'].includes(order.status) && order.lines.some((line: any) => uninvoicedQuantity(order, line) > 0))
+    || (order.invoices || []).some((invoice: any) => (invoice.paymentApprovals || []).some((approval: any) => approval.status === 'pending'))
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(`/api/procurement${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload?.error || payload?.message || 'The procurement request failed.')
+  return payload as T
+}
+
+async function requestCampaign<T>(path: string, body: FormData): Promise<T> {
+  const response = await apiFetch(`/api/procurement${path}`, { method: 'POST', body })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload?.error || payload?.message || 'The campaign could not be published.')
+  return payload as T
+}
+
+function CampaignImageShowcase({ images, title }: { images?: string[]; title: string }) {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [expanded, setExpanded] = useState(false)
+  const imageList = images || []
+  useEffect(() => setActiveIndex((current) => Math.min(current, Math.max(0, imageList.length - 1))), [imageList.length])
+  useEffect(() => {
+    if (expanded || imageList.length < 2 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const timer = setInterval(() => setActiveIndex((current) => (current + 1) % imageList.length), 7000)
+    return () => clearInterval(timer)
+  }, [imageList.length, expanded])
+  if (!imageList.length) return null
+  const move = (direction: number) => setActiveIndex((current) => (current + direction + imageList.length) % imageList.length)
+  return <>
+    <div className="relative mx-auto w-full overflow-hidden bg-neutral-950" aria-label={`Images for ${title}`}>
+      <button type="button" aria-label={`View ${title} image full screen`} onClick={() => setExpanded(true)} className="block w-full cursor-zoom-in">
+        <img src={imageList[activeIndex]} alt={`${title} image ${activeIndex + 1}`} className="mx-auto max-h-[78vh] min-h-64 w-full object-contain sm:aspect-[4/5] sm:max-h-[820px]" loading={activeIndex === 0 ? 'eager' : 'lazy'} />
+      </button>
+      {imageList.length > 1 && <>
+        <button type="button" aria-label="Previous campaign image" onClick={() => move(-1)} className="absolute left-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white hover:bg-black/75"><ChevronLeft className="size-5" /></button>
+        <button type="button" aria-label="Next campaign image" onClick={() => move(1)} className="absolute right-3 top-1/2 grid size-10 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white hover:bg-black/75"><ChevronRight className="size-5" /></button>
+      </>}
+    </div>
+    {expanded && <div role="dialog" aria-modal="true" aria-label={`${title} images`} className="fixed inset-0 z-[80] grid place-items-center bg-black/95 p-2 sm:p-6" onClick={() => setExpanded(false)} onKeyDown={(event) => { if (event.key === 'Escape') setExpanded(false); if (event.key === 'ArrowLeft') move(-1); if (event.key === 'ArrowRight') move(1) }} tabIndex={-1}>
+      <button type="button" aria-label="Close image viewer" onClick={() => setExpanded(false)} className="absolute right-4 top-4 z-10 grid size-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25"><X className="size-5" /></button>
+      {imageList.length > 1 && <button type="button" aria-label="Previous campaign image" onClick={(event) => { event.stopPropagation(); move(-1) }} className="absolute left-3 z-10 grid size-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:left-8"><ChevronLeft className="size-6" /></button>}
+      <img src={imageList[activeIndex]} alt={`${title} image ${activeIndex + 1}`} className="max-h-full max-w-full object-contain" onClick={(event) => event.stopPropagation()} />
+      {imageList.length > 1 && <button type="button" aria-label="Next campaign image" onClick={(event) => { event.stopPropagation(); move(1) }} className="absolute right-3 z-10 grid size-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25 sm:right-8"><ChevronRight className="size-6" /></button>}
+    </div>}
+  </>
+}
+
+function printPaymentReceipt(order: any, invoice: any, approval: any) {
+  const popup = window.open('', '_blank', 'width=760,height=900')
+  if (!popup) return
+  const safe = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
+  const status = approval.status === 'approved' ? 'Confirmed receipt' : 'Payment submitted - awaiting seller confirmation'
+  const method = approval.receivedPaymentMethod || approval.supplierPayment?.paymentMethod?.replace(/_/g, ' ') || 'Not specified'
+  const amount = `${order.currency} ${Number(approval.amount).toLocaleString()}`
+  popup.document.open()
+  popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Marketplace payment receipt</title><style>body{font:15px Arial,sans-serif;color:#17212b;margin:0;padding:36px}.receipt{max-width:680px;margin:auto;border:1px solid #d6dde3;padding:32px}.brand{text-align:center;font-size:18px;font-weight:700;color:#12624a}.label{color:#61717e;font-size:12px;text-transform:uppercase;letter-spacing:.08em}.amount{text-align:center;font-size:30px;font-weight:700;margin:18px 0}.status{text-align:center;padding:10px;background:#f1f5f3;margin-bottom:24px}.row{display:flex;justify-content:space-between;gap:20px;border-bottom:1px solid #e5e9ec;padding:12px 0}.row span:first-child{color:#61717e}.foot{margin-top:24px;color:#61717e;font-size:12px}@media print{body{padding:0}.receipt{border:0}}</style></head><body><main class="receipt"><header class="brand">JibuSales · Marketplace</header><p class="label" style="text-align:center;margin-top:8px">${approval.status === 'approved' ? 'Payment receipt' : 'Payment submission acknowledgment'}</p><div class="amount">${safe(amount)}</div><div class="status">${safe(status)}</div><div class="row"><span>Buyer</span><strong>${safe(order.buyer?.name || 'Buyer business')}</strong></div><div class="row"><span>Seller</span><strong>${safe(order.seller?.name || 'Seller business')}</strong></div><div class="row"><span>Supplier invoice</span><strong>${safe(invoice.invoiceNo)}</strong></div><div class="row"><span>Purchase order</span><strong>${safe(order.poNumber)}</strong></div><div class="row"><span>Payment method</span><strong>${safe(method)}</strong></div><div class="row"><span>Payment reference</span><strong>${safe(approval.supplierPayment?.reference || 'Not provided')}</strong></div><div class="row"><span>Recorded</span><strong>${safe(new Date(approval.createdAt).toLocaleString())}</strong></div><div class="row"><span>Receipt reference</span><strong>${safe(approval.id)}</strong></div><p class="foot">${approval.status === 'approved' ? 'This receipt confirms that the seller recorded the repayment and applied it to the linked invoice.' : 'This copy confirms submission only. It is not a receipt for funds received until the seller confirms the payment.'}</p></main><script>window.onload=()=>setTimeout(()=>window.print(),200)</script></body></html>`)
+  popup.document.close()
+}
+
+function Field({ label, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  return <label className="grid gap-1.5 text-sm font-medium text-foreground">{label}<input {...props} className={`h-10 min-w-0 rounded-md border border-input bg-background px-3 text-sm font-normal outline-none focus:ring-2 focus:ring-ring ${props.className || ''}`} /></label>
+}
+
+function TextareaField({ label, aiWritingField, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; aiWritingField?: boolean }) {
+  return <div className="grid gap-1.5 text-sm"><div className="font-medium text-foreground">{label}</div><Textarea {...props} aiWritingField={aiWritingField} className={`min-h-20 min-w-0 font-normal ${props.className || ''}`} /></div>
+}
+
+export default function ProcurementNetworkPage({ mode = 'buyer', section = 'marketplace' }: { mode?: 'buyer' | 'seller'; section?: Section }) {
+  const { sellerTenantId } = useParams<{ sellerTenantId: string }>()
+  const { user, hasPermission } = useJWTAuth()
+  const { canAccessFeature } = useFeatureAccess()
+  const can = (permission: string) => !(mode === 'seller' && permission === 'canCreateProcurementRFQ') && (user?.role === 'owner' || hasPermission(permission))
+  const canViewMessages = canAccessFeature('communication') && (user?.role === 'owner' || hasPermission('canViewCommunication'))
+  const canSendMessages = canAccessFeature('communication') && (user?.role === 'owner' || hasPermission('canCreateCommunication'))
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [search, setSearch] = useState('')
+  const [listingCategory, setListingCategory] = useState('')
+  const [listingSort, setListingSort] = useState('recent')
+  const [feedAudience, setFeedAudience] = useState<'for-you' | 'following' | 'offers'>('for-you')
+  const [orderSearch, setOrderSearch] = useState('')
+  const [orderFilter, setOrderFilter] = useState<'all' | 'action' | 'open' | 'closed'>('all')
+  const [rfqSearch, setRfqSearch] = useState('')
+  const [rfqFilter, setRfqFilter] = useState<'all' | 'open' | 'awarded' | 'closed'>('all')
+  const [listings, setListings] = useState<Listing[]>([])
+  const [myListings, setMyListings] = useState<Listing[]>([])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [sellerProfileView, setSellerProfileView] = useState<SellerProfileView | null>(null)
+  const [campaignImages, setCampaignImages] = useState<File[]>([])
+  const [followedSellerIds, setFollowedSellerIds] = useState<Set<string>>(new Set())
+  const [activeStorySellerIndex, setActiveStorySellerIndex] = useState<number | null>(null)
+  const [activeStorySlideIndex, setActiveStorySlideIndex] = useState(0)
+  const [showAllCampaigns, setShowAllCampaigns] = useState(false)
+  const [marketInsight, setMarketInsight] = useState<{ title: string; message: string; listingId: string | null } | null>(null)
+  const [marketInsightVisible, setMarketInsightVisible] = useState(false)
+  const marketInsightAttempted = useRef(false)
+  const [myCampaigns, setMyCampaigns] = useState<Campaign[]>([])
+  const [suppliers, setSuppliers] = useState<Array<{ tenantId: string; sellerType?: string; category: string; description: string; business?: Business }>>([])
+  const [allRelationships, setAllRelationships] = useState<Relationship[]>([])
+  const [allRFQs, setAllRFQs] = useState<RFQ[]>([])
+  const [orders, setOrders] = useState<any[]>([])
+  const [branches, setBranches] = useState<Array<{ id: string; name: string }>>([])
+  const [localSuppliers, setLocalSuppliers] = useState<Array<{ id: string; name: string }>>([])
+  const [inventoryProducts, setInventoryProducts] = useState<Array<{ id: string; name: string; sku?: string | null; branchId?: string | null }>>([])
+  const [inventoryCategories, setInventoryCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [requestProducts, setRequestProducts] = useState<Array<{ id: string; name: string; sku?: string | null; itemType: string; baseUnit: string; branchId?: string | null }>>([])
+  const [openProductLine, setOpenProductLine] = useState<number | null>(null)
+  const [businessAddress, setBusinessAddress] = useState('')
+  const [sellerProducts, setSellerProducts] = useState<Array<{ id: string; name: string; sku?: string | null; itemType: string }>>([])
+  const [receiveDraft, setReceiveDraft] = useState<Record<string, string>>({})
+  const [newProductDraft, setNewProductDraft] = useState<Record<string, { name: string; sellingPrice: string; sku: string; categoryId: string; minStock: string }>>({})
+  const [selectedBranch, setSelectedBranch] = useState('')
+  const [selectedSupplier, setSelectedSupplier] = useState('')
+  const [productMappings, setProductMappings] = useState<Record<string, string>>({})
+  const [sellerProductMappings, setSellerProductMappings] = useState<Record<string, string>>({})
+  const [sellerPaymentOpen, setSellerPaymentOpen] = useState<Record<string, boolean>>({})
+  const [sellerPaymentAccounts, setSellerPaymentAccounts] = useState<Record<string, Array<{ id: string; name: string; type: string; currency: string; paymentMethod: string }>>>({})
+  const [sellerPaymentDraft, setSellerPaymentDraft] = useState<Record<string, { amount: string; accountId: string; reference: string }>>({})
+  const [profile, setProfile] = useState({ sellerType: 'supplier', category: '', description: '', website: '', discoverable: false })
+  const [listingForm, setListingForm] = useState({ name: '', category: '', description: '', unit: 'Piece', price: '', currency: 'UGX', minimumQty: '1', availableQty: '', leadTimeDays: '', visibility: 'public' })
+  const [campaignForm, setCampaignForm] = useState({ campaignType: (can('canCreateMarketplacePromotion') ? 'promotion' : 'ad') as 'promotion' | 'ad', listingId: '', title: '', message: '', startsAt: '', endsAt: '' })
+  const campaignImagePreviews = useMemo(() => campaignImages.map((file) => ({ file, url: URL.createObjectURL(file) })), [campaignImages])
+  useEffect(() => () => campaignImagePreviews.forEach(({ url }) => URL.revokeObjectURL(url)), [campaignImagePreviews])
+  const [rfqForm, setRfqForm] = useState({ title: '', notes: '', visibility: 'open', currency: 'UGX', deliveryAddress: '', sellerTenantIds: [] as string[], lines: [{ ...blankLine }] })
+  const [offerRequest, setOfferRequest] = useState<OfferRequestDraft | null>(null)
+  const [activeRFQ, setActiveRFQ] = useState<RFQ | null>(null)
+  const [quotes, setQuotes] = useState<any[]>([])
+  const [quoteDraft, setQuoteDraft] = useState<Record<string, string>>({})
+  const [discussion, setDiscussion] = useState<{ quoteId: string; messages: any[] } | null>(null)
+  const [messageDraft, setMessageDraft] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const [profileData, listingData, ownData, directoryData, relationshipData, rfqData, orderData, branchData, supplierData, productData, requestProductData, categoryData, businessData, sellerProductData, campaignData, ownCampaignData, followData, sellerProfileData] = await Promise.all([
+        mode === 'seller' ? request<{ profile: typeof profile | null }>('/profile') : Promise.resolve({ profile: null }),
+        mode === 'buyer' ? request<{ listings: Listing[] }>(`/listings?search=${encodeURIComponent(search)}`) : Promise.resolve({ listings: [] }),
+        mode === 'seller' ? request<{ listings: Listing[] }>('/listings/mine').catch(() => ({ listings: [] })) : Promise.resolve({ listings: [] }),
+        mode === 'buyer' ? request<{ suppliers: typeof suppliers }>(`/directory?search=${encodeURIComponent(search)}`) : Promise.resolve({ suppliers: [] }),
+        request<{ relationships: Relationship[] }>('/relationships'),
+        request<{ rfqs: RFQ[] }>('/rfqs'),
+        request<{ orders: any[] }>('/orders'),
+        mode === 'buyer' ? request<{ branches: Array<{ id: string; name: string }> }>('/branches') : Promise.resolve({ branches: [] }),
+        mode === 'buyer' ? request<{ suppliers: Array<{ id: string; name: string }> }>('/local-suppliers').catch(() => ({ suppliers: [] })) : Promise.resolve({ suppliers: [] }),
+        mode === 'buyer' ? request<{ products: typeof inventoryProducts }>('/inventory-products').catch(() => ({ products: [] })) : Promise.resolve({ products: [] }),
+        mode === 'buyer' ? request<{ products: typeof requestProducts }>('/request-products').catch(() => ({ products: [] })) : Promise.resolve({ products: [] }),
+        mode === 'buyer' ? request<{ categories: typeof inventoryCategories }>('/inventory-categories').catch(() => ({ categories: [] })) : Promise.resolve({ categories: [] }),
+        mode === 'buyer' ? request<{ business: { address: string | null } }>('/business-profile').catch(() => ({ business: { address: null } })) : Promise.resolve({ business: { address: null } }),
+        mode === 'seller' ? request<{ products: typeof sellerProducts }>('/seller-products').catch(() => ({ products: [] })) : Promise.resolve({ products: [] }),
+        mode === 'buyer' ? request<{ campaigns: Campaign[] }>('/promotions') : Promise.resolve({ campaigns: [] }),
+        mode === 'seller' ? request<{ campaigns: Campaign[] }>('/promotions/mine').catch(() => ({ campaigns: [] })) : Promise.resolve({ campaigns: [] }),
+        mode === 'buyer' ? request<{ sellerTenantIds: string[] }>('/follows').catch(() => ({ sellerTenantIds: [] })) : Promise.resolve({ sellerTenantIds: [] }),
+        mode === 'buyer' && section === 'seller-profile' && sellerTenantId
+          ? request<SellerProfileView>(`/sellers/${encodeURIComponent(sellerTenantId)}/profile`)
+          : Promise.resolve(null),
+      ])
+      if (profileData.profile) setProfile({ sellerType: profileData.profile.sellerType || 'supplier', category: profileData.profile.category || '', description: profileData.profile.description || '', website: profileData.profile.website || '', discoverable: profileData.profile.discoverable })
+      setListings(listingData.listings); setMyListings(ownData.listings); setSuppliers(directoryData.suppliers); setAllRelationships(relationshipData.relationships); setAllRFQs(rfqData.rfqs)
+      setOrders(orderData.orders); setBranches(branchData.branches); setLocalSuppliers(supplierData.suppliers)
+      setInventoryProducts(productData.products)
+      setRequestProducts(requestProductData.products)
+      setInventoryCategories(categoryData.categories)
+      const address = businessData.business.address || ''
+      setBusinessAddress(address)
+      setRfqForm((form) => ({ ...form, deliveryAddress: form.deliveryAddress || address }))
+      setSellerProducts(sellerProductData.products)
+      setCampaigns(campaignData.campaigns)
+      setMyCampaigns(ownCampaignData.campaigns)
+      setSellerProfileView(sellerProfileData)
+      setFollowedSellerIds(new Set(followData.sellerTenantIds))
+      if (!selectedBranch && branchData.branches.length === 1) setSelectedBranch(branchData.branches[0].id)
+      if (!selectedSupplier && supplierData.suppliers.length === 1) setSelectedSupplier(supplierData.suppliers[0].id)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load the procurement network.') }
+    finally { setLoading(false) }
+  }, [mode, section, sellerTenantId, search, selectedBranch, selectedSupplier])
+
+  useEffect(() => { void load() }, [load])
+
+  const relationships = allRelationships.filter((row) => row.direction === (mode === 'buyer' ? 'outgoing' : 'incoming') && !(mode === 'seller' && row.status === 'pending'))
+  const rfqs = allRFQs.filter((rfq) => mode === 'buyer' ? rfq.isMine : !rfq.isMine)
+  const visibleRFQs = useMemo(() => rfqs.filter((rfq) => {
+    const query = rfqSearch.trim().toLowerCase()
+    const matchesSearch = !query || [rfq.title, rfq.buyer?.name, ...rfq.lines.map((line) => line.productName)].some((value) => String(value || '').toLowerCase().includes(query))
+    if (!matchesSearch) return false
+    if (rfqFilter === 'closed') return ['closed', 'cancelled', 'rejected'].includes(rfq.status)
+    if (rfqFilter !== 'all') return rfq.status === rfqFilter
+    return true
+  }), [rfqs, rfqSearch, rfqFilter])
+  const activeRelationships = useMemo(() => relationships.filter((row) => row.status === 'active'), [relationships])
+  const listingCategories = useMemo(() => [...new Set(listings.map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [listings])
+  const visibleListings = useMemo(() => listings.filter((item) => !listingCategory || item.category.toLocaleLowerCase() === listingCategory.toLocaleLowerCase()).sort((a, b) => {
+    if (listingSort === 'price-asc') return Number(a.price) - Number(b.price)
+    if (listingSort === 'price-desc') return Number(b.price) - Number(a.price)
+    if (listingSort === 'minimum-asc') return Number(a.minimumQty) - Number(b.minimumQty)
+    return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+  }), [listings, listingSort])
+  const feedCampaigns = useMemo(() => feedAudience === 'offers' ? [] : feedAudience === 'following'
+    ? campaigns.filter((campaign) => campaign.business?.id && followedSellerIds.has(campaign.business.id))
+    : campaigns, [campaigns, feedAudience, followedSellerIds])
+  const campaignListingIds = useMemo(() => new Set(feedCampaigns.map((campaign) => campaign.listing?.id).filter(Boolean)), [feedCampaigns])
+  const feedListings = useMemo(() => visibleListings.filter((item) =>
+    !campaignListingIds.has(item.id) && (feedAudience !== 'following' || (item.business?.id && followedSellerIds.has(item.business.id))),
+  ), [visibleListings, feedAudience, followedSellerIds, campaignListingIds])
+  const sellerStories = useMemo(() => {
+    const unique = new Map<string, SellerStory>()
+    for (const campaign of feedCampaigns) {
+      const business = campaign.business
+      if (!business?.id || !campaign.images?.length) continue
+      const story = unique.get(business.id) || { id: business.id, name: business.name || 'Supplier', logo: business.logo, slides: [] }
+      story.slides.push(...campaign.images.map((image) => ({ image, title: campaign.title, message: campaign.message, campaignType: campaign.campaignType })))
+      unique.set(business.id, story)
+    }
+    return [...unique.values()]
+  }, [feedCampaigns])
+  const activeStory = activeStorySellerIndex == null ? null : sellerStories[activeStorySellerIndex] || null
+  const activeStorySlide = activeStory?.slides[activeStorySlideIndex] || null
+  const closeStory = () => { setActiveStorySellerIndex(null); setActiveStorySlideIndex(0) }
+  const moveStory = (direction: number) => {
+    if (activeStorySellerIndex == null || !activeStory) return
+    const nextSlide = activeStorySlideIndex + direction
+    if (nextSlide >= 0 && nextSlide < activeStory.slides.length) {
+      setActiveStorySlideIndex(nextSlide)
+      return
+    }
+    const nextSeller = activeStorySellerIndex + direction
+    if (nextSeller < 0) {
+      setActiveStorySlideIndex(0)
+      return
+    }
+    if (nextSeller >= sellerStories.length) {
+      closeStory()
+      return
+    }
+    setActiveStorySellerIndex(nextSeller)
+    setActiveStorySlideIndex(direction > 0 ? 0 : sellerStories[nextSeller].slides.length - 1)
+  }
+  useEffect(() => {
+    if (mode !== 'buyer' || section !== 'marketplace' || !activeStory || !activeStorySlide || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const advance = () => moveStory(1)
+    const timer = window.setTimeout(advance, 5000)
+    return () => window.clearTimeout(timer)
+  }, [mode, section, activeStory, activeStorySlide, activeStorySellerIndex, activeStorySlideIndex])
+  useEffect(() => {
+    if (!activeStory) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeStory()
+      if (event.key === 'ArrowLeft') moveStory(-1)
+      if (event.key === 'ArrowRight') moveStory(1)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activeStory, activeStorySellerIndex, activeStorySlideIndex, sellerStories])
+  const visibleOrders = useMemo(() => orders.filter((order) => {
+    if (order.side !== mode) return false
+    const query = orderSearch.trim().toLowerCase()
+    const matchesSearch = !query || [order.poNumber, order.buyer?.name, order.seller?.name, ...(order.lines || []).map((line: any) => line.itemName), ...(order.invoices || []).map((invoice: any) => invoice.invoiceNo)]
+      .some((value) => String(value || '').toLowerCase().includes(query))
+    if (!matchesSearch) return false
+    if (orderFilter === 'closed') return ['rejected', 'cancelled'].includes(order.status)
+    if (orderFilter === 'open' && ['rejected', 'cancelled'].includes(order.status)) return false
+    if (orderFilter === 'action') return orderNeedsAction(order, mode)
+    return true
+  }), [orders, mode, orderSearch, orderFilter])
+  const incomingRequests = mode === 'seller' ? allRelationships.filter((row) => row.direction === 'incoming' && row.status === 'pending') : []
+  const canUseAI = user?.role === 'owner' || hasPermission('canUseBusinessAI')
+  const canFollowSellers = user?.role === 'owner' || hasPermission('canFollowMarketplaceSellers')
+
+  useEffect(() => {
+    if (mode !== 'buyer' || section !== 'marketplace' || !canUseAI || !user?.id || !user?.tenantId || marketInsightAttempted.current) return
+    marketInsightAttempted.current = true
+    const today = new Date().toISOString().slice(0, 10)
+    const storageKey = `marketplace-insight:${user.tenantId}:${user.id}`
+    try { if (localStorage.getItem(storageKey) === today) return } catch { /* Storage may be unavailable in private browsing. */ }
+    let fadeTimer: ReturnType<typeof setTimeout> | undefined
+    let dismissTimer: ReturnType<typeof setTimeout> | undefined
+    let active = true
+    void request<{ insight: { title: string; message: string; listingId: string | null } | null }>('/market-insight')
+      .then(({ insight }) => {
+        if (!active || !insight) return
+        setMarketInsight(insight)
+        setMarketInsightVisible(true)
+        try { localStorage.setItem(storageKey, today) } catch { /* The daily limit still applies to this page session. */ }
+        fadeTimer = setTimeout(() => {
+          setMarketInsightVisible(false)
+          dismissTimer = setTimeout(() => setMarketInsight(null), 350)
+        }, 9500)
+      })
+      .catch(() => {})
+    return () => { active = false; if (fadeTimer) clearTimeout(fadeTimer); if (dismissTimer) clearTimeout(dismissTimer) }
+  }, [mode, section, canUseAI, user?.id, user?.tenantId])
+
+  async function run(action: () => Promise<unknown>, success: string) {
+    setBusy(true); setError(''); setNotice('')
+    try { await action(); setNotice(success); await load() }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'The action could not be completed.') }
+    finally { setBusy(false) }
+  }
+
+  async function toggleSellerFollow(sellerTenantId: string) {
+    const following = followedSellerIds.has(sellerTenantId)
+    setBusy(true); setError(''); setNotice('')
+    try {
+      await request(`/sellers/${sellerTenantId}/follow`, { method: following ? 'DELETE' : 'POST' })
+      setFollowedSellerIds((current) => {
+        const next = new Set(current)
+        if (following) next.delete(sellerTenantId)
+        else next.add(sellerTenantId)
+        return next
+      })
+      setNotice(following ? 'Seller updates turned off.' : 'Seller followed. You will be notified about new visible marketplace posts.')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Seller follow could not be updated.') }
+    finally { setBusy(false) }
+  }
+
+  function beginOfferRequest(listing: OfferRequestDraft['listing'], campaign?: Campaign) {
+    setOfferRequest({
+      listing,
+      campaignId: campaign?.id,
+      campaignTitle: campaign?.title,
+      campaignMessage: campaign?.message,
+      quantity: listing.minimumQty || '1',
+      deliveryAddress: businessAddress,
+      notes: '',
+    })
+  }
+
+  async function submitOfferRequest() {
+    if (!offerRequest) return
+    const { listing, campaignId, campaignTitle, campaignMessage, quantity, deliveryAddress, notes } = offerRequest
+    await run(async () => {
+      await request('/rfqs', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: `Quote request: ${listing.name}`,
+          visibility: 'private',
+          currency: listing.currency,
+          deliveryAddress,
+          notes: [campaignTitle ? `Referred from campaign: ${campaignTitle}` : '', campaignMessage || '', notes].filter(Boolean).join('\n\n'),
+          sourceOffer: { listingId: listing.id, campaignId },
+          lines: [{ productName: listing.name, unit: listing.unit, quantity, specification: notes }],
+        }),
+      })
+      setOfferRequest(null)
+    }, 'Private quote request sent to the seller. No inventory or accounting entries were created.')
+  }
+
+  async function shareMarketplacePost(name: string, targetId: string) {
+    const url = new URL(window.location.href)
+    url.hash = targetId
+    const shareData = { title: name, text: `Marketplace offer: ${name}`, url: url.toString() }
+    try {
+      if (navigator.share) await navigator.share(shareData)
+      else {
+        await navigator.clipboard.writeText(shareData.url)
+        setNotice('Offer link copied. Share it with your business contacts.')
+      }
+    } catch (reason) {
+      if (reason instanceof Error && reason.name !== 'AbortError') setError('Could not share this offer from this device.')
+    }
+  }
+
+  function selectCampaignImages(files: FileList | null) {
+    const selected = Array.from(files || [])
+    const remaining = 4 - campaignImages.length
+    if (selected.length > remaining) { setError(`You can add ${remaining} more campaign image${remaining === 1 ? '' : 's'}. Remove an image to make room.`); return }
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+    const supportedExtensions = /\.(jpe?g|png|webp|heic|heif)$/i
+    if (selected.some((file) => (!supportedTypes.includes(file.type) && !(!file.type && supportedExtensions.test(file.name))) || file.size > 5 * 1024 * 1024)) {
+      setError('Use JPEG, PNG, WebP, HEIC, or HEIF images up to 5 MB each.'); return
+    }
+    setError('')
+    setCampaignImages((current) => [...current, ...selected])
+  }
+
+  async function openRFQ(rfq: RFQ) {
+    setError(''); setActiveRFQ(rfq); setQuotes([]); setDiscussion(null)
+    try {
+      const data = await request<{ quotes: any[] }>(`/rfqs/${rfq.id}/quotes`)
+      setQuotes(data.quotes)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load quotes.') }
+  }
+
+  async function openDiscussion(quoteId: string) {
+    if (!activeRFQ) return
+    try {
+      const data = await request<{ messages: any[] }>(`/rfqs/${activeRFQ.id}/quotes/${quoteId}/messages`)
+      setDiscussion({ quoteId, messages: data.messages })
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load the private quote discussion.') }
+  }
+
+  const workspaceRFQs = rfqs
+  const workspaceOrders = orders.filter((order) => order.side === mode)
+
+  return <main className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8">
+    <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b pb-5">
+      <div className="flex min-w-0 gap-3">
+        <div className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-md bg-emerald-100 text-emerald-800"><Store className="size-5" /></div>
+        <div><h1 className="text-xl font-semibold">{mode === 'buyer' ? ({ marketplace: 'Marketplace', rfqs: 'Quote requests', orders: 'Purchases & invoices', relationships: 'My suppliers', profile: 'Marketplace' } as const)[section] : ({ marketplace: 'Seller studio', rfqs: 'Incoming quote requests', orders: 'Sales & fulfilment', relationships: 'Buyer relationships', profile: 'Seller profile' } as const)[section]}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{mode === 'buyer' ? 'Discover suppliers, compare offers, request quotes and manage your procurement.' : 'Manage your offers, buyer requests, fulfilment and marketplace profile.'}</p></div>
+      </div>
+      <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />Refresh</Button>
+    </header>
+
+    {error && <div role="alert" className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+    {notice && <div role="status" className="mb-4 rounded-md border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{notice}</div>}
+    {loading && <div className="mb-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Loading procurement data</div>}
+
+    {section === 'orders' && <section className="space-y-4">
+      <div className="flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-lg font-semibold">Purchase orders, receipts and invoices</h2><p className="mt-1 text-sm text-muted-foreground">Approve and send orders, record partial receipts, and match invoices before creating a payable.</p><p className="mt-1 text-xs text-muted-foreground">{visibleOrders.length} {visibleOrders.length === 1 ? 'order' : 'orders'} shown</p></div><div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_160px]"><label className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><input value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} placeholder="Search PO, business, item, invoice" className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm" /></label><select aria-label="Filter orders" value={orderFilter} onChange={(event) => setOrderFilter(event.target.value as typeof orderFilter)} className="h-10 rounded-md border bg-background px-3 text-sm"><option value="all">All orders</option><option value="action">Needs action</option><option value="open">Open orders</option><option value="closed">Rejected / cancelled</option></select></div></div>
+      {visibleOrders.length ? visibleOrders.map((order) => <article key={order.id} className="rounded-md border p-4">
+        <div className="flex flex-wrap justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="font-semibold">{order.poNumber}</h3><span className="rounded-sm bg-muted px-2 py-0.5 text-xs capitalize">{order.status.replace(/_/g, ' ')}</span></div><p className="mt-1 text-sm text-muted-foreground">{order.side === 'buyer' ? `Supplier: ${order.seller?.name || 'Business'}` : `Buyer: ${order.buyer?.name || 'Business'}`} · {order.currency}</p></div></div>
+        <div className="my-3 divide-y rounded-md border">{order.lines.map((line: any) => {
+          const canReceive = order.side === 'buyer' && ['acknowledged', 'partially_received'].includes(order.status)
+          const canCreateProduct = can('canCreateProduct')
+          const draft = newProductDraft[line.id] || { name: line.itemName, sellingPrice: '', sku: '', categoryId: '', minStock: '10' }
+          return <div key={line.id} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_150px]">
+            <div><div className="font-medium">{line.itemName}</div><p className="text-xs text-muted-foreground">Ordered {Number(line.orderedQuantity)} {line.unit} · Received {Number(line.receivedQuantity)} · {order.currency} {Number(line.unitPrice).toLocaleString()}</p>{line.specification && <p className="mt-1 text-xs text-muted-foreground">{line.specification}</p>}
+              {canReceive && !line.productId && <><label className="mt-2 grid max-w-lg gap-1 text-xs">Use existing inventory item (optional)<select className="h-9 rounded-md border bg-background px-2 text-sm" defaultValue="" onChange={(e) => { if (e.target.value) void run(() => request(`/orders/${order.id}/lines/${line.id}/product`, { method: 'PATCH', body: JSON.stringify({ productId: e.target.value, branchId: order.branchId }) }), 'Inventory item linked to this order line.') }}><option value="">{canCreateProduct ? 'Create a new product when received' : 'Select an existing product'}</option>{inventoryProducts.map((product) => <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ''}</option>)}</select></label>{canCreateProduct ? <div className="mt-3 grid gap-2 rounded-md border bg-muted/20 p-3 sm:grid-cols-2"><p className="text-xs text-muted-foreground sm:col-span-2">New inventory product · cost price uses the accepted quote ({order.currency} {Number(line.unitPrice).toLocaleString()}); confirmed stock is added on receipt.</p><Field label="Product name" value={draft.name} maxLength={180} onChange={(e) => setNewProductDraft({ ...newProductDraft, [line.id]: { ...draft, name: e.target.value } })} required /><Field label="Selling price" type="number" min="0.01" step="0.01" value={draft.sellingPrice} onChange={(e) => setNewProductDraft({ ...newProductDraft, [line.id]: { ...draft, sellingPrice: e.target.value } })} required /><Field label="SKU (optional)" value={draft.sku} maxLength={100} onChange={(e) => setNewProductDraft({ ...newProductDraft, [line.id]: { ...draft, sku: e.target.value } })} /><label className="grid gap-1.5 text-sm font-medium">Category (optional)<select value={draft.categoryId} onChange={(e) => setNewProductDraft({ ...newProductDraft, [line.id]: { ...draft, categoryId: e.target.value } })} className="h-10 min-w-0 rounded-md border border-input bg-background px-3 text-sm font-normal"><option value="">Uncategorized</option>{inventoryCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><Field label="Low-stock alert at" type="number" min="0" step="1" value={draft.minStock} onChange={(e) => setNewProductDraft({ ...newProductDraft, [line.id]: { ...draft, minStock: e.target.value } })} /></div> : <p className="mt-2 text-xs text-muted-foreground">Create Product permission is required to add an unlisted item. Choose an existing inventory item instead.</p>}</>}
+            </div>{canReceive && <Field label="Receive now" type="number" min="0" max={Math.max(0, Number(line.orderedQuantity) - Number(line.receivedQuantity))} step="1" value={receiveDraft[line.id] || ''} onChange={(e) => setReceiveDraft({ ...receiveDraft, [line.id]: e.target.value })} />}</div>
+        })}</div>
+        {order.receipts?.length > 0 && <p className="mb-2 text-xs text-muted-foreground">Receipts: {order.receipts.map((receipt: any) => receipt.receiptNo).join(', ')}</p>}
+        {order.invoices?.length > 0 && <div className="mb-3 space-y-2">{order.invoices.map((invoice: any) => <div key={invoice.id} className="rounded-md bg-muted/40 p-3 text-xs"><p className="font-medium text-foreground">Invoice {invoice.invoiceNo} · {invoice.status} · {order.currency} {Number(invoice.total).toLocaleString()}{invoice.payment ? ` · Paid ${Number(invoice.payment.amountPaid).toLocaleString()} · Balance ${Number(invoice.payment.balance).toLocaleString()} (${invoice.payment.paymentStatus})` : ''}</p><p className="mt-1 text-muted-foreground">Tax {Number(invoice.taxAmount || 0).toLocaleString()} · Freight {Number(invoice.deliveryFee || 0).toLocaleString()}{invoice.status === 'approved' ? ` · Allocated to inventory ${Number(invoice.freightInventoryAmount || 0).toLocaleString()} · Allocated to service expense ${Number(invoice.freightExpenseAmount || 0).toLocaleString()}` : ''}</p>{invoice.lines.map((invoiceLine: any) => { const ordered = order.lines.find((line: any) => line.id === invoiceLine.orderLineId); return <p key={invoiceLine.id} className="mt-1 text-muted-foreground">{ordered?.itemName || 'Item'}: invoiced {Number(invoiceLine.quantity)} at {order.currency} {Number(invoiceLine.unitPrice).toLocaleString()} · received {Number(ordered?.receivedQuantity || 0)} at agreed {order.currency} {Number(ordered?.unitPrice || 0).toLocaleString()}</p> })}</div>)}</div>}
+        {order.invoices?.map((invoice: any) => invoice.paymentApprovals?.map((approval: any) => (
+          <div key={approval.id} className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+            <div>
+              <p className="font-medium">Repayment · {order.currency} {Number(approval.amount).toLocaleString()} · {approval.receivedPaymentMethod || approval.supplierPayment?.paymentMethod?.replaceAll('_' , ' ') || 'payment'} · {approval.initiatedBySide === 'seller' ? 'Seller recorded' : 'Buyer submitted'} · {approval.status === 'pending' ? 'Awaiting seller confirmation' : approval.status === 'approved' ? 'Confirmed and applied' : 'Not approved'}</p>
+              <p className="mt-1 text-muted-foreground">Invoice {invoice.invoiceNo}{approval.supplierPayment?.reference ? ` · Reference ${approval.supplierPayment.reference}` : ''} · {new Date(approval.createdAt).toLocaleString()}</p>
+              {order.side === 'buyer' && approval.initiatedBySide === 'seller' && <p className="mt-1 text-amber-800">Your payable was reduced through Marketplace Settlement Clearing. Reconcile it to the actual cash or bank account used.</p>}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => printPaymentReceipt(order, invoice, approval)}><Printer className="mr-2 size-4" />{approval.status === 'approved' ? 'Print receipt' : 'Print submission'}</Button>
+            {order.side === 'seller' && approval.status === 'pending' && can('canApproveProcurementPayment') && <Button size="sm" disabled={busy} onClick={() => void run(() => request(`/payment-approvals/${approval.id}/approve`, { method: 'PATCH' }), 'Repayment confirmed and applied to the seller receivable.')}>Confirm received</Button>}
+          </div>
+        )))}
+    {order.side === 'seller' && can('canRecordProcurementPayment') && order.invoices?.filter((invoice: any) => invoice.status === 'approved' && Number(invoice.sellerReceivable?.balance || 0) > 0).map((invoice: any) => <div key={`seller-payment-${invoice.id}`} className="mb-3 rounded-md border border-dashed p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-sm font-medium">Record payment received · {invoice.invoiceNo}</p><p className="text-xs text-muted-foreground">Outstanding seller balance: {order.currency} {Number(invoice.sellerReceivable.balance).toLocaleString()}</p></div><Button size="sm" variant="outline" disabled={busy} onClick={async () => { const open = !sellerPaymentOpen[invoice.id]; setSellerPaymentOpen({ ...sellerPaymentOpen, [invoice.id]: open }); if (open && !sellerPaymentAccounts[invoice.id]) { try { const result = await request<{ accounts: Array<{ id: string; name: string; type: string; currency: string; paymentMethod: string }> }>(`/invoices/${invoice.id}/payment-accounts`); setSellerPaymentAccounts({ ...sellerPaymentAccounts, [invoice.id]: result.accounts }); setSellerPaymentDraft({ ...sellerPaymentDraft, [invoice.id]: { amount: String(invoice.sellerReceivable.balance), accountId: result.accounts[0]?.id || '', reference: '' } }) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load permitted receiving accounts.') } } }}>{sellerPaymentOpen[invoice.id] ? 'Close' : 'Enter receipt'}</Button></div>{sellerPaymentOpen[invoice.id] && <form className="mt-3 grid gap-2 sm:grid-cols-[150px_minmax(180px,1fr)_minmax(160px,1fr)_auto] sm:items-end" onSubmit={(event) => { event.preventDefault(); const draft = sellerPaymentDraft[invoice.id]; if (!draft?.accountId) { setError('Choose a permitted receiving account.'); return } void run(() => request(`/invoices/${invoice.id}/repayments`, { method: 'POST', body: JSON.stringify({ amount: draft.amount, cashAccountId: draft.accountId, reference: draft.reference, idempotencyKey: crypto.randomUUID() }) }), 'Receipt recorded. Buyer payable was updated through Marketplace Settlement Clearing.') }}><label className="grid gap-1 text-xs font-medium">Amount<input required type="number" min="0.01" max={Number(invoice.sellerReceivable.balance)} step="0.01" value={sellerPaymentDraft[invoice.id]?.amount ?? String(invoice.sellerReceivable.balance)} onChange={(event) => setSellerPaymentDraft({ ...sellerPaymentDraft, [invoice.id]: { ...(sellerPaymentDraft[invoice.id] || { amount: '', accountId: '', reference: '' }), amount: event.target.value } })} className="h-9 rounded-md border bg-background px-2 text-sm" /></label><label className="grid gap-1 text-xs font-medium">Received into<select required value={sellerPaymentDraft[invoice.id]?.accountId || ''} onChange={(event) => setSellerPaymentDraft({ ...sellerPaymentDraft, [invoice.id]: { ...(sellerPaymentDraft[invoice.id] || { amount: '', reference: '' }), accountId: event.target.value } })} className="h-9 rounded-md border bg-background px-2 text-sm"><option value="">Select receiving account</option>{(sellerPaymentAccounts[invoice.id] || []).map((account) => <option key={account.id} value={account.id}>{account.name} · {account.type.replace(/_/g, ' ')}</option>)}</select></label><label className="grid gap-1 text-xs font-medium">Reference<input value={sellerPaymentDraft[invoice.id]?.reference || ''} onChange={(event) => setSellerPaymentDraft({ ...sellerPaymentDraft, [invoice.id]: { ...(sellerPaymentDraft[invoice.id] || { amount: '', accountId: '' }), reference: event.target.value } })} className="h-9 rounded-md border bg-background px-2 text-sm" /></label><Button size="sm" type="submit" disabled={busy || !sellerPaymentAccounts[invoice.id]?.length}>Record and post</Button><p className="text-xs text-muted-foreground sm:col-span-full">The seller receipt posts to the selected receiving account. The buyer payable is automatically reduced against Marketplace Settlement Clearing; the buyer can reconcile that clearing entry to its actual payment account.</p></form>}</div>)}
+        {order.side === 'buyer' && order.status === 'pending_approval' && can('canApproveProcurementOrder') && <Button size="sm" disabled={busy} onClick={() => void run(() => request(`/orders/${order.id}/approve`, { method: 'PATCH' }), 'Purchase order approved. Send it when ready.')}>Approve order</Button>}
+        {order.side === 'buyer' && order.status === 'approved' && can('canApproveProcurementOrder') && <Button size="sm" disabled={busy} onClick={() => void run(() => request(`/orders/${order.id}/send`, { method: 'PATCH' }), 'Purchase order sent to supplier.')}>Send to supplier</Button>}
+        {order.side === 'seller' && order.status === 'sent' && can('canAcknowledgeProcurementOrder') && <div className="flex gap-2"><Button size="sm" disabled={busy} onClick={() => void run(() => request(`/orders/${order.id}/acknowledge`, { method: 'PATCH', body: JSON.stringify({ decision: 'accept' }) }), 'Purchase order acknowledged.')}>Accept order</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/orders/${order.id}/acknowledge`, { method: 'PATCH', body: JSON.stringify({ decision: 'reject', reason: 'Unable to fulfil' }) }), 'Purchase order rejected.')}>Reject</Button></div>}
+        {order.side === 'buyer' && can('canReceiveProcurementGoods') && ['acknowledged', 'partially_received'].includes(order.status) && <div className="mt-3 flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs font-medium">Receiving branch<select disabled className="h-9 rounded-md border bg-background px-2 text-sm" value={order.branchId || ''}><option value="">{branches.find((branch) => branch.id === order.branchId)?.name || 'Branch not set'}</option></select></label><Button size="sm" disabled={busy || !order.branchId || !order.lines.some((line: any) => Number(receiveDraft[line.id] || 0) > 0) || order.lines.some((line: any) => Number(receiveDraft[line.id] || 0) > 0 && !line.productId && (!can('canCreateProduct') || !newProductDraft[line.id]?.name?.trim() || !(Number(newProductDraft[line.id]?.sellingPrice) > 0) || !Number.isInteger(Number(newProductDraft[line.id]?.minStock ?? 10))))} onClick={() => void run(async () => { await request(`/orders/${order.id}/receipts`, { method: 'POST', body: JSON.stringify({ branchId: order.branchId, lines: order.lines.filter((line: any) => Number(receiveDraft[line.id] || 0) > 0).map((line: any) => ({ orderLineId: line.id, quantity: receiveDraft[line.id], ...(!line.productId ? { newProduct: { name: newProductDraft[line.id]?.name || line.itemName, sellingPrice: newProductDraft[line.id]?.sellingPrice, sku: newProductDraft[line.id]?.sku, categoryId: newProductDraft[line.id]?.categoryId, minStock: newProductDraft[line.id]?.minStock || '10' } } : {}) })) }) }); setReceiveDraft({}); setNewProductDraft({}) }, 'Goods receipt recorded; confirmed stock is added to the linked or newly created product.')}>Record goods received</Button></div>}
+        {can('canSubmitProcurementInvoice') && order.side === 'seller' && ['acknowledged', 'partially_received', 'received'].includes(order.status) && <form className="mt-3 grid gap-3 rounded-md border bg-muted/20 p-3" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); const lines = order.lines.map((line: any) => ({ line, quantity: uninvoicedQuantity(order, line) })).filter((row: any) => row.quantity > 0); void run(() => request(`/orders/${order.id}/invoices`, { method: 'POST', body: JSON.stringify({ invoiceNo: form.get('invoiceNo'), taxAmount: uninvoicedTax(order), deliveryFee: form.get('deliveryFee') || 0, lines: lines.map((row: any) => ({ orderLineId: row.line.id, quantity: row.quantity, unitPrice: row.line.unitPrice, sellerProductId: sellerProductMappings[row.line.id] })) }) }), 'Invoice submitted for matching.') }}><div><h4 className="text-sm font-medium">Invoice received goods</h4><p className="mt-1 text-xs text-muted-foreground">Map each line to your own product or service so approval can post your receivable, sales, tax and inventory/COGS correctly.</p></div>{order.lines.filter((line: any) => uninvoicedQuantity(order, line) > 0).map((line: any) => <label key={line.id} className="grid max-w-2xl gap-1 text-xs font-medium">Seller item for {line.itemName}<select required value={sellerProductMappings[line.id] || ''} onChange={(e) => setSellerProductMappings({ ...sellerProductMappings, [line.id]: e.target.value })} className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="">Choose your product/service</option>{sellerProducts.map((product) => <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ''}{product.itemType === 'service' ? ' · Service' : ''}</option>)}</select></label>)}<div className="flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs font-medium">Supplier invoice number<input name="invoiceNo" required className="h-9 rounded-md border bg-background px-2 text-sm" /></label><label className="grid gap-1 text-xs font-medium">Output tax (accepted rate)<input aria-label="Output tax from accepted quote" type="text" value={uninvoicedTax(order).toLocaleString()} readOnly className="h-9 w-36 rounded-md border bg-muted px-2 text-sm" /></label><input type="hidden" name="taxAmount" value={uninvoicedTax(order)} /><label className="grid gap-1 text-xs font-medium">Freight / delivery<input name="deliveryFee" type="number" min="0" step="0.01" defaultValue="0" className="h-9 w-36 rounded-md border bg-background px-2 text-sm" /></label><Button size="sm" type="submit" disabled={busy || !order.lines.some((line: any) => uninvoicedQuantity(order, line) > 0) || order.lines.some((line: any) => uninvoicedQuantity(order, line) > 0 && !sellerProductMappings[line.id])}>Submit invoice for received goods</Button></div></form>}
+        {order.side === 'buyer' && can('canReviewProcurementInvoice') && order.invoices?.some((invoice: any) => invoice.status === 'submitted') && <div className="mt-3 flex flex-wrap items-end gap-2"><label className="grid gap-1 text-xs font-medium">Supplier record<select className="h-9 rounded-md border bg-background px-2 text-sm" value={selectedSupplier} onChange={(e) => setSelectedSupplier(e.target.value)}><option value="">Select supplier</option>{localSuppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label><Button size="sm" disabled={busy || !selectedSupplier} onClick={() => { const invoice = order.invoices.find((row: any) => row.status === 'submitted'); void run(() => request(`/invoices/${invoice.id}/approve`, { method: 'PATCH', body: JSON.stringify({ supplierId: selectedSupplier, branchId: order.branchId || selectedBranch }) }), 'Invoice approved and posted to supplier payables.') }}>Approve matched invoice</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => { const invoice = order.invoices.find((row: any) => row.status === 'submitted'); void run(() => request(`/invoices/${invoice.id}/reject`, { method: 'PATCH', body: JSON.stringify({ reason: 'Invoice requires correction' }) }), 'Invoice rejected for correction.') }}>Reject invoice</Button></div>}
+      </article>) : <p className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">{orderSearch || orderFilter !== 'all' ? 'No orders match these filters.' : mode === 'buyer' ? 'No purchases yet. Select a supplier quote to create your first purchase order.' : 'No buyer orders or fulfilment tasks yet.'}</p>}
+    </section>}
+
+    {section === 'marketplace' && <section className={mode === 'seller' ? 'grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_360px]' : 'mx-auto max-w-5xl space-y-6'}>
+      {mode === 'buyer' ? <div className="min-w-0">
+        <div className="relative mb-5 overflow-hidden rounded-md bg-emerald-950 px-5 py-5 text-white sm:px-7 sm:py-6">
+          <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+            <div className="max-w-2xl"><p className="text-xs font-semibold uppercase text-emerald-200">The JibuSales supplier network</p><h1 className="mt-1 text-2xl font-semibold">Good finds. Better business.</h1><p className="mt-2 max-w-xl text-sm leading-6 text-emerald-50/85">Catch supplier updates, compare live offers, and take the next step when something fits.</p></div>
+            <div className="flex gap-5 border-l border-white/20 pl-4"><div><p className="text-xl font-semibold tabular-nums">{feedCampaigns.length}</p><p className="text-xs text-emerald-100">posts</p></div><div><p className="text-xl font-semibold tabular-nums">{feedListings.length}</p><p className="text-xs text-emerald-100">offers</p></div></div>
+          </div>
+        </div>
+        <div className="mb-4 space-y-3 border-b pb-4"><div className="grid gap-3 sm:grid-cols-[minmax(220px,1fr)_190px_190px]"><div><h2 className="text-lg font-semibold">Marketplace feed</h2><p className="text-sm text-muted-foreground">Supplier stories, offers and current pricing from opted-in businesses.</p></div><label className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search offers and suppliers" className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm" /></label><div className="grid grid-cols-2 gap-2"><select aria-label="Filter by category" value={listingCategory} onChange={(event) => setListingCategory(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="">All categories</option>{listingCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select><select aria-label="Sort offers" value={listingSort} onChange={(event) => setListingSort(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm"><option value="recent">Recently updated</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option><option value="minimum-asc">Smallest minimum</option></select></div></div><div className="flex gap-1 overflow-x-auto rounded-md bg-muted/60 p-1" role="tablist" aria-label="Marketplace feed"><button type="button" role="tab" aria-selected={feedAudience === 'for-you'} onClick={() => setFeedAudience('for-you')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'for-you' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>For you</button><button type="button" role="tab" aria-selected={feedAudience === 'following'} onClick={() => setFeedAudience('following')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'following' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Following <span className="ml-1 text-xs">{followedSellerIds.size}</span></button><button type="button" role="tab" aria-selected={feedAudience === 'offers'} onClick={() => setFeedAudience('offers')} className={`shrink-0 rounded-sm px-4 py-2 text-sm font-medium ${feedAudience === 'offers' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>Offers</button></div></div>
+        {sellerStories.length > 0 && <section aria-label="Seller stories" className="mb-5 border-b pb-4"><div className="mb-3 flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">Supplier status</h2><p className="text-xs text-muted-foreground">Fresh campaign images from sellers in your feed.</p></div><span className="text-xs tabular-nums text-muted-foreground">{sellerStories.length} businesses</span></div><div className="flex gap-4 overflow-x-auto pb-2">{sellerStories.map((seller, index) => <div key={seller.id} className="flex w-[76px] shrink-0 flex-col items-center gap-1.5 text-center"><button type="button" aria-label={`Play ${seller.name} status, ${seller.slides.length} images`} onClick={() => { setActiveStorySellerIndex(index); setActiveStorySlideIndex(0) }} className="group grid size-[68px] place-items-center rounded-full bg-rose-500 p-[3px] transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 focus-visible:ring-offset-2"><span className="grid size-full place-items-center overflow-hidden rounded-full border-2 border-background bg-emerald-50 text-emerald-900">{seller.slides[0]?.image ? <img src={seller.slides[0].image} alt="" className="size-full object-cover" loading="lazy" /> : seller.logo ? <img src={seller.logo} alt="" className="size-full object-cover" loading="lazy" /> : <Building2 className="size-6" />}</span></button><Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(seller.id)}`} className="w-full truncate text-xs font-medium hover:underline">{seller.name}</Link></div>)}</div></section>}
+        {activeStory && activeStorySlide && <div role="dialog" aria-modal="true" aria-label={`${activeStory.name} supplier status`} className="fixed inset-0 z-[90] bg-black/85 sm:grid sm:place-items-center sm:p-5" onClick={closeStory}>
+          <div className="relative h-[100dvh] w-full overflow-hidden bg-neutral-950 text-white sm:h-[min(88dvh,820px)] sm:max-w-[440px] sm:rounded-md" onClick={(event) => event.stopPropagation()}>
+            <img key={`${activeStory.id}-${activeStorySlideIndex}`} src={activeStorySlide.image} alt={activeStorySlide.title} className="absolute inset-0 size-full object-contain" />
+            <div className="absolute inset-x-0 top-0 z-20 space-y-3 bg-black/45 px-3 pb-5 pt-[max(env(safe-area-inset-top),12px)]">
+              <div className="flex gap-1" aria-label={`Image ${activeStorySlideIndex + 1} of ${activeStory.slides.length}`}>{activeStory.slides.map((slide, index) => <span key={`${slide.image}-${index}`} className="h-1 flex-1 overflow-hidden rounded-full bg-white/35"><span className={`block h-full bg-white ${index < activeStorySlideIndex ? 'w-full' : index === activeStorySlideIndex ? 'w-full origin-left animate-story-progress' : 'w-0'}`} /></span>)}</div>
+              <header className="flex items-center gap-3"><div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border border-white/70 bg-emerald-100 text-emerald-900">{activeStory.logo ? <img src={activeStory.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-5" />}</div><div className="min-w-0 flex-1"><Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(activeStory.id)}`} onClick={closeStory} className="block truncate text-sm font-semibold hover:underline">{activeStory.name}</Link><p className="text-xs text-white/75">{activeStorySlide.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'}</p></div><button type="button" aria-label="Close supplier status" onClick={closeStory} className="grid size-10 place-items-center rounded-full bg-white/10 hover:bg-white/20"><X className="size-5" /></button></header>
+            </div>
+            <button type="button" aria-label="Previous status image" onClick={() => moveStory(-1)} className="absolute inset-y-20 left-0 z-10 w-1/3 cursor-pointer" />
+            <button type="button" aria-label="Next status image" onClick={() => moveStory(1)} className="absolute inset-y-20 right-0 z-10 w-1/3 cursor-pointer" />
+            <div className="absolute inset-x-0 bottom-0 z-20 bg-black/65 px-4 pb-[max(env(safe-area-inset-bottom),20px)] pt-5"><p className="text-xs font-medium text-emerald-200">{activeStorySlide.campaignType === 'ad' ? 'Sponsored offer' : 'Supplier update'}</p><h2 className="mt-1 text-lg font-semibold">{activeStorySlide.title}</h2><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-white/90">{activeStorySlide.message}</p><Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(activeStory.id)}`} onClick={closeStory} className="mt-3 inline-flex min-h-10 items-center rounded-sm border border-white/50 px-3 text-sm font-medium hover:bg-white/10">View seller and offers <ArrowRight className="ml-2 size-4" /></Link></div>
+            <span className="sr-only" aria-live="polite">Image {activeStorySlideIndex + 1} of {activeStory.slides.length}: {activeStorySlide.title}</span>
+          </div>
+        </div>}
+        {feedCampaigns.length > 0 && <section aria-label="Marketplace posts" className="space-y-5">{(showAllCampaigns ? feedCampaigns : feedCampaigns.slice(0, 4)).map((campaign) => <article key={campaign.id} className="mx-auto w-full max-w-[720px] overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md">
+          <header className="flex items-center gap-3 px-4 py-3"><div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{campaign.business?.logo ? <img src={campaign.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-5" />}</div><div className="min-w-0 flex-1">{campaign.business?.id ? <Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(campaign.business.id)}`} className="block truncate text-sm font-semibold hover:underline">{campaign.business.name || 'Marketplace seller'}</Link> : <p className="truncate text-sm font-semibold">{campaign.business?.name || 'Marketplace seller'}</p>}<p className="text-xs text-muted-foreground">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'} · {campaign.endsAt ? `ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Active now'}</p></div>{canFollowSellers && campaign.business?.id && <Button size="sm" variant={followedSellerIds.has(campaign.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(campaign.business!.id)}>{followedSellerIds.has(campaign.business.id) ? 'Following' : 'Follow'}</Button>}</header>
+          <div className="px-4 pb-3"><h3 className="text-base font-semibold">{campaign.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{campaign.message}</p></div>
+          <CampaignImageShowcase images={campaign.images} title={campaign.title} />
+          {campaign.listing && <footer className="flex flex-wrap items-center gap-3 border-t px-4 py-3"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{campaign.listing.name}</p><p className="text-sm tabular-nums text-emerald-800">{campaign.listing.currency} {Number(campaign.listing.price).toLocaleString()} <span className="font-normal text-muted-foreground">/ {campaign.listing.unit}</span></p></div><Button size="sm" variant="ghost" aria-label={`Share ${campaign.listing.name}`} title="Share offer" onClick={() => void shareMarketplacePost(campaign.listing!.name, `market-listing-${campaign.listing!.id}`)}><Share2 className="size-4" /></Button>{can('canCreateProcurementRFQ') && <Button size="sm" disabled={busy} onClick={() => beginOfferRequest(campaign.listing!, campaign)}><Send className="mr-2 size-4" />Request quote</Button>}</footer>}
+        </article>)}{feedCampaigns.length > 4 && <button type="button" className="w-full rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted" onClick={() => setShowAllCampaigns((visible) => !visible)}>{showAllCampaigns ? 'Show fewer posts' : `Load more posts (${feedCampaigns.length - 4})`}</button>}</section>}
+        {feedListings.length ? <div className="grid gap-4">{feedListings.map((item) => <article id={`market-listing-${item.id}`} key={item.id} className="min-w-0 overflow-hidden rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md">
+          <header className="flex items-center gap-3 px-4 pt-4"><div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-800 ring-2 ring-background">{item.business?.logo ? <img src={item.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-4" />}</div><div className="min-w-0 flex-1">{item.business?.id ? <Link to={`/tenant/procurement/buying/sellers/${encodeURIComponent(item.business.id)}`} className="block truncate text-sm font-semibold hover:underline">{item.business.name || 'Marketplace seller'}</Link> : <p className="truncate text-sm font-semibold">{item.business?.name || 'Marketplace seller'}</p>}<p className="text-xs text-muted-foreground">{item.category} · {item.unit} · Marketplace offer</p></div><Button size="icon" variant="ghost" aria-label={`Share ${item.name}`} title="Share offer" onClick={() => void shareMarketplacePost(item.name, `market-listing-${item.id}`)}><Share2 className="size-4" /></Button>{canFollowSellers && item.business?.id && <Button size="sm" variant={followedSellerIds.has(item.business.id) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(item.business!.id)}>{followedSellerIds.has(item.business.id) ? 'Following' : 'Follow'}</Button>}</header><div className="px-4 pb-4 pt-3"><h3 className="break-words text-base font-semibold">{item.name}</h3>
+          <p className="min-h-10 break-words text-sm text-muted-foreground">{item.description || 'No additional description provided.'}</p>
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-3"><div><div className="text-xl font-semibold tabular-nums">{item.currency} {Number(item.price).toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {item.unit}</span></div><div className="text-xs text-muted-foreground">Minimum {Number(item.minimumQty).toLocaleString()} {item.unit}</div></div><div className="flex flex-wrap items-center gap-2">{item.availableQty && <span className="text-xs text-muted-foreground">Available: {Number(item.availableQty).toLocaleString()}</span>}{item.leadTimeDays != null && <span className="text-xs text-muted-foreground">{item.leadTimeDays} day lead time</span>}</div></div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-3 text-xs text-muted-foreground"><button className="underline underline-offset-2 hover:text-foreground" onClick={async () => { try { const d = await request<{history: any[]}>(`/listings/${item.id}/price-history`); setNotice(d.history.length ? d.history.map((x) => `${new Date(x.effectiveAt).toLocaleDateString()}: ${x.currency} ${x.oldPrice} → ${x.newPrice}${x.reason ? ` (${x.reason})` : ''}`).join(' · ') : 'No recorded price changes yet.') } catch (e) { setError(e instanceof Error ? e.message : 'Could not load price history.') } }}>Price history</button>{can('canCreateProcurementRFQ') && <Button className="ml-auto" size="sm" disabled={busy} onClick={() => beginOfferRequest(item)}><Send className="mr-2 size-4" />Request quote</Button>}</div></div>
+        </article>)}</div> : <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">{feedAudience === 'following' ? 'No posts from followed sellers yet. Follow a supplier to build your feed.' : 'No supplier offers match these filters. Discover an opted-in supplier or publish your own catalogue from the panel.'}</div>}
+        <h2 className="mb-3 mt-8 text-lg font-semibold">Discover suppliers</h2>
+        {suppliers.length ? <div className="max-h-[32rem] divide-y overflow-y-auto rounded-md border">{suppliers.map((supplier) => { const existing = relationships.find((r) => r.counterparty?.id === supplier.tenantId); const following = followedSellerIds.has(supplier.tenantId); return <div key={supplier.tenantId} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="flex min-w-0 items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-md bg-slate-100"><Building2 className="size-4" /></div><div className="min-w-0"><div className="truncate font-medium">{supplier.business?.name || 'Business'}</div><div className="text-xs capitalize text-muted-foreground">{supplier.sellerType || 'supplier'} · {supplier.category}{supplier.business?.businessType ? ` · ${supplier.business.businessType}` : ''}</div></div></div><div className="flex flex-wrap items-center gap-2">{canFollowSellers && <Button size="sm" variant={following ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(supplier.tenantId)}>{following ? <><UserRoundCheck className="mr-1.5 size-4" />Following</> : <><UserPlus className="mr-1.5 size-4" />Follow seller</>}</Button>}{existing ? <span className="text-xs capitalize text-muted-foreground">{existing.direction === 'incoming' && existing.status === 'pending' ? 'Request awaiting your review' : existing.status}</span> : <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request('/relationships', { method: 'POST', body: JSON.stringify({ sellerTenantId: supplier.tenantId }) }), 'Supplier relationship request sent.')}>Connect</Button>}</div></div>})}</div> : <p className="text-sm text-muted-foreground">No other supplier profiles are discoverable yet.</p>}
+      </div> : <div className="min-w-0">
+        <section className="mb-5 border-b pb-5"><h2 className="text-lg font-semibold">Seller overview</h2><p className="mt-1 text-sm text-muted-foreground">A focused workspace for managing your marketplace presence and buyer activity.</p><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><div className="border p-3"><p className="text-xs text-muted-foreground">Published offers</p><p className="mt-1 text-xl font-semibold tabular-nums">{myListings.length}</p></div><div className="border p-3"><p className="text-xs text-muted-foreground">Active campaigns</p><p className="mt-1 text-xl font-semibold tabular-nums">{myCampaigns.filter((campaign) => campaign.status === 'active').length}</p></div><div className="border p-3"><p className="text-xs text-muted-foreground">Incoming quote requests</p><p className="mt-1 text-xl font-semibold tabular-nums">{workspaceRFQs.filter((rfq) => rfq.status === 'open').length}</p></div><div className="border p-3"><p className="text-xs text-muted-foreground">Orders to fulfil</p><p className="mt-1 text-xl font-semibold tabular-nums">{workspaceOrders.filter((order) => ['sent', 'acknowledged', 'partially_received', 'received'].includes(order.status)).length}</p></div></div></section>
+        <div className="grid gap-5 lg:grid-cols-2"><section><h3 className="mb-3 text-sm font-semibold">Your marketplace offers</h3>{myListings.length ? <div className="divide-y border">{myListings.map((listing) => <div key={listing.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="break-words text-sm font-medium">{listing.name}</p><p className="mt-1 text-xs text-muted-foreground">{listing.category} · {listing.currency} {Number(listing.price).toLocaleString()} · {listing.visibility === 'public' ? 'Public' : 'Connected buyers only'}</p></div><span className="text-xs capitalize text-muted-foreground">{listing.status}</span></div>)}</div> : <p className="border border-dashed p-5 text-sm text-muted-foreground">No offers published yet. Use the seller panel to publish your first offer.</p>}</section><section><h3 className="mb-3 text-sm font-semibold">Campaigns</h3>{myCampaigns.length ? <div className="divide-y border">{myCampaigns.slice(0, 8).map((campaign) => <div key={campaign.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0"><p className="truncate text-sm font-medium">{campaign.title}</p><p className="mt-1 text-xs text-muted-foreground">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Promotion'} · {campaign.images?.length || 0} images</p></div><span className="text-xs capitalize text-muted-foreground">{campaign.status}</span></div>)}</div> : <p className="border border-dashed p-5 text-sm text-muted-foreground">No campaigns yet. Campaigns can be created for any active offer.</p>}</section></div>
+      </div>}
+      {mode === 'seller' && <aside className="border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
+        <h2 className="mb-4 text-lg font-semibold">Publish a supplier offer</h2>
+        {can('canCreateMarketplaceListing') && <form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => request('/listings', { method: 'POST', body: JSON.stringify(listingForm) }), 'Offer published.'); setListingForm((form) => ({ ...form, name: '', description: '', price: '', availableQty: '' })) }}>
+          <Field label="Product or offer name" value={listingForm.name} onChange={(e) => setListingForm({ ...listingForm, name: e.target.value })} required />
+          <div className="grid grid-cols-2 gap-3"><Field label="Category" value={listingForm.category} onChange={(e) => setListingForm({ ...listingForm, category: e.target.value })} required /><Field label="Unit" value={listingForm.unit} onChange={(e) => setListingForm({ ...listingForm, unit: e.target.value })} required /></div>
+          <div className="grid grid-cols-2 gap-3"><Field label="Price" type="number" min="0" step="0.01" value={listingForm.price} onChange={(e) => setListingForm({ ...listingForm, price: e.target.value })} required /><Field label="Currency" value={listingForm.currency} onChange={(e) => setListingForm({ ...listingForm, currency: e.target.value.toUpperCase() })} required /></div>
+          <div className="grid grid-cols-2 gap-3"><Field label="Minimum order" type="number" min="0.001" step="0.001" value={listingForm.minimumQty} onChange={(e) => setListingForm({ ...listingForm, minimumQty: e.target.value })} required /><Field label="Available quantity" type="number" min="0" step="0.001" value={listingForm.availableQty} onChange={(e) => setListingForm({ ...listingForm, availableQty: e.target.value })} /></div>
+          <TextareaField label="Description" aiWritingField value={listingForm.description} onChange={(e) => setListingForm({ ...listingForm, description: e.target.value })} />
+          <label className="grid gap-1.5 text-sm font-medium">Visibility<select value={listingForm.visibility} onChange={(e) => setListingForm({ ...listingForm, visibility: e.target.value })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="public">Public marketplace</option><option value="private">Approved relationships only</option></select></label>
+          <Button type="submit" disabled={busy}><Plus className="mr-2 size-4" />Publish offer</Button>
+        </form>}
+        {can('canChangeMarketplacePrice') && myListings.length > 0 && <div className="mt-6 border-t pt-4"><h3 className="mb-2 text-sm font-semibold">Your offers ({myListings.length})</h3><div className="max-h-64 space-y-2 overflow-y-auto">{myListings.map((item) => <form key={item.id} className="rounded-md border p-3" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); void run(() => request(`/listings/${item.id}/price`, { method: 'PATCH', body: JSON.stringify({ price: form.get('price'), reason: form.get('reason') }) }), 'Price updated and change history recorded.') }}><div className="mb-2 truncate text-sm font-medium">{item.name} <span className="font-normal text-muted-foreground">· {item.currency} {Number(item.price).toLocaleString()}</span></div><div className="grid grid-cols-[1fr_1fr_auto] gap-2"><input aria-label="New price" name="price" type="number" min="0" step="0.01" required placeholder="New price" className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" /><input aria-label="Price change reason" name="reason" placeholder="Change reason" className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" /><Button variant="outline" size="sm" type="submit" disabled={busy}>Update</Button></div></form>)}</div></div>}
+        {(can('canCreateMarketplacePromotion') || can('canRunMarketplaceAds')) && <div className="mt-6 border-t pt-4">
+          <h3 className="mb-2 text-sm font-semibold">Create a marketplace campaign</h3>
+          {!loading && !profile.discoverable && <p role="status" className="mb-3 border-l-2 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-950">Your campaign is saved and visible in your own buyer feed, but other businesses will not discover it until you enable <strong>Show my seller profile in discovery</strong> on the Supplier profile page. Private offers remain limited to connected businesses.</p>}
+          <form className="grid gap-3" onSubmit={(event) => {
+            event.preventDefault()
+            const endpoint = campaignForm.campaignType === 'ad' ? '/ads' : '/promotions'
+            const body = new FormData()
+            body.append('payload', JSON.stringify(campaignForm))
+            campaignImages.forEach((image) => body.append('images', image))
+            void run(async () => {
+              const result = await requestCampaign(endpoint, body)
+              setCampaignImages([])
+              return result
+            }, campaignForm.campaignType === 'ad' ? 'Sponsored marketplace offer is live.' : 'Marketplace promotion is live.')
+            setCampaignForm((form) => ({ ...form, title: '', message: '' }))
+          }}>
+            <label className="grid gap-1.5 text-sm font-medium">Campaign type<select value={campaignForm.campaignType} onChange={(event) => setCampaignForm({ ...campaignForm, campaignType: event.target.value as 'promotion' | 'ad' })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal">{can('canCreateMarketplacePromotion') && <option value="promotion">Promotion</option>}{can('canRunMarketplaceAds') && <option value="ad">Sponsored offer</option>}</select></label>
+            <label className="grid gap-1.5 text-sm font-medium">Marketplace listing<select required value={campaignForm.listingId} onChange={(event) => setCampaignForm({ ...campaignForm, listingId: event.target.value })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="">Choose your offer</option>{myListings.map((listing) => <option key={listing.id} value={listing.id}>{listing.name}</option>)}</select></label>
+            <Field label="Campaign headline" maxLength={160} value={campaignForm.title} onChange={(event) => setCampaignForm({ ...campaignForm, title: event.target.value })} required />
+            <TextareaField label="Campaign message" aiWritingField maxLength={1200} value={campaignForm.message} onChange={(event) => setCampaignForm({ ...campaignForm, message: event.target.value })} required />
+            <Field label="Starts" type="datetime-local" value={campaignForm.startsAt} onChange={(event) => setCampaignForm({ ...campaignForm, startsAt: event.target.value })} required />
+            <Field label="Ends (optional)" type="datetime-local" value={campaignForm.endsAt} onChange={(event) => setCampaignForm({ ...campaignForm, endsAt: event.target.value })} />
+            <label className="grid gap-1.5 text-sm font-medium">Campaign images ({campaignImages.length}/4)<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple disabled={campaignImages.length >= 4} onChange={(event) => { selectCampaignImages(event.target.files); event.currentTarget.value = '' }} className="min-w-0 rounded-md border bg-background px-3 py-2 text-sm font-normal file:mr-3 file:rounded-sm file:border-0 file:bg-muted file:px-3 file:py-1.5 disabled:opacity-60" /><span className="text-xs font-normal text-muted-foreground">JPEG, PNG, WebP, HEIC, or HEIF · up to 5 MB each. Add images in multiple selections; buyers see two images at a time.</span></label>
+            {campaignImagePreviews.length > 0 && <div className="grid grid-cols-2 gap-2">{campaignImagePreviews.map(({ file, url }, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="relative min-w-0 overflow-hidden border"><img src={url} alt={file.name} className="aspect-[4/3] w-full object-cover" /><button type="button" aria-label={`Remove ${file.name}`} title="Remove image" onClick={() => setCampaignImages((current) => current.filter((_, currentIndex) => currentIndex !== index))} className="absolute right-1 top-1 grid size-8 place-items-center rounded-full bg-black/75 text-white hover:bg-black"><X className="size-4" /></button><p className="truncate px-2 py-1 text-xs text-muted-foreground">{file.name}</p></div>)}</div>}
+            {campaignImages.length > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setCampaignImages([])}>Clear selected images</Button>}
+            <p className="text-xs text-muted-foreground">This creates an in-app marketplace placement. It does not buy external ads or charge an advertising fee.</p>
+            <Button type="submit" disabled={busy || !myListings.length || (campaignForm.campaignType === 'ad' ? !can('canRunMarketplaceAds') : !can('canCreateMarketplacePromotion'))}><Plus className="mr-2 size-4" />Publish campaign</Button>
+          </form>
+          {myCampaigns.length > 0 && <div className="mt-4 space-y-2"><h4 className="text-xs font-semibold">Your campaigns</h4>{myCampaigns.map((campaign) => <div key={campaign.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span className="min-w-0 truncate">{campaign.title} · {campaign.status}</span>{can('canManageMarketplacePromotions') && campaign.status !== 'cancelled' && <div className="flex gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/promotions/${campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: campaign.status === 'active' ? 'paused' : 'active' }) }), campaign.status === 'active' ? 'Campaign paused.' : 'Campaign resumed.')}>{campaign.status === 'active' ? 'Pause' : 'Resume'}</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(() => request(`/promotions/${campaign.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }), 'Campaign cancelled.')}>Cancel</Button></div>}</div>)}</div>}
+        </div>}
+      </aside>}
+    </section>}
+
+    {section === 'seller-profile' && <section className="mx-auto w-full max-w-5xl space-y-5">
+      <Link to="/tenant/procurement/buying/marketplace" className="inline-flex min-h-10 items-center gap-2 text-sm font-medium text-emerald-800 hover:underline"><ArrowLeft className="size-4" />Marketplace</Link>
+      {loading && <div className="border p-8 text-center text-sm text-muted-foreground">Loading seller profile…</div>}
+      {!loading && !sellerProfileView && <div className="border border-dashed p-8 text-center text-sm text-muted-foreground">This seller profile is unavailable or is no longer shared with your business.</div>}
+      {sellerProfileView && <>
+        <header className="border-b pb-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-emerald-100 text-emerald-900 ring-1 ring-border sm:size-20">{sellerProfileView.profile.business?.logo ? <img src={sellerProfileView.profile.business.logo} alt="" className="size-full object-cover" /> : <Building2 className="size-8" />}</div>
+            <div className="min-w-0 flex-1"><h1 className="break-words text-xl font-semibold">{sellerProfileView.profile.business?.name || 'Marketplace seller'}</h1><p className="mt-1 text-sm capitalize text-muted-foreground">{sellerProfileView.profile.sellerType.replace(/_/g, ' ')} · {sellerProfileView.profile.category}</p>{sellerProfileView.profile.website && <a href={sellerProfileView.profile.website} target="_blank" rel="noreferrer" className="mt-1 inline-block break-all text-sm text-emerald-800 underline underline-offset-2">{sellerProfileView.profile.website}</a>}</div>
+            {canFollowSellers && sellerProfileView.profile.tenantId !== user?.tenantId && <Button variant={followedSellerIds.has(sellerProfileView.profile.tenantId) ? 'secondary' : 'outline'} disabled={busy} onClick={() => void toggleSellerFollow(sellerProfileView.profile.tenantId)}>{followedSellerIds.has(sellerProfileView.profile.tenantId) ? <><UserRoundCheck className="mr-2 size-4" />Following</> : <><UserPlus className="mr-2 size-4" />Follow seller</>}</Button>}
+          </div>
+          <div className="mt-5 max-w-3xl"><h2 className="text-sm font-semibold">About</h2><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{sellerProfileView.profile.description || 'This seller has not added a business description yet.'}</p></div>
+        </header>
+        <section aria-label="Seller marketplace posts" className="space-y-5">
+          <h2 className="text-lg font-semibold">Posts and offers</h2>
+          {sellerProfileView.campaigns.map((campaign) => <article key={campaign.id} className="mx-auto w-full max-w-[720px] overflow-hidden rounded-md border bg-card shadow-sm">
+            <header className="px-4 py-3"><p className="text-sm font-semibold">{campaign.campaignType === 'ad' ? 'Sponsored offer' : 'Marketplace promotion'}</p><p className="mt-1 text-xs text-muted-foreground">{campaign.endsAt ? `Ends ${new Date(campaign.endsAt).toLocaleDateString()}` : 'Active now'}</p></header>
+            <div className="px-4 pb-3"><h3 className="text-base font-semibold">{campaign.title}</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{campaign.message}</p></div>
+            <CampaignImageShowcase images={campaign.images} title={campaign.title} />
+            {campaign.listing && <div className="border-t px-4 py-3"><p className="font-semibold">{campaign.listing.name}</p><p className="text-sm tabular-nums text-emerald-800">{campaign.listing.currency} {Number(campaign.listing.price).toLocaleString()} / {campaign.listing.unit}</p>{can('canCreateProcurementRFQ') && <Button className="mt-3" size="sm" disabled={busy} onClick={() => beginOfferRequest(campaign.listing!)}><Send className="mr-2 size-4" />Request quote</Button>}</div>}
+          </article>)}
+          {sellerProfileView.listings.filter((listing) => !sellerProfileView.campaigns.some((campaign) => campaign.listing?.id === listing.id)).map((listing) => <article key={listing.id} className="mx-auto w-full max-w-[720px] rounded-md border bg-card p-4 shadow-sm"><p className="text-xs font-medium uppercase text-emerald-800">Marketplace offer</p><h3 className="mt-1 text-base font-semibold">{listing.name}</h3><p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{listing.description || 'No additional description provided.'}</p><p className="mt-4 text-lg font-semibold tabular-nums">{listing.currency} {Number(listing.price).toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {listing.unit}</span></p><p className="text-xs text-muted-foreground">Minimum {Number(listing.minimumQty).toLocaleString()} {listing.unit}</p>{can('canCreateProcurementRFQ') && <Button className="mt-3" size="sm" disabled={busy} onClick={() => beginOfferRequest(listing)}><Send className="mr-2 size-4" />Request quote</Button>}</article>)}
+          {!sellerProfileView.campaigns.length && !sellerProfileView.listings.length && <div className="border border-dashed p-8 text-center text-sm text-muted-foreground">No active posts or offers are currently available.</div>}
+        </section>
+      </>}
+    </section>}
+
+    {section === 'rfqs' && <section className="grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0"><div className="mb-4 grid gap-3 border-b pb-4 sm:grid-cols-[minmax(0,1fr)_minmax(210px,320px)_150px]"><div><h2 className="text-lg font-semibold">RFQ marketplace</h2><p className="text-sm text-muted-foreground">Open requests are visible to opted-in sellers. Private requests and all offers stay limited to their participants.</p><p className="mt-1 text-xs text-muted-foreground">{visibleRFQs.length} requests shown</p></div><label className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><input value={rfqSearch} onChange={(event) => setRfqSearch(event.target.value)} placeholder="Search requests, businesses, items" className="h-10 w-full rounded-md border bg-background pl-9 pr-3 text-sm" /></label><select aria-label="Filter quote requests" value={rfqFilter} onChange={(event) => setRfqFilter(event.target.value as typeof rfqFilter)} className="h-10 rounded-md border bg-background px-3 text-sm"><option value="all">All requests</option><option value="open">Open</option><option value="awarded">Awarded</option><option value="closed">Closed</option></select></div>
+        {visibleRFQs.length ? <div className="space-y-3">{visibleRFQs.map((rfq) => <article key={rfq.id} className="rounded-md border bg-card p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words font-semibold">{rfq.title}</h3><span className="rounded-sm bg-slate-100 px-2 py-0.5 text-xs">{rfq.visibility === 'open' ? 'Open marketplace' : 'Private'}</span><span className="rounded-sm bg-slate-100 px-2 py-0.5 text-xs">{rfq.status}</span></div><p className="mt-1 text-sm text-muted-foreground">{rfq.buyer?.name || 'Your business'} · {rfq.lines.length} items{rfq.quoteCount ? ` · ${rfq.quoteCount} offers` : ''}{rfq.myQuote ? ` · Your offer v${rfq.myQuote.version} (${rfq.myQuote.status})` : ''}</p></div><Button size="sm" variant="outline" onClick={() => void openRFQ(rfq)}>Open <ArrowRight className="ml-2 size-4" /></Button></div><div className="mt-3 flex flex-wrap gap-2">{rfq.lines.slice(0, 4).map((line) => <span key={line.id} className="rounded-sm border px-2 py-1 text-xs">{line.productName} · {Number(line.quantity).toLocaleString()} {line.unit}</span>)}</div></article>)}</div> : <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">{rfqSearch || rfqFilter !== 'all' ? 'No quote requests match these filters.' : 'No requests yet. Publish an open request for marketplace-wide offers, or create a private request for connected suppliers.'}</div>}
+        {activeRFQ && <div className="mt-5 rounded-md border-2 border-emerald-700/40 p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{activeRFQ.title}</h3><p className="mt-1 text-xs text-muted-foreground">From {activeRFQ.buyer?.name || 'your business'} · {activeRFQ.visibility} RFQ</p></div><button aria-label="Close RFQ details" onClick={() => setActiveRFQ(null)} className="text-sm text-muted-foreground">Close</button></div><div className="my-4 divide-y rounded-md border">{activeRFQ.lines.map((line) => <div key={line.id} className="flex flex-wrap justify-between gap-2 p-3 text-sm"><div><div className="font-medium">{line.productName}</div><div className="text-xs text-muted-foreground">{line.specification}</div>{line.referencePrice != null && <div className="mt-1 text-xs text-emerald-800">Marketplace reference: {line.referenceCurrency || activeRFQ.currency} {Number(line.referencePrice).toLocaleString()} · seller quote required</div>}</div><span className="tabular-nums">{Number(line.quantity).toLocaleString()} {line.unit}</span></div>)}</div>
+          {activeRFQ.isMine && <div className="mb-4">{quotes.length > 0 ? <div className="space-y-3"><h4 className="font-medium">Private offers to this buyer</h4>{quotes.map((quote) => <div key={quote.id} className="rounded-md border p-3"><div className="flex flex-wrap justify-between gap-2"><strong>{quote.seller?.name || 'Supplier'}</strong><span className="text-xs text-muted-foreground">Version {quote.version} · {quote.status}</span></div><div className="mt-2 space-y-1">{quote.lines.map((line: any) => <div key={line.id} className="flex justify-between gap-2 text-sm"><span>{activeRFQ.lines.find((x) => x.id === line.rfqLineId)?.productName} · {line.quantity}</span><span className="tabular-nums">{activeRFQ.currency} {Number(line.unitPrice).toLocaleString()}</span></div>)}</div><div className="mt-2 text-xs text-muted-foreground">Delivery {quote.deliveryDays ?? 'not specified'} days · fee {activeRFQ.currency} {Number(quote.deliveryFee).toLocaleString()} · {quote.paymentTerms || 'payment terms not stated'}</div>{activeRFQ.status === 'open' && quote.status === 'submitted' && <Button className="mt-3" size="sm" onClick={() => void run(() => request(`/rfqs/${activeRFQ.id}/quotes/${quote.id}/select`, { method: 'POST' }), 'Offer selected. No stock or accounting entries were created.')}>Select offer</Button>}</div>)}</div> : <p className="text-sm text-muted-foreground">Offers submitted to this RFQ are visible only to you and the supplier who sent them.</p>}
+          </div>}
+          {activeRFQ.isMine && quotes.find((quote) => quote.status === 'selected') && <div className="mb-4 grid gap-3 rounded-md border border-emerald-700/30 bg-emerald-50/40 p-3"><h4 className="font-medium">Issue purchase order</h4><label className="grid gap-1.5 text-sm font-medium">Receiving branch<select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="">Select branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>{quotes.find((quote) => quote.status === 'selected')?.lines.map((line: any) => { const requestedItem = activeRFQ.lines.find((item) => item.id === line.rfqLineId); const needsNewOrAlternateProduct = Boolean(line.alternative || !requestedItem?.productId); const mappedProduct = inventoryProducts.find((product) => product.id === requestedItem?.productId); return needsNewOrAlternateProduct ? <label key={line.id} className="grid gap-1 text-sm">Inventory product for {line.alternative || requestedItem?.productName}<select value={productMappings[line.id] || ''} onChange={(e) => setProductMappings({ ...productMappings, [line.id]: e.target.value })} className="h-10 min-w-0 rounded-md border bg-background px-3 text-sm"><option value="">Create product when goods are received</option>{inventoryProducts.map((product) => <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ''}</option>)}</select></label> : <div key={line.id} className="rounded-md border bg-background px-3 py-2 text-sm"><span className="text-muted-foreground">Receiving selected item:</span> <span className="font-medium">{mappedProduct?.name || requestedItem.productName}</span>{mappedProduct?.sku ? <span className="text-muted-foreground"> · {mappedProduct.sku}</span> : null}</div> })}<Button disabled={busy || !selectedBranch} onClick={() => { const quote = quotes.find((row) => row.status === 'selected'); if (!quote) return; void run(() => request(`/rfqs/${activeRFQ.id}/quotes/${quote.id}/order`, { method: 'POST', body: JSON.stringify({ branchId: selectedBranch, productMappings }) }), 'Draft purchase order created with selected inventory items and waiting for approval.') }}>{busy ? 'Creating…' : 'Create purchase order'}</Button></div>}
+          {!activeRFQ.isMine && quotes[0] && <div className="mb-4 rounded-md border p-3"><div className="text-sm font-medium">Your offer, version {quotes[0].version}: {quotes[0].status}</div>{canViewMessages && <Button className="mt-2" size="sm" variant="outline" onClick={() => void openDiscussion(quotes[0].id)}>Open private discussion</Button>}</div>}
+          {activeRFQ.isMine && canViewMessages && quotes.map((quote) => <Button key={`discussion-${quote.id}`} className="mb-3 mr-2" size="sm" variant="outline" onClick={() => void openDiscussion(quote.id)}>Discuss with {quote.seller?.name || 'supplier'}</Button>)}
+          {activeRFQ && !canViewMessages && <p className="mb-4 border-l-2 border-muted-foreground/30 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">Private quote messaging is unavailable. Ask your JibuSales administrator to enable the Communication module and grant messaging access.</p>}
+          {discussion && canViewMessages && <section className="mb-4 overflow-hidden rounded-md border bg-card"><header className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3"><div><h4 className="text-sm font-semibold">Quote discussion</h4><p className="mt-0.5 text-xs text-muted-foreground">Private to the buyer and seller on this offer</p></div><span className="text-xs text-muted-foreground">{discussion.messages.length} messages</span></header><div className="max-h-72 space-y-3 overflow-y-auto bg-muted/10 p-4">{discussion.messages.length ? discussion.messages.map((message) => { const ownMessage = message.senderTenantId === user?.tenantId; return <article key={message.id} className={`max-w-[92%] border p-3 sm:max-w-[80%] ${ownMessage ? 'ml-auto border-emerald-800/20 bg-emerald-50/70' : 'border-border bg-background'}`}><div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1"><span className="text-xs font-semibold">{ownMessage ? 'Your business' : 'Other business'}</span><time className="text-[11px] tabular-nums text-muted-foreground">{new Date(message.createdAt).toLocaleString()}</time></div><p className="whitespace-pre-wrap break-words text-sm leading-5">{message.body}</p></article> }) : <div className="border border-dashed bg-background px-4 py-7 text-center"><p className="text-sm font-medium">No messages yet</p><p className="mt-1 text-xs text-muted-foreground">Use this private thread to clarify quantities, delivery, or commercial terms.</p></div>}</div>{canSendMessages ? <form className="flex flex-col gap-2 border-t bg-background p-3 sm:flex-row" onSubmit={(e) => { e.preventDefault(); void run(async () => { await request(`/rfqs/${activeRFQ.id}/quotes/${discussion.quoteId}/messages`, { method: 'POST', body: JSON.stringify({ body: messageDraft }) }); const data = await request<{ messages: any[] }>(`/rfqs/${activeRFQ.id}/quotes/${discussion.quoteId}/messages`); setDiscussion({ quoteId: discussion.quoteId, messages: data.messages }); setMessageDraft('') }, 'Message sent privately.') }}><input value={messageDraft} onChange={(e) => setMessageDraft(e.target.value)} aria-label="Negotiation message" maxLength={4000} placeholder="Write a message about this offer" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" required /><Button size="sm" type="submit" disabled={busy || !messageDraft.trim()}><Send className="mr-2 size-4" />Send</Button></form> : <p className="border-t px-4 py-3 text-xs text-muted-foreground">You can view this thread but do not have permission to send messages.</p>}</section>}
+          {!activeRFQ.isMine && activeRFQ.status === 'open' && <form className="grid gap-3 border-t pt-4" onSubmit={(e) => { e.preventDefault(); void run(() => request(`/rfqs/${activeRFQ.id}/quotes`, { method: 'POST', body: JSON.stringify({ notes: quoteDraft.notes, paymentTerms: quoteDraft.paymentTerms, deliveryDays: quoteDraft.deliveryDays || undefined, lines: activeRFQ.lines.map((line) => ({ rfqLineId: line.id, quantity: quoteDraft[`qty-${line.id}`] || line.quantity, unitPrice: quoteDraft[`price-${line.id}`], taxRate: quoteDraft[`tax-${line.id}`] || 0 })) }) }), 'Quote submitted privately to the buyer.') }}><h4 className="font-medium">Submit your private offer</h4>{activeRFQ.lines.map((line) => <div key={line.id} className="grid grid-cols-1 gap-2 rounded-md border p-2 sm:grid-cols-[minmax(0,1fr)_90px_110px_100px]"><div className="self-center text-sm">{line.productName}<div className="text-xs text-muted-foreground">Requested {line.quantity} {line.unit}</div></div><input aria-label={`${line.productName} quantity`} type="number" min="0.001" max={Number(line.quantity)} step="0.001" placeholder="Qty" className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" value={quoteDraft[`qty-${line.id}`] ?? line.quantity} onChange={(e) => setQuoteDraft({ ...quoteDraft, [`qty-${line.id}`]: e.target.value })} required /><input aria-label={`${line.productName} unit price`} type="number" min="0" step="0.01" placeholder="Unit price" className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" value={quoteDraft[`price-${line.id}`] || ''} onChange={(e) => setQuoteDraft({ ...quoteDraft, [`price-${line.id}`]: e.target.value })} required /><input aria-label={`${line.productName} tax rate percent`} type="number" min="0" max="100" step="0.01" placeholder="Tax %" className="h-9 min-w-0 rounded-md border bg-background px-2 text-sm" value={quoteDraft[`tax-${line.id}`] ?? '0'} onChange={(e) => setQuoteDraft({ ...quoteDraft, [`tax-${line.id}`]: e.target.value })} /></div>)}<div className="grid grid-cols-1 gap-2 sm:grid-cols-2"><Field label="Delivery days" type="number" min="0" value={quoteDraft.deliveryDays || ''} onChange={(e) => setQuoteDraft({ ...quoteDraft, deliveryDays: e.target.value })} /><Field label="Payment terms" value={quoteDraft.paymentTerms || ''} onChange={(e) => setQuoteDraft({ ...quoteDraft, paymentTerms: e.target.value })} /></div><TextareaField label="Offer notes" value={quoteDraft.notes || ''} onChange={(e) => setQuoteDraft({ ...quoteDraft, notes: e.target.value })} /><Button type="submit" disabled={busy}><Send className="mr-2 size-4" />Submit quote</Button></form>}
+        </div>}
+      </div>
+      <aside className="border-t pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">{can('canCreateProcurementRFQ') && <><h2 className="mb-4 text-lg font-semibold">Create a request</h2><form className="grid gap-3" onSubmit={(e) => { e.preventDefault(); void run(() => request('/rfqs', { method: 'POST', body: JSON.stringify(rfqForm) }), 'Request published to the selected audience.'); setRfqForm({ ...rfqForm, title: '', notes: '', lines: [{ ...blankLine }] }) }}>
+        <Field label="Request title" value={rfqForm.title} onChange={(e) => setRfqForm({ ...rfqForm, title: e.target.value })} required />
+        <label className="grid gap-1.5 text-sm font-medium">Audience<select value={rfqForm.visibility} onChange={(e) => setRfqForm({ ...rfqForm, visibility: e.target.value })} className="h-10 rounded-md border bg-background px-3 text-sm font-normal"><option value="open">Open to all opted-in sellers</option><option value="private">Specific connected suppliers</option></select></label>
+        {rfqForm.visibility === 'private' && <fieldset className="max-h-36 space-y-2 overflow-y-auto rounded-md border p-3"><legend className="px-1 text-xs text-muted-foreground">Connected suppliers</legend>{activeRelationships.filter((r) => r.direction === 'outgoing').map((r) => <label key={r.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rfqForm.sellerTenantIds.includes(r.counterparty?.id || '')} onChange={(e) => setRfqForm((form) => ({ ...form, sellerTenantIds: e.target.checked ? [...form.sellerTenantIds, r.counterparty?.id || ''] : form.sellerTenantIds.filter((id) => id !== r.counterparty?.id) }))} />{r.counterparty?.name}</label>)}{!activeRelationships.some((r) => r.direction === 'outgoing') && <span className="text-xs text-muted-foreground">No approved suppliers. Connect and get approval first.</span>}</fieldset>}
+        {rfqForm.lines.map((line, index) => <div key={index} className="grid gap-2 rounded-md border p-3"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">ITEM {index + 1}</span>{rfqForm.lines.length > 1 && <button type="button" className="text-xs text-red-700" onClick={() => setRfqForm((form) => ({ ...form, lines: form.lines.filter((_, i) => i !== index) }))}>Remove</button>}</div>{line.custom ? <><Field label="Item name" value={line.productName} maxLength={180} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((row, i) => i === index ? { ...row, productName: e.target.value } : row) }))} placeholder="Name the item requested from sellers" required /><button type="button" className="justify-self-start text-xs font-medium text-emerald-800 underline underline-offset-2" onClick={() => setRfqForm((form) => ({ ...form, lines: form.lines.map((row, i) => i === index ? { ...row, ...blankLine } : row) }))}>Choose from inventory instead</button></> : <><label className="grid gap-1.5 text-sm font-medium">Business item<Popover open={openProductLine === index} onOpenChange={(open) => setOpenProductLine(open ? index : null)}><PopoverTrigger asChild><button type="button" role="combobox" aria-expanded={openProductLine === index} className="flex h-10 min-w-0 items-center justify-between gap-2 rounded-md border bg-background px-3 text-left text-sm font-normal"><span className={line.productName ? 'truncate' : 'truncate text-muted-foreground'}>{line.productName || 'Search and select an inventory item'}</span><ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" /></button></PopoverTrigger><PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0"><Command><CommandInput placeholder="Search by product name or SKU..." /><CommandList><CommandEmpty>No matching business items.</CommandEmpty><CommandGroup>{requestProducts.map((product) => <CommandItem key={product.id} value={`${product.name} ${product.sku || ''} ${product.itemType} ${product.id}`} onSelect={() => { setRfqForm((form) => ({ ...form, lines: form.lines.map((item, lineIndex) => lineIndex === index ? { ...item, productId: product.id, productName: product.name, unit: product.baseUnit || 'Piece' } : item) })); setOpenProductLine(null) }}><span className="min-w-0 flex-1 truncate">{product.name}{product.sku ? ` · ${product.sku}` : ''}</span><span className="shrink-0 text-xs capitalize text-muted-foreground">{product.itemType}</span></CommandItem>)}</CommandGroup></CommandList></Command></PopoverContent></Popover></label><button type="button" className="justify-self-start text-xs font-medium text-emerald-800 underline underline-offset-2" onClick={() => setRfqForm((form) => ({ ...form, lines: form.lines.map((row, i) => i === index ? { ...row, productId: '', productName: '', custom: true } : row) }))}>Not in inventory? Enter a custom item</button></> }<div className="grid grid-cols-2 gap-2"><Field label="Quantity" type="number" min="0.001" step="0.001" value={line.quantity} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, quantity: e.target.value } : x) }))} required /><Field label="Unit" value={line.unit} readOnly={!line.custom} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, unit: e.target.value } : x) }))} required /></div><Field label="Specifications or item details (optional)" value={line.specification} maxLength={1000} onChange={(e) => setRfqForm((form) => ({ ...form, lines: form.lines.map((x, i) => i === index ? { ...x, specification: e.target.value } : x) }))} placeholder="Brand, size, quality, packaging, or other requirements" /></div>)}
+        {requestProducts.length === 0 && <p className="text-xs text-muted-foreground">No inventory item is required for a custom request.</p>}
+        <Button type="button" variant="outline" onClick={() => setRfqForm((form) => ({ ...form, lines: [...form.lines, { ...blankLine }] }))}><Plus className="mr-2 size-4" />Add item</Button>
+        <Field label="Delivery location" value={rfqForm.deliveryAddress} placeholder={businessAddress || 'Set an address in Business Profile'} onChange={(e) => setRfqForm({ ...rfqForm, deliveryAddress: e.target.value })} />
+        <TextareaField label="Notes and requirements" aiWritingField value={rfqForm.notes} onChange={(e) => setRfqForm({ ...rfqForm, notes: e.target.value })} />
+        <Button type="submit" disabled={busy || rfqForm.lines.some((line) => !line.quantity || (line.custom ? !line.productName.trim() || !line.unit.trim() : !line.productId))}><Send className="mr-2 size-4" />Publish RFQ</Button>
+      </form></>}</aside>
+    </section>}
+
+    {section === 'relationships' && <section className="grid gap-8 lg:grid-cols-2"><div><h2 className="mb-1 text-lg font-semibold">Connected suppliers</h2><p className="mb-4 text-sm text-muted-foreground">Private RFQs can only be shared with relationships the supplier has approved.</p>{relationships.length ? <div className="divide-y rounded-md border">{relationships.map((row) => <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 p-4"><div><div className="font-medium">{row.counterparty?.name || 'Business'}</div><div className="mt-1 text-xs capitalize text-muted-foreground">{row.direction} · {row.status}</div></div>{row.direction === 'incoming' && row.status === 'pending' && <div className="flex gap-2"><Button size="sm" onClick={() => void run(() => request(`/relationships/${row.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'active' }) }), 'Supplier relationship approved.')}>Approve</Button><Button size="sm" variant="outline" onClick={() => void run(() => request(`/relationships/${row.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'rejected' }) }), 'Supplier request declined.')}>Decline</Button></div>}{row.status === 'active' && <Button size="sm" variant="outline" onClick={() => void run(() => request(`/relationships/${row.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'suspended' }) }), 'Relationship suspended.')}>Suspend</Button>}</div>)}</div> : <p className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">No supplier relationships yet. Find opted-in suppliers in Marketplace and request a connection.</p>}</div><div><h2 className="mb-1 text-lg font-semibold">Pending inbound requests</h2><p className="mb-4 text-sm text-muted-foreground">Approve only businesses you are ready to share private procurement with.</p>{incomingRequests.length ? <div className="space-y-2">{incomingRequests.map((row) => <div key={row.id} className="rounded-md border p-4"><strong>{row.counterparty?.name}</strong><div className="mt-3 flex gap-2"><Button size="sm" onClick={() => void run(() => request(`/relationships/${row.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'active' }) }), 'Supplier relationship approved.')}>Approve</Button><Button size="sm" variant="outline" onClick={() => void run(() => request(`/relationships/${row.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'rejected' }) }), 'Supplier request declined.')}>Decline</Button></div></div>)}</div> : <p className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">No businesses are waiting for approval.</p>}</div></section>}
+
+    {section === 'profile' && <section className="max-w-3xl"><div className="mb-5"><h2 className="text-lg font-semibold">Supplier onboarding profile</h2><p className="mt-1 text-sm text-muted-foreground">Your existing business account is your network identity. Opting into discovery publishes only this profile and the offers you choose to list.</p></div><form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run(() => request('/profile', { method: 'PUT', body: JSON.stringify(profile) }), 'Supplier profile saved.') }}><label className="grid gap-1.5 text-sm font-medium text-foreground">Seller type<select value={profile.sellerType} onChange={(e) => setProfile({ ...profile, sellerType: e.target.value })} className="h-10 min-w-0 rounded-md border border-input bg-background px-3 text-sm font-normal"><option value="supplier">Supplier / reseller</option><option value="manufacturer">Manufacturer</option><option value="both">Supplier and manufacturer</option></select></label><Field label="Business category" value={profile.category} onChange={(e) => setProfile({ ...profile, category: e.target.value })} placeholder="Food wholesaler, building materials..." required /><Field label="Website (optional)" type="url" value={profile.website} onChange={(e) => setProfile({ ...profile, website: e.target.value })} placeholder="https://" /><div className="sm:col-span-2"><TextareaField label="Business description" value={profile.description} onChange={(e) => setProfile({ ...profile, description: e.target.value })} placeholder="What do you supply, manufacture, or distribute?" /></div><label className="flex items-start gap-3 rounded-md border p-4 sm:col-span-2"><input type="checkbox" className="mt-1" checked={profile.discoverable} onChange={(e) => setProfile({ ...profile, discoverable: e.target.checked })} /><span><span className="block font-medium">Show my seller profile in discovery</span><span className="mt-1 block text-sm text-muted-foreground">Your public business name, seller type, category, description, logo, and public listings can be found by other opted-in businesses. Private prices, customers, financials, and purchase history are never listed.</span></span></label><Button type="submit" disabled={busy} className="sm:col-span-2"><ShieldCheck className="mr-2 size-4" />Save seller profile</Button></form><div className="mt-6 grid gap-3 border-t pt-5 text-sm text-muted-foreground sm:grid-cols-3"><div className="flex gap-2"><Globe2 className="size-4 shrink-0 text-emerald-700" />Opt-in discovery is controlled by your business.</div><div className="flex gap-2"><CircleDollarSign className="size-4 shrink-0 text-emerald-700" />Published price updates retain a timestamped history.</div><div className="flex gap-2"><Clock3 className="size-4 shrink-0 text-emerald-700" />A quote is not an order, payment, or stock receipt.</div></div></section>}
+    {offerRequest && <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/50 p-3 sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOfferRequest(null) }}><section role="dialog" aria-modal="true" aria-labelledby="offer-request-title" className="my-auto w-full max-w-lg border bg-background p-5 shadow-xl"><header className="mb-4 flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase text-emerald-800">Private to {campaigns.find((campaign) => campaign.id === offerRequest.campaignId)?.business?.name || listings.find((listing) => listing.id === offerRequest.listing.id)?.business?.name || 'the seller'}</p><h2 id="offer-request-title" className="mt-1 text-lg font-semibold">Request a quote</h2><p className="mt-1 text-sm text-muted-foreground">{offerRequest.listing.name} · advertised at {offerRequest.listing.currency} {Number(offerRequest.listing.price).toLocaleString()} per {offerRequest.listing.unit}. Price is a reference; the seller confirms quote terms.</p>{offerRequest.campaignTitle && <p className="mt-1 text-xs text-muted-foreground">From campaign: {offerRequest.campaignTitle}</p>}</div><button type="button" aria-label="Close quote request" disabled={busy} onClick={() => setOfferRequest(null)} className="rounded-sm p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button></header><form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); void submitOfferRequest() }}><Field label={`Quantity (${offerRequest.listing.unit})`} type="number" min="0.001" step="0.001" value={offerRequest.quantity} onChange={(event) => setOfferRequest({ ...offerRequest, quantity: event.target.value })} required /><Field label="Delivery location" value={offerRequest.deliveryAddress} onChange={(event) => setOfferRequest({ ...offerRequest, deliveryAddress: event.target.value })} placeholder="Add a delivery location" /><TextareaField label="Requirements or questions" value={offerRequest.notes} maxLength={2000} onChange={(event) => setOfferRequest({ ...offerRequest, notes: event.target.value })} placeholder="Packaging, grade, delivery timing, or other requirements" /><p className="text-xs leading-5 text-muted-foreground">This sends a private request to the seller. It does not create a product, order, payment, or stock movement. You can review the seller’s quote before proceeding.</p><div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => setOfferRequest(null)}>Cancel</Button><Button type="submit" disabled={busy || Number(offerRequest.quantity) <= 0}><Send className="mr-2 size-4" />{busy ? 'Sending…' : 'Send private request'}</Button></div></form></section></div>}
+    {section === 'marketplace' && marketInsight && <aside role="status" aria-live="polite" className={`fixed bottom-20 right-3 z-40 w-[min(24rem,calc(100vw-1.5rem))] border border-emerald-900/15 bg-background p-4 shadow-lg transition duration-300 sm:bottom-4 sm:right-4 ${marketInsightVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'}`}><div className="flex items-start gap-3"><div className="grid size-8 shrink-0 place-items-center rounded-sm bg-emerald-50 text-emerald-800"><Sparkles className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase text-emerald-800">AI marketplace note</p><h2 className="mt-0.5 break-words text-sm font-semibold">{marketInsight.title}</h2><p className="mt-1 break-words text-sm leading-5 text-muted-foreground">{marketInsight.message}</p>{marketInsight.listingId && <button type="button" className="mt-2 text-xs font-medium text-emerald-800 underline underline-offset-2" onClick={() => { document.getElementById(`market-listing-${marketInsight.listingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setMarketInsightVisible(false); setTimeout(() => setMarketInsight(null), 350) }}>View offer</button>}</div><button type="button" aria-label="Dismiss marketplace insight" className="-mr-1 -mt-1 rounded-sm p-1 text-muted-foreground hover:bg-muted" onClick={() => { setMarketInsightVisible(false); setTimeout(() => setMarketInsight(null), 350) }}><X className="size-4" /></button></div></aside>}
+  </main>
+}
+

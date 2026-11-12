@@ -1,0 +1,2939 @@
+import { Pagination } from '@/components/Pagination'
+import React, { useState, useEffect } from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/hooks/use-toast'
+import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { formatCurrency, cn, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
+import { displayReference } from '@/lib/displayReference'
+import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
+import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
+import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalReceivableCustomers, getLocalReceivableSales, getLocalReceivablePayments, getLocalProducts } from '@/db/hybrid'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import { appConfirm } from '@/lib/appFeedback'
+import { 
+  Users, 
+  Building2, 
+  CreditCard, 
+  FileText, 
+  TrendingUp,
+  Wallet,
+  Settings,
+  Plus,
+  Search,
+  Filter,
+  Download,
+  Eye,
+  Edit,
+  Trash2,
+  Calendar,
+  DollarSign,
+  Shield,
+  ArrowUpRight,
+  ArrowDownRight,
+  ArrowDownCircle,
+  Printer
+} from 'lucide-react'
+
+interface Customer {
+  id: string
+  branchId?: string | null
+  name: string
+  email?: string
+  phone?: string
+  maskedPhone?: string
+  address?: string
+  maskedAddress?: string
+  maskedEmail?: string
+  creditLimit?: number
+  balance?: number
+  rentalBalance?: number
+  availableForWithdrawal?: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
+  status: 'active' | 'inactive' | 'blocked'
+  trustScore?: number
+  notes?: string
+  canDelete?: boolean
+}
+
+interface FuelCard {
+  id: string
+  cardNumber: string
+  holderName: string
+  customerId?: string | null
+  customer?: { id: string; name: string; phone?: string } | null
+  cardType: 'prepaid' | 'credit' | 'fleet'
+  balance: number
+  creditLimit: number
+  status: 'active' | 'suspended' | 'expired' | 'cancelled'
+  expiresAt?: string | null
+  notes?: string
+  createdAt: string
+}
+
+interface Supplier {
+  id: string
+  name: string
+  email?: string
+  phone?: string
+  address?: string
+  balance: number
+  openingBalance?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
+  status: 'active' | 'inactive' | 'blocked'
+  notes?: string
+}
+
+interface Expense {
+  id: string
+  category: string
+  description: string
+  amount: number
+  paymentMethod: string
+  reference?: string
+  notes?: string
+  date: string
+  user: {
+    id: string
+    fname: string
+    lname: string
+  }
+}
+
+interface SaleDraftItem {
+  productId: string
+  quantity: string
+  price: string
+  discount: string
+  unitName: string
+}
+
+const createEmptySaleItem = (): SaleDraftItem => ({
+  productId: '',
+  quantity: '1',
+  price: '',
+  discount: '0',
+  unitName: '',
+})
+
+const BASE_SELLING_UNIT = '__base_unit__'
+
+const CUSTOMER_OPTION_PAGE_SIZE = 100
+
+const mergeCustomerOptions = (existing: Customer[], incoming: Customer[]) => {
+  const byId = new Map<string, Customer>()
+  ;[...existing, ...incoming].forEach((customer) => {
+    if (customer?.id) byId.set(customer.id, customer)
+  })
+  return Array.from(byId.values())
+}
+
+const parseAmount = (value: string | number | undefined) => {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : 0
+}
+
+const availableCustomerFunds = (customer: Pick<Customer, 'balance' | 'availableForWithdrawal'> | null | undefined) =>
+  customer?.availableForWithdrawal != null
+    ? Math.max(0, parseAmount(customer.availableForWithdrawal))
+    : Math.max(0, -parseAmount(customer?.balance))
+
+const searchText = (...values: unknown[]) =>
+  values
+    .filter((value) => value !== null && value !== undefined)
+    .map((value) => String(value).toLowerCase())
+    .join(' ')
+
+const readResponseError = async (response: Response, fallback: string) => {
+  const data = await response.json().catch(() => ({}))
+  return data?.error || data?.message || fallback
+}
+
+const isReceivableSale = (sale: any) => (
+  sale?.status !== 'cancelled' &&
+  sale?.affectsCreditSales !== false &&
+  !sale?.documentType &&
+  !sale?.noteNo
+)
+
+const canRecordSalePayment = (sale: any) => (
+  isReceivableSale(sale) &&
+  sale?.status !== 'refunded' &&
+  sale?.paymentStatus !== 'paid' &&
+  Math.round(parseAmount(sale?.balance) * 100) > 0
+)
+
+const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex items-start justify-between gap-4 border-b py-2 last:border-b-0">
+    <span className="text-sm text-muted-foreground">{label}</span>
+    <span className="text-right text-sm font-medium break-words">{value || 'Not set'}</span>
+  </div>
+)
+
+export default function ReceivablesPage() {
+  const { user, hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const multiUnitEnabled = hasFeature('inventory.multi_unit')
+  const propertyManagementBusiness = hasFeature('property_management.landlord') || hasFeature('property_management.agent')
+  const baseCurrency = getTenantCurrency()
+  const { toast } = useToast()
+  const online = useOnlineStatus()
+  
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [customerPage, setCustomerPage] = useState(1)
+  const [customerPageSize, setCustomerPageSize] = useState(10)
+  const [customerTotal, setCustomerTotal] = useState(0)
+  const customerRequestId = React.useRef(0)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [customerOptions, setCustomerOptions] = useState<Customer[]>([])
+  const [customerOptionsLoading, setCustomerOptionsLoading] = useState(false)
+  const [saleCustomerSearch, setSaleCustomerSearch] = useState('')
+  const [selectedSaleCustomerOption, setSelectedSaleCustomerOption] = useState<Customer | null>(null)
+  const [saleCustomerPage, setSaleCustomerPage] = useState(1)
+  const [saleCustomerTotal, setSaleCustomerTotal] = useState(0)
+  const [, setSaleItemSearchByIndex] = useState<Record<number, string>>({})
+  const [products, setProducts] = useState<InventoryItem[]>([])
+  const [sales, setSales] = useState<any[]>([])
+  const [payments, setPayments] = useState<any[]>([])
+  const [businessProfile, setBusinessProfile] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const { tab: urlTab } = useParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const handledCustomerActionRef = React.useRef<string | null>(null)
+  const activeTab = (urlTab === 'sales' || urlTab === 'payments' || urlTab === 'fuel-cards' || urlTab === 'credit-accounts') ? urlTab : 'customers'
+  const [summary, setSummary] = useState<any>(null)
+  const [showCustomerModal, setShowCustomerModal] = useState(false)
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
+  const [showSaleModal, setShowSaleModal] = useState(false)
+  const [savingSale, setSavingSale] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [savingPayment, setSavingPayment] = useState(false)
+  const savingPaymentRef = React.useRef(false)
+  const [showWithdrawalModal, setShowWithdrawalModal] = useState(false)
+  const [savingWithdrawal, setSavingWithdrawal] = useState(false)
+  const savingWithdrawalRef = React.useRef(false)
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [selectedSale, setSelectedSale] = useState<any | null>(null)
+  const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
+  const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
+  const [customerDetails, setCustomerDetails] = useState<CustomerHistoryTarget | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [withdrawalAmount, setWithdrawalAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [paymentCurrency, setPaymentCurrency] = useState(baseCurrency)
+  const [paymentRateToBase, setPaymentRateToBase] = useState<number | null>(1)
+  const [paymentUnitsPerBase, setPaymentUnitsPerBase] = useState<number | null>(1)
+  const [paymentNotes, setPaymentNotes] = useState('')
+  const [saleCurrency, setSaleCurrency] = useState(baseCurrency)
+  const [saleRateToBase, setSaleRateToBase] = useState<number | null>(1)
+  const [saleUnitsPerBase, setSaleUnitsPerBase] = useState<number | null>(1)
+  const [mobileProvider, setMobileProvider] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+  const [cashAccounts, setCashAccounts] = useState<any[]>([])
+  const [selectedCashAccountId, setSelectedCashAccountId] = useState<string | null>(null)
+  const [saleForm, setSaleForm] = useState({
+    customerId: '',
+    paymentMethod: 'credit',
+    amountPaid: '0',
+    tax: '0',
+    discount: '0',
+    notes: '',
+  })
+  const [saleItems, setSaleItems] = useState<SaleDraftItem[]>([createEmptySaleItem()])
+  const creditEnabled = hasPermission('canViewReceivable')
+  const canViewCustomerPhone = hasPermission('canViewCustomerPhone')
+  const canViewCustomerEmail = hasPermission('canViewCustomerEmail')
+  const canViewCustomerBalance = hasPermission('canViewCustomerBalance')
+  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canCreateCustomerCreditLimit') || hasPermission('canEditCustomerCreditLimit'))
+  const canManageCustomerCreditLimit = hasFeature('customers.credit_limits') && hasPermission('canEditCustomerCreditLimit')
+  const canRecordCustomerPayment = hasPermission('canRecordCustomerPayment')
+  const canEditCustomer = hasPermission('canEditCustomer') || hasPermission('canEditReceivable')
+  const canCreateWithdrawal = hasPermission('canCreateWithdrawal')
+  const canDeleteCustomer = hasPermission('canDeleteCustomer')
+  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || ''
+  const hasLegacyAnyTransactionAccount = hasPermission('canUseAnyTransactionAccount')
+  const hasLegacyOtherCashAccount = hasPermission('canUseOtherCashAccount')
+  const canUseOwnCashAccount = hasPermission('canUseOwnCashAccount') || hasPermission('canUseCash') || hasLegacyAnyTransactionAccount
+  const canUseOtherStaffCashAccount = hasPermission('canUseOtherStaffCashAccount') || hasLegacyOtherCashAccount || hasLegacyAnyTransactionAccount
+  const canUseSafeAccount = hasPermission('canUseSafeAccount') || hasLegacyOtherCashAccount || hasLegacyAnyTransactionAccount
+  const canUseBankAccount = hasPermission('canUseBankAccount') || hasLegacyAnyTransactionAccount
+  const canUseMobileMoneyAccount = hasPermission('canUseMobileMoneyAccount') || hasLegacyAnyTransactionAccount
+  const canUseCardAccount = hasPermission('canUseCardAccount') || hasLegacyAnyTransactionAccount
+
+  // Fuel Cards state
+  const [fuelCards, setFuelCards] = useState<FuelCard[]>([])
+  const [showFuelCardModal, setShowFuelCardModal] = useState(false)
+  const [editingFuelCard, setEditingFuelCard] = useState<FuelCard | null>(null)
+  const [fuelCardForm, setFuelCardForm] = useState({
+    cardNumber: '', holderName: '', customerId: '', cardType: 'prepaid' as 'prepaid' | 'credit' | 'fleet',
+    balance: '0', creditLimit: '0', expiresAt: '', notes: ''
+  })
+
+  // Credit Accounts state
+  const [creditAccounts, setCreditAccounts] = useState<Customer[]>([])
+  const [editingCreditAccount, setEditingCreditAccount] = useState<Customer | null>(null)
+  const [creditAccountForm, setCreditAccountForm] = useState({
+    creditLimit: '0', status: 'active' as 'active' | 'inactive' | 'blocked', trustScore: '0', notes: ''
+  })
+
+  useEffect(() => {
+    loadBusinessProfile()
+  }, [])
+
+  useEffect(() => {
+    if (showPaymentModal || showWithdrawalModal) {
+      loadCashAccounts()
+    } else {
+      setCashAccounts([])
+      setSelectedCashAccountId(null)
+    }
+  }, [showPaymentModal, showWithdrawalModal])
+
+  useEffect(() => {
+    if (!creditEnabled) {
+      setLoading(false)
+      return
+    }
+
+
+    if (activeTab === 'sales') { loadSales(); setLoading(false) }
+    if (activeTab === 'payments') { loadPayments(); setLoading(false) }
+    if (activeTab === 'fuel-cards') loadFuelCards()
+    if (activeTab === 'credit-accounts') loadCreditAccounts()
+    loadReceivablesSummary()
+  }, [creditEnabled, activeTab, searchTerm, statusFilter])
+
+  useEffect(() => {
+    if (creditEnabled && activeTab === 'customers') loadCustomers()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditEnabled, activeTab, searchTerm, statusFilter, customerPage, customerPageSize, online])
+
+  useEffect(() => {
+    const request = (location.state as any)?.customerAction
+    if (!request?.type || !request.customer?.id) return
+    const actionKey = `${location.key}:${request.type}:${request.customer.id}`
+    if (handledCustomerActionRef.current === actionKey) return
+    handledCustomerActionRef.current = actionKey
+
+    const customer = request.customer as Customer
+    if (request.type === 'payment') {
+      setSelectedCustomer(customer)
+      setSelectedSale(null)
+      setPaymentAmount('')
+      setPaymentNotes('')
+      setPaymentCurrency(baseCurrency)
+      setPaymentRateToBase(1)
+      setPaymentUnitsPerBase(1)
+      setShowPaymentModal(true)
+    } else if (request.type === 'withdrawal') {
+      setSelectedCustomer(customer)
+      setSelectedSale(null)
+      setWithdrawalAmount('')
+      setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      setSelectedCashAccountId(null)
+      setShowWithdrawalModal(true)
+    } else if (request.type === 'edit') {
+      setEditingCustomer(customer)
+      setShowCustomerModal(true)
+    } else if (request.type === 'delete') {
+      void deleteCustomer(customer)
+    }
+
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key, location.pathname, location.search, location.state, navigate])
+
+  useEffect(() => {
+    if (!showSaleModal) return
+    const timer = window.setTimeout(() => {
+      loadCustomerOptions({ search: saleCustomerSearch, page: 1, append: false })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSaleModal, saleCustomerSearch, online])
+
+  const loadCustomers = async (
+    showPageLoading = true,
+    overrides?: { search?: string; status?: string }
+  ) => {
+    const requestId = ++customerRequestId.current
+    const page = overrides ? 1 : customerPage
+    try {
+      if (showPageLoading) setLoading(true)
+      let rows: Customer[]
+      let total: number
+      if (online) {
+        const params = new URLSearchParams({
+          page: String(page), limit: String(customerPageSize),
+          ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
+          ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
+        })
+        const response = await apiFetch(`/api/receivables/customers?${params}`)
+        if (!response.ok) throw new Error(await readResponseError(response, 'Failed to load customers'))
+        const data = await response.json()
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+          toast({ title: 'Customer data loaded with a warning', description: data.warnings.join(' '), variant: 'destructive' })
+        }
+        rows = (data.customers || []).slice().sort((a: Customer, b: Customer) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        )
+        total = Number(data.pagination?.total ?? rows.length)
+      } else {
+        const local = await getLocalReceivableCustomers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
+        total = local.length
+        rows = local.slice().sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        ).slice((page - 1) * customerPageSize, page * customerPageSize)
+      }
+      if (requestId !== customerRequestId.current) return
+      setCustomers(rows)
+      setCustomerTotal(total)
+      const validPage = Math.max(1, Math.min(page, Math.ceil(total / customerPageSize)))
+      if (validPage !== customerPage) setCustomerPage(validPage)
+    } catch (error) {
+      if (requestId !== customerRequestId.current) return
+      setCustomers([])
+      setCustomerTotal(0)
+      toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to load customers', variant: 'destructive' })
+    } finally {
+      if (showPageLoading && requestId === customerRequestId.current) setLoading(false)
+    }
+  }
+
+  const deleteCustomer = async (customer: Customer) => {
+    if (!online || !canDeleteCustomer || !customer.canDelete) return
+    if (!(await appConfirm(`Delete ${customer.name}? This customer has no balance or transaction history. This cannot be undone.`))) return
+
+    try {
+      const response = await apiFetch(`/api/receivables/customers/${customer.id}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(await readResponseError(response, 'Failed to delete customer'))
+      toast({ title: 'Customer deleted', description: `${customer.name} was removed.` })
+      await Promise.all([loadCustomers(false), loadReceivablesSummary()])
+    } catch (error) {
+      toast({ title: 'Unable to delete customer', description: error instanceof Error ? error.message : 'Please refresh and try again.', variant: 'destructive' })
+      await loadCustomers(false)
+    }
+  }
+
+  const loadSales = async () => {
+    try {
+      if (online) {
+        const response = await apiFetch('/api/receivables/sales')
+        if (response.ok) {
+          const data = await response.json()
+          setSales((data.sales || []).filter(isReceivableSale))
+        } else {
+          try { setSales(await getLocalReceivableSales()) } catch { setSales([]) }
+        }
+      } else {
+        const local = await getLocalReceivableSales()
+        setSales(local)
+      }
+    } catch (error) {
+      try { setSales(await getLocalReceivableSales()) } catch { setSales([]) }
+    }
+  }
+
+  const loadBusinessProfile = async () => {
+    try {
+      const response = await apiFetch('/api/settings/business-profile')
+      if (response.ok) {
+        setBusinessProfile(await response.json())
+      }
+    } catch (error) {
+      console.error('Failed to load business profile for invoice printing:', error)
+    }
+  }
+
+  const loadPayments = async () => {
+    try {
+      if (online) {
+        const response = await apiFetch('/api/receivables/payments')
+        if (response.ok) {
+          const data = await response.json()
+          setPayments(data.payments || [])
+        } else {
+          try { setPayments(await getLocalReceivablePayments()) } catch { setPayments([]) }
+        }
+      } else {
+        const local = await getLocalReceivablePayments()
+        setPayments(local)
+      }
+    } catch (error) {
+      try { setPayments(await getLocalReceivablePayments()) } catch { setPayments([]) }
+    }
+  }
+
+  const loadReceivablesSummary = async () => {
+    try {
+      if (online) {
+        const response = await apiFetch('/api/receivables/receivables/summary')
+        if (response.ok) {
+          const data = await response.json()
+          setSummary(data)
+        }
+      } else {
+        const localCustomers = await getLocalReceivableCustomers()
+        const localSales = await getLocalReceivableSales()
+        const totalReceivable = localCustomers.reduce((sum, c) => sum + (c.balance || 0), 0)
+        const totalSales = localSales.reduce((sum, s) => sum + (s.total || 0), 0)
+        setSummary({
+          totalReceivable,
+          totalSales,
+          customerCount: localCustomers.length,
+          outstandingBalance: totalReceivable,
+        })
+      }
+    } catch (error) {
+      console.error('Failed to load summary:', error)
+    }
+  }
+
+  const loadFuelCards = async () => {
+    try {
+      setLoading(true)
+      const response = await apiFetch(`/api/receivables/fuel-cards?search=${encodeURIComponent(searchTerm)}`)
+      if (response.ok) {
+        const data = await response.json()
+        setFuelCards(data.cards || [])
+      }
+    } catch (error) {
+      console.error('Failed to load fuel cards:', error)
+      toast({ variant: 'destructive', title: 'Failed to load fuel cards' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveFuelCard = async () => {
+    if (!fuelCardForm.cardNumber.trim() || !fuelCardForm.holderName.trim()) {
+      toast({ variant: 'destructive', title: 'Card number and holder name are required' })
+      return
+    }
+    try {
+      const payload = {
+        cardNumber: fuelCardForm.cardNumber.trim(),
+        holderName: fuelCardForm.holderName.trim(),
+        customerId: fuelCardForm.customerId || null,
+        cardType: fuelCardForm.cardType,
+        balance: Number(fuelCardForm.balance) || 0,
+        creditLimit: Number(fuelCardForm.creditLimit) || 0,
+        expiresAt: fuelCardForm.expiresAt || null,
+        notes: fuelCardForm.notes || null,
+      }
+      const url = editingFuelCard
+        ? `/api/receivables/fuel-cards/${editingFuelCard.id}`
+        : '/api/receivables/fuel-cards'
+      const method = editingFuelCard ? 'PUT' : 'POST'
+      const response = await apiFetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (response.ok) {
+        toast({ title: editingFuelCard ? 'Fuel card updated' : 'Fuel card created' })
+        setShowFuelCardModal(false)
+        setEditingFuelCard(null)
+        setFuelCardForm({ cardNumber: '', holderName: '', customerId: '', cardType: 'prepaid', balance: '0', creditLimit: '0', expiresAt: '', notes: '' })
+        loadFuelCards()
+      } else {
+        const err = await response.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: err.error || 'Failed to save fuel card' })
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to save fuel card' })
+    }
+  }
+
+  const deleteFuelCard = async (id: string) => {
+    try {
+      const response = await apiFetch(`/api/receivables/fuel-cards/${id}`, { method: 'DELETE' })
+      if (response.ok) {
+        toast({ title: 'Fuel card deleted' })
+        loadFuelCards()
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to delete fuel card' })
+    }
+  }
+
+  const reloadFuelCard = async (id: string) => {
+    const amount = await appPrompt('Enter reload amount:', 'number')
+    if (!amount || Number(amount) <= 0) return
+    try {
+      const response = await apiFetch(`/api/receivables/fuel-cards/${id}/reload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: Number(amount) }),
+      })
+      if (response.ok) {
+        toast({ title: 'Fuel card reloaded' })
+        loadFuelCards()
+      } else {
+        const err = await response.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: err.error || 'Failed to reload card' })
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to reload fuel card' })
+    }
+  }
+
+  const loadCreditAccounts = async () => {
+    try {
+      setLoading(true)
+      const response = await apiFetch(`/api/receivables/credit-accounts?search=${encodeURIComponent(searchTerm)}`)
+      if (response.ok) {
+        const data = await response.json()
+        setCreditAccounts(data.accounts || [])
+      }
+    } catch (error) {
+      console.error('Failed to load credit accounts:', error)
+      toast({ variant: 'destructive', title: 'Failed to load credit accounts' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveCreditAccount = async () => {
+    if (!editingCreditAccount) return
+    if (Number(creditAccountForm.creditLimit || 0) < 0 || !Number.isFinite(Number(creditAccountForm.creditLimit || 0))) {
+      toast({ variant: 'destructive', title: 'Invalid credit limit', description: 'A customer credit limit cannot be negative.' })
+      return
+    }
+    try {
+      const response = await apiFetch(`/api/receivables/credit-accounts/${editingCreditAccount.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creditLimit: Number(creditAccountForm.creditLimit) || 0,
+          status: creditAccountForm.status,
+          notes: creditAccountForm.notes || null,
+        }),
+      })
+      if (response.ok) {
+        toast({ title: 'Credit terms updated' })
+        setEditingCreditAccount(null)
+        loadCreditAccounts()
+      } else {
+        const err = await response.json().catch(() => ({}))
+        toast({ variant: 'destructive', title: err.error || 'Failed to update credit account' })
+      }
+    } catch (error) {
+      toast({ variant: 'destructive', title: 'Failed to update credit account' })
+    }
+  }
+
+  const loadProducts = async () => {
+    try {
+      if (online) {
+        const data = await inventoryApi.list()
+        setProducts(data)
+      } else {
+        const local = await getLocalProducts()
+        setProducts(local)
+      }
+    } catch (error: any) {
+      try {
+        const local = await getLocalProducts()
+        setProducts(local)
+      } catch {
+        toast({
+          title: 'Error',
+          description: error.message || 'Failed to load products',
+          variant: 'destructive'
+        })
+      }
+    }
+  }
+
+  const loadCustomerOptions = async ({
+    search = saleCustomerSearch,
+    page = 1,
+    append = false,
+  }: { search?: string; page?: number; append?: boolean } = {}) => {
+    const normalizedSearch = search.trim()
+    try {
+      setCustomerOptionsLoading(true)
+      if (online) {
+        const params = new URLSearchParams({
+          status: 'active',
+          page: String(page),
+          limit: String(CUSTOMER_OPTION_PAGE_SIZE),
+          ...(normalizedSearch && { search: normalizedSearch }),
+        })
+        const response = await apiFetch('/api/receivables/customers?' + params)
+        if (!response.ok) {
+          throw new Error(await readResponseError(response, 'Failed to load customer options'))
+        }
+        const data = await response.json()
+        const rows = data.customers || []
+        setCustomerOptions((current) => append ? mergeCustomerOptions(current, rows) : rows)
+        setSaleCustomerPage(Number(data.pagination?.page || page))
+        setSaleCustomerTotal(Number(data.pagination?.total || rows.length))
+      } else {
+        const local = await getLocalReceivableCustomers(normalizedSearch, 'active')
+        const rows = local.slice(0, page * CUSTOMER_OPTION_PAGE_SIZE)
+        setCustomerOptions(rows)
+        setSaleCustomerPage(page)
+        setSaleCustomerTotal(local.length)
+      }
+    } catch (error) {
+      try {
+        const local = await getLocalReceivableCustomers(normalizedSearch, 'active')
+        const rows = local.slice(0, page * CUSTOMER_OPTION_PAGE_SIZE)
+        setCustomerOptions(rows)
+        setSaleCustomerPage(page)
+        setSaleCustomerTotal(local.length)
+      } catch {
+        toast({
+          title: 'Error',
+          description: error instanceof Error ? error.message : 'Failed to load customer options',
+          variant: 'destructive'
+        })
+      }
+    } finally {
+      setCustomerOptionsLoading(false)
+    }
+  }
+
+  const getAccountTypesForPaymentMethod = (method: string): string[] => {
+    const methodToTypes: { [key: string]: string[] } = {
+      cash: ['cash', 'safe'],
+      mobile_money: ['mobile_money'],
+      bank_transfer: ['bank'],
+      card: ['card']
+    }
+    return methodToTypes[method] || ['cash']
+  }
+
+  const getAccountTypeForPaymentMethod = (method: string): string => getAccountTypesForPaymentMethod(method).join(' / ')
+
+  const canUsePaymentMethod = (method: string): boolean => {
+    if (method === 'cash' || method === 'safe') return hasPermission('canUseCash')
+    if (method === 'mobile_money') return hasPermission('canUseMobileMoney')
+    if (method === 'bank_transfer' || method === 'bank' || method === 'cheque') return hasPermission('canUseBank')
+    if (method === 'card') return hasPermission('canUseCard')
+    return false
+  }
+
+  const canUseAccountForPaymentMethod = (acc: any, method: string): boolean => {
+    const accountType = String(acc?.type || '').toLowerCase()
+    const isAssignedAccount = assignedCashAccountId && String(acc?.id) === String(assignedCashAccountId)
+    if (!canUsePaymentMethod(method)) return false
+    if (accountType === 'cash') return Boolean(isAssignedAccount ? canUseOwnCashAccount : canUseOtherStaffCashAccount)
+    if (accountType === 'safe') return canUseSafeAccount
+    if (accountType === 'bank') return canUseBankAccount
+    if (accountType === 'mobile_money') return canUseMobileMoneyAccount
+    if (accountType === 'card') return canUseCardAccount
+    return false
+  }
+
+  const paymentMethodOptions = [
+    { value: 'cash', label: 'Cash' },
+    { value: 'mobile_money', label: 'Mobile Money' },
+    { value: 'bank_transfer', label: 'Bank Transfer' },
+    { value: 'card', label: 'Card' },
+  ].filter((option) => canUsePaymentMethod(option.value))
+
+  const loadCashAccounts = async (forPaymentMethod: string = paymentMethod) => {
+    try {
+      const response = await apiFetch('/api/expenses/cash-accounts')
+      if (response.ok) {
+        const data = await response.json()
+        const accountTypes = getAccountTypesForPaymentMethod(forPaymentMethod)
+        
+        const filteredAccounts = (data || []).filter((acc: any) => {
+          if (!accountTypes.includes(acc.type)) return false
+          return canUseAccountForPaymentMethod(acc, forPaymentMethod)
+        })
+        
+        setCashAccounts(filteredAccounts)
+        
+        const assignedAccount = filteredAccounts.find((acc: any) => assignedCashAccountId && String(acc.id) === String(assignedCashAccountId))
+        if (assignedAccount) {
+          setSelectedCashAccountId(assignedAccount.id)
+        } else if (filteredAccounts?.length === 1) {
+          setSelectedCashAccountId(filteredAccounts[0].id)
+        } else if (filteredAccounts?.length === 0) {
+          setSelectedCashAccountId(null)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load cash accounts:', error)
+      toast({
+        title: 'Warning',
+        description: 'Could not load cash accounts. Please select one manually.',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const openSaleModal = () => {
+    setSaleCustomerSearch('')
+    setSaleCustomerPage(1)
+    setSaleCustomerTotal(0)
+    setSelectedSaleCustomerOption(null)
+    setCustomerOptions([])
+    setShowSaleModal(true)
+    if (products.length === 0) loadProducts()
+  }
+
+  const updateSaleItem = (index: number, patch: Partial<SaleDraftItem>) => {
+    setSaleItems((prev) =>
+      prev.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)
+    )
+  }
+
+  const handleSaleProductChange = (index: number, productId: string) => {
+    const product = products.find((item) => String(item.id) === productId)
+    const itemType = (product as any)?.itemType
+    const defaultPrice = itemType === 'rental'
+      ? (product as any)?.rentalPrice || product?.unit_price
+      : product?.unit_price
+    updateSaleItem(index, {
+      productId,
+      price: product ? String(defaultPrice) : '',
+      unitName: '',
+    })
+  }
+
+  const handleSaleUnitChange = (index: number, unitName: string) => {
+    const item = saleItems[index]
+    const product = products.find((candidate) => String(candidate.id) === item?.productId)
+    if (!product) return
+    if (unitName === BASE_SELLING_UNIT) {
+      updateSaleItem(index, { unitName: '', price: String(product.unit_price) })
+      return
+    }
+    const selectedUnit = (product.units || []).find((unit: any) => unit.unitName === unitName)
+    if (!selectedUnit) return
+    updateSaleItem(index, { unitName: selectedUnit.unitName, price: String(selectedUnit.sellingPrice) })
+  }
+
+  const removeSaleItem = (index: number) => {
+    setSaleItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
+  }
+
+  const saleSubtotal = saleItems.reduce((sum, item) => {
+    return sum + parseAmount(item.price) * Math.max(1, parseInt(item.quantity, 10) || 1)
+  }, 0)
+  const saleItemDiscount = saleItems.reduce((sum, item) => sum + parseAmount(item.discount), 0)
+  const saleTotal = Math.max(
+    0,
+    saleSubtotal + parseAmount(saleForm.tax) - parseAmount(saleForm.discount) - saleItemDiscount
+  )
+
+  const createSale = async (event: React.FormEvent) => {
+    event.preventDefault()
+
+    const items = saleItems
+      .filter((item) => item.productId)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
+        price: parseAmount(item.price),
+        discount: parseAmount(item.discount),
+        unitName: item.unitName || null,
+      }))
+
+    if (!saleForm.customerId || items.length === 0) {
+      toast({
+        title: 'Missing sale details',
+        description: 'Select a customer and at least one item.',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    if (saleCurrency !== baseCurrency && (!saleRateToBase || !saleUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
+    const paidAmount = Math.min(parseAmount(saleForm.amountPaid) * Number(saleRateToBase || 1), saleTotal)
+    const balanceAfterPayment = Math.max(0, saleTotal - paidAmount)
+    if (balanceAfterPayment > 0 && canViewCustomerCreditLimit) {
+      const customerCreditLimit = Number(selectedSaleCustomer?.creditLimit || 0)
+      const currentCustomerBalance = Number(selectedSaleCustomer?.balance || 0)
+      const projectedCustomerBalance = currentCustomerBalance + balanceAfterPayment
+      if (projectedCustomerBalance > 0.01 && customerCreditLimit <= 0) {
+        toast({
+          title: 'Credit limit required',
+          description: `Set a credit limit for ${selectedSaleCustomer?.name || 'this customer'} before making a credit sale.`,
+          variant: 'destructive'
+        })
+        return
+      }
+      if (projectedCustomerBalance > customerCreditLimit + 0.01) {
+        toast({
+          title: 'Credit limit exceeded',
+          description: `Available credit is ${formatCurrency(Math.max(0, customerCreditLimit - currentCustomerBalance))}.`,
+          variant: 'destructive'
+        })
+        return
+      }
+    }
+
+    setSavingSale(true)
+    try {
+      const response = await apiFetch('/api/receivables/sales', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerId: saleForm.customerId,
+          items,
+          paymentMethod: saleForm.paymentMethod,
+          subtotal: saleSubtotal,
+          tax: parseAmount(saleForm.tax),
+          discount: parseAmount(saleForm.discount),
+          total: saleTotal,
+          amountPaid: parseAmount(saleForm.amountPaid),
+          currency: saleCurrency,
+          unitsPerBase: saleUnitsPerBase,
+          notes: saleForm.notes || undefined,
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to create sale'))
+      }
+
+      const createdSale = await response.json()
+      toast({
+        title: 'Success',
+        description: createdSale.creditApplied > 0
+          ? `${formatCurrency(createdSale.creditApplied)} of existing customer credit was applied without moving cash. Print or download the invoice from the details window.`
+          : 'Sale recorded successfully. Print or download the invoice from the details window.'
+      })
+      setShowSaleModal(false)
+      setSelectedSaleDetail(createdSale)
+      if (createdSale?.id) {
+        setSales((prev) => [createdSale, ...prev.filter((sale) => sale.id !== createdSale.id)])
+      }
+      setSaleForm({
+        customerId: '',
+        paymentMethod: 'credit',
+        amountPaid: '0',
+        tax: '0',
+        discount: '0',
+        notes: '',
+      })
+      setSaleCurrency(baseCurrency)
+      setSaleRateToBase(1)
+      setSaleUnitsPerBase(1)
+      setSelectedSaleCustomerOption(null)
+      setSaleItems([createEmptySaleItem()])
+      setSaleCustomerSearch('')
+      setSaleItemSearchByIndex({})
+      loadSales()
+      if (activeTab === 'customers') loadCustomers()
+      loadCustomerOptions()
+      loadReceivablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create sale',
+        variant: 'destructive'
+      })
+    } finally {
+      setSavingSale(false)
+    }
+  }
+
+  const recordPayment = async () => {
+    if (savingPaymentRef.current) return
+
+    if (selectedSale && (!canRecordCustomerPayment || !canRecordSalePayment(sales.find((sale) => sale.id === selectedSale.id) || selectedSale))) {
+      toast({ title: 'No payment due', description: 'This sale has no outstanding payment to record.' })
+      setShowPaymentModal(false)
+      setSelectedSale(null)
+      setSelectedCustomer(null)
+      setPaymentAmount('')
+      return
+    }
+
+    const targetCustomer = selectedSale?.customer || selectedCustomer
+    if (!targetCustomer) {
+      toast({ variant: 'destructive', title: 'Select a customer first' })
+      return
+    }
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
+      return
+    }
+    if (paymentCurrency !== baseCurrency && (!paymentRateToBase || !paymentUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
+    if (!selectedCashAccountId) {
+      toast({ variant: 'destructive', title: 'Select a cash account to record the payment' })
+      return
+    }
+    if (!canUsePaymentMethod(paymentMethod)) {
+      toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
+      return
+    }
+    const selectedAccount = cashAccounts.find((account) => String(account.id) === String(selectedCashAccountId))
+    if (!selectedAccount || !canUseAccountForPaymentMethod(selectedAccount, paymentMethod)) {
+      toast({ variant: 'destructive', title: 'Choose a permitted transaction account' })
+      return
+    }
+
+    const randomId = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const idempotencyKey = `customer-payment-${targetCustomer.id}-${selectedSale?.id || 'customer'}-${randomId}`
+
+    savingPaymentRef.current = true
+    setSavingPayment(true)
+    try {
+      const response = await apiFetch('/api/receivables/payments', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({
+          customerId: targetCustomer.id,
+          branchId: selectedSale?.branchId || selectedSale?.branch?.id || targetCustomer.branchId || undefined,
+          saleId: selectedSale?.id,
+          amount: parseFloat(paymentAmount),
+          currency: paymentCurrency,
+          unitsPerBase: paymentUnitsPerBase,
+          paymentMethod,
+          cashAccountId: selectedCashAccountId || undefined,
+          idempotencyKey,
+          mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
+          phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
+          transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
+          notes: paymentNotes.trim() || 'Payment recorded via dashboard'
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to record payment'))
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Payment recorded successfully'
+      })
+      setShowPaymentModal(false)
+      setSelectedCustomer(null)
+      setSelectedSale(null)
+      setPaymentAmount('')
+      setPaymentNotes('')
+      setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      if (activeTab === 'customers') loadCustomers()
+      loadCustomerOptions()
+      loadSales()
+      loadPayments()
+      loadReceivablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to record payment',
+        variant: 'destructive'
+      })
+    } finally {
+      savingPaymentRef.current = false
+      setSavingPayment(false)
+    }
+  }
+  const recordWithdrawal = async () => {
+    if (savingWithdrawalRef.current) return
+    if (!canCreateWithdrawal) {
+      toast({
+        variant: 'destructive',
+        title: 'You do not have permission to record customer withdrawals',
+        description: 'Required permission: canCreateWithdrawal',
+      })
+      return
+    }
+    const targetCustomer = selectedCustomer
+    if (!targetCustomer) {
+      toast({ variant: 'destructive', title: 'Select a customer first' })
+      return
+    }
+    const amount = Number(withdrawalAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a valid withdrawal amount' })
+      return
+    }
+    if (!online || targetCustomer.status !== 'active') {
+      toast({ variant: 'destructive', title: 'Withdrawals require an active customer and an online connection' })
+      return
+    }
+    const availableFunds = availableCustomerFunds(targetCustomer)
+    if (amount > availableFunds) {
+      toast({ variant: 'destructive', title: 'Insufficient customer funds', description: `${targetCustomer.name} has ${formatCurrency(availableFunds)} available to withdraw.` })
+      return
+    }
+    if (!selectedCashAccountId) {
+      toast({ variant: 'destructive', title: 'Select a cash account to record the withdrawal' })
+      return
+    }
+
+    const account = cashAccounts.find((item) => String(item.id) === String(selectedCashAccountId))
+    if (!account || amount > parseAmount(account.balance)) {
+      toast({ variant: 'destructive', title: 'Insufficient balance in the selected account' })
+      return
+    }
+    savingWithdrawalRef.current = true
+    setSavingWithdrawal(true)
+    try {
+      const response = await apiFetch('/api/receivables/withdrawals', {
+        method: 'POST',
+        body: JSON.stringify({
+          customerId: targetCustomer.id,
+          branchId: targetCustomer.branchId || undefined,
+          amount,
+          paymentMethod,
+          cashAccountId: selectedCashAccountId || undefined,
+          mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
+          phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
+          transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
+          notes: 'Customer withdrawal recorded via dashboard'
+        })
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}))
+        if (typeof error.currentBalance === 'number' && Number.isFinite(error.currentBalance)) {
+          setSelectedCustomer((current) => current?.id === targetCustomer.id ? { ...current, balance: error.currentBalance } : current)
+          setCustomers((current) => current.map((customer) => customer.id === targetCustomer.id ? { ...customer, balance: error.currentBalance } : customer))
+        }
+        throw new Error(error.error || error.message || 'Failed to record withdrawal')
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Withdrawal recorded successfully'
+      })
+      setShowWithdrawalModal(false)
+      setSelectedCustomer(null)
+      setWithdrawalAmount('')
+      setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      setSelectedCashAccountId(null)
+      if (activeTab === 'customers') loadCustomers()
+      loadCustomerOptions()
+      loadSales()
+      loadPayments()
+      loadReceivablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to record withdrawal',
+        variant: 'destructive'
+      })
+    } finally {
+      savingWithdrawalRef.current = false
+      setSavingWithdrawal(false)
+    }
+  }
+
+  const getStatusBadge = (status: string) => {
+    const variants = {
+      active: 'default',
+      inactive: 'secondary',
+      blocked: 'destructive'
+    }
+    return (
+      <Badge variant={variants[status as keyof typeof variants] as 'default' | 'destructive' | 'outline' | 'secondary'}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    )
+  }
+
+  const getTrustScoreColor = (score: number) => {
+    if (score >= 80) return 'text-green-600'
+    if (score >= 60) return 'text-yellow-600'
+    return 'text-red-600'
+  }
+
+  const getPaymentStatusBadge = (status: string) => {
+    const variants = {
+      paid: 'default',
+      partial: 'secondary',
+      unpaid: 'destructive',
+      overdue: 'destructive'
+    }
+    return (
+      <Badge variant={variants[status as keyof typeof variants] as any}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    )
+  }
+
+  const openCustomerHistory = (customer?: CustomerHistoryTarget | null) => {
+    if (!customer?.id) return
+    setHistoryCustomer(customer)
+  }
+
+  const renderCustomerNameButton = (customer?: CustomerHistoryTarget | null, fallback = 'Walk-in customer') => {
+    if (!customer?.id || !hasPermission('canViewCustomer')) return <span>{customer?.name || fallback}</span>
+    return (
+      <button
+        type="button"
+        className="break-words text-left font-medium text-primary underline-offset-2 hover:underline"
+        onClick={() => setCustomerDetails(customer)}
+      >
+        {customer.name || fallback}
+      </button>
+    )
+  }
+
+  const buildInvoiceData = (sale: any, customerOverride?: any) => {
+    const business = businessProfile || {}
+    const saleItems = Array.isArray(sale?.items) ? sale.items : []
+    const customer = customerOverride || sale?.customer || { name: 'Walk-in customer' }
+    const items = saleItems.map((item: any) => ({
+      name: `${item?.product?.name || item?.name || 'Item'}${item?.unitName ? ` (${item.unitName})` : ''}`,
+      quantity: Number(item?.quantity || 0),
+      unitName: item?.unitName || '',
+      price: Number(item?.price || item?.unitPrice || 0),
+      total: Number(item?.total || (Number(item?.quantity || 0) * Number(item?.price || item?.unitPrice || 0)))
+    }))
+
+    return {
+      business,
+      customer,
+      sale,
+      items,
+      invoiceNo: sale?.receiptNo || sale?.invoiceNo || 'N/A',
+      subtotal: Number(sale?.subtotal || 0),
+      tax: Number(sale?.tax || 0),
+      discount: Number(sale?.discount || 0),
+      total: Number(sale?.total || 0),
+      amountPaid: Number(sale?.amountPaid || 0),
+      balance: Number(sale?.balance || 0),
+      createdAt: sale?.createdAt || new Date().toISOString(),
+    }
+  }
+
+  const exportSaleInvoicePdf = (sale: any, customerOverride?: any) => {
+    const invoice = buildInvoiceData(sale, customerOverride)
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    const margin = 40
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(20)
+    doc.text(invoice.business?.name || 'Business Name', pageWidth / 2, 56, { align: 'center' })
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    const businessLines = [
+      invoice.business?.address,
+      invoice.business?.phone ? `Tel: ${invoice.business.phone}` : '',
+      invoice.business?.email,
+    ].filter(Boolean)
+    businessLines.forEach((line, index) => doc.text(line, pageWidth / 2, 78 + index * 12, { align: 'center' }))
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(16)
+    doc.text('Invoice', margin, 140)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`No: ${invoice.invoiceNo}`, margin, 160)
+    doc.text(`Date: ${new Date(invoice.createdAt).toLocaleString()}`, margin, 176)
+
+    doc.setFont('helvetica', 'bold')
+    doc.text('Customer', pageWidth - 180, 140)
+    doc.setFont('helvetica', 'normal')
+    const customerName = invoice.customer?.name || 'Walk-in customer'
+    doc.text(customerName, pageWidth - 180, 160)
+    if (invoice.customer?.phone) doc.text(`Phone: ${invoice.customer.phone}`, pageWidth - 180, 176)
+    if (invoice.customer?.email) doc.text(`Email: ${invoice.customer.email}`, pageWidth - 180, 192)
+
+    const rows = invoice.items.map((item: any) => [
+      item.name,
+      `${item.quantity}${item.unitName ? ` ${item.unitName}` : ''}`,
+      formatCurrency(Number(item.price)),
+      formatCurrency(Number(item.total)),
+    ])
+
+    autoTable(doc, {
+      startY: 220,
+      head: [['Item', 'Qty', 'Price', 'Total']],
+      body: rows.length ? rows : [['No items recorded', '', '', '']],
+      theme: 'striped',
+      styles: { fontSize: 9, cellPadding: 6 },
+      headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold' },
+      margin: { left: margin, right: margin },
+    })
+
+    const tableEndY = (doc as any).lastAutoTable?.finalY ?? 220
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    const totalsX = pageWidth - margin - 120
+    doc.text('Subtotal', totalsX, tableEndY + 24)
+    doc.text(formatCurrency(invoice.subtotal), pageWidth - margin, tableEndY + 24, { align: 'right' })
+    doc.text('Tax', totalsX, tableEndY + 40)
+    doc.text(formatCurrency(invoice.tax), pageWidth - margin, tableEndY + 40, { align: 'right' })
+    doc.text('Discount', totalsX, tableEndY + 56)
+    doc.text(formatCurrency(invoice.discount), pageWidth - margin, tableEndY + 56, { align: 'right' })
+    doc.setFont('helvetica', 'bold')
+    doc.text('Total', totalsX, tableEndY + 76)
+    doc.text(formatCurrency(invoice.total), pageWidth - margin, tableEndY + 76, { align: 'right' })
+    doc.setFont('helvetica', 'normal')
+    doc.text('Amount Paid', totalsX, tableEndY + 92)
+    doc.text(formatCurrency(invoice.amountPaid), pageWidth - margin, tableEndY + 92, { align: 'right' })
+    doc.text('Balance', totalsX, tableEndY + 108)
+    doc.text(formatCurrency(invoice.balance), pageWidth - margin, tableEndY + 108, { align: 'right' })
+
+    if (invoice.business?.receiptHeader) {
+      doc.setFont('helvetica', 'italic')
+      doc.text(invoice.business.receiptHeader, pageWidth / 2, pageHeight - 70, { align: 'center' })
+    }
+    doc.setFont('helvetica', 'normal')
+    doc.text('Thank you for your business.', pageWidth / 2, pageHeight - 52, { align: 'center' })
+    if (invoice.business?.receiptFooter) {
+      doc.text(invoice.business.receiptFooter, pageWidth / 2, pageHeight - 36, { align: 'center' })
+    }
+
+    doc.save(`invoice-${String(invoice.invoiceNo).replace(/\s+/g, '-')}.pdf`)
+  }
+
+  const printSaleInvoice = (sale: any, customerOverride?: any) => {
+    const business = businessProfile || {}
+    const customer = customerOverride || sale?.customer || {}
+    const customerName = customer?.name || 'Walk-in customer'
+    const customerPhone = customer?.phone || ''
+    const customerEmail = customer?.email || ''
+    const items = Array.isArray(sale?.items) ? sale.items : []
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+
+    if (!printWindow) {
+      toast({ title: 'Pop-up blocked', description: 'Enable pop-ups to print the invoice.', variant: 'destructive' })
+      return
+    }
+
+    const escapeHtml = (value: any) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+
+    const invoiceItemsHtml = items.length
+      ? items.map((item: any) => {
+          const productName = `${item?.product?.name || item?.name || 'Item'}${item?.unitName ? ` (${item.unitName})` : ''}`
+          const qty = Number(item?.quantity || 0)
+          const price = Number(item?.price || 0)
+          const total = Number(item?.total || qty * price)
+          return `
+            <tr>
+              <td>${escapeHtml(productName)}</td>
+              <td>${qty}${item?.unitName ? ` ${escapeHtml(item.unitName)}` : ''}</td>
+              <td>${formatCurrency(price)}</td>
+              <td>${formatCurrency(total)}</td>
+            </tr>
+          `
+        }).join('')
+      : '<tr><td colspan="4">No items recorded</td></tr>'
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Invoice ${escapeHtml(sale?.receiptNo || 'Sale')}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; padding: 24px; }
+            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 16px; }
+            .company-name { font-size: 26px; font-weight: 700; }
+            .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+            .top-row { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+            .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; }
+            .label { font-size: 12px; color: #6b7280; }
+            .value { font-size: 14px; font-weight: 600; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 8px; text-align: left; }
+            th { background: #f3f4f6; }
+            .totals { margin-left: auto; width: 320px; margin-top: 18px; }
+            .amount-row { display: flex; justify-content: space-between; margin-top: 8px; }
+            .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #374151; }
+            @media print { body { padding: 12px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-name">${escapeHtml(business?.name || 'Business Name')}</div>
+            ${business?.address ? `<div class="meta">${escapeHtml(business.address)}</div>` : ''}
+            ${business?.phone ? `<div class="meta">Tel: ${escapeHtml(business.phone)}</div>` : ''}
+            ${business?.email ? `<div class="meta">${escapeHtml(business.email)}</div>` : ''}
+          </div>
+
+          <div class="top-row">
+            <div class="card" style="flex: 1;">
+              <div class="label">Invoice</div>
+              <div class="value">${escapeHtml(sale?.receiptNo || 'N/A')}</div>
+            </div>
+            <div class="card" style="flex: 1;">
+              <div class="label">Date</div>
+              <div class="value">${new Date(sale?.createdAt || Date.now()).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <div class="label">Customer</div>
+            <div class="value">${escapeHtml(customerName)}</div>
+            ${customerPhone ? `<div class="meta">Phone: ${escapeHtml(customerPhone)}</div>` : ''}
+            ${customerEmail ? `<div class="meta">Email: ${escapeHtml(customerEmail)}</div>` : ''}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoiceItemsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="amount-row"><span>Subtotal</span><strong>${formatCurrency(Number(sale?.subtotal || 0))}</strong></div>
+            <div class="amount-row"><span>Tax</span><strong>${formatCurrency(Number(sale?.tax || 0))}</strong></div>
+            <div class="amount-row"><span>Discount</span><strong>${formatCurrency(Number(sale?.discount || 0))}</strong></div>
+            <div class="amount-row" style="font-size: 18px; margin-top: 12px;"><span>Total</span><strong>${formatCurrency(Number(sale?.total || 0))}</strong></div>
+            ${Number(sale?.creditApplications?.length || 0) > 0 ? `<div class="amount-row"><span>Customer Credit Applied</span><strong>${formatCurrency(sale.creditApplications.reduce((sum, row) => sum + Number(row.amount || 0), 0))}</strong></div>` : ''}
+            <div class="amount-row"><span>Amount Settled</span><strong>${formatCurrency(Number(sale?.amountPaid || 0))}</strong></div>
+            <div class="amount-row"><span>Balance</span><strong>${formatCurrency(Number(sale?.balance || 0))}</strong></div>
+          </div>
+
+          <div class="footer">
+            ${business?.receiptHeader ? `<div>${escapeHtml(business.receiptHeader)}</div>` : ''}
+            <div>Thank you for your business.</div>
+            ${business?.receiptFooter ? `<div>${escapeHtml(business.receiptFooter)}</div>` : ''}
+          </div>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => {
+      printWindow.print()
+    }, 300)
+  }
+
+  const exportPaymentInvoicePdf = (payment: any) => {
+    const linkedSale = sales.find((sale) => sale.id === payment.saleId || sale.id === payment.sale?.id) || payment.sale || null
+    const invoiceSale = linkedSale || {
+      id: payment?.saleId || payment?.id,
+      receiptNo: payment?.sale?.receiptNo || `PAY-${payment?.id || 'receipt'}`,
+      customer: payment?.customer || null,
+      subtotal: 0,
+      tax: 0,
+      discount: 0,
+      total: Number(payment?.amount || 0),
+      amountPaid: Number(payment?.amount || 0),
+      balance: 0,
+      createdAt: payment?.createdAt || new Date().toISOString(),
+      items: [],
+    }
+    exportSaleInvoicePdf(invoiceSale, payment?.customer || invoiceSale?.customer)
+  }
+
+  const printPaymentInvoice = (payment: any) => {
+    const business = businessProfile || {}
+    const linkedSale = sales.find((sale) => sale.id === payment.saleId || sale.id === payment.sale?.id) || payment.sale || null
+    const customerName = payment.customer?.name || linkedSale?.customer?.name || 'Walk-in customer'
+    const customerPhone = payment.customer?.phone || linkedSale?.customer?.phone || ''
+    const customerEmail = payment.customer?.email || linkedSale?.customer?.email || ''
+    const items = Array.isArray(linkedSale?.items) ? linkedSale.items : []
+    const invoiceTotal = Number(linkedSale?.total ?? payment.amount ?? 0)
+    const amountPaid = Number(linkedSale?.amountPaid ?? payment.amount ?? 0)
+    const balance = Number(linkedSale?.balance ?? Math.max(0, invoiceTotal - amountPaid))
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (!printWindow) {
+      toast({ title: 'Pop-up blocked', description: 'Enable pop-ups to print the invoice.', variant: 'destructive' })
+      return
+    }
+
+    const escapeHtml = (value: any) => String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+
+    const invoiceItemsHtml = items.length
+      ? items.map((item: any) => {
+          const productName = item?.product?.name || item?.name || 'Item'
+          const qty = Number(item?.quantity || 0)
+          const price = Number(item?.price || 0)
+          const total = Number(item?.total || qty * price)
+          return `
+            <tr>
+              <td>${escapeHtml(productName)}</td>
+              <td>${qty}</td>
+              <td>${formatCurrency(price)}</td>
+              <td>${formatCurrency(total)}</td>
+            </tr>
+          `
+        }).join('')
+      : '<tr><td colspan="4">No items recorded</td></tr>'
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Payment Invoice ${escapeHtml(linkedSale?.receiptNo || payment.sale?.receiptNo || 'Receipt')}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; padding: 24px; }
+            .header { text-align: center; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 16px; }
+            .company-name { font-size: 26px; font-weight: 700; }
+            .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+            .top-row { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+            .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 12px; }
+            .label { font-size: 12px; color: #6b7280; }
+            .value { font-size: 14px; font-weight: 600; margin-top: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 10px 8px; text-align: left; }
+            th { background: #f3f4f6; }
+            .totals { margin-left: auto; width: 320px; margin-top: 18px; }
+            .amount-row { display: flex; justify-content: space-between; margin-top: 8px; }
+            .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #374151; }
+            @media print { body { padding: 12px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-name">${escapeHtml(business?.name || 'Business Name')}</div>
+            ${business?.address ? `<div class="meta">${escapeHtml(business.address)}</div>` : ''}
+            ${business?.phone ? `<div class="meta">Tel: ${escapeHtml(business.phone)}</div>` : ''}
+            ${business?.email ? `<div class="meta">${escapeHtml(business.email)}</div>` : ''}
+          </div>
+
+          <div class="top-row">
+            <div class="card" style="flex: 1;">
+              <div class="label">Invoice</div>
+              <div class="value">${escapeHtml(linkedSale?.receiptNo || payment.sale?.receiptNo || 'N/A')}</div>
+            </div>
+            <div class="card" style="flex: 1;">
+              <div class="label">Payment Date</div>
+              <div class="value">${new Date(payment?.createdAt || Date.now()).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <div class="label">Customer</div>
+            <div class="value">${escapeHtml(customerName)}</div>
+            ${customerPhone ? `<div class="meta">Phone: ${escapeHtml(customerPhone)}</div>` : ''}
+            ${customerEmail ? `<div class="meta">Email: ${escapeHtml(customerEmail)}</div>` : ''}
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoiceItemsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <div class="amount-row"><span>Invoice Total</span><strong>${formatCurrency(invoiceTotal)}</strong></div>
+            <div class="amount-row"><span>Payment Amount</span><strong>${formatCurrency(Number(payment.amount || 0))}</strong></div>
+            <div class="amount-row"><span>Amount Paid To Date</span><strong>${formatCurrency(amountPaid)}</strong></div>
+            <div class="amount-row"><span>Balance</span><strong>${formatCurrency(balance)}</strong></div>
+          </div>
+
+          <div class="footer">
+            ${business?.receiptHeader ? `<div>${escapeHtml(business.receiptHeader)}</div>` : ''}
+            <div>Thank you for your business.</div>
+            ${business?.receiptFooter ? `<div>${escapeHtml(business.receiptFooter)}</div>` : ''}
+          </div>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    printWindow.focus()
+    setTimeout(() => {
+      printWindow.print()
+    }, 300)
+  }
+
+  const closeDetails = () => {
+    setSelectedSaleDetail(null)
+  }
+
+  const formatUserName = (user?: { fname?: string; lname?: string }) => {
+    const name = `${user?.fname || ''} ${user?.lname || ''}`.trim()
+    return name || 'Unknown'
+  }
+
+  if (!hasPermission('canViewReceivable')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-lg font-semibold">Access Denied</h2>
+          <p className="text-muted-foreground">You don't have permission to access receivables management.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const tab = activeTab
+
+  const pageTitle =
+    tab === 'customers' ? 'Customers' :
+    tab === 'sales' ? 'Credit Sales' :
+    tab === 'payments' ? 'Payments' :
+    tab === 'fuel-cards' ? 'Fuel Cards' :
+    tab === 'credit-accounts' ? 'Credit Accounts' :
+    'Receivables'
+
+  const pageSubtitle =
+    tab === 'customers' ? 'Manage customer credit accounts and balances' :
+    tab === 'sales' ? 'Track credit sales and outstanding balances' :
+    tab === 'payments' ? 'Record and review customer payments' :
+    tab === 'fuel-cards' ? 'Manage fuel card accounts and transactions' :
+    tab === 'credit-accounts' ? 'Manage customer credit account terms' :
+    'Manage customer credit and outstanding payments'
+  const selectedSaleCustomerFallback = [...(selectedSaleCustomerOption ? [selectedSaleCustomerOption] : []), ...customerOptions, ...customers].find((customer) => customer.id === saleForm.customerId)
+  const saleCustomerList = selectedSaleCustomerFallback && !customerOptions.some((customer) => customer.id === selectedSaleCustomerFallback.id)
+    ? [selectedSaleCustomerFallback, ...customerOptions]
+    : customerOptions
+  const saleCustomerOptions = saleCustomerList.map((customer) => ({
+    value: customer.id,
+    label: [
+      customer.name,
+      customer.phone,
+      customer.email,
+      `Balance ${formatCurrency(customer.balance || 0)}`,
+    ].filter(Boolean).join(' - '),
+  }))
+  const saleProductOptions = products.map((product) => {
+    const pType = (product as any)?.itemType || 'product'
+    const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
+    return {
+      value: String(product.id),
+      label: [
+        `[${typeLabel}] ${product.product_name}`,
+        product.product_id,
+        product.sku ? `SKU ${product.sku}` : '',
+        product.barcode ? `Barcode ${product.barcode}` : '',
+      ].filter(Boolean).join(' - '),
+    }
+  })
+  const selectedSaleCustomer = saleCustomerList.find((customer) => customer.id === saleForm.customerId)
+  const loadedSaleCustomerCount = saleCustomerOptions.length
+  const saleCustomerHasMore = saleCustomerTotal > loadedSaleCustomerCount
+  const saleAmountPaid = Math.min(parseAmount(saleForm.amountPaid) * Number(saleRateToBase || 1), saleTotal)
+  const saleBalanceAfterPayment = Math.max(0, saleTotal - saleAmountPaid)
+  const saleCustomerCreditAvailable = Math.max(0, -Number(selectedSaleCustomer?.balance || 0))
+  const saleCreditAppliedPreview = Math.min(saleBalanceAfterPayment, saleCustomerCreditAvailable)
+  const saleBalanceAfterCredit = Math.max(0, saleBalanceAfterPayment - saleCreditAppliedPreview)
+  const selectedWithdrawalAccount = cashAccounts.find((account) => String(account.id) === String(selectedCashAccountId))
+  const withdrawalValue = parseAmount(withdrawalAmount)
+  const withdrawalAccountBalance = Number(selectedWithdrawalAccount?.balance || 0)
+  const withdrawalAccountBalanceAfter = selectedWithdrawalAccount ? withdrawalAccountBalance - withdrawalValue : null
+  const withdrawalAvailableFunds = availableCustomerFunds(selectedCustomer)
+  const withdrawalCustomerFundsAfter = Math.max(0, withdrawalAvailableFunds - withdrawalValue)
+  const withdrawalLimit = selectedWithdrawalAccount ? Math.min(withdrawalAvailableFunds, Math.max(0, withdrawalAccountBalance)) : withdrawalAvailableFunds
+  const customerTableMinWidth = 240 + (canViewCustomerPhone ? 150 : 0) + (canViewCustomerEmail ? 220 : 0) + (canViewCustomerCreditLimit ? 155 : 0) + (canViewCustomerBalance ? 400 : 0) + (canViewCustomerBalance && canViewCustomerCreditLimit ? 155 : 0) + 115
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">{pageTitle}</h1>
+          <p className="text-muted-foreground">{pageSubtitle}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {tab === 'customers' && !propertyManagementBusiness && (
+            <Button variant="outline" onClick={() => {
+              setEditingCustomer(null)
+              setShowCustomerModal(true)
+            }}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Customer
+            </Button>
+          )}
+          {tab === 'sales' && (
+            <Button onClick={openSaleModal}>
+              <FileText className="h-4 w-4 mr-2" />
+              New Sale
+            </Button>
+          )}
+          {tab === 'fuel-cards' && (
+            <Button onClick={() => {
+              setEditingFuelCard(null)
+              setFuelCardForm({ cardNumber: '', holderName: '', customerId: '', cardType: 'prepaid', balance: '0', creditLimit: '0', expiresAt: '', notes: '' })
+              setShowFuelCardModal(true)
+            }}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Fuel Card
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <UsageLimitBanner resource="customers" label="Customers" currentCount={summary?.totalCustomers ?? customerTotal} />
+
+      {/* Filters — only for customers, sales, payments */}
+      <div className={cn('flex flex-wrap items-center gap-4 py-4', tab !== 'customers' && tab !== 'sales' && tab !== 'payments' && 'hidden')}>
+        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => { setSearchTerm(e.target.value); setCustomerPage(1) }}
+            className="max-w-sm"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setCustomerPage(1) }}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+            <SelectItem value="blocked">Blocked</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Content */}
+      {activeTab === 'customers' && (
+        <div className="grid min-w-0 gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">{customerTotal} customers{!online ? ' saved on this device' : ''}</p>
+            <label className="flex items-center gap-2 text-sm">Per page
+              <select aria-label="Customers per page" className="h-9 rounded-md border bg-background px-2" value={customerPageSize} onChange={(event) => { setCustomerPageSize(Number(event.target.value)); setCustomerPage(1) }}>
+                {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+          </div>
+          {loading ? (
+            <div className="py-8 text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : customers.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No customers found.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full table-fixed text-sm" style={{ minWidth: customerTableMinWidth }}>
+                <colgroup>
+                  <col style={{ width: 240 }} />
+                  {canViewCustomerPhone && <col style={{ width: 150 }} />}
+                  {canViewCustomerEmail && <col style={{ width: 220 }} />}
+                  {canViewCustomerCreditLimit && <col style={{ width: 155 }} />}
+                  {canViewCustomerBalance && <>
+                    <col style={{ width: 155 }} />
+                    <col style={{ width: 155 }} />
+                    <col style={{ width: 90 }} />
+                  </>}
+                  {canViewCustomerBalance && canViewCustomerCreditLimit && <col style={{ width: 155 }} />}
+                  <col style={{ width: 115 }} />
+                </colgroup>
+                <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="whitespace-nowrap px-3 py-3">Customer</th>
+                    {canViewCustomerPhone && <th scope="col" className="whitespace-nowrap px-3 py-3">Phone</th>}
+                    {canViewCustomerEmail && <th scope="col" className="whitespace-nowrap px-3 py-3">Email</th>}
+                    {canViewCustomerCreditLimit && <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Credit limit</th>}
+                    {canViewCustomerBalance && <>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Opening balance</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Balance</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Trust</th>
+                    </>}
+                    {canViewCustomerBalance && canViewCustomerCreditLimit && <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Available credit</th>}
+                    <th scope="col" className="whitespace-nowrap px-3 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.map((customer) => (
+                    <tr
+                      key={customer.id}
+                      role="link"
+                      tabIndex={0}
+                      aria-label={`Open ${customer.name} customer profile`}
+                      className="cursor-pointer border-t transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="combobox"]')) return
+                        navigate(`/tenant/receivables/customers/${customer.id}`)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+                        event.preventDefault()
+                        navigate(`/tenant/receivables/customers/${customer.id}`)
+                      }}
+                    >
+                      <td className="px-3 py-3" title={customer.name}>
+                        <span className="block truncate font-medium">{renderCustomerNameButton(customer, customer.name)}</span>
+                        {!canViewCustomerPhone && <span className="mt-1 block text-xs text-muted-foreground">{customer.maskedPhone || '07xxxxxx'}</span>}
+                        {!canViewCustomerEmail && customer.maskedEmail && <span className="block break-all text-xs text-muted-foreground">{customer.maskedEmail}</span>}
+                      </td>
+                      {canViewCustomerPhone && <td className="whitespace-nowrap px-3 py-3" title={customer.phone || ''}><span className="block truncate">{customer.phone || '—'}</span></td>}
+                      {canViewCustomerEmail && <td className="px-3 py-3" title={customer.email || ''}><span className="block truncate">{customer.email || '—'}</span></td>}
+                      {canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>}
+                      {canViewCustomerBalance && <>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.openingBalance || 0)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(customer.balance || 0)}{Number(customer.rentalBalance || 0) > 0 && <span className="mt-1 block text-xs font-normal text-amber-700">Rent due: {formatCurrency(Number(customer.rentalBalance))}</span>}</td>
+                        <td className={`whitespace-nowrap px-3 py-3 text-right font-semibold ${getTrustScoreColor(customer.trustScore || 0)}`}>{customer.trustScore || 0}/100</td>
+                      </>}
+                      {canViewCustomerBalance && canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>}
+                      <td className="whitespace-nowrap px-3 py-3">{getStatusBadge(customer.status || 'active')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <fieldset disabled={loading}>
+            <Pagination currentPage={customerPage} totalPages={Math.ceil(customerTotal / customerPageSize)} totalItems={customerTotal} pageSize={customerPageSize} onPageChange={setCustomerPage} />
+          </fieldset>
+        </div>
+      )}
+
+      {activeTab === 'sales' && (
+        <div className="grid gap-4">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Credit notes and debit notes are adjustments, not credit sales. They stay on the Credit & Debit Notes page and do not appear in this list.
+          </div>
+          {sales.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">No credit sales found.</CardContent>
+            </Card>
+          ) : (
+            sales.map((sale) => (
+              <Card key={sale.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <FileText className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{sale.receiptNo}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {renderCustomerNameButton(sale.customer, 'Walk-in customer')}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDisplayDate(sale.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {getPaymentStatusBadge(sale.paymentStatus)}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Total</p>
+                      <p className="font-semibold">{Number(sale.total || 0).toFixed(2)}</p>
+                      {sale.currency && sale.currency !== baseCurrency && sale.foreignTotal != null && <p className="text-xs text-muted-foreground">{Number(sale.foreignTotal).toLocaleString()} {sale.currency} · base {Number(sale.total).toLocaleString()} {baseCurrency}</p>}
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Paid</p>
+                      <p className="font-semibold">{Number(sale.amountPaid || 0).toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Balance</p>
+                      <p className="font-semibold text-red-600">{Number(sale.balance || 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {canRecordCustomerPayment && sale.customer && canRecordSalePayment(sale) && (
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          setSelectedCustomer(sale.customer)
+                          setSelectedSale(sale)
+                          setPaymentAmount(String(sale.balance || ''))
+                          setPaymentNotes('')
+                          setShowPaymentModal(true)
+                        }}
+                      >
+                        <DollarSign className="h-4 w-4 mr-1" />
+                        Record Payment
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => printSaleInvoice(sale)}>
+                      <Printer className="h-4 w-4 mr-1" />
+                      Print Invoice
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => exportSaleInvoicePdf(sale)}>
+                      <Download className="h-4 w-4 mr-1" />
+                      Download PDF
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setSelectedSaleDetail(sale)}>
+                      <Eye className="h-4 w-4 mr-1" />
+                      View Details
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'payments' && (
+        <div className="grid gap-4">
+          {payments.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">No customer payments found.</CardContent>
+            </Card>
+          ) : (
+            payments.map((payment) => (
+              <Card key={payment.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Wallet className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{Number(payment.amount || 0).toFixed(2)}</h3>
+                        {payment.currency && payment.currency !== baseCurrency && payment.foreignAmount != null && <p className="text-xs text-muted-foreground">{Number(payment.foreignAmount).toLocaleString()} {payment.currency} → {Number(payment.amount).toLocaleString()} {baseCurrency}</p>}
+                        <p className="text-sm text-muted-foreground">
+                          From {renderCustomerNameButton(payment.customer, 'Customer')}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDisplayDate(payment.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline">{payment.paymentMethod}</Badge>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                    {payment.sale?.receiptNo && (
+                      <p className="text-sm text-muted-foreground">Sale: {payment.sale.receiptNo}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <TransactionReceiptButton data={{
+                        title: 'Customer payment receipt', reference: displayReference(payment.reference || payment.transactionId, payment.id, 'PAY'),
+                        date: payment.createdAt, amount: Number(payment.amount || 0), partyLabel: 'Received from', partyName: payment.customer?.name || 'Customer',
+                        fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Mobile money provider', value: payment.mobileProvider }, { label: 'Mobile money number', value: payment.phoneNumber }, { label: 'Transaction ID', value: payment.transactionId }, { label: 'Applied to sale', value: payment.sale?.receiptNo }, { label: 'Notes', value: payment.notes }],
+                      }} />
+                      <Button size="sm" variant="outline" onClick={() => printPaymentInvoice(payment)}>
+                        <Printer className="h-4 w-4 mr-1" />
+                        Print Invoice
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => exportPaymentInvoicePdf(payment)}>
+                        <Download className="h-4 w-4 mr-1" />
+                        Download PDF
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'fuel-cards' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="text-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div></div>
+          ) : fuelCards.length === 0 ? (
+            <Card><CardContent className="p-6 text-sm text-muted-foreground">No fuel cards registered yet. Click "Add Fuel Card" to create one.</CardContent></Card>
+          ) : (
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-sm min-w-[600px]">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="p-2 text-left">Card Number</th>
+                    <th className="p-2 text-left">Holder</th>
+                    <th className="p-2 text-left">Customer</th>
+                    <th className="p-2 text-left">Type</th>
+                    <th className="p-2 text-right">Balance</th>
+                    {canViewCustomerCreditLimit && <th className="p-2 text-right">Credit Limit</th>}
+                    <th className="p-2 text-left">Status</th>
+                    <th className="p-2 text-left">Expires</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fuelCards.map(card => (
+                    <tr key={card.id} className="border-t">
+                      <td className="p-2 font-medium">{card.cardNumber}</td>
+                      <td className="p-2">{card.holderName}</td>
+                      <td className="p-2">{card.customer ? renderCustomerNameButton(card.customer, card.customer.name) : '—'}</td>
+                      <td className="p-2 capitalize">{card.cardType}</td>
+                      <td className="p-2 text-right font-semibold">{Number(card.balance).toFixed(2)}</td>
+                      <td className="p-2 text-right">{Number(card.creditLimit).toFixed(2)}</td>
+                      <td className="p-2">
+                        <Badge variant={card.status === 'active' ? 'default' : card.status === 'suspended' ? 'destructive' : 'secondary'}>
+                          {card.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2">{card.expiresAt ? formatDisplayDate(card.expiresAt) : '—'}</td>
+                      <td className="p-2 space-x-1 whitespace-nowrap">
+                        <Button size="sm" variant="outline" onClick={() => reloadFuelCard(card.id)}>Reload</Button>
+                        <Button size="sm" variant="ghost" onClick={() => {
+                          setEditingFuelCard(card)
+                          setFuelCardForm({
+                            cardNumber: card.cardNumber, holderName: card.holderName,
+                            customerId: card.customerId || '', cardType: card.cardType,
+                            balance: String(card.balance), creditLimit: String(card.creditLimit),
+                            expiresAt: card.expiresAt ? card.expiresAt.split('T')[0] : '', notes: card.notes || ''
+                          })
+                          setShowFuelCardModal(true)
+                        }}><Edit className="h-3 w-3" /></Button>
+                        <Button size="sm" variant="ghost" className="text-red-500" onClick={() => deleteFuelCard(card.id)}><Trash2 className="h-3 w-3" /></Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'credit-accounts' && (
+        <div className="space-y-4">
+          {loading ? (
+            <div className="text-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div></div>
+          ) : creditAccounts.length === 0 ? (
+            <Card><CardContent className="p-6 text-sm text-muted-foreground">No credit accounts found. Set a credit limit on a customer to create a credit account.</CardContent></Card>
+          ) : (
+            <div className="rounded-md border overflow-x-auto">
+              <table className="w-full text-sm min-w-[760px]">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="p-2 text-left">Customer</th>
+                    <th className="p-2 text-left">Phone</th>
+                    <th className="p-2 text-right">Credit Limit</th>
+                    <th className="p-2 text-right">Opening Balance</th>
+                    <th className="p-2 text-right">Balance</th>
+                    {canViewCustomerCreditLimit && <th className="p-2 text-right">Available</th>}
+                    <th className="p-2 text-left">Trust Score</th>
+                    <th className="p-2 text-left">Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {creditAccounts.map(acct => (
+                    <tr key={acct.id} className="border-t">
+                      <td className="p-2">{renderCustomerNameButton(acct, acct.name)}</td>
+                      <td className="p-2">{acct.phone || '—'}</td>
+                      {canViewCustomerCreditLimit && <td className="p-2 text-right">{Number(acct.creditLimit).toFixed(2)}</td>}
+                      <td className="p-2 text-right">{formatCurrency(acct.openingBalance || 0)}</td>
+                      <td className="p-2 text-right text-red-600 font-semibold">{Number(acct.balance).toFixed(2)}</td>
+                      {canViewCustomerCreditLimit && <td className="p-2 text-right text-green-600">{(Number(acct.creditLimit) - Number(acct.balance)).toFixed(2)}</td>}
+                      <td className="p-2">{acct.trustScore}/100</td>
+                      <td className="p-2">
+                        <Badge variant={acct.status === 'active' ? 'default' : acct.status === 'blocked' ? 'destructive' : 'secondary'}>
+                          {acct.status}
+                        </Badge>
+                      </td>
+                      <td className="p-2">
+                        {canManageCustomerCreditLimit && <Button size="sm" variant="ghost" onClick={() => {
+                          setEditingCreditAccount(acct)
+                          setCreditAccountForm({ creditLimit: String(acct.creditLimit), status: acct.status, trustScore: String(acct.trustScore), notes: acct.notes || '' })
+                        }}><Edit className="h-3 w-3" /></Button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      <CustomerTransactionHistoryDialog
+        customer={historyCustomer}
+        open={!!historyCustomer}
+        onOpenChange={(open) => {
+          if (!open) setHistoryCustomer(null)
+        }}
+        onRecordPayment={(profile) => {
+          setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedSale(null)
+          setPaymentAmount('')
+          setPaymentNotes('')
+          setHistoryCustomer(null)
+          setShowPaymentModal(true)
+        }}
+        onWithdraw={(profile) => {
+          setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedSale(null)
+          setWithdrawalAmount('')
+          setPaymentMethod('cash')
+          setMobileProvider('')
+          setPhoneNumber('')
+          setTransactionId('')
+          setSelectedCashAccountId(null)
+          setHistoryCustomer(null)
+          setShowWithdrawalModal(true)
+        }}
+      />
+      <CustomerTransactionHistoryDialog
+        customer={customerDetails}
+        open={!!customerDetails}
+        viewMode="details"
+        onOpenChange={(open) => {
+          if (!open) setCustomerDetails(null)
+        }}
+      />
+
+      <CreateCustomerModal
+        isOpen={showCustomerModal}
+        initialData={editingCustomer || undefined}
+        onClose={() => {
+          setShowCustomerModal(false)
+          setEditingCustomer(null)
+        }}
+        onSuccess={(customer) => {
+          setCustomers((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)].sort((a, b) =>
+            a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+          ))
+          setCustomerOptions((prev) => [customer, ...prev.filter((item) => item.id !== customer.id)])
+          setEditingCustomer(null)
+          if (activeTab === 'customers') loadCustomers()
+          loadReceivablesSummary()
+        }}
+      />
+
+      {/* Sale Modal */}
+      {showSaleModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">New Customer Sale</h3>
+            <form onSubmit={createSale} className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <FormSelectSearch
+                    label="Customer"
+                    required
+                    value={saleForm.customerId}
+                    options={saleCustomerOptions}
+                    onChange={(value) => {
+                      const customerId = value ? String(value) : ''
+                      setSelectedSaleCustomerOption(saleCustomerList.find((customer) => customer.id === customerId) || null)
+                      setSaleForm((prev) => ({ ...prev, customerId }))
+                    }}
+                    placeholder="Select customer"
+                    searchPlaceholder="Search customer by name, phone, email, or address..."
+                    searchValue={saleCustomerSearch}
+                    onSearchChange={setSaleCustomerSearch}
+                    filterOptions={false}
+                    isLoading={customerOptionsLoading}
+                    emptyText={saleCustomerSearch ? 'No matching active customers' : 'No active customers found'}
+                    helperText={saleCustomerTotal > 0 ? loadedSaleCustomerCount + ' of ' + saleCustomerTotal + ' active customers loaded' : undefined}
+                    listFooter={saleCustomerHasMore ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full"
+                        disabled={customerOptionsLoading}
+                        onClick={() => loadCustomerOptions({ search: saleCustomerSearch, page: saleCustomerPage + 1, append: true })}
+                      >
+                        {customerOptionsLoading ? 'Loading customers...' : 'Load more customers (' + loadedSaleCustomerCount + '/' + saleCustomerTotal + ')'}
+                      </Button>
+                    ) : undefined}
+                    clearable={false}
+                  />
+                  {selectedSaleCustomer && (
+                    <div className="mt-2 rounded-md border bg-muted/30 p-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="block">{renderCustomerNameButton(selectedSaleCustomer, selectedSaleCustomer.name)}</span>
+                          {selectedSaleCustomer.phone && <span className="text-xs text-muted-foreground">{selectedSaleCustomer.phone}</span>}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className={`block font-semibold ${Number(selectedSaleCustomer.balance || 0) < 0 ? 'text-emerald-700' : Number(selectedSaleCustomer.balance || 0) > 0 ? 'text-red-600' : ''}`}>{formatCurrency(selectedSaleCustomer.balance || 0)}</span>
+                          <span className="text-xs text-muted-foreground">Current balance</span>
+                        </span>
+                      </div>
+              {canViewCustomerCreditLimit && <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>}
+                      <p className="mt-1 text-xs text-muted-foreground">Opening balance: {formatCurrency(selectedSaleCustomer.openingBalance || 0)}</p>
+                      {saleCustomerCreditAvailable > 0 && saleBalanceAfterPayment > 0 && (
+                        <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+                          {formatCurrency(saleCreditAppliedPreview)} customer credit will be applied automatically. Remaining on this invoice: {formatCurrency(saleBalanceAfterCredit)}. No cash withdrawal or receipt will be recorded.
+                        </p>
+                      )}
+                      {canViewCustomerCreditLimit && Number(selectedSaleCustomer.balance || 0) + saleBalanceAfterPayment > 0.01 && saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
+                        <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                          Set a credit limit for this customer before recording a credit sale.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <Label>Payment Method</Label>
+                  <Select
+                    value={saleForm.paymentMethod}
+                    onValueChange={(value) => setSaleForm((prev) => ({ ...prev, paymentMethod: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select payment method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="credit">Credit</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="card">Card</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={saleCurrency} enabled={hasFeature('settings.currencies')} amount={saleRateToBase ? saleTotal / saleRateToBase : 0} onCurrencyChange={setSaleCurrency} onRateChange={(rate, units) => { setSaleRateToBase(rate); setSaleUnitsPerBase(units) }} />
+
+              <div className="space-y-3">
+                <Label>Items</Label>
+
+                {saleItems.map((item, index) => {
+                  const selectedItem = products.find((p) => String(p.id) === item.productId)
+                  const selectedItemType = (selectedItem as any)?.itemType
+                  const isService = selectedItemType === 'service'
+                  const isRental = selectedItemType === 'rental'
+                  const sellingUnits = multiUnitEnabled ? (selectedItem?.units || []) : []
+                  return (
+                  <div key={index} className={`grid gap-3 ${sellingUnits.length ? 'md:grid-cols-[minmax(0,1.3fr)_minmax(145px,0.9fr)_80px_110px_110px_40px]' : 'md:grid-cols-[minmax(0,1fr)_90px_120px_120px_40px]'}`}>
+                    <FormSelectSearch
+                      containerClassName="min-w-0"
+                      value={item.productId}
+                      options={saleProductOptions}
+                      onChange={(value) => handleSaleProductChange(index, value ? String(value) : '')}
+                      placeholder="Select item"
+                      searchPlaceholder="Search item, SKU, barcode, category..."
+                      helperText={saleProductOptions.length === 0 ? 'No products or services found' : undefined}
+                      clearable={false}
+                    />
+                    {sellingUnits.length > 0 && (
+                      <Select
+                        value={item.unitName || BASE_SELLING_UNIT}
+                        onValueChange={(value) => handleSaleUnitChange(index, value)}
+                      >
+                        <SelectTrigger aria-label={`Selling unit for ${selectedItem?.product_name || 'item'}`}>
+                          <SelectValue placeholder="Selling unit" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={BASE_SELLING_UNIT}>
+                            {selectedItem?.baseUnit || 'Piece'} · {formatCurrency(selectedItem?.unit_price || 0)}
+                          </SelectItem>
+                          {sellingUnits.map((unit: any) => (
+                            <SelectItem key={unit.id || unit.unitName} value={unit.unitName}>
+                              {unit.unitName} ({unit.conversionFactor} {selectedItem?.baseUnit || 'Piece'}) · {formatCurrency(unit.sellingPrice || 0)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(event) => updateSaleItem(index, { quantity: event.target.value })}
+                      placeholder={isService ? 'Hours' : isRental ? 'Periods' : 'Qty'}
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.price}
+                      disabled={Boolean(item.unitName)}
+                      onChange={(event) => updateSaleItem(index, { price: event.target.value })}
+                      placeholder={item.unitName ? 'Configured unit price' : 'Price'}
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.discount}
+                      onChange={(event) => updateSaleItem(index, { discount: event.target.value })}
+                      placeholder="Discount"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={saleItems.length === 1}
+                      onClick={() => removeSaleItem(index)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  )
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full sm:w-auto"
+                  onClick={() => setSaleItems((prev) => [...prev, createEmptySaleItem()])}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add another item
+                </Button>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div>
+                  <Label htmlFor="saleTax">Tax</Label>
+                  <Input
+                    id="saleTax"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={saleForm.tax}
+                    onChange={(event) => setSaleForm((prev) => ({ ...prev, tax: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="saleDiscount">Order Discount</Label>
+                  <Input
+                    id="saleDiscount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={saleForm.discount}
+                    onChange={(event) => setSaleForm((prev) => ({ ...prev, discount: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="salePaid">Amount Paid ({saleCurrency})</Label>
+                  <Input
+                    id="salePaid"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    max={saleRateToBase ? saleTotal / saleRateToBase : saleTotal}
+                    value={saleForm.amountPaid}
+                    onChange={(event) => setSaleForm((prev) => ({ ...prev, amountPaid: event.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="saleNotes">Notes</Label>
+                <Textarea
+                  id="saleNotes"
+                  aiWritingField
+                  value={saleForm.notes}
+                  onChange={(event) => setSaleForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  rows={3}
+                />
+              </div>
+
+              <div className="rounded-md border p-4 text-sm">
+                <div className="flex justify-between">
+                  <span>Subtotal</span>
+                  <span>{formatCurrency(saleSubtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Total Due</span>
+                  <span className="font-semibold">{formatCurrency(saleTotal)}</span>
+                </div>
+                {saleCurrency !== baseCurrency && saleRateToBase && <div className="flex justify-between text-muted-foreground"><span>Transaction total ({saleCurrency})</span><span>{formatCurrency(saleTotal / saleRateToBase, saleCurrency)}</span></div>}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Balance after payment</span>
+                  <span>{formatCurrency(saleBalanceAfterPayment)}</span>
+                </div>
+                {saleCreditAppliedPreview > 0 && (
+                  <>
+                    <div className="flex justify-between text-emerald-700">
+                      <span>Customer credit applied</span>
+                      <span>-{formatCurrency(saleCreditAppliedPreview)}</span>
+                    </div>
+                    <div className="flex justify-between font-medium">
+                      <span>Remaining invoice balance</span>
+                      <span>{formatCurrency(saleBalanceAfterCredit)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShowSaleModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={savingSale}>
+                  {savingSale ? 'Saving...' : 'Record Sale'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && selectedCustomer && (
+        <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/50 [touch-action:pan-y]">
+          <div className="flex min-h-full items-start justify-center p-2 sm:items-center sm:p-4">
+          <div className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-lg bg-background p-4 shadow-xl [-webkit-overflow-scrolling:touch] sm:max-h-[calc(100dvh-2rem)] sm:p-6">
+            <h3 className="mb-4 text-lg font-semibold">Record Payment</h3>
+            <div className="space-y-4">
+              <div>
+                <Label>Customer</Label>
+                <p className="font-medium">{selectedCustomer.name}</p>
+                {selectedSale?.receiptNo && (
+                  <p className="text-sm text-muted-foreground">Sale: {selectedSale.receiptNo}</p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Balance: {Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0).toFixed(2)}
+                </p>
+              </div>
+              
+              <div>
+                <Label htmlFor="amount">Payment Amount</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                />
+                {paymentCurrency !== baseCurrency && paymentRateToBase && <p className="mt-1 text-xs text-muted-foreground">Receivable/ledger posting: {(Number(paymentAmount || 0) * paymentRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {baseCurrency}</p>}
+              </div>
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={paymentCurrency} enabled={hasFeature('settings.currencies')} amount={Number(paymentAmount || 0)} onCurrencyChange={setPaymentCurrency} onRateChange={(rate, units) => { setPaymentRateToBase(rate); setPaymentUnitsPerBase(units) }} />
+              
+              <div>
+                <Label htmlFor="paymentMethod">Payment Method</Label>
+                <Select 
+                  value={paymentMethod} 
+                  onValueChange={(method) => {
+                    setPaymentMethod(method)
+                    setSelectedCashAccountId(null)
+                    // Reload cash accounts filtered by new payment method
+                    setTimeout(() => loadCashAccounts(method), 50)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethodOptions.length > 0 ? (
+                      paymentMethodOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {paymentMethod === 'mobile_money' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                  <div>
+                    <Label>Network Provider *</Label>
+                    <select
+                      value={mobileProvider}
+                      onChange={(e) => setMobileProvider(e.target.value)}
+                      className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Select provider</option>
+                      <option value="MTN">MTN</option>
+                      <option value="Airtel">Airtel</option>
+                      <option value="Zamtel">Zamtel</option>
+                      <option value="Vodafone">Vodafone</option>
+                      <option value="M-Pesa">M-Pesa</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Phone Number *</Label>
+                    <Input
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      placeholder="e.g. 0977123456"
+                      type="tel"
+                    />
+                  </div>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label htmlFor="customerPaymentNotes">Note (optional)</Label>
+                <Textarea
+                  id="customerPaymentNotes"
+                  value={paymentNotes}
+                  onChange={(event) => setPaymentNotes(event.target.value)}
+                  placeholder="Add a payment note"
+                  rows={3}
+                  className="mt-1 w-full resize-y"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="cashAccount">Staff Till / Account</Label>
+                <Select value={selectedCashAccountId || ''} onValueChange={(v) => setSelectedCashAccountId(v || null)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={cashAccounts.length === 0 ? 'No accounts available for this payment method' : 'Select till or account'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cashAccounts.length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground">No {getAccountTypeForPaymentMethod(paymentMethod)} accounts available</div>
+                    ) : (
+                      cashAccounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          {acc.name} (Balance: {acc.balance?.toFixed?.(2) ?? acc.balance})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Select your staff till or tenant account. Transaction will be recorded under your name.
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowPaymentModal(false)
+                  setSelectedSale(null)
+                  setSelectedCustomer(null)
+                  setPaymentAmount('')
+                  setPaymentNotes('')
+                  setSelectedCashAccountId(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={recordPayment} disabled={
+                savingPayment ||
+                (selectedSale && !canRecordSalePayment(sales.find((sale) => sale.id === selectedSale.id) || selectedSale)) ||
+                !paymentAmount || parseFloat(paymentAmount) <= 0 ||
+                !selectedCashAccountId ||
+                (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
+                (paymentMethod === 'card' ? !transactionId.trim() : false)
+              }>
+                {savingPayment ? 'Recording...' : 'Record Payment'}
+              </Button>
+            </div>
+          </div>
+          </div>
+        </div>
+      )}
+
+      {/* Withdrawal Modal */}
+      {showWithdrawalModal && selectedCustomer && canCreateWithdrawal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">Record Withdrawal</h3>
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault()
+                recordWithdrawal()
+              }}
+            >
+              <fieldset disabled={savingWithdrawal} className="space-y-4">
+              <div>
+                <Label>Customer</Label>
+                <p className="font-medium">{selectedCustomer.name}</p>
+                <p className="text-sm text-muted-foreground">
+                  Available Customer Funds: {formatCurrency(withdrawalAvailableFunds)}
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="withdrawalAmount">Withdrawal Amount</Label>
+                <Input
+                  id="withdrawalAmount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  max={withdrawalLimit}
+                  required
+                  aria-describedby="withdrawalFundsLimit"
+                  aria-invalid={withdrawalValue > withdrawalAvailableFunds}
+                  value={withdrawalAmount}
+                  onChange={(event) => setWithdrawalAmount(event.target.value)}
+                  placeholder="0.00"
+                />
+                <p id="withdrawalFundsLimit" className={withdrawalValue > withdrawalAvailableFunds ? 'mt-1 text-sm text-red-600' : 'mt-1 text-sm text-muted-foreground'}>
+                  {withdrawalValue > withdrawalAvailableFunds ? 'Withdrawal exceeds available customer funds. ' : 'Maximum withdrawal: '}
+                  {formatCurrency(withdrawalLimit)}
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="withdrawalPaymentMethod">Payment Method</Label>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(method) => {
+                    setPaymentMethod(method)
+                    setSelectedCashAccountId(null)
+                    setMobileProvider('')
+                    setPhoneNumber('')
+                    setTransactionId('')
+                    setTimeout(() => loadCashAccounts(method), 50)
+                  }}
+                >
+                  <SelectTrigger id="withdrawalPaymentMethod">
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethodOptions.length > 0 ? (
+                      paymentMethodOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {paymentMethod === 'mobile_money' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                  <div>
+                    <Label>Network Provider *</Label>
+                    <select
+                      value={mobileProvider}
+                      onChange={(event) => setMobileProvider(event.target.value)}
+                      className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Select provider</option>
+                      <option value="MTN">MTN</option>
+                      <option value="Airtel">Airtel</option>
+                      <option value="Zamtel">Zamtel</option>
+                      <option value="Vodafone">Vodafone</option>
+                      <option value="M-Pesa">M-Pesa</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Phone Number *</Label>
+                    <Input
+                      value={phoneNumber}
+                      onChange={(event) => setPhoneNumber(event.target.value)}
+                      placeholder="e.g. 0977123456"
+                      type="tel"
+                    />
+                  </div>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(event) => setTransactionId(event.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                  <div>
+                    <Label>Transaction ID *</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(event) => setTransactionId(event.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <Label htmlFor="withdrawalCashAccount">Staff Till / Account</Label>
+                <Select value={selectedCashAccountId || ''} onValueChange={(value) => setSelectedCashAccountId(value || null)}>
+                  <SelectTrigger id="withdrawalCashAccount">
+                    <SelectValue placeholder={cashAccounts.length === 0 ? 'No accounts available for this payment method' : 'Select till or account'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cashAccounts.length === 0 ? (
+                      <div className="p-2 text-xs text-muted-foreground">No {getAccountTypeForPaymentMethod(paymentMethod)} accounts available</div>
+                    ) : (
+                      cashAccounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          {account.name} (Balance: {formatCurrency(Number(account.balance || 0))})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="rounded-md border p-4 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span>Customer Funds Remaining</span>
+                  <span className="font-semibold whitespace-nowrap">{formatCurrency(withdrawalCustomerFundsAfter)}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-muted-foreground">
+                  <span>Account Balance After</span>
+                  <span className={withdrawalAccountBalanceAfter !== null && withdrawalAccountBalanceAfter < 0 ? 'font-semibold text-red-600' : ''}>
+                    {withdrawalAccountBalanceAfter === null ? 'Select account' : formatCurrency(withdrawalAccountBalanceAfter)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowWithdrawalModal(false)
+                    setSelectedCustomer(null)
+                    setWithdrawalAmount('')
+                    setPaymentMethod('cash')
+                    setMobileProvider('')
+                    setPhoneNumber('')
+                    setTransactionId('')
+                    setSelectedCashAccountId(null)
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    savingWithdrawal || !online || selectedCustomer.status !== 'active' ||
+                    withdrawalValue <= 0 || withdrawalValue > withdrawalAvailableFunds ||
+                    !selectedCashAccountId ||
+                    (withdrawalAccountBalanceAfter !== null && withdrawalAccountBalanceAfter < 0) ||
+                    (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
+                    (paymentMethod === 'card' ? !transactionId.trim() : false)
+                  }
+                >
+                  {savingWithdrawal ? 'Recording...' : 'Record Withdrawal'}
+                </Button>
+              </div>
+              </fieldset>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedSaleDetail && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {selectedSaleDetail.receiptNo}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Sale details
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={closeDetails}>
+                Close
+              </Button>
+            </div>
+
+            {selectedSaleDetail && (
+              <div className="space-y-5">
+                <div className="flex flex-wrap gap-2 pb-2">
+                  <Button size="sm" variant="outline" onClick={() => printSaleInvoice(selectedSaleDetail)}>
+                    <Printer className="h-4 w-4 mr-1" />
+                    Print Invoice
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => exportSaleInvoicePdf(selectedSaleDetail)}>
+                    <Download className="h-4 w-4 mr-1" />
+                    Download PDF
+                  </Button>
+                </div>
+                <div>
+                  <DetailRow label="Customer" value={renderCustomerNameButton(selectedSaleDetail.customer, 'Walk-in customer')} />
+                  <DetailRow label="Status" value={getPaymentStatusBadge(selectedSaleDetail.paymentStatus)} />
+                  <DetailRow label="Payment Method" value={selectedSaleDetail.paymentMethod} />
+                  <DetailRow label="Subtotal" value={formatCurrency(Number(selectedSaleDetail.subtotal || 0))} />
+                  <DetailRow label="Tax" value={formatCurrency(Number(selectedSaleDetail.tax || 0))} />
+                  <DetailRow label="Discount" value={formatCurrency(Number(selectedSaleDetail.discount || 0))} />
+                  <DetailRow label="Total" value={formatCurrency(Number(selectedSaleDetail.total || 0))} />
+                  <DetailRow label="Amount Settled" value={formatCurrency(Number(selectedSaleDetail.amountPaid || 0))} />
+                  {Array.isArray(selectedSaleDetail.creditApplications) && selectedSaleDetail.creditApplications.length > 0 && (
+                    <DetailRow label="Customer Credit Applied" value={formatCurrency(selectedSaleDetail.creditApplications.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0))} />
+                  )}
+                  <DetailRow label="Balance" value={formatCurrency(Number(selectedSaleDetail.balance || 0))} />
+                  <DetailRow
+                    label="Due Date"
+                    value={selectedSaleDetail.dueDate ? formatDisplayDate(selectedSaleDetail.dueDate) : 'Not set'}
+                  />
+                  <DetailRow label="Recorded By" value={formatUserName(selectedSaleDetail.user || selectedSaleDetail.User)} />
+                  <DetailRow label="Created" value={new Date(selectedSaleDetail.createdAt).toLocaleString()} />
+                  <DetailRow label="Notes" value={selectedSaleDetail.notes} />
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold">Items</h4>
+                  <div className="space-y-2">
+                    {selectedSaleDetail.items?.length ? (
+                      selectedSaleDetail.items.map((item: any, index: number) => (
+                        <div key={`${item.product?.id || index}-${index}`} className="rounded-md border p-3 text-sm">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="font-medium">{item.product?.name || 'Product'}</p>
+                              <p className="text-xs text-muted-foreground">{item.product?.sku || 'No SKU'}</p>
+                            </div>
+                            <p className="font-semibold">{formatCurrency(Number(item.total || 0))}</p>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Qty {item.quantity} x {formatCurrency(Number(item.price || 0))}
+                            {Number(item.discount || 0) > 0 ? `, discount ${formatCurrency(Number(item.discount || 0))}` : ''}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No items found for this sale.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Fuel Card Modal */}
+      {showFuelCardModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">{editingFuelCard ? 'Edit Fuel Card' : 'New Fuel Card'}</h3>
+            <div className="space-y-3">
+              <div><Label>Card Number</Label><Input value={fuelCardForm.cardNumber} onChange={e => setFuelCardForm({ ...fuelCardForm, cardNumber: e.target.value })} placeholder="FC-00001" /></div>
+              <div><Label>Holder Name</Label><Input value={fuelCardForm.holderName} onChange={e => setFuelCardForm({ ...fuelCardForm, holderName: e.target.value })} placeholder="John Doe" /></div>
+              <div>
+                <Label>Link to Customer (optional)</Label>
+                <Select value={fuelCardForm.customerId} onValueChange={v => setFuelCardForm({ ...fuelCardForm, customerId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
+                  <SelectContent>
+                    {(customerOptions.length ? customerOptions : customers).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Card Type</Label>
+                <Select value={fuelCardForm.cardType} onValueChange={v => setFuelCardForm({ ...fuelCardForm, cardType: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="prepaid">Prepaid</SelectItem>
+                    <SelectItem value="credit">Credit</SelectItem>
+                    <SelectItem value="fleet">Fleet</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><Label>Initial Balance</Label><Input type="number" value={fuelCardForm.balance} onChange={e => setFuelCardForm({ ...fuelCardForm, balance: e.target.value })} /></div>
+                <div><Label>Credit Limit</Label><Input type="number" value={fuelCardForm.creditLimit} onChange={e => setFuelCardForm({ ...fuelCardForm, creditLimit: e.target.value })} /></div>
+              </div>
+              <div><Label>Expiry Date (optional)</Label><Input type="date" value={fuelCardForm.expiresAt} onChange={e => setFuelCardForm({ ...fuelCardForm, expiresAt: e.target.value })} /></div>
+              <div><Label>Notes</Label><Textarea value={fuelCardForm.notes} onChange={e => setFuelCardForm({ ...fuelCardForm, notes: e.target.value })} rows={2} /></div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => { setShowFuelCardModal(false); setEditingFuelCard(null) }}>Cancel</Button>
+              <Button onClick={saveFuelCard}>{editingFuelCard ? 'Update Card' : 'Create Card'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Account Edit Modal */}
+      {editingCreditAccount && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-1">Edit Credit Terms</h3>
+            <p className="text-sm text-muted-foreground mb-4">{editingCreditAccount.name}</p>
+            <div className="space-y-3">
+              <div><Label>Credit Limit</Label><Input type="number" min="0" step="0.01" value={creditAccountForm.creditLimit} onChange={e => setCreditAccountForm({ ...creditAccountForm, creditLimit: e.target.value })} /><p className="mt-1 text-xs text-muted-foreground">Set to zero to prevent further credit sales without changing the existing balance.</p></div>
+              <div>
+                <Label>Status</Label>
+                <Select value={creditAccountForm.status} onValueChange={v => setCreditAccountForm({ ...creditAccountForm, status: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="blocked">Blocked</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Trust Score</Label>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-semibold">
+                  {editingCreditAccount.trustScore || 0}/100
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">Calculated from repayment history.</p>
+              </div>
+              <div><Label>Notes</Label><Textarea value={creditAccountForm.notes} onChange={e => setCreditAccountForm({ ...creditAccountForm, notes: e.target.value })} rows={2} /></div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setEditingCreditAccount(null)}>Cancel</Button>
+              <Button onClick={saveCreditAccount}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+import { appPrompt } from '@/lib/appFeedback'

@@ -1,0 +1,2697 @@
+import { serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import {
+  ShoppingCart, Package, DollarSign, Users, Building2,
+  CreditCard, BarChart3, Calendar, Loader2,
+  FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory, X,
+  TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon
+} from 'lucide-react'
+import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
+import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
+import { reportsApiV2, branchesApi, inventoryApi, apiFetch, type ReportParams } from '@/lib/api'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { formatCurrency, cn, formatDisplayDate } from '@/lib/utils'
+import { displayReference } from '@/lib/displayReference'
+import { buildDailySalesTrend } from '@/lib/salesReportChartData'
+import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { exportToExcel, exportToPDF, printReport, type BusinessInfo } from '@/lib/exportUtils'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalReportData } from '@/db/hybrid'
+import { EnrichedReport, type EnrichedReportData } from '@/components/EnrichedReportRenderer'
+import DailyBusinessReport from '@/components/DailyBusinessReport'
+import WeeklySalesCharts from '@/components/WeeklySalesCharts'
+import RentalReportView from '@/components/RentalReportView'
+import { canViewReportItem } from '@/lib/reportPermissions'
+
+type IconType = React.ComponentType<{ className?: string }>
+
+interface ReportItem {
+  feature?: string
+  permission?: string
+  dataKey?: string
+  id: string
+  label: string
+  apiFn: (params?: ReportParams) => Promise<any>
+  renderType: 'table' | 'summary' | 'pnL' | 'balanceSheet' | 'trialBalance' | 'aging' | 'ledger' | 'statement' | 'enriched' | 'dailyBusiness' | 'propertyManagement' | 'rental'
+  columns?: { key: string; label: string; format?: 'currency' | 'number' | 'date' | 'text' }[]
+  summaryKeys?: { key: string; label: string; format?: 'currency' | 'number' | 'text' }[]
+  entityType?: 'customer' | 'supplier' | 'product' | 'tenancy'
+  ledgerType?: 'customer' | 'supplier' | 'product' | 'financial'
+  showBranchFilter?: boolean
+}
+
+interface ReportCategory {
+  id: string
+  label: string
+  icon: IconType
+  permission: string
+  feature?: string
+  items: ReportItem[]
+}
+
+const currencyCol = (key: string, label: string) => ({ key, label, format: 'currency' as const })
+const numberCol = (key: string, label: string) => ({ key, label, format: 'number' as const })
+const dateCol = (key: string, label: string) => ({ key, label, format: 'date' as const })
+const textCol = (key: string, label: string) => ({ key, label, format: 'text' as const })
+const weekRangeForInput = (offset = 0) => {
+  const start = new Date()
+  start.setHours(12, 0, 0, 0)
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + offset * 7)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  const value = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return { from: value(start), to: value(end) }
+}
+const saleJobColumns = [dateCol('date', 'Date'), textCol('cardNo', 'Job Card'), textCol('receiptNo', 'Receipt'), textCol('customer', 'Customer'), textCol('product', 'Product / Service Sold'), textCol('service', 'Service'), textCol('source', 'Service Type'), numberCol('quantity', 'Quantity'), textCol('cashier', 'Cashier'), textCol('technician', 'Technician'), textCol('status', 'Job Status'), textCol('saleStatus', 'Sale Status'), textCol('description', 'Job Details'), textCol('completionNotes', 'Completion Notes'), currencyCol('totalCost', 'Service Costs')]
+
+const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
+
+const CATEGORIES: ReportCategory[] = [
+  {
+    id: 'sales', label: 'Sales Reports', icon: ShoppingCart, permission: 'canViewSalesReport',
+    items: [
+      { id: 'salesSummary', label: 'Sales Summary', apiFn: reportsApiV2.salesSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'count', label: 'Total Sales', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'serviceAndHireBookedAmount', label: 'Service & Hire Bookings', format: 'currency' },
+          { key: 'goodsBookedAmount', label: 'Goods in Bookings', format: 'currency' },
+          { key: 'consumablesIssuedCost', label: 'Consumables Issued Cost', format: 'currency' },
+          { key: 'historicalCount', label: 'Historical Records', format: 'number' },
+          { key: 'historicalAmountNotPosted', label: 'Historical Value Not Added to Current Operations', format: 'currency' },
+          { key: 'historicalReceivableOutstanding', label: 'Collectible Historical Rental Receivables', format: 'currency' },
+          { key: 'totalSubtotal', label: 'Subtotal', format: 'currency' },
+          { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
+          { key: 'totalTax', label: 'Total Tax', format: 'currency' },
+          { key: 'avgSale', label: 'Average Sale', format: 'currency' },
+        ]
+      },
+      { id: 'salesDaily', label: 'Daily Sales Report', apiFn: reportsApiV2.dailyBusiness, renderType: 'dailyBusiness', showBranchFilter: true },
+      { id: 'salesWeekly', label: 'Weekly Sales Report', apiFn: reportsApiV2.salesWeekly, renderType: 'enriched', showBranchFilter: true,
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Sales', format: 'number' },
+          { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
+          { key: 'totalDiscount', label: 'Discount', format: 'currency' },
+          { key: 'totalTax', label: 'Tax', format: 'currency' },
+        ]
+      },
+      { id: 'salesMonthly', label: 'Monthly Sales Report', apiFn: reportsApiV2.salesMonthly, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Sales', format: 'number' },
+          { key: 'totalRevenue', label: 'Revenue', format: 'currency' },
+          { key: 'totalDiscount', label: 'Discount', format: 'currency' },
+          { key: 'totalTax', label: 'Tax', format: 'currency' },
+        ]
+      },
+      { id: 'salesByProduct', label: 'Sales by Product', apiFn: reportsApiV2.salesByProduct, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Quantity'), currencyCol('revenue', 'Revenue'), currencyCol('cost', 'Cost'), currencyCol('profit', 'Profit')]
+      },
+      { id: 'salesByCategory', label: 'Sales by Category', apiFn: reportsApiV2.salesByCategory, renderType: 'table',
+        columns: [textCol('category', 'Category'), numberCol('quantity', 'Quantity'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'salesByCustomer', label: 'Sales by Customer', apiFn: reportsApiV2.salesByCustomer, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), numberCol('count', 'Orders'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'salesByUser', label: 'Sales by User/Cashier', apiFn: reportsApiV2.salesByUser, renderType: 'table',
+        columns: [textCol('user', 'User'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount')]
+      },
+      { id: 'salesServiceJobs', label: 'Product & Service Jobs', apiFn: reportsApiV2.salesServiceJobs, renderType: 'table', feature: 'service.job_cards', columns: saleJobColumns },
+      { id: 'salesByBranch', label: 'Sales by Branch', apiFn: reportsApiV2.salesByBranch, renderType: 'table',
+        columns: [textCol('branch', 'Branch'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount')]
+      },
+      { id: 'salesDiscounts', label: 'Discount Report', apiFn: reportsApiV2.salesDiscounts, renderType: 'table',
+        columns: [textCol('receiptNo', 'Receipt'), textCol('status', 'Status'), currencyCol('discount', 'Discount'), currencyCol('total', 'Total')]
+      },
+      { id: 'salesReturns', label: 'Returns & Refunds Report', apiFn: reportsApiV2.salesReturns, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalSales', label: 'Total Returns', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Amount', format: 'currency' },
+          { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport',
+    items: [
+      { id: 'inventoryStock', label: 'Current Stock Report', apiFn: reportsApiV2.inventoryStock, renderType: 'table',
+        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price')]
+      },
+      { id: 'inventoryValuation', label: 'Stock Valuation Report', apiFn: reportsApiV2.inventoryValuation, renderType: 'table',
+        columns: [textCol('category', 'Category'), numberCol('quantity', 'Qty'), currencyCol('costValue', 'Cost Value'), currencyCol('retailValue', 'Retail Value')]
+      },
+      { id: 'inventoryLowStock', label: 'Low Stock Report', apiFn: reportsApiV2.inventoryLowStock, renderType: 'table',
+        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('branch', 'Branch')]
+      },
+      { id: 'inventoryOutOfStock', label: 'Out of Stock Report', apiFn: reportsApiV2.inventoryOutOfStock, renderType: 'table',
+        columns: [textCol('name', 'Product'), textCol('sku', 'SKU'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), numberCol('minStock', 'Min Stock'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price'), textCol('branch', 'Branch'), textCol('status', 'Status')]
+      },
+      { id: 'inventoryStockMovement', label: 'Stock Movement Report', apiFn: reportsApiV2.inventoryStockMovement, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalInbound', label: 'Total In', format: 'number' },
+          { key: 'totalOutbound', label: 'Total Out', format: 'number' },
+          { key: 'currentStock', label: 'Current Stock', format: 'number' },
+          { key: 'netChange', label: 'Net Change', format: 'number' },
+        ]
+      },
+      { id: 'inventoryAdjustments', label: 'Inventory Adjustment Report', apiFn: reportsApiV2.inventoryAdjustments, renderType: 'table',
+        columns: [textCol('action', 'Action'), textCol('model', 'Model'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
+      },
+      { id: 'inventoryExpiry', label: 'Expiry Report', apiFn: reportsApiV2.inventoryExpiry, renderType: 'table',
+        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), dateCol('expiryDate', 'Expiry Date')]
+      },
+      { id: 'inventoryDamaged', label: 'Damaged/Lost Stock Report', apiFn: reportsApiV2.inventoryDamaged, renderType: 'table',
+        columns: [textCol('action', 'Action'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
+      },
+      { id: 'inventoryFastMoving', label: 'Fast Moving Products', apiFn: reportsApiV2.inventoryFastMoving, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'inventorySlowMoving', label: 'Slow Moving Products', apiFn: reportsApiV2.inventorySlowMoving, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'inventoryProductLedger', label: 'Product Ledger', apiFn: reportsApiV2.inventoryProductLedger, renderType: 'ledger', ledgerType: 'product', entityType: 'product', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), numberCol('inQty', 'In Qty'), numberCol('outQty', 'Out Qty'), numberCol('balance', 'Balance')]
+      },
+    ]
+  },
+  {
+    id: 'financial', label: 'Financial Reports', icon: DollarSign, permission: 'canViewFinancialReport',
+    items: [
+      { id: 'financialProfitLoss', label: 'Profit & Loss Report', apiFn: reportsApiV2.financialProfitLoss, renderType: 'pnL' },
+      { id: 'financialIncome', label: 'Income Report', apiFn: reportsApiV2.financialIncome, renderType: 'summary',
+        summaryKeys: [
+          { key: 'salesRevenue', label: 'Sales Revenue', format: 'currency' },
+          { key: 'customerPayments', label: 'Customer Payments', format: 'currency' },
+          { key: 'totalIncome', label: 'Total Income', format: 'currency' },
+        ]
+      },
+      { id: 'financialExpense', label: 'Expense Report', apiFn: reportsApiV2.financialExpense, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalExpense', label: 'Total Expense', format: 'currency' },
+          { key: 'expenseCount', label: 'Total Transactions', format: 'number' },
+        ]
+      },
+      { id: 'financialCashFlow', label: 'Cash Flow Report', apiFn: reportsApiV2.financialCashFlow, renderType: 'summary',
+        summaryKeys: [
+          { key: 'inflow', label: 'Total Inflow', format: 'currency' },
+          { key: 'outflow', label: 'Total Outflow', format: 'currency' },
+          { key: 'netCashFlow', label: 'Net Cash Flow', format: 'currency' },
+        ]
+      },
+      { id: 'financialTrialBalance', label: 'Trial Balance', apiFn: reportsApiV2.financialTrialBalance, renderType: 'trialBalance',
+        columns: [textCol('account', 'Account'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit')]
+      },
+      { id: 'financialBalanceSheet', label: 'Balance Sheet', apiFn: reportsApiV2.financialBalanceSheet, renderType: 'balanceSheet' },
+      { id: 'financialGeneralLedger', label: 'General Ledger', apiFn: reportsApiV2.financialGeneralLedger, renderType: 'ledger', ledgerType: 'financial', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('account', 'Account'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit')]
+      },
+      { id: 'financialBankTransactions', label: 'Bank Transactions Report', apiFn: reportsApiV2.financialBankTransactions, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
+          { key: 'totalInflow', label: 'Inflow', format: 'currency' },
+          { key: 'totalOutflow', label: 'Outflow', format: 'currency' },
+          { key: 'closingBalance', label: 'Closing Balance', format: 'currency' },
+        ]
+      },
+      { id: 'financialTax', label: 'Tax Report (VAT, GST)', apiFn: reportsApiV2.financialTax, renderType: 'summary',
+        summaryKeys: [
+          { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'totalTax', label: 'Total Tax', format: 'currency' },
+          { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
+          { key: 'salesCount', label: 'Sales Count', format: 'number' },
+          { key: 'averageTaxRate', label: 'Avg Tax Rate (%)', format: 'text' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'customers', label: 'Customer Reports', icon: Users, permission: 'canViewCustomerReport',
+    items: [
+      { id: 'customersList', label: 'Customer List Report', apiFn: reportsApiV2.customersList, renderType: 'table',
+        columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), textCol('email', 'Email'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'customersSales', label: 'Customer Sales Report', apiFn: reportsApiV2.customersSales, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), numberCol('count', 'Orders'), currencyCol('total', 'Total'), currencyCol('paid', 'Paid'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'customersBalance', label: 'Customer Balance Report', apiFn: reportsApiV2.customersBalance, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalBalance', label: 'Total Balance', format: 'currency' },
+          { key: 'customerCount', label: 'Customer Count', format: 'number' },
+        ]
+      },
+      { id: 'customersReceivables', label: 'Customer Receivables Report', apiFn: reportsApiV2.customersReceivables, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), currencyCol('total', 'Total'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'customersTop', label: 'Top Customers Report', apiFn: reportsApiV2.customersTop, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), numberCol('count', 'Orders'), currencyCol('total', 'Total Spent')]
+      },
+      { id: 'customersLedger', label: 'Customer Ledger', apiFn: reportsApiV2.customersLedger, renderType: 'ledger', ledgerType: 'customer', entityType: 'customer', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'customersStatement', label: 'Customer Statement', apiFn: reportsApiV2.customersStatement, renderType: 'statement', entityType: 'customer', showBranchFilter: true,
+        summaryKeys: [
+          { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
+          { key: 'totalSales', label: 'Total Sales', format: 'currency' },
+          { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'totalCreditNotes', label: 'Credit Notes', format: 'currency' },
+          { key: 'totalSaleReturns', label: 'Sale Returns', format: 'currency' },
+          { key: 'currentBalance', label: 'Current Balance', format: 'currency' },
+          { key: 'salesCount', label: 'Sales Count', format: 'number' },
+          { key: 'paymentCount', label: 'Payment Count', format: 'number' },
+        ]
+      },
+      { id: 'customersCreditNotes', label: 'Credit Notes Report', apiFn: reportsApiV2.customersCreditNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), textCol('originalSale', 'Original Sale'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
+    ]
+  },
+  {
+    id: 'suppliers', label: 'Supplier Reports', icon: Building2, permission: 'canViewSupplierReport',
+    items: [
+      { id: 'suppliersList', label: 'Supplier List Report', apiFn: reportsApiV2.suppliersList, renderType: 'table',
+        columns: [textCol('name', 'Name'), textCol('phone', 'Phone'), textCol('email', 'Email'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'suppliersPurchases', label: 'Supplier Purchases Report', apiFn: reportsApiV2.suppliersPurchases, renderType: 'table',
+        columns: [textCol('supplier', 'Supplier'), numberCol('count', 'Orders'), currencyCol('total', 'Total')]
+      },
+      { id: 'suppliersPayables', label: 'Supplier Payables Report', apiFn: reportsApiV2.suppliersPayables, renderType: 'table',
+        columns: [textCol('supplier', 'Supplier'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'suppliersBalance', label: 'Supplier Balance Report', apiFn: reportsApiV2.suppliersBalance, renderType: 'enriched',
+        summaryKeys: [
+          { key: 'totalBalance', label: 'Total Balance', format: 'currency' },
+          { key: 'supplierCount', label: 'Supplier Count', format: 'number' },
+        ]
+      },
+      { id: 'suppliersStatement', label: 'Supplier Statement', apiFn: reportsApiV2.suppliersStatement, renderType: 'statement', entityType: 'supplier', showBranchFilter: true,
+        summaryKeys: [
+          { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
+          { key: 'totalPurchases', label: 'Total Purchases', format: 'currency' },
+          { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'totalDebitNotes', label: 'Debit Notes', format: 'currency' },
+          { key: 'openBalance', label: 'Open Balance', format: 'currency' },
+          { key: 'currentBalance', label: 'Current Balance', format: 'currency' },
+          { key: 'purchaseCount', label: 'Purchase Count', format: 'number' },
+          { key: 'paymentCount', label: 'Payment Count', format: 'number' },
+        ]
+      },
+      { id: 'suppliersDebitNotes', label: 'Debit Notes Report', apiFn: reportsApiV2.suppliersDebitNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), textCol('originalPurchase', 'Original Purchase'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
+      { id: 'suppliersLedger', label: 'Supplier Ledger', apiFn: reportsApiV2.suppliersLedger, renderType: 'ledger', ledgerType: 'supplier', entityType: 'supplier', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), currencyCol('debit', 'Debit'), currencyCol('credit', 'Credit'), currencyCol('balance', 'Balance')]
+      },
+    ]
+  },
+  {
+    id: 'receivables', label: 'Receivables Reports', icon: CreditCard, permission: 'canViewReceivablesReport',
+    items: [
+      { id: 'receivablesOutstanding', label: 'Outstanding Invoices', apiFn: reportsApiV2.receivablesOutstanding, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), textCol('status', 'Status'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
+      },
+      { id: 'receivablesAging', label: 'Customer Aging Report', apiFn: reportsApiV2.receivablesAging, renderType: 'aging',
+        columns: [textCol('customer', 'Customer'), textCol('documentType', 'Document'), textCol('reference', 'Invoice / Ref'), dateCol('documentDate', 'Invoice Date'), dateCol('dueDate', 'Due Date'), textCol('agingBasis', 'Aging Basis'), textCol('daysPastDue', 'Days Past Due'), textCol('agingBucket', 'Age Band'), currencyCol('originalAmount', 'Original'), currencyCol('paidAmount', 'Paid / adjusted'), currencyCol('creditApplied', 'Credit Applied'), currencyCol('balance', 'Outstanding')],
+        summaryKeys: [
+          { key: 'totalOutstanding', label: 'Outstanding', format: 'currency' },
+          { key: 'documentCount', label: 'Open Documents', format: 'number' },
+          { key: 'entityCount', label: 'Customers', format: 'number' },
+        ]
+      },
+      { id: 'receivablesCollection', label: 'Collection Report', apiFn: reportsApiV2.receivablesCollection, renderType: 'table',
+        columns: [dateCol('createdAt', 'Date'), textCol('customer', 'Customer'), textCol('invoice', 'Invoice'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method'), textCol('mobileProvider', 'Provider'), textCol('phoneNumber', 'Mobile Number'), textCol('accountName', 'Received Into'), textCol('accountType', 'Account Type'), textCol('bankName', 'Bank'), textCol('accountNumber', 'Account No.'), textCol('accountHolder', 'Account Holder'), textCol('bankBranch', 'Bank Branch'), textCol('transactionId', 'Transaction ID'), textCol('reference', 'Reference')]
+      },
+      { id: 'receivablesOverdue', label: 'Overdue Accounts Report', apiFn: reportsApiV2.receivablesOverdue, renderType: 'table',
+        columns: [textCol('customer', 'Customer'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
+      },
+      { id: 'receivablesCreditNotes', label: 'Credit Notes Report', apiFn: reportsApiV2.customersCreditNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('customer', 'Customer'), textCol('originalSale', 'Original Sale'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
+    ]
+  },
+  {
+    id: 'payables', label: 'Payables Reports', icon: FileText, permission: 'canViewPayablesReport',
+    items: [
+      { id: 'payablesOutstanding', label: 'Outstanding Bills Report', apiFn: reportsApiV2.payablesOutstanding, renderType: 'table',
+        columns: [textCol('supplier', 'Supplier'), currencyCol('total', 'Total'), currencyCol('balance', 'Balance'), dateCol('createdAt', 'Date')]
+      },
+      { id: 'payablesAging', label: 'Supplier Aging Report', apiFn: reportsApiV2.payablesAging, renderType: 'aging',
+        columns: [textCol('supplier', 'Supplier'), textCol('documentType', 'Document'), textCol('reference', 'Bill / Ref'), dateCol('documentDate', 'Bill Date'), dateCol('dueDate', 'Due Date'), textCol('agingBasis', 'Aging Basis'), textCol('daysPastDue', 'Days Past Due'), textCol('agingBucket', 'Age Band'), currencyCol('originalAmount', 'Original'), currencyCol('paidAmount', 'Paid / adjusted'), currencyCol('balance', 'Outstanding')],
+        summaryKeys: [
+          { key: 'totalOutstanding', label: 'Outstanding', format: 'currency' },
+          { key: 'documentCount', label: 'Open Bills', format: 'number' },
+          { key: 'entityCount', label: 'Suppliers', format: 'number' },
+        ]
+      },
+      { id: 'payablesPaymentHistory', label: 'Payment History Report', apiFn: reportsApiV2.payablesPaymentHistory, renderType: 'table',
+        columns: [dateCol('createdAt', 'Date'), textCol('supplier', 'Supplier'), textCol('bill', 'Bill'), currencyCol('amount', 'Amount'), textCol('paymentMethod', 'Method'), textCol('mobileProvider', 'Provider'), textCol('phoneNumber', 'Mobile Number'), textCol('accountName', 'Paid From'), textCol('accountType', 'Account Type'), textCol('bankName', 'Bank'), textCol('accountNumber', 'Account No.'), textCol('accountHolder', 'Account Holder'), textCol('bankBranch', 'Bank Branch'), textCol('transactionId', 'Transaction ID'), textCol('reference', 'Reference')]
+      },
+      { id: 'payablesOverdue', label: 'Overdue Supplier Balances', apiFn: reportsApiV2.payablesOverdue, renderType: 'table',
+        columns: [textCol('supplier', 'Supplier'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due Date')]
+      },
+      { id: 'payablesDebitNotes', label: 'Debit Notes Report', apiFn: reportsApiV2.suppliersDebitNotes, renderType: 'table',
+        columns: [textCol('noteNo', 'Note No'), textCol('supplier', 'Supplier'), textCol('originalPurchase', 'Original Purchase'), currencyCol('amount', 'Amount'), textCol('reason', 'Reason'), textCol('status', 'Status'), dateCol('date', 'Date')]
+      },
+    ]
+  },
+  {
+    id: 'performance', label: 'Business Performance Reports', icon: BarChart3, permission: 'canViewPerformanceReport',
+    items: [
+      { id: 'performanceBranch', label: 'Branch Performance Report', apiFn: reportsApiV2.performanceBranch, renderType: 'table',
+        columns: [textCol('branch', 'Branch'), numberCol('count', 'Sales'), currencyCol('revenue', 'Revenue'), currencyCol('discount', 'Discount'), currencyCol('avgSale', 'Avg Sale')]
+      },
+      { id: 'performanceProduct', label: 'Product Performance Report', apiFn: reportsApiV2.performanceProduct, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty'), currencyCol('revenue', 'Revenue'), currencyCol('profit', 'Profit'), numberCol('transactions', 'Transactions')]
+      },
+      { id: 'performanceCategory', label: 'Category Performance Report', apiFn: reportsApiV2.performanceCategory, renderType: 'table',
+        columns: [textCol('category', 'Category'), numberCol('quantity', 'Qty'), currencyCol('revenue', 'Revenue'), currencyCol('profit', 'Profit')]
+      },
+      { id: 'performanceUserActivity', label: 'User Activity Report', apiFn: reportsApiV2.performanceUserActivity, renderType: 'table',
+        columns: [textCol('user', 'User'), numberCol('actions', 'Actions'), textCol('models', 'Models')]
+      },
+      { id: 'performanceTopProducts', label: 'Top Selling Products', apiFn: reportsApiV2.performanceTopProducts, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue'), currencyCol('profit', 'Profit')]
+      },
+      { id: 'performanceLeastProducts', label: 'Least Selling Products', apiFn: reportsApiV2.performanceLeastProducts, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue'), currencyCol('profit', 'Profit')]
+      },
+    ]
+  },
+  {
+    id: 'services', label: 'Service Reports', icon: Wrench, permission: 'canViewServiceReport',
+    items: [
+      { id: 'servicesSummary', label: 'Service Summary', apiFn: reportsApiV2.servicesSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'count', label: 'Total Services', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'totalQuantity', label: 'Total Quantity Sold', format: 'number' },
+          { key: 'avgPrice', label: 'Average Price', format: 'currency' },
+          { key: 'salesCount', label: 'Sales Count', format: 'number' },
+        ]
+      },
+      { id: 'servicesList', label: 'Service List', apiFn: reportsApiV2.servicesList, renderType: 'table',
+        columns: [textCol('name', 'Service'), textCol('category', 'Category'), currencyCol('price', 'Price'), numberCol('estimatedHours', 'Est. Hours'), textCol('branch', 'Branch')]
+      },
+      { id: 'servicesSales', label: 'Service Sales Report', apiFn: reportsApiV2.servicesSales, renderType: 'table',
+        columns: [textCol('service', 'Service'), textCol('category', 'Category'), textCol('receiptNo', 'Receipt'), textCol('customer', 'Customer'), numberCol('quantity', 'Qty'), currencyCol('total', 'Total'), dateCol('date', 'Date')]
+      },
+      { id: 'servicesByCategory', label: 'Service Sales by Category', apiFn: reportsApiV2.servicesByCategory, renderType: 'table',
+        columns: [textCol('category', 'Category'), numberCol('count', 'Sales Count'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'servicesByBranch', label: 'Service Sales by Branch', apiFn: reportsApiV2.servicesByBranch, renderType: 'table',
+        columns: [textCol('branch', 'Branch'), numberCol('count', 'Sales Count'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'servicesTop', label: 'Top Services', apiFn: reportsApiV2.servicesTop, renderType: 'table',
+        columns: [textCol('service', 'Service'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      },
+      { id: 'svcAppointments', label: 'Appointment Analytics', apiFn: reportsApiV2.svcAppointments, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Appointments', format: 'number' },
+          { key: 'scheduled', label: 'Scheduled', format: 'number' },
+          { key: 'confirmed', label: 'Confirmed', format: 'number' },
+          { key: 'inProgress', label: 'In Progress', format: 'number' },
+          { key: 'completed', label: 'Completed', format: 'number' },
+          { key: 'cancelled', label: 'Cancelled', format: 'number' },
+          { key: 'noShow', label: 'No Show', format: 'number' },
+          { key: 'completedRevenue', label: 'Completed Revenue', format: 'currency' },
+        ]
+      },
+      { id: 'svcTechnicians', label: 'Technician Performance', apiFn: reportsApiV2.svcTechnicians, renderType: 'table',
+        columns: [textCol('name', 'Name'), textCol('role', 'Role'), numberCol('rating', 'Rating'), numberCol('totalJobs', 'Total Jobs'), numberCol('completedJobs', 'Completed'), numberCol('jobCards', 'Job Cards'), textCol('availability', 'Availability'), currencyCol('hourlyRate', 'Hourly Rate')]
+      },
+      { id: 'svcContracts', label: 'Contract Utilization', apiFn: reportsApiV2.svcContracts, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Contracts', format: 'number' },
+          { key: 'active', label: 'Active', format: 'number' },
+          { key: 'expired', label: 'Expired', format: 'number' },
+          { key: 'terminated', label: 'Terminated', format: 'number' },
+          { key: 'pendingRenewal', label: 'Pending Renewal', format: 'number' },
+          { key: 'activeValue', label: 'Active Contract Value', format: 'currency' },
+        ]
+      },
+      { id: 'svcFeedback', label: 'Customer Feedback Report', apiFn: reportsApiV2.svcFeedback, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Reviews', format: 'number' },
+          { key: 'avgRating', label: 'Avg Rating', format: 'number' },
+          { key: 'avgServiceQuality', label: 'Avg Service Quality', format: 'number' },
+          { key: 'avgTimeliness', label: 'Avg Timeliness', format: 'number' },
+          { key: 'avgProfessionalism', label: 'Avg Professionalism', format: 'number' },
+          { key: 'avgValueForMoney', label: 'Avg Value for Money', format: 'number' },
+          { key: 'recommendRate', label: 'Recommend Rate (%)', format: 'number' },
+        ]
+      },
+      { id: 'svcJobCards', label: 'Job Cards & Sales', apiFn: reportsApiV2.svcJobCards, renderType: 'table', columns: saleJobColumns,
+        summaryKeys: [
+          { key: 'total', label: 'Total Job Cards', format: 'number' },
+          { key: 'pending', label: 'Pending', format: 'number' },
+          { key: 'inProgress', label: 'In Progress', format: 'number' },
+          { key: 'onHold', label: 'On Hold', format: 'number' },
+          { key: 'completed', label: 'Completed', format: 'number' },
+          { key: 'cancelled', label: 'Cancelled', format: 'number' },
+          { key: 'laborCost', label: 'Labor Cost', format: 'currency' },
+          { key: 'partsCost', label: 'Parts Cost', format: 'currency' },
+          { key: 'totalCost', label: 'Total Cost', format: 'currency' },
+        ]
+      },
+      { id: 'svcWorkOrders', label: 'Work Order Summary', apiFn: reportsApiV2.svcWorkOrders, renderType: 'summary',
+        summaryKeys: [
+          { key: 'total', label: 'Total Work Orders', format: 'number' },
+          { key: 'open', label: 'Open', format: 'number' },
+          { key: 'inProgress', label: 'In Progress', format: 'number' },
+          { key: 'onHold', label: 'On Hold', format: 'number' },
+          { key: 'completed', label: 'Completed', format: 'number' },
+          { key: 'cancelled', label: 'Cancelled', format: 'number' },
+          { key: 'estimatedCost', label: 'Estimated Cost', format: 'currency' },
+          { key: 'actualCost', label: 'Actual Cost', format: 'currency' },
+          { key: 'laborCost', label: 'Labor Cost', format: 'currency' },
+          { key: 'partsCost', label: 'Parts Cost', format: 'currency' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport',
+    items: [
+      { id: 'rentalsSummary', label: 'Rental Summary', apiFn: reportsApiV2.rentalsSummary, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [
+          { key: 'count', label: 'Total Rentals', format: 'number' },
+          { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+          { key: 'totalDeposit', label: 'Total Deposits', format: 'currency' },
+          { key: 'totalPaid', label: 'Total Paid', format: 'currency' },
+          { key: 'totalBalance', label: 'Outstanding Balance', format: 'currency' },
+          { key: 'activeCount', label: 'Active Rentals', format: 'number' },
+          { key: 'returnedCount', label: 'Returned', format: 'number' },
+          { key: 'cancelledCount', label: 'Cancelled', format: 'number' },
+        ]
+      },
+      { id: 'rentalsList', label: 'Rental List Report', apiFn: reportsApiV2.rentalsList, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Rental Records', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }, { key: 'totalBalance', label: 'Outstanding', format: 'currency' }],
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('item', 'Items'), numberCol('quantity', 'Qty'), textCol('phone', 'Phone'), textCol('branch', 'Branch'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), textCol('status', 'Status'), currencyCol('totalAmount', 'Total'), currencyCol('paid', 'Paid'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsByItem', label: 'Rental by Item', apiFn: reportsApiV2.rentalsByItem, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'itemCount', label: 'Items Rented', format: 'number' }, { key: 'hireCount', label: 'Hires', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }],
+        columns: [textCol('item', 'Item'), numberCol('hireCount', 'Hire Count'), currencyCol('totalRevenue', 'Revenue'), currencyCol('totalDeposit', 'Deposits')]
+      },
+      { id: 'rentalsByCustomer', label: 'Rental by Customer', apiFn: reportsApiV2.rentalsByCustomer, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'customerCount', label: 'Customers', format: 'number' }, { key: 'count', label: 'Rental Records', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'balance', label: 'Outstanding', format: 'currency' }],
+        columns: [textCol('customer', 'Customer'), numberCol('count', 'Rentals'), currencyCol('totalRevenue', 'Revenue'), currencyCol('totalDeposit', 'Deposits'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsByBranch', label: 'Rental by Branch', apiFn: reportsApiV2.rentalsByBranch, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'branchCount', label: 'Branches', format: 'number' }, { key: 'count', label: 'Rental Records', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }],
+        columns: [textCol('branch', 'Branch'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
+      },
+      { id: 'rentalsActive', label: 'Active Rentals', apiFn: reportsApiV2.rentalsActive, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Active Rentals', format: 'number' }, { key: 'overdue', label: 'Overdue', format: 'number' }, { key: 'totalBalance', label: 'Outstanding', format: 'currency' }],
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), dateCol('hireDate', 'Hire Date'), dateCol('expectedReturnDate', 'Expected Return'), numberCol('daysOverdue', 'Days Overdue'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsOverdue', label: 'Overdue Rentals', apiFn: reportsApiV2.rentalsOverdue, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Overdue Rentals', format: 'number' }, { key: 'totalBalance', label: 'Outstanding', format: 'currency' }],
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), textCol('phone', 'Phone'), dateCol('expectedReturnDate', 'Expected Return'), numberCol('daysOverdue', 'Days Overdue'), currencyCol('totalAmount', 'Total'), currencyCol('balance', 'Balance')]
+      },
+      { id: 'rentalsReturns', label: 'Rental Returns Report', apiFn: reportsApiV2.rentalsReturns, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Returns', format: 'number' }, { key: 'totalDamageFees', label: 'Damage Fees', format: 'currency' }],
+        columns: [textCol('rentalNo', 'Rental No'), textCol('customer', 'Customer'), dateCol('hireDate', 'Hire Date'), dateCol('actualReturnDate', 'Return Date'), currencyCol('totalAmount', 'Total'), textCol('depositStatus', 'Deposit Status'), currencyCol('damageFees', 'Damage Fees')]
+      },
+      { id: 'rentalsDaily', label: 'Daily Rental Report', apiFn: reportsApiV2.rentalsDaily, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'rentalsStarted', label: 'Hires / Reservations', format: 'number' }, { key: 'rentalCharges', label: 'Rental Charges', format: 'currency' }, { key: 'returns', label: 'Items Returned', format: 'number' }, { key: 'overdueRentals', label: 'Overdue Rentals', format: 'number' }],
+        columns: [dateCol('date', 'Date'), textCol('type', 'Activity'), textCol('reference', 'Receipt / Rental No'), textCol('customer', 'Customer'), textCol('item', 'Item'), numberCol('quantity', 'Qty'), textCol('staff', 'Staff'), textCol('branch', 'Branch'), textCol('paymentMethod', 'Method'), currencyCol('amount', 'Amount'), textCol('status', 'Status')]
+      },
+      { id: 'rentalsMonthly', label: 'Monthly Rental Report', apiFn: reportsApiV2.rentalsMonthly, renderType: 'rental', showBranchFilter: true,
+        summaryKeys: [{ key: 'count', label: 'Rentals', format: 'number' }, { key: 'totalRevenue', label: 'Rental Charges', format: 'currency' }, { key: 'totalDeposit', label: 'Deposits', format: 'currency' }],
+        columns: [textCol('month', 'Month'), numberCol('count', 'Rentals'), currencyCol('revenue', 'Revenue'), currencyCol('deposit', 'Deposits')]
+      },
+    ]
+  },
+  {
+    id: 'property-management', label: 'Property Management Reports', icon: Building2, permission: 'canViewPropertyReports',
+    items: [
+      { id: 'propertyRentRoll', label: 'Rent Roll', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'rentRoll', summaryKeys: [{ key: 'activeTenancies', label: 'Active Tenancies', format: 'number' }, { key: 'occupiedUnits', label: 'Occupied Units', format: 'number' }, { key: 'vacantUnits', label: 'Vacant Units', format: 'number' }, { key: 'periodOutstanding', label: 'Open Rent Balance', format: 'currency' }], columns: [textCol('tenantName', 'Tenant'), textCol('propertyName', 'Property'), textCol('unitCode', 'Unit'), textCol('ownerName', 'Owner'), textCol('agreementRef', 'Agreement'), dateCol('startDate', 'Start Date'), currencyCol('rentAmount', 'Rent'), currencyCol('openBalance', 'Open Balance'), currencyCol('overdueBalance', 'Overdue')] },
+      { id: 'propertyRentArrears', label: 'Rent Arrears & Aging', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'arrears', summaryKeys: [{ key: 'arrears', label: 'Total Arrears', format: 'currency' }, { key: 'persistentArrearsCount', label: 'Persistent Arrears', format: 'number' }, { key: 'days1To30', label: '1–30 Days', format: 'currency' }, { key: 'days31To60', label: '31–60 Days', format: 'currency' }, { key: 'days61To90', label: '61–90 Days', format: 'currency' }, { key: 'over90Days', label: 'Over 90 Days', format: 'currency' }], columns: [textCol('tenantName', 'Tenant'), textCol('propertyName', 'Property'), textCol('unitCode', 'Unit'), textCol('ownerName', 'Owner'), currencyCol('rentAmount', 'Monthly Rent'), currencyCol('balance', 'Total Balance'), currencyCol('overdueBalance', 'Overdue'), numberCol('overduePeriods', 'Overdue Periods'), currencyCol('days1To30', '1–30 Days'), currencyCol('days31To60', '31–60 Days'), currencyCol('days61To90', '61–90 Days'), currencyCol('over90Days', 'Over 90 Days'), textCol('persistentArrears', 'Persistent Arrears')] },
+      { id: 'propertyRentCollections', label: 'Rent Collections', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'collections', summaryKeys: [{ key: 'rentCharged', label: 'Rent Charged', format: 'currency' }, { key: 'collected', label: 'Collected', format: 'currency' }, { key: 'periodOutstanding', label: 'Period Balance', format: 'currency' }, { key: 'ownerPayouts', label: 'Owner Payouts', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('receiptNo', 'Receipt'), textCol('tenantName', 'Tenant'), textCol('property', 'Property'), textCol('unit', 'Unit'), textCol('owner', 'Owner'), textCol('paymentMethod', 'Method'), currencyCol('amount', 'Amount')] },
+      { id: 'propertyRenterStatement', label: 'Tenant Statement', apiFn: (params) => reportsApiV2.propertyTenancyStatement(String(params?.tenancyId || '')), renderType: 'propertyManagement', dataKey: 'entries', entityType: 'tenancy', summaryKeys: [{ key: 'closingBalance', label: 'Closing Balance', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('type', 'Transaction'), textCol('reference', 'Reference'), textCol('description', 'Description'), currencyCol('debit', 'Charge'), currencyCol('credit', 'Payment'), currencyCol('runningBalance', 'Balance')] },
+      { id: 'propertyPaymentPlans', label: 'Repayment Plan Progress', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'paymentPlans', summaryKeys: [{ key: 'paymentPlanValue', label: 'Plan Value', format: 'currency' }, { key: 'paymentPlanCollected', label: 'Collected', format: 'currency' }, { key: 'paymentPlanBalance', label: 'Outstanding', format: 'currency' }], columns: [dateCol('createdAt', 'Created'), textCol('planNo', 'Plan'), textCol('tenantName', 'Tenant'), textCol('property', 'Property'), textCol('unit', 'Unit'), currencyCol('totalAmount', 'Plan Amount'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance'), numberCol('installmentCount', 'Installments'), numberCol('paidInstallments', 'Paid'), numberCol('overdueInstallments', 'Overdue'), dateCol('nextDueDate', 'Next Due'), textCol('status', 'Status')] },
+      { id: 'propertyOwnerPayables', label: 'Landlord Payables', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'ownerPayables', permission: 'canViewPayable', summaryKeys: [{ key: 'ownerPayableBalance', label: 'Owner Payable Balance', format: 'currency' }], columns: [textCol('owner', 'Landlord'), currencyCol('rentAccrued', 'Rent Accrued'), currencyCol('paid', 'Paid'), currencyCol('balance', 'Amount Due')] },
+      { id: 'propertyOwnerPayouts', label: 'Landlord Payout History', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'ownerPayouts', summaryKeys: [{ key: 'ownerPayouts', label: 'Paid to Owners', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('reference', 'Reference'), textCol('owner', 'Landlord'), textCol('account', 'Paid From'), currencyCol('amount', 'Amount')] },
+      { id: 'propertyPlotSales', label: 'Plot Sales & Receivables', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'plotSales', permission: 'canViewPropertySales', summaryKeys: [{ key: 'plotSaleValue', label: 'Sales Value', format: 'currency' }, { key: 'plotSalesCollected', label: 'Collected', format: 'currency' }, { key: 'plotSaleBalance', label: 'Buyer Balance', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('saleNo', 'Sale'), textCol('buyer', 'Buyer'), textCol('property', 'Property'), textCol('unit', 'Plot / Unit'), textCol('mode', 'Sale Mode'), textCol('owner', 'Owner'), currencyCol('salePrice', 'Sale Price'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance'), currencyCol('costBasis', 'Cost Basis'), currencyCol('commission', 'Commission'), textCol('status', 'Status')] },
+      { id: 'propertyPlotPurchases', label: 'Plot Purchases & Supplier Payables', apiFn: reportsApiV2.propertyManagement, renderType: 'propertyManagement', dataKey: 'plotPurchases', permission: 'canViewPropertyLandPurchases', summaryKeys: [{ key: 'plotPurchaseValue', label: 'Purchase Value', format: 'currency' }, { key: 'plotPurchaseBalance', label: 'Supplier Balance', format: 'currency' }], columns: [dateCol('date', 'Date'), textCol('purchaseNo', 'Purchase'), textCol('supplier', 'Supplier'), textCol('property', 'Property'), textCol('unit', 'Plot / Unit'), currencyCol('purchasePrice', 'Price'), currencyCol('capitalizedCosts', 'Capitalized Costs'), currencyCol('recoverableTax', 'Recoverable Tax'), currencyCol('total', 'Total Cost'), currencyCol('amountPaid', 'Paid'), currencyCol('balance', 'Balance'), dateCol('dueDate', 'Due'), textCol('paymentStatus', 'Status')] },
+    ],
+  },
+  {
+    id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport', feature: 'fuel_station.reports',
+    items: [
+      { id: 'fuelSalesSummary', label: 'Fuel Sales Summary', apiFn: reportsApiV2.fuelSalesSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'shiftCount', label: 'Total Shifts', format: 'number' },
+          { key: 'totalLitres', label: 'Total Litres Sold', format: 'number' },
+          { key: 'cashSales', label: 'Cash Sales', format: 'currency' },
+          { key: 'mobileSales', label: 'Mobile Sales', format: 'currency' },
+          { key: 'creditSales', label: 'Credit Sales', format: 'currency' },
+          { key: 'totalSales', label: 'Total Fuel Sales', format: 'currency' },
+          { key: 'lubricantSales', label: 'Lubricant Sales', format: 'currency' },
+          { key: 'carWashIncome', label: 'Car Wash Income', format: 'currency' },
+          { key: 'expenses', label: 'Expenses', format: 'currency' },
+          { key: 'netAmount', label: 'Net Amount', format: 'currency' },
+        ]
+      },
+      { id: 'fuelByPump', label: 'Sales by Pump', apiFn: reportsApiV2.fuelSalesByPump, renderType: 'table',
+        columns: [textCol('pump', 'Pump'), numberCol('litresSold', 'Litres Sold'), currencyCol('amount', 'Amount'), numberCol('readings', 'Readings')]
+      },
+      { id: 'fuelByTank', label: 'Tank Stock Report', apiFn: reportsApiV2.fuelTankStock, renderType: 'table',
+        columns: [textCol('tank', 'Tank'), textCol('fuelType', 'Fuel Type'), numberCol('capacity', 'Capacity (L)'), numberCol('currentStock', 'Current Stock (L)'), currencyCol('unitCost', 'Unit Cost'), currencyCol('stockValue', 'Stock Value'), numberCol('fillPercent', 'Fill %')]
+      },
+      { id: 'fuelDeliveries', label: 'Fuel Deliveries Report', apiFn: reportsApiV2.fuelDeliveries, renderType: 'table',
+        columns: [textCol('tank', 'Tank'), textCol('fuelType', 'Fuel Type'), textCol('supplierName', 'Supplier'), textCol('invoiceNo', 'Invoice No'), numberCol('litres', 'Litres'), currencyCol('unitCost', 'Unit Cost'), currencyCol('totalCost', 'Total Cost'), dateCol('deliveryDate', 'Delivery Date')]
+      },
+      { id: 'fuelShiftSummary', label: 'Shift Summary Report', apiFn: reportsApiV2.fuelShiftSummary, renderType: 'table',
+        columns: [textCol('shiftNo', 'Shift No'), textCol('pump', 'Pump'), textCol('attendant', 'Attendant'), numberCol('litresSold', 'Litres'), currencyCol('cashSales', 'Cash'), currencyCol('mobileSales', 'Mobile'), currencyCol('creditSales', 'Credit'), currencyCol('totalSales', 'Total'), currencyCol('expenses', 'Expenses'), currencyCol('netAmount', 'Net'), textCol('status', 'Status'), dateCol('startDate', 'Start Date')]
+      },
+      { id: 'fuelLubricantSales', label: 'Lubricant Sales Report', apiFn: reportsApiV2.fuelLubricantSales, renderType: 'table',
+        columns: [textCol('shiftNo', 'Shift No'), textCol('pump', 'Pump'), textCol('attendant', 'Attendant'), currencyCol('lubricantSales', 'Lubricant Sales'), dateCol('startDate', 'Date')]
+      },
+      { id: 'fuelCarWash', label: 'Car Wash Income Report', apiFn: reportsApiV2.fuelCarWashIncome, renderType: 'table',
+        columns: [textCol('shiftNo', 'Shift No'), textCol('pump', 'Pump'), textCol('attendant', 'Attendant'), currencyCol('carWashIncome', 'Car Wash Income'), dateCol('startDate', 'Date')]
+      },
+      { id: 'fuelMeterReadings', label: 'Meter Readings Report', apiFn: reportsApiV2.fuelMeterReadings, renderType: 'table',
+        columns: [textCol('pump', 'Pump'), numberCol('openingReading', 'Opening'), numberCol('closingReading', 'Closing'), numberCol('litresSold', 'Litres Sold'), currencyCol('amount', 'Amount'), dateCol('readingDate', 'Date')]
+      },
+    ]
+  },
+  {
+    id: 'manufacturing', label: 'Manufacturing Reports', icon: Factory, permission: 'canViewManufacturingReport', feature: 'manufacturing.reports',
+    items: [
+      { id: 'mfgProductionSummary', label: 'Production Summary', apiFn: reportsApiV2.manufacturingSummary, renderType: 'summary',
+        summaryKeys: [
+          { key: 'count', label: 'Production Orders', format: 'number' },
+          { key: 'completedCount', label: 'Completed', format: 'number' },
+          { key: 'totalQuantity', label: 'Units Planned', format: 'number' },
+          { key: 'totalCost', label: 'Total Cost', format: 'currency' },
+          { key: 'wasteQty', label: 'Waste Qty', format: 'number' },
+          { key: 'recipeCount', label: 'Recipes', format: 'number' },
+        ]
+      },
+      { id: 'mfgByProduct', label: 'Production by Product', apiFn: reportsApiV2.manufacturingByProduct, renderType: 'table',
+        columns: [textCol('product', 'Product'), numberCol('orders', 'Orders'), numberCol('quantity', 'Qty'), currencyCol('totalCost', 'Total Cost'), numberCol('completed', 'Completed')]
+      },
+      { id: 'mfgWasteReport', label: 'Waste Report', apiFn: reportsApiV2.manufacturingWaste, renderType: 'table',
+        columns: [textCol('orderNo', 'Order'), textCol('product', 'Product'), numberCol('quantity', 'Qty'), currencyCol('totalCost', 'Cost'), textCol('reason', 'Reason')]
+      },
+      { id: 'mfgCostAnalysis', label: 'Production Cost Analysis', apiFn: reportsApiV2.manufacturingCostAnalysis, renderType: 'table',
+        columns: [textCol('orderNo', 'Order'), textCol('product', 'Product'), numberCol('quantity', 'Qty'), currencyCol('totalCost', 'Cost'), numberCol('wasteQty', 'Waste Qty'), currencyCol('wasteCost', 'Waste Cost')]
+      },
+      { id: 'mfgBOMReport', label: 'BOM / Recipe Report', apiFn: reportsApiV2.manufacturingBom, renderType: 'table',
+        columns: [textCol('name', 'Recipe'), textCol('product', 'Product'), textCol('yield', 'Yield'), numberCol('ingredientCount', 'Ingredients'), numberCol('ingredientCost', 'Ingredient Qty')]
+      },
+    ]
+  },
+  {
+    id: 'clinic', label: 'Clinic Reports', icon: Calendar, permission: 'canViewClinicReports', feature: 'clinic_management',
+    items: [
+      { id: 'clinicOperationsSummary', label: 'Clinic Operations Summary', apiFn: reportsApiV2.clinicOperations, renderType: 'summary',
+        summaryKeys: [
+          { key: 'patients', label: 'Clinic Patients', format: 'number' },
+          { key: 'appointments', label: 'Appointments', format: 'number' },
+          { key: 'encounters', label: 'Clinical Encounters', format: 'number' },
+          { key: 'prescriptions', label: 'Prescriptions', format: 'number' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'pharmacy', label: 'Pharmacy Reports', icon: Package, permission: 'canViewPharmacyReports', feature: 'pharmacy_management',
+    items: [
+      { id: 'pharmacyOperationsSummary', label: 'Pharmacy Operations Summary', apiFn: reportsApiV2.pharmacyOperations, renderType: 'summary',
+        summaryKeys: [
+          { key: 'activeBatches', label: 'Active Batches', format: 'number' },
+          { key: 'batchUnits', label: 'Units in Batches', format: 'number' },
+          { key: 'expiredBatches', label: 'Expired Batches', format: 'number' },
+          { key: 'expiringSoon', label: 'Expiring Within 90 Days', format: 'number' },
+          { key: 'fulfillmentEvents', label: 'Prescription Fulfillments', format: 'number' },
+        ]
+      },
+    ]
+  },
+  {
+    id: 'analysis', label: 'Business Analysis', icon: BarChart3, permission: 'canViewFinancialReport',
+    items: [
+      { id: 'executiveSummary', label: 'Executive Summary & Insights', apiFn: reportsApiV2.executiveSummary, renderType: 'table' as any },
+    ]
+  },
+]
+
+const ALL_REPORTS = CATEGORIES.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label })))
+
+function formatValue(value: any, format?: string): string {
+  if (value === null || value === undefined) return '—'
+  switch (format) {
+    case 'currency': return formatCurrency(Number(value) || 0)
+    case 'number': return new Intl.NumberFormat('en-US').format(Number(value) || 0)
+    case 'date': return value ? formatDisplayDate(value) : '—'
+    default: {
+      if (Array.isArray(value)) return value.map(v => formatValue(v)).filter(v => v !== '—').join(', ')
+      if (typeof value === 'object') {
+        const objectValue = value as Record<string, any>
+        const preferredKeys = ['name', 'label', 'email', 'description', 'title', 'code', 'reference', 'number', 'type']
+        for (const key of preferredKeys) {
+          const candidate = objectValue[key]
+          if (candidate !== null && candidate !== undefined && candidate !== '') return String(candidate)
+        }
+
+        const numericKeys = ['amount', 'total', 'balance', 'value', 'price', 'cost', 'revenue', 'profit', 'quantity', 'count']
+        for (const key of numericKeys) {
+          const candidate = objectValue[key]
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return String(candidate)
+        }
+
+        for (const entry of Object.values(objectValue)) {
+          if (entry == null || entry === '') continue
+          if (typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean') return String(entry)
+          if (typeof entry === 'object') {
+            const nestedText = formatValue(entry)
+            if (nestedText !== '—') return nestedText
+          }
+        }
+
+        return '—'
+      }
+      return String(value)
+    }
+  }
+}
+
+const detailAliases: Record<string, string[]> = {
+  revenue: ['revenue', 'salesRevenue', 'totalIncome'],
+  salesRevenue: ['salesRevenue', 'revenue', 'totalIncome'],
+  posSalesRevenue: ['posSalesRevenue'],
+  receivableSalesRevenue: ['receivableSalesRevenue'],
+  cogs: ['cogs'],
+  grossProfit: ['grossProfit', 'revenue', 'cogs'],
+  expenses: ['expenses', 'totalExpense'],
+  totalExpense: ['totalExpense', 'expenses'],
+  netProfit: ['netProfit', 'revenue', 'cogs', 'expenses'],
+  totalDiscount: ['totalDiscount'],
+  totalTax: ['totalTax', 'taxPayable'],
+  salesCount: ['salesCount', 'revenue'],
+  customerPayments: ['customerPayments', 'customerCollections'],
+  customerCollections: ['customerCollections', 'customerPayments'],
+  totalIncome: ['totalIncome', 'salesRevenue'],
+  inflow: ['inflow', 'cashInflows'],
+  outflow: ['outflow', 'cashOutflows'],
+  transfersIn: ['transfersIn'],
+  transfersOut: ['transfersOut'],
+  netCashFlow: ['netCashFlow', 'inflow', 'outflow'],
+  netAccountMovement: ['netAccountMovement', 'inflow', 'outflow', 'transfersIn', 'transfersOut'],
+  openingBalance: ['openingBalance'],
+  closingBalance: ['closingBalance'],
+}
+
+function financialDetailRows(data: any, key?: string): any[] {
+  if (!data || !key) return []
+  const groups = data.detailGroups || data.details || {}
+  const keys = detailAliases[key] || [key]
+  const rows = keys.flatMap((candidate) => {
+    const value = groups[candidate]
+    return Array.isArray(value) ? value : []
+  })
+  const seen = new Set<string>()
+  return rows.filter((row) => {
+    const id = String(row?.id || row?.reference || JSON.stringify(row))
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+function valueLooksMoney(key: string) {
+  return /(amount|balance|debit|credit|total|revenue|profit|cost|cogs|tax|discount|paid|expense|inflow|outflow|value)$/i.test(key)
+}
+
+function FinancialDetailModal({ title, rows, onClose }: { title: string; rows: any[]; onClose: () => void }) {
+  const normalizedRows = Array.isArray(rows) ? rows : []
+  const columns = ['date', 'type', 'account', 'description', 'reference', 'customer', 'supplier', 'staff', 'branch', 'paymentMethod', 'quantity', 'inQty', 'outQty', 'itemCount', 'grossAmount', 'revenue', 'productRevenue', 'serviceRevenue', 'cogs', 'tax', 'discount', 'grossProfit', 'debit', 'credit', 'amount', 'balance']
+    .filter((key) => normalizedRows.some((row) => row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== ''))
+  const visibleColumns = columns.length ? columns : ['description', 'amount']
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true">
+      <div className="max-h-[92vh] w-full overflow-hidden rounded-t-lg bg-background shadow-xl sm:max-w-6xl sm:rounded-lg">
+        <div className="flex items-start justify-between gap-4 border-b px-4 py-3 sm:px-6">
+          <div>
+            <h3 className="text-base font-semibold">{title}</h3>
+            <p className="text-xs text-muted-foreground">{normalizedRows.length} source transaction{normalizedRows.length === 1 ? '' : 's'}</p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close details">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="max-h-[74vh] overflow-y-auto p-4 sm:p-6">
+          {normalizedRows.length ? (
+            <>
+              <div className="hidden overflow-x-auto rounded-lg border lg:block">
+                <table className="min-w-[1200px] w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      {visibleColumns.map((column) => (
+                        <th key={column} className={cn('px-4 py-3 font-medium text-muted-foreground', valueLooksMoney(column) ? 'text-right' : 'text-left')}>
+                          {column.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {normalizedRows.map((row, index) => (
+                      <tr key={`${row?.id || row?.reference || index}-${index}`} className="border-t hover:bg-muted/30">
+                        {visibleColumns.map((column) => (
+                          <td key={column} className={cn('px-4 py-2 align-top', valueLooksMoney(column) ? 'text-right tabular-nums' : '')}>
+                            {column === 'date' ? formatValue(row?.[column], 'date') : valueLooksMoney(column) ? formatCurrency(Number(row?.[column] || 0)) : formatValue(row?.[column])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="space-y-3 lg:hidden">
+                {normalizedRows.map((row, index) => (
+                  <div key={`${row?.id || row?.reference || index}-${index}`} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-medium break-words">{row?.description || row?.account || row?.type || 'Transaction'}</p>
+                        <p className="text-xs text-muted-foreground">{formatValue(row?.date, 'date')} {row?.reference ? `- ${row.reference}` : ''}</p>
+                        {(row?.customer || row?.staff || row?.branch) && (
+                          <p className="mt-1 break-words text-xs text-muted-foreground">
+                            {[row?.customer && `Customer: ${row.customer}`, row?.staff && `Staff: ${row.staff}`, row?.branch && `Branch: ${row.branch}`].filter(Boolean).join(' | ')}
+                          </p>
+                        )}
+                      </div>
+                      <p className="shrink-0 text-right font-semibold">{formatCurrency(Number(row?.amount ?? row?.debit ?? row?.credit ?? row?.balance ?? 0))}</p>
+                    </div>
+                    {row?.details && <p className="mt-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">{row.details}</p>}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">No source transactions were returned for this line.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BreakdownList({ title, data }: { title: string; data?: Record<string, number | any> }) {
+  const entries = Object.entries(data || {}).map(([label, value]) => {
+    let numValue = 0
+    if (typeof value === 'number') {
+      numValue = value
+    } else if (typeof value === 'object' && value !== null) {
+      // If value is an object, try to extract a numeric value
+      const numKeys = ['amount', 'total', 'value', 'count']
+      for (const key of numKeys) {
+        if (typeof value[key] === 'number') {
+          numValue = value[key]
+          break
+        }
+      }
+    } else {
+      numValue = Number(value) || 0
+    }
+    return [label, numValue] as [string, number]
+  }).filter(([, value]) => Number(value) > 0)
+
+  if (!entries.length) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-4">
+      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
+      <div className="space-y-2">
+        {entries.map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">{label}</span>
+            <span className="font-medium">{formatCurrency(Number(value) || 0)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ExpenseCategoryBreakdown({ summary }: { summary: any }) {
+  const categories = Object.entries(summary?.byCategory || {})
+  if (!categories.length) return null
+
+  return (
+    <div className="rounded-lg border bg-muted/20 p-4">
+      <h3 className="mb-3 text-sm font-semibold">Category Breakdown</h3>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {categories.map(([category, amount]) => (
+          <div key={category} className="rounded-lg border bg-background/70 p-3">
+            <p className="text-sm text-muted-foreground">{category}</p>
+            <p className="mt-1 font-semibold">{formatCurrency(Number(amount) || 0)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ReportTable({ data, columns }: { data: any[]; columns: ReportItem['columns'] }) {
+  if (!data || data.length === 0) return <p className="text-center text-muted-foreground py-8">No data available for this report.</p>
+  const rows = Array.isArray(data) ? data : [data]
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
+  const startIndex = (page - 1) * pageSize
+  const visibleRows = rows.slice(startIndex, startIndex + pageSize)
+  const cols = columns || Object.keys(rows[0]).map(k => ({ key: k, label: k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase()), format: 'text' as const }))
+
+  useEffect(() => {
+    setPage(1)
+  }, [data])
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              {cols.map(col => <th key={col.key} className="px-4 py-3 text-left font-medium text-muted-foreground">{col.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, i) => (
+              <tr key={`${row.id || row.receiptNo || row.name || i}-${i}`} className="border-t hover:bg-muted/30">
+                {cols.map(col => <td key={col.key} className="px-4 py-2">{formatValue(row[col.key], col.format)}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm text-muted-foreground">
+        <span>Showing {rows.length ? startIndex + 1 : 0}-{Math.min(startIndex + pageSize, rows.length)} of {rows.length} rows</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.max(1, prev - 1))} disabled={page === 1}>Previous</Button>
+          <span>Page {page} of {totalPages}</span>
+          <Button variant="outline" size="sm" onClick={() => setPage(prev => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>Next</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LedgerReport({ data, columns }: { data: any; columns: ReportItem['columns'] }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Click Generate to load.</p>
+  const entries = data.data || []
+  if (!entries.length) return <p className="text-center text-muted-foreground py-8">No transactions found for the selected period.</p>
+
+  const entityName = data.customer?.name || data.supplier?.name || data.product?.name || ''
+  const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : data.product ? 'Product' : ''
+  const isProductLedger = !!data.product
+  const openingLabel = isProductLedger ? 'Opening Stock' : 'Opening Balance'
+  const closingLabel = isProductLedger ? 'Closing Stock' : 'Closing Balance'
+  const openingValue = isProductLedger ? data.openingStock : data.openingBalance
+  const closingValue = isProductLedger ? data.closingStock : data.closingBalance
+  const detailsForRow = (row: any) => {
+    if (Array.isArray(row.detailsRows) && row.detailsRows.length) return row.detailsRows
+    if (Array.isArray(row.items) && row.items.length) return [row, ...row.items.map((item: any, index: number) => ({ id: `${row.id || row.reference || 'row'}-item-${index}`, date: row.date, type: 'Item', account: row.account, description: item.product || item.name || row.description, reference: row.reference, quantity: item.quantity, amount: item.total, revenue: item.total, cogs: item.cogs, grossProfit: item.grossProfit }))]
+    return [row]
+  }
+
+  return (
+    <>
+      <div className="space-y-4">
+        {entityName && (
+          <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground">{entityType}</p>
+              <p className="text-lg font-semibold">{entityName}</p>
+              {data.customer?.phone && <p className="text-sm text-muted-foreground">{data.customer.phone}</p>}
+              {data.supplier?.phone && <p className="text-sm text-muted-foreground">{data.supplier.phone}</p>}
+              {data.product?.sku && <p className="text-sm text-muted-foreground">SKU: {data.product.sku}</p>}
+            </div>
+            <div className="flex gap-6 sm:justify-end">
+              <div className="text-right"><p className="text-xs text-muted-foreground">{openingLabel}</p><p className="font-semibold">{isProductLedger ? openingValue : formatCurrency(openingValue)}</p></div>
+              <div className="text-right"><p className="text-xs text-muted-foreground">{closingLabel}</p><p className="font-semibold">{isProductLedger ? closingValue : formatCurrency(closingValue)}</p></div>
+            </div>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="bg-muted/50">
+              <tr>{columns?.map(col => { const isNumeric = col.format === 'currency' || col.format === 'number'; return <th key={col.key} className={`px-4 py-3 font-medium text-muted-foreground ${isNumeric ? 'text-right' : 'text-left'}`}>{col.label}</th> })}</tr>
+            </thead>
+            <tbody>
+              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Opening Balance</td><td className="px-4 py-2 text-right">{isProductLedger ? openingValue : formatCurrency(openingValue)}</td></tr>
+              {entries.map((row: any, i: number) => {
+                const rowDetails = detailsForRow(row)
+                return (
+                  <tr key={row.id || row.reference || i} className="cursor-pointer border-t hover:bg-muted/30" onClick={() => setDetail({ title: row.description || row.account || 'Ledger entry', rows: rowDetails })}>
+                    {columns?.map(col => {
+                      const isNumeric = col.format === 'currency' || col.format === 'number'
+                      const val = row[col.key]
+                      const displayVal = (isNumeric && (val === 0 || val === null || val === undefined)) ? '-' : formatValue(val, col.format)
+                      return <td key={col.key} className={`px-4 py-2 ${isNumeric ? 'text-right tabular-nums' : ''}`}>{displayVal}</td>
+                    })}
+                  </tr>
+                )
+              })}
+              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Closing Balance</td><td className="px-4 py-2 text-right">{isProductLedger ? closingValue : formatCurrency(closingValue)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        {data.summary && <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">{Object.entries(data.summary).map(([k, v]) => <div key={k}><p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p><p className="font-semibold">{typeof v === 'number' ? (k.toLowerCase().includes('count') || k.toLowerCase().includes('qty') ? v : formatCurrency(v)) : String(v)}</p></div>)}</div>}
+      </div>
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
+  )
+}
+
+function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryKeys'] }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Select an entity to view statement.</p>
+  const entityName = data.customer?.name || data.supplier?.name || ''
+  const entityType = data.customer ? 'Customer' : data.supplier ? 'Supplier' : ''
+  const isCustomer = !!data.customer
+  const transactions = data.transactions || []
+
+  const getTransactionBadgeColor = (type: string) => {
+    switch (type) {
+      case 'Sale':
+        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+      case 'Payment Received':
+        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+      case 'Credit Note':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+      case 'Return/Refund':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+      case 'Discount':
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Entity header - Bank Statement Style */}
+      {entityName && (
+        <div className="rounded-lg border-2 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800 px-6 py-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{entityType} Account Statement</p>
+              <p className="text-2xl font-bold mt-1">{entityName}</p>
+              <div className="flex gap-6 mt-3 text-sm text-muted-foreground">
+                {(data.customer?.phone || data.supplier?.phone) && <p>{data.customer?.phone || data.supplier?.phone}</p>}
+                {(data.customer?.email || data.supplier?.email) && <p>{data.customer?.email || data.supplier?.email}</p>}
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">Current Balance</p>
+              <p className={`text-2xl font-bold mt-1 ${(data.summary?.currentBalance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {formatCurrency(data.summary?.currentBalance || 0)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-2">Statement Date: {formatDisplayDate(data.generatedAt)}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary cards - Enhanced */}
+      {data.summary && keys && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {keys.map(k => (
+            <Card key={k.key} className="border-l-4 border-l-blue-500">
+              <CardContent className="p-4">
+                <p className="text-xs font-medium text-muted-foreground uppercase">{k.label}</p>
+                <p className="mt-2 text-xl font-bold">{formatValue(data.summary[k.key], k.format)}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+
+
+      {/* Placeholder - Transactions merged into comprehensive ledger below */}
+
+      {/* Comprehensive Transaction Ledger - Bank Statement Style */}
+      {transactions.length > 0 && (
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Transaction History - Complete Ledger</h3>
+            <p className="text-xs text-muted-foreground">{transactions.length} transactions</p>
+          </div>
+          {/* Desktop view */}
+          <div className="hidden lg:block overflow-x-auto rounded-lg border">
+            <table className="min-w-[1400px] w-full text-sm">
+              <thead className="sticky top-0 bg-muted/50 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-20">Date</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Type</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground flex-1">Description</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-28">Reference</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Method</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Debit</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Credit</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((txn: any, idx: number) => (
+                  <tr key={txn.id || idx} className="border-t hover:bg-muted/30 transition-colors">
+                    <td className="px-4 py-3 whitespace-nowrap text-xs">
+                      {(() => {
+                        const d = new Date(txn.date)
+                        const day = String(d.getDate()).padStart(2, '0')
+                        const month = String(d.getMonth() + 1).padStart(2, '0')
+                        const year = d.getFullYear()
+                        return `${day}/${month}/${year}`
+                      })()}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTransactionBadgeColor(txn.type)}`}>
+                        {txn.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="truncate">{txn.description}</div>
+                      {txn.details && <div className="text-xs text-muted-foreground truncate">{txn.details}</div>}
+                    </td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap font-mono">{txn.reference}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{txn.paymentMethod}</td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {txn.debit > 0 ? formatCurrency(txn.debit) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {txn.credit > 0 ? formatCurrency(txn.credit) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-bold">
+                      <span className={txn.balance > 0 ? 'text-red-600' : 'text-green-600'}>
+                        {formatCurrency(txn.balance)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile/Tablet view */}
+          <div className="lg:hidden space-y-3">
+            {transactions.map((txn: any, idx: number) => (
+              <Card key={txn.id || idx} className="border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${getTransactionBadgeColor(txn.type)}`}>
+                      {txn.type}
+                    </span>
+                    <p className="text-xs text-muted-foreground">
+                      {(() => {
+                        const d = new Date(txn.date)
+                        const day = String(d.getDate()).padStart(2, '0')
+                        const month = String(d.getMonth() + 1).padStart(2, '0')
+                        const year = d.getFullYear()
+                        return `${day}/${month}/${year}`
+                      })()}
+                    </p>
+                  </div>
+                  <p className="font-medium text-sm mb-1">{txn.description}</p>
+                  {txn.details && <p className="text-xs text-muted-foreground mb-3">{txn.details}</p>}
+                  <div className="grid grid-cols-3 gap-2 pt-3 border-t text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Debit</p>
+                      <p className="font-semibold">{txn.debit > 0 ? formatCurrency(txn.debit) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Credit</p>
+                      <p className="font-semibold">{txn.credit > 0 ? formatCurrency(txn.credit) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Balance</p>
+                      <p className={`font-bold ${txn.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {formatCurrency(txn.balance)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {transactions.length === 0 && (
+        <div className="rounded-lg border border-dashed p-8 text-center">
+          <p className="text-muted-foreground">No transactions found for this {isCustomer ? 'customer' : 'supplier'}.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SummaryCards({ data, keys }: { data: any; keys: ReportItem['summaryKeys'] }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+  const valueFor = (key: string) => data[key] ?? data.summary?.[key]
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {keys?.map(k => {
+          const rows = financialDetailRows(data, k.key)
+          const clickable = rows.length > 0
+          return (
+            <Card
+              key={k.key}
+              role={clickable ? 'button' : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              className={cn(clickable && 'cursor-pointer transition hover:border-primary/40 hover:shadow-sm')}
+              onClick={() => clickable && setDetail({ title: k.label, rows })}
+              onKeyDown={(event) => {
+                if (clickable && (event.key === 'Enter' || event.key === ' ')) setDetail({ title: k.label, rows })
+              }}
+            >
+              <CardContent className="p-4">
+                <p className="text-sm text-muted-foreground">{k.label}</p>
+                <p className="mt-1 text-2xl font-bold">{formatValue(valueFor(k.key), k.format)}</p>
+                {clickable && <p className="mt-2 text-xs font-medium text-primary">View source transactions</p>}
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
+  )
+}
+
+type PerformanceSeries = { key: string; label: string; color: string; format: 'currency' | 'number' }
+type PerformanceChartSpec = { title: string; labelKey: string; rows: any[]; series: PerformanceSeries[] }
+
+function getPerformanceChartSpecs(reportId: string, data: any): PerformanceChartSpec[] {
+  const labelKey = reportId === 'performanceBranch' ? 'branch' : reportId === 'performanceCategory' ? 'category' : 'product'
+  const allRows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  const rows = allRows.slice(0, 10)
+  if (!rows.length) return []
+
+  return reportId === 'performanceBranch'
+    ? [
+        { title: 'Revenue and discounts by branch', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' }, { key: 'discount', label: 'Discount', color: '#e5a11a', format: 'currency' }] },
+        { title: 'Sales volume by branch', labelKey, rows, series: [{ key: 'count', label: 'Sales', color: '#3987d7', format: 'number' }] },
+        { title: 'Average sale value by branch', labelKey, rows, series: [{ key: 'avgSale', label: 'Average sale', color: '#7765c4', format: 'currency' }] },
+      ]
+    : reportId === 'performanceCategory'
+      ? [
+          { title: 'Revenue and gross profit by category', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' }] },
+          { title: 'Quantity sold by category', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' }] },
+        ]
+      : reportId === 'performanceProduct'
+        ? [
+            { title: 'Revenue and gross profit by product', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#0f9f6e', format: 'currency' }, { key: 'profit', label: 'Gross profit', color: '#3987d7', format: 'currency' }] },
+            { title: 'Quantity sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity', color: '#e5a11a', format: 'number' }] },
+            { title: 'Sales transactions by product', labelKey, rows, series: [{ key: 'transactions', label: 'Transactions', color: '#7765c4', format: 'number' }] },
+          ]
+        : [
+            { title: 'Units sold by product', labelKey, rows, series: [{ key: 'quantity', label: 'Quantity sold', color: reportId === 'performanceLeastProducts' ? '#d97745' : '#0f9f6e', format: 'number' }] },
+            { title: 'Revenue and gross profit', labelKey, rows, series: [{ key: 'revenue', label: 'Revenue', color: '#3987d7', format: 'currency' }, { key: 'profit', label: 'Gross profit', color: '#e5a11a', format: 'currency' }] },
+          ]
+}
+
+function getPropertyManagementChartSpecs(reportId: string, data: any): PerformanceChartSpec[] {
+  if (reportId === 'propertyRentArrears') return [{ title: 'Rent arrears aging', labelKey: 'bucket', rows: data?.agingSummary || [], series: [{ key: 'amount', label: 'Outstanding rent', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyRentRoll') return [{ title: 'Portfolio occupancy', labelKey: 'status', rows: data?.occupancySummary || [], series: [{ key: 'units', label: 'Units', color: '#0f9f6e', format: 'number' }] }]
+  if (reportId === 'propertyRentCollections') return [{ title: 'Rent collected by day', labelKey: 'date', rows: data?.collectionsByDate || [], series: [{ key: 'amount', label: 'Collected', color: '#3987d7', format: 'currency' }] }]
+  if (reportId === 'propertyPaymentPlans') return [{ title: 'Repayment plan progress', labelKey: 'planNo', rows: data?.paymentPlans || [], series: [{ key: 'amountPaid', label: 'Paid', color: '#0f9f6e', format: 'currency' }, { key: 'balance', label: 'Outstanding', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyPlotSales') return [{ title: 'Plot sale settlement', labelKey: 'saleNo', rows: data?.plotSales || [], series: [{ key: 'amountPaid', label: 'Paid', color: '#0f9f6e', format: 'currency' }, { key: 'balance', label: 'Outstanding', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyPlotPurchases') return [{ title: 'Plot supplier settlement', labelKey: 'purchaseNo', rows: data?.plotPurchases || [], series: [{ key: 'amountPaid', label: 'Paid', color: '#0f9f6e', format: 'currency' }, { key: 'balance', label: 'Outstanding', color: '#d97706', format: 'currency' }] }]
+  if (reportId === 'propertyOwnerPayouts') {
+    const grouped = (data?.ownerPayouts || []).reduce((map: Map<string, number>, row: any) => map.set(row.owner, (map.get(row.owner) || 0) + Number(row.amount || 0)), new Map<string, number>())
+    return [{ title: 'Payouts by landlord', labelKey: 'owner', rows: [...grouped].map(([owner, amount]) => ({ owner, amount })), series: [{ key: 'amount', label: 'Paid out', color: '#7765c4', format: 'currency' }] }]
+  }
+  return []
+}
+
+function PerformanceAxisTick({ x, y, payload }: any) {
+  const label = String(payload?.value ?? '')
+  const shortened = label.length > 17 ? `${label.slice(0, 16)}…` : label
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={-8} y={4} textAnchor="end" fill="hsl(var(--muted-foreground))" fontSize={11}>
+        {shortened}
+      </text>
+    </g>
+  )
+}
+
+function PerformanceChart({
+  title,
+  rows,
+  labelKey,
+  series,
+}: {
+  title: string
+  rows: any[]
+  labelKey: string
+  series: Array<{ key: string; label: string; color: string; format: 'currency' | 'number' }>
+}) {
+  const formatter = (value: number, name: string, props: any) => {
+    const item = series.find(metric => metric.key === props?.dataKey)
+    const formatted = item?.format === 'currency' ? formatCurrency(Number(value) || 0) : Number(value || 0).toLocaleString()
+    return [formatted, item?.label || name]
+  }
+  const tickFormatter = (value: number) => {
+    const currencyMetric = series.some(metric => metric.format === 'currency')
+    return currencyMetric ? formatCurrency(Number(value) || 0) : Number(value || 0).toLocaleString()
+  }
+
+  return (
+    <section className="min-w-0 border-t pt-4 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <div className="mt-3 h-[270px] min-w-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 14, bottom: 4, left: 0 }} barCategoryGap="24%">
+            <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis type="number" tickFormatter={tickFormatter} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+            <YAxis type="category" dataKey={labelKey} width={128} tick={<PerformanceAxisTick />} axisLine={false} tickLine={false} />
+            <Tooltip
+              formatter={formatter}
+              contentStyle={{ borderRadius: 8, border: '1px solid hsl(var(--border))', background: 'hsl(var(--popover))', color: 'hsl(var(--popover-foreground))', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)' }}
+              labelStyle={{ fontWeight: 600, marginBottom: 4 }}
+              cursor={{ fill: 'hsl(var(--muted))', opacity: 0.45 }}
+            />
+            {series.map(metric => (
+              <Bar key={metric.key} dataKey={metric.key} name={metric.label} fill={metric.color} radius={[0, 4, 4, 0]} maxBarSize={20} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  )
+}
+
+function BusinessPerformanceCharts({ reportId, data }: { reportId: string; data: any }) {
+  const allRows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  if (!allRows.length) return null
+  const charts = getPerformanceChartSpecs(reportId, data)
+  const limit = 10
+  const rankLabel = reportId === 'performanceLeastProducts'
+    ? `Least-selling ${Math.min(limit, allRows.length)} of ${allRows.length}`
+    : reportId === 'performanceTopProducts'
+      ? `Top-selling ${Math.min(limit, allRows.length)} of ${allRows.length}`
+      : `Top ${Math.min(limit, allRows.length)} of ${allRows.length} by ${reportId === 'performanceBranch' ? 'revenue' : reportId === 'performanceCategory' ? 'revenue' : 'revenue'}`
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-2">
+        <h2 className="text-base font-semibold">Performance at a glance</h2>
+        <p className="text-xs text-muted-foreground">{rankLabel} · values match the report rows below</p>
+      </div>
+      <div className={cn('grid gap-x-8 gap-y-7', charts.length === 3 ? 'lg:grid-cols-2 xl:grid-cols-3' : 'lg:grid-cols-2')}>
+        {charts.map(chart => (
+          <PerformanceChart key={chart.title} title={chart.title} rows={chart.rows} labelKey={chart.labelKey} series={chart.series} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PropertyManagementCharts({ reportId, data }: { reportId: string; data: any }) {
+  const charts = getPropertyManagementChartSpecs(reportId, data).filter(chart => chart.rows.length > 0)
+  if (!charts.length) return null
+  return (
+    <div className="space-y-3 border-b pb-4">
+      <h2 className="text-sm font-semibold">Portfolio insights</h2>
+      <div className={cn('grid min-w-0 gap-x-8 gap-y-5', charts.length > 1 ? 'lg:grid-cols-2' : 'grid-cols-1')}>
+        {charts.map(chart => <PerformanceChart key={chart.title} {...chart} />)}
+      </div>
+    </div>
+  )
+}
+
+function AdvancedSalesSummary({ data }: { data: any }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const trendData = Array.isArray(data.trend) && data.trend.length > 0
+    ? data.trend
+    : [
+        { label: 'Sales', value: Number(data.totalRevenue || 0) },
+      ]
+
+  const performance = [
+    { name: 'Revenue', value: Number(data.totalRevenue || 0) },
+    { name: 'Discount', value: Number(data.totalDiscount || 0) },
+    { name: 'Tax', value: Number(data.totalTax || 0) },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <SummaryCards data={data} keys={[
+        { key: 'count', label: 'Total Sales', format: 'number' },
+        { key: 'totalRevenue', label: 'Total Revenue', format: 'currency' },
+        { key: 'totalSubtotal', label: 'Subtotal', format: 'currency' },
+        { key: 'totalDiscount', label: 'Total Discount', format: 'currency' },
+        { key: 'totalTax', label: 'Total Tax', format: 'currency' },
+        { key: 'avgSale', label: 'Average Sale', format: 'currency' },
+      ]} />
+      <div className="grid gap-4 xl:grid-cols-[1.4fr_0.8fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Revenue Trend</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={trendData}>
+                <defs>
+                  <linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#2563eb" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="label" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <Area type="monotone" dataKey="value" stroke="#2563eb" fill="url(#revenueFill)" strokeWidth={2} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Revenue Mix</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={performance} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
+                  <Cell fill="#2563eb" />
+                  <Cell fill="#f59e0b" />
+                  <Cell fill="#10b981" />
+                </Pie>
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function AdvancedFastMoving({ data }: { data: any }) {
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  if (!rows.length) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const topProducts = rows.slice(0, 8)
+  const chartData = topProducts.map((row: any) => ({ name: row.product, quantity: Number(row.quantity || 0), revenue: Number(row.revenue || 0) }))
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Top Movers</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatNumber(Number(value) || 0)} />
+                <Bar dataKey="quantity" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Revenue Leaders</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            {topProducts.map((row: any, idx: number) => (
+              <div key={row.product || idx} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{row.product}</span>
+                  <span className="text-sm text-muted-foreground">{Number(row.quantity || 0)} sold</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-muted">
+                  <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (Number(row.revenue || 0) / Math.max(...topProducts.map((x: any) => Number(x.revenue || 0))) || 0) * 100)}%` }} />
+                </div>
+                <p className="mt-2 text-sm font-semibold">{formatCurrency(Number(row.revenue || 0))}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+      <ReportTable data={rows} columns={[
+        { key: 'product', label: 'Product', format: 'text' },
+        { key: 'quantity', label: 'Qty Sold', format: 'number' },
+        { key: 'revenue', label: 'Revenue', format: 'currency' },
+      ]} />
+    </div>
+  )
+}
+
+function AdvancedBranchPerformance({ data }: { data: any }) {
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+  if (!rows.length) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const chartData = rows.map((row: any) => ({ name: row.branch, revenue: Number(row.revenue || 0), sales: Number(row.count || 0), avgSale: Number(row.avgSale || 0) }))
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Branch Revenue</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} formatter={(value: any) => formatCurrency(Number(value) || 0)} />
+                <Bar dataKey="revenue" fill="#0f766e" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Sales vs Avg Sale</CardTitle></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid {...chartGrid} />
+                <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} interval={0} angle={-12} textAnchor="end" height={70} />
+                <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickLine={false} axisLine={false} />
+                <Tooltip {...chartTooltip} />
+                <Line type="monotone" dataKey="sales" stroke="#3b82f6" strokeWidth={2} />
+                <Line type="monotone" dataKey="avgSale" stroke="#f59e0b" strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+      <ReportTable data={rows} columns={[
+        { key: 'branch', label: 'Branch', format: 'text' },
+        { key: 'count', label: 'Sales', format: 'number' },
+        { key: 'revenue', label: 'Revenue', format: 'currency' },
+        { key: 'discount', label: 'Discount', format: 'currency' },
+        { key: 'avgSale', label: 'Avg Sale', format: 'currency' },
+      ]} />
+    </div>
+  )
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('en-US').format(value || 0)
+}
+
+function PnLReport({ data }: { data: any }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const hasComparison = !!data.previous
+  const fmtChange = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+  const rows = [
+    { key: 'revenue', label: 'Revenue', value: data.revenue, bold: true, prev: data.previous?.revenue, change: data.changes?.revenue },
+    { key: 'cogs', label: 'Cost of Sales (COGS)', value: -data.cogs, prev: data.previous ? -data.previous.cogs : undefined, change: data.changes?.cogs },
+    { key: 'grossProfit', label: 'Gross Profit', value: data.grossProfit, bold: true, highlight: true, prev: data.previous?.grossProfit, change: data.changes?.grossProfit },
+    { key: 'expenses', label: 'Operating Expenses', value: -data.expenses, prev: data.previous ? -data.previous.expenses : undefined, change: data.changes?.expenses },
+    { key: 'netProfit', label: 'Net Profit', value: data.netProfit, bold: true, highlight: true, prev: data.previous?.netProfit, change: data.changes?.netProfit },
+  ]
+  const extraRows = [
+    { key: 'totalDiscount', label: 'Total Discount', value: data.totalDiscount, format: 'currency' as const },
+    { key: 'totalTax', label: 'Total Tax', value: data.totalTax, format: 'currency' as const },
+    { key: 'salesCount', label: 'Sales Count', value: data.salesCount, format: 'number' as const },
+  ]
+
+  const openDetail = (label: string, key: string) => {
+    const rows = financialDetailRows(data, key)
+    if (rows.length) setDetail({ title: label, rows })
+  }
+
+  return (
+    <div className="space-y-4">
+      {hasComparison && data.periods && (
+        <div className="flex flex-wrap gap-4 text-sm">
+          <div className="rounded-lg bg-blue-50 px-4 py-2">
+            <span className="text-muted-foreground">Current: </span>
+            <span className="font-semibold">{data.periods.current?.from ? `${formatDisplayDate(data.periods.current.from)} - ${formatDisplayDate(data.periods.current.to)}` : ''}</span>
+          </div>
+          <div className="rounded-lg bg-gray-100 px-4 py-2">
+            <span className="text-muted-foreground">Previous: </span>
+            <span className="font-semibold">{data.periods.previous?.from ? `${formatDisplayDate(data.periods.previous.from)} - ${formatDisplayDate(data.periods.previous.to)}` : ''}</span>
+          </div>
+        </div>
+      )}
+      <Card>
+        <CardContent className="p-6">
+          <div className="space-y-3">
+            {rows.map((r) => {
+              const hasDetails = financialDetailRows(data, r.key).length > 0
+              return (
+                <div
+                  key={r.key}
+                  role={hasDetails ? 'button' : undefined}
+                  tabIndex={hasDetails ? 0 : undefined}
+                  className={cn('flex items-center justify-between rounded-lg p-3', r.bold ? 'bg-muted/50 font-bold' : '', hasDetails && 'cursor-pointer transition hover:bg-primary/5')}
+                  onClick={() => openDetail(r.label, r.key)}
+                  onKeyDown={(event) => {
+                    if (hasDetails && (event.key === 'Enter' || event.key === ' ')) openDetail(r.label, r.key)
+                  }}
+                >
+                  <div className="flex flex-col">
+                    <span>{r.label}</span>
+                    {hasDetails && <span className="text-xs font-normal text-primary">View source transactions</span>}
+                    {hasComparison && r.prev !== undefined && <span className="text-xs font-normal text-muted-foreground">Prev: {formatCurrency(r.prev || 0)}</span>}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {hasComparison && r.change !== undefined && <span className={cn('text-xs font-normal', r.change >= 0 ? 'text-green-600' : 'text-red-600')}>{fmtChange(r.change)}</span>}
+                    <span className={cn(r.highlight && r.value >= 0 ? 'text-green-600' : r.highlight && r.value < 0 ? 'text-red-600' : '')}>{formatCurrency(r.value || 0)}</span>
+                  </div>
+                </div>
+              )
+            })}
+            {data.grossMargin !== undefined && <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">Gross Margin</span><span className="font-semibold">{data.grossMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.grossMargin?.toFixed(1)}%)` : ''}</span></div>}
+            {data.netMargin !== undefined && <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm"><span className="text-muted-foreground">Net Margin</span><span className="font-semibold">{data.netMargin.toFixed(1)}%{hasComparison && data.previous ? ` (was ${data.previous.netMargin?.toFixed(1)}%)` : ''}</span></div>}
+            <div className="flex justify-between rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground"><span>Additional Info</span></div>
+            {extraRows.map((row) => {
+              const rows = financialDetailRows(data, row.key)
+              const hasDetails = rows.length > 0
+              return (
+                <div key={row.key} role={hasDetails ? 'button' : undefined} tabIndex={hasDetails ? 0 : undefined} className={cn('flex justify-between rounded-lg p-3 text-sm', hasDetails && 'cursor-pointer hover:bg-primary/5')} onClick={() => openDetail(row.label, row.key)} onKeyDown={(event) => { if (hasDetails && (event.key === 'Enter' || event.key === ' ')) openDetail(row.label, row.key) }}>
+                  <span>{row.label}{hasDetails && <span className="ml-2 text-xs text-primary">View source</span>}</span>
+                  <span>{row.format === 'number' ? formatNumber(Number(row.value || 0)) : formatCurrency(row.value || 0)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+      {data.commentary && data.commentary.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Lightbulb className="h-4 w-4 text-amber-500" />Analysis & Commentary</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {data.commentary.map((c: string, i: number) => <div key={i} className="flex items-start gap-2 rounded-lg border-l-4 border-l-blue-500 bg-blue-50/50 p-3"><Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" /><p className="text-sm">{c}</p></div>)}
+          </CardContent>
+        </Card>
+      )}
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </div>
+  )
+}
+
+function BalanceSheetReport({ data }: { data: any }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const line = (label: string, value: number, key: string, bold = false) => {
+    const rows = financialDetailRows(data, key)
+    const clickable = rows.length > 0
+    return (
+      <div
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        className={cn('flex justify-between gap-4 rounded-md px-2 py-2', bold ? 'border-t pt-3 font-bold' : 'text-sm', clickable && 'cursor-pointer hover:bg-primary/5')}
+        onClick={() => clickable && setDetail({ title: label, rows })}
+        onKeyDown={(event) => { if (clickable && (event.key === 'Enter' || event.key === ' ')) setDetail({ title: label, rows }) }}
+      >
+        <span>{label}{clickable && !bold && <span className="ml-2 text-xs font-medium text-primary">View source</span>}</span>
+        <span className="text-right tabular-nums">{formatCurrency(value || 0)}</span>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Card>
+          <CardHeader><CardTitle className="text-base">Assets</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {(data.lineItems?.assets || []).map((item: any) => <div key={item.key}>{line(item.label, item.amount, item.key)}</div>)}
+            {line('Total Assets', data.assets?.totalAssets || 0, 'totalAssets', true)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Liabilities</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {(data.lineItems?.liabilities || []).map((item: any) => <div key={item.key}>{line(item.label, item.amount, item.key)}</div>)}
+            {line('Total Liabilities', data.liabilities?.totalLiabilities || 0, 'totalLiabilities', true)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle className="text-base">Equity</CardTitle></CardHeader>
+          <CardContent className="space-y-1">
+            {(data.lineItems?.equity || []).map((item: any) => <div key={item.key}>{line(item.label, item.amount, item.key)}</div>)}
+            {line('Total Equity', data.equity?.totalEquity || 0, 'totalEquity', true)}
+          </CardContent>
+        </Card>
+      </div>
+      {typeof data.difference === "number" && Math.abs(data.difference) >= 0.01 && <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Unreconciled difference: {formatCurrency(data.difference)}. Assets do not equal recorded liabilities and equity.</p>}
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
+  )
+}
+
+function TrialBalanceReport({ data }: { data: any }) {
+  const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
+  if (!data?.accounts) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+  const totalDebit = data.totalDebit ?? data.accounts.reduce((a: number, x: any) => a + (x.debit || 0), 0)
+  const totalCredit = data.totalCredit ?? data.accounts.reduce((a: number, x: any) => a + (x.credit || 0), 0)
+  return (
+    <>
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-muted/50">
+            <tr><th className="px-4 py-3 text-left font-medium">Account</th><th className="px-4 py-3 text-right font-medium">Debit</th><th className="px-4 py-3 text-right font-medium">Credit</th></tr>
+          </thead>
+          <tbody>
+            {data.accounts.map((acc: any, i: number) => {
+              const rows = Array.isArray(acc.details) ? acc.details : financialDetailRows(data, acc.key || acc.account)
+              const clickable = rows.length > 0
+              return (
+                <tr key={i} className={cn('border-t hover:bg-muted/30', clickable && 'cursor-pointer')} onClick={() => clickable && setDetail({ title: acc.account, rows })}>
+                  <td className="px-4 py-2">
+                    <div className="font-medium">{acc.account}</div>
+                    {clickable && <div className="text-xs text-primary">View source transactions</div>}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{acc.debit ? formatCurrency(acc.debit) : '-'}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{acc.credit ? formatCurrency(acc.credit) : '-'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot className="border-t-2 font-bold">
+            <tr><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right tabular-nums">{formatCurrency(totalDebit)}</td><td className="px-4 py-3 text-right tabular-nums">{formatCurrency(totalCredit)}</td></tr>
+          </tfoot>
+        </table>
+      </div>
+      {typeof data.difference === 'number' && Math.abs(data.difference) >= 0.01 && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Difference: {formatCurrency(data.difference)}. Open the rows above to inspect the source balances and period activity.</p>}
+      {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
+    </>
+  )
+}
+
+function AgingReport({ data }: { data: any }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+  const buckets = data.buckets || {}
+  const bucketLabels: Record<string, string> = {
+    notDue: 'Not yet due', current: 'Due today', '1-30': '1-30 days overdue',
+    '31-60': '31-60 days overdue', '61-90': '61-90 days overdue', '90+': 'Over 90 days overdue',
+  }
+  const summaryRows = Array.isArray(data.data) ? data.data : []
+  const detailRows = Array.isArray(data.transactions) ? data.transactions : []
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <p className="text-muted-foreground">Aging calculated from each document's due date as of <span className="font-medium text-foreground">{formatDisplayDate(data.asOfDate)}</span>.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 font-semibold">
+          <span>Open balance: {formatCurrency(Number(data.summary?.totalOutstanding || 0))}</span>
+          <span>{data.summary?.entityCount || 0} customers / suppliers</span>
+          <span>{data.summary?.documentCount || 0} open documents</span>
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {Object.entries(bucketLabels).map(([key, label]) => (
+          <Card key={key}><CardContent className="p-3">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="mt-1 font-bold tabular-nums">{formatCurrency(Number(buckets[key]) || 0)}</p>
+          </CardContent></Card>
+        ))}
+      </div>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">Balance by {data.title?.includes('Supplier') ? 'supplier' : 'customer'}</h3>
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="min-w-[1000px] w-full text-sm">
+            <thead className="bg-muted/50"><tr>
+              <th className="px-3 py-3 text-left font-medium">Name</th>
+              <th className="px-3 py-3 text-right font-medium">Open documents</th>
+              {Object.keys(bucketLabels).map((key) => <th key={key} className="px-3 py-3 text-right font-medium">{bucketLabels[key]}</th>)}
+              <th className="px-3 py-3 text-right font-medium">Total outstanding</th>
+              <th className="px-3 py-3 text-right font-medium">Oldest overdue</th>
+            </tr></thead>
+            <tbody>{summaryRows.map((row: any, index: number) => (
+              <tr key={row.customerId || row.supplierId || index} className="border-t hover:bg-muted/30">
+                <td className="px-3 py-2 font-medium">{row.customer || row.supplier}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.documentCount}</td>
+                {Object.keys(bucketLabels).map((key) => <td key={key} className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.aging?.[key] || 0))}</td>)}
+                <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(Number(row.totalBalance || 0))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.oldestDaysPastDue ? `${row.oldestDaysPastDue} days` : '—'}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">Open invoices and bills</h3>
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="min-w-[1350px] w-full text-sm">
+            <thead className="bg-muted/50"><tr>
+              <th className="px-3 py-3 text-left font-medium">Customer / Supplier</th>
+              <th className="px-3 py-3 text-left font-medium">Document</th>
+              <th className="px-3 py-3 text-left font-medium">Reference</th>
+              <th className="px-3 py-3 text-left font-medium">Document date</th>
+              <th className="px-3 py-3 text-left font-medium">Due date</th>
+              <th className="px-3 py-3 text-left font-medium">Aging basis</th>
+              <th className="px-3 py-3 text-right font-medium">Days overdue</th>
+              <th className="px-3 py-3 text-left font-medium">Age band</th>
+              <th className="px-3 py-3 text-right font-medium">Original</th>
+              <th className="px-3 py-3 text-right font-medium">Paid / adjusted</th>
+              {detailRows.some((row: any) => Number(row.creditApplied) > 0) && <th className="px-3 py-3 text-right font-medium">Credit applied</th>}
+              <th className="px-3 py-3 text-right font-medium">Outstanding</th>
+            </tr></thead>
+            <tbody>{detailRows.map((row: any, index: number) => (
+              <tr key={row.id || index} className="border-t hover:bg-muted/30">
+                <td className="px-3 py-2 font-medium">{row.customer || row.supplier}</td>
+                <td className="px-3 py-2">{row.documentType}</td>
+                <td className="px-3 py-2 font-mono text-xs">{row.reference || '—'}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{formatDisplayDate(row.documentDate)}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{formatDisplayDate(row.dueDate)}</td>
+                <td className="px-3 py-2">{row.agingBasis}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{row.daysPastDue ? row.daysPastDue : '—'}</td>
+                <td className="px-3 py-2">{bucketLabels[row.agingBucket] || 'Current'}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.originalAmount || 0))}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.paidAmount || 0))}</td>
+                {detailRows.some((item: any) => Number(item.creditApplied) > 0) && <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(Number(row.creditApplied || 0))}</td>}
+                <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatCurrency(Number(row.balance || 0))}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {!detailRows.length && <p className="py-6 text-center text-sm text-muted-foreground">No open documents for this period.</p>}
+      </section>
+    </div>
+  )
+}
+
+function ExecutiveSummaryReport({ data }: { data: any }) {
+  if (!data) return <p className="text-center text-muted-foreground py-8">No data available.</p>
+
+  const { comparisons, insights, topGrowers, topDecliners, categoryAnalysis, branchAnalysis, paymentMethodAnalysis, snapshot, periods } = data
+
+  const insightIcon = (icon: string) => {
+    switch (icon) {
+      case 'trend-up': return <TrendingUp className="h-4 w-4" />
+      case 'trend-down': return <TrendingDown className="h-4 w-4" />
+      case 'alert': return <AlertTriangle className="h-4 w-4" />
+      case 'clock': return <Clock className="h-4 w-4" />
+      default: return <Info className="h-4 w-4" />
+    }
+  }
+
+  const insightColor = (type: string) => {
+    switch (type) {
+      case 'positive': return 'border-l-green-500 bg-green-50/50'
+      case 'negative': return 'border-l-red-500 bg-red-50/50'
+      case 'warning': return 'border-l-amber-500 bg-amber-50/50'
+      default: return 'border-l-blue-500 bg-blue-50/50'
+    }
+  }
+
+  const fmtPeriod = (p: any) => {
+    if (!p?.from) return ''
+    return `${formatDisplayDate(p.from)} – ${formatDisplayDate(p.to)}`
+  }
+
+  const categoryChartData = (categoryAnalysis || []).slice(0, 8).map((c: any) => ({
+    name: c.category,
+    current: c.currentRevenue,
+    previous: c.previousRevenue,
+  }))
+
+  const payChartData = (paymentMethodAnalysis || []).map((p: any) => ({
+    name: p.method.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+    value: p.total,
+    share: p.share,
+  }))
+
+  return (
+    <div className="space-y-6">
+      {/* Period labels */}
+      <div className="flex flex-wrap gap-4 text-sm">
+        <div className="rounded-lg bg-blue-50 px-4 py-2">
+          <span className="text-muted-foreground">Current: </span>
+          <span className="font-semibold">{fmtPeriod(periods?.current)}</span>
+        </div>
+        <div className="rounded-lg bg-gray-100 px-4 py-2">
+          <span className="text-muted-foreground">Previous: </span>
+          <span className="font-semibold">{fmtPeriod(periods?.previous)}</span>
+        </div>
+      </div>
+
+      {/* Comparison Cards */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {(comparisons || []).map((c: any, i: number) => (
+          <Card key={i} className={cn('border-l-4', c.change >= 0 ? 'border-l-green-500' : 'border-l-red-500')}>
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">{c.metric}</p>
+              <p className="mt-1 text-xl font-bold">
+                {c.format === 'currency' ? formatCurrency(c.current) : new Intl.NumberFormat('en-US').format(c.current)}
+              </p>
+              <div className="mt-1 flex items-center gap-1 text-xs">
+                {c.change >= 0 ? (
+                  <ArrowUpRight className="h-3 w-3 text-green-600" />
+                ) : (
+                  <ArrowDownRight className="h-3 w-3 text-red-600" />
+                )}
+                <span className={c.change >= 0 ? 'text-green-600' : 'text-red-600'}>
+                  {c.change >= 0 ? '+' : ''}{c.change.toFixed(1)}%
+                </span>
+                <span className="text-muted-foreground">vs prev</span>
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Prev: {c.format === 'currency' ? formatCurrency(c.previous) : new Intl.NumberFormat('en-US').format(c.previous)}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Auto-Generated Insights */}
+      {insights && insights.length > 0 && (
+        <div>
+          <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <Lightbulb className="h-5 w-5 text-amber-500" />
+            Insights & Analysis
+          </h3>
+          <div className="space-y-2">
+            {insights.map((ins: any, i: number) => (
+              <div key={i} className={cn('flex items-start gap-3 rounded-lg border-l-4 p-3', insightColor(ins.type))}>
+                <div className="mt-0.5 shrink-0">{insightIcon(ins.icon)}</div>
+                <div>
+                  <p className="font-medium text-sm">{ins.title}</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">{ins.text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Key Drivers: Top Growers & Decliners */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {topGrowers && topGrowers.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingUp className="h-4 w-4 text-green-600" />
+                Top Growing Products
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {topGrowers.map((p: any, i: number) => (
+                <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium text-sm">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.category} · {p.currentQty} sold (was {p.previousQty})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-sm text-green-600">+{formatCurrency(p.revenueChange)}</p>
+                    <p className="text-xs text-muted-foreground">{formatCurrency(p.currentRevenue)}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+        {topDecliners && topDecliners.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingDown className="h-4 w-4 text-red-600" />
+                Top Declining Products
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {topDecliners.map((p: any, i: number) => (
+                <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="font-medium text-sm">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.category} · {p.currentQty} sold (was {p.previousQty})</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold text-sm text-red-600">{formatCurrency(p.revenueChange)}</p>
+                    <p className="text-xs text-muted-foreground">{formatCurrency(p.currentRevenue)}</p>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Category & Branch Analysis */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {categoryChartData.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Category Performance (Current vs Previous)</CardTitle></CardHeader>
+            <CardContent className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={categoryChartData}>
+                  <CartesianGrid {...chartGrid} />
+                  <XAxis dataKey="name" tick={{ ...chartAxisTick, fontSize: 11 }} interval={0} angle={-12} textAnchor="end" height={70} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                  <YAxis tick={{ ...chartAxisTick, fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} axisLine={chartAxisLine} tickLine={chartAxisLine} />
+                  <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
+                  <Bar dataKey="previous" fill="#94a3b8" radius={[3, 3, 0, 0]} name="Previous" />
+                  <Bar dataKey="current" fill="#2563eb" radius={[3, 3, 0, 0]} name="Current" />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+        {branchAnalysis && branchAnalysis.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Branch Performance</CardTitle></CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {branchAnalysis.map((b: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="font-medium text-sm">{b.branch}</p>
+                      <p className="text-xs text-muted-foreground">{b.salesCount} sales</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-sm">{formatCurrency(b.currentRevenue)}</p>
+                      <p className={cn('text-xs', b.change >= 0 ? 'text-green-600' : 'text-red-600')}>
+                        {b.change >= 0 ? '+' : ''}{b.change.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Payment Method Mix & Operational Snapshot */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {payChartData.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Payment Method Mix</CardTitle></CardHeader>
+            <CardContent className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={payChartData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={85} paddingAngle={2}>
+                    {payChartData.map((_: any, idx: number) => (
+                      <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip {...chartTooltip} formatter={(value: number) => formatCurrency(value)} />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+        {snapshot && (
+          <Card>
+            <CardHeader><CardTitle className="text-base">Operational Snapshot</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Gross Margin</p>
+                <p className="font-bold">{snapshot.grossMargin?.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Net Margin</p>
+                <p className="font-bold">{snapshot.netMargin?.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Cash on Hand</p>
+                <p className="font-bold">{formatCurrency(snapshot.cashOnHand)}</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Receivables</p>
+                <p className="font-bold">{formatCurrency(snapshot.receivablesOutstanding)}</p>
+                <p className="text-xs text-muted-foreground">{snapshot.receivablesCount} customers</p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Products</p>
+                <p className="font-bold">{snapshot.productCount}</p>
+                {snapshot.lowStockCount > 0 && <p className="text-xs text-amber-600">{snapshot.lowStockCount} low stock</p>}
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="text-xs text-muted-foreground">Expiring Soon</p>
+                <p className="font-bold">{snapshot.expiringCount}</p>
+                <p className="text-xs text-muted-foreground">within 60 days</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default function ReportsPage() {
+  const [searchParams] = useSearchParams()
+  const selectedReport = (serviceReportIds[searchParams.get('report') || ''] || searchParams.get('report'))
+  const selectedCustomerIdParam = searchParams.get('customerId') || ''
+  const selectedSupplierIdParam = searchParams.get('supplierId') || ''
+  const selectedProductIdParam = searchParams.get('productId') || ''
+  const selectedEntityIdParam = selectedCustomerIdParam || selectedSupplierIdParam || selectedProductIdParam
+  const [reportData, setReportData] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [selectedEntityId, setSelectedEntityId] = useState(selectedEntityIdParam)
+  const [selectedBranchId, setSelectedBranchId] = useState('')
+  const [selectedStaffId, setSelectedStaffId] = useState('')
+  const [selectedDailyCustomerId, setSelectedDailyCustomerId] = useState('')
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
+  const [entityList, setEntityList] = useState<any[]>([])
+  const [branchList, setBranchList] = useState<any[]>([])
+  const [dailyStaffList, setDailyStaffList] = useState<any[]>([])
+  const [dailyCustomerList, setDailyCustomerList] = useState<any[]>([])
+  const [businessInfo, setBusinessInfo] = useState<BusinessInfo | null>(null)
+  const { toast } = useToast()
+  const { hasPermission, user } = useJWTAuth()
+  const { canAccessFeature } = useFeatureAccess()
+  const online = useOnlineStatus()
+
+  const visibleCategories = useMemo(() => CATEGORIES.flatMap(c => c.id === 'services' ? [
+    { ...c, items: c.items.filter(item => !serviceReportPermissions[item.id]) },
+    { ...c, id: 'service-business', label: 'Service Business Reports', feature: 'service.reports', items: c.items.filter(item => serviceReportPermissions[item.id]) },
+  ] : [c]).map(c => ({ ...c, items: c.items.filter(item => (!item.feature || canAccessFeature(item.feature)) && canViewReportItem(item.id, item.permission || serviceReportPermissions[item.id] || c.permission, hasPermission)) }))
+    .filter(c => c.items.length > 0 && (c.id !== 'property-management' || canAccessFeature('property_management.landlord') || canAccessFeature('property_management.agent')) && (!c.feature || canAccessFeature(c.feature))), [hasPermission, canAccessFeature])
+  const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
+
+  const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])
+
+  // Fetch entity list when report changes
+  useEffect(() => {
+    const initialEntityId =
+      currentReport?.entityType === 'customer' ? selectedCustomerIdParam :
+      currentReport?.entityType === 'supplier' ? selectedSupplierIdParam :
+      currentReport?.entityType === 'product' ? selectedProductIdParam :
+      ''
+    setSelectedEntityId(initialEntityId)
+    setEntityList([])
+    if (!currentReport?.entityType) return
+    let cancelled = false
+    const entityType = currentReport.entityType
+    ;(async () => {
+      try {
+        if (entityType === 'customer') {
+          const res = await apiFetch('/api/receivables/customers?limit=10000')
+          if (res.ok) {
+            const data = await res.json()
+            const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+            if (!cancelled) setEntityList(list.map((c: any) => ({ id: c.id, label: c.name })))
+          } else {
+            // Fallback to receivables endpoint without limit param
+            const res2 = await apiFetch('/api/receivables/customers')
+            if (res2.ok) {
+              const data = await res2.json()
+              const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+              if (!cancelled) setEntityList(list.map((c: any) => ({ id: c.id, label: c.name })))
+            }
+          }
+        } else if (entityType === 'supplier') {
+          const res = await apiFetch('/api/payables/suppliers?limit=10000')
+          if (res.ok) {
+            const data = await res.json()
+            const list = Array.isArray(data?.suppliers) ? data.suppliers : Array.isArray(data) ? data : []
+            if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
+          } else {
+            const res2 = await apiFetch('/api/payables/suppliers')
+            if (res2.ok) {
+              const data = await res2.json()
+              const list = Array.isArray(data?.suppliers) ? data.suppliers : Array.isArray(data) ? data : []
+              if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
+            }
+          }
+        } else if (entityType === 'product') {
+          const products = await inventoryApi.list()
+          if (!cancelled) setEntityList(products.map((p: any) => ({ id: p.id, label: p.name })))
+        } else if (entityType === 'tenancy') {
+          const tenancies = await reportsApiV2.propertyTenancies()
+          if (!cancelled) setEntityList(tenancies.map((row: any) => ({ id: row.id, label: `${row.tenantName} · ${row.unit?.property?.name || 'Property'} / ${row.unit?.unitCode || ''}` })))
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport, selectedCustomerIdParam, selectedSupplierIdParam, selectedProductIdParam])
+
+  // Fetch business info for print/export headers
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch('/api/settings')
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          setBusinessInfo({
+            name: data.name,
+            address: data.address,
+            phone: data.phone,
+            email: data.email,
+            taxId: data.taxId,
+            logo: data.logo,
+            currency: data.currency,
+          })
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  // Fetch branches when report needs branch filter
+  useEffect(() => {
+    if (!currentReport?.showBranchFilter) { setBranchList([]); return }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const branches = await branchesApi.active()
+        if (!cancelled) {
+          setBranchList(branches)
+          if (user?.role !== 'owner') setSelectedBranchId(current => current || defaultBranchId(user, branches))
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport])
+
+  useEffect(() => {
+    setSelectedStaffId('')
+    setSelectedDailyCustomerId('')
+    setSelectedPaymentMethod('')
+    setDailyStaffList([])
+    setDailyCustomerList([])
+    if (currentReport?.id !== 'salesDaily') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [staffRes, customerRes] = await Promise.all([
+          apiFetch('/api/staff'),
+          apiFetch('/api/receivables/customers?limit=10000'),
+        ])
+        if (staffRes.ok && !cancelled) {
+          const data = await staffRes.json()
+          const list = Array.isArray(data?.staff) ? data.staff : Array.isArray(data) ? data : []
+          setDailyStaffList(list.map((staff: any) => ({
+            id: staff.id,
+            label: [staff.fname, staff.lname].filter(Boolean).join(' ') || staff.email || staff.name || 'Staff',
+          })))
+        }
+        if (customerRes.ok && !cancelled) {
+          const data = await customerRes.json()
+          const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+          setDailyCustomerList(list.map((customer: any) => ({ id: customer.id, label: customer.name })))
+        }
+      } catch { /* ignore */ }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport])
+
+  const loadReport = useCallback(async () => {
+    if (!currentReport) return
+    setLoading(true)
+    setReportData(null)
+    try {
+      if (currentReport.entityType === 'tenancy' && !selectedEntityId) return
+      if (!online && (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'rental')) {
+        throw new Error("Connect to the internet to load complete accounting data.")
+      }
+      if (online) {
+        const params: ReportParams = {}
+        if (from) params.from = from
+        if (to) params.to = to
+        if (currentReport.entityType === 'customer' && selectedEntityId) params.customerId = selectedEntityId
+        if (currentReport.entityType === 'supplier' && selectedEntityId) params.supplierId = selectedEntityId
+        if (currentReport.entityType === 'product' && selectedEntityId) params.productId = selectedEntityId
+        if (currentReport.entityType === 'tenancy' && selectedEntityId) params.tenancyId = selectedEntityId
+        if (currentReport.showBranchFilter && selectedBranchId && selectedBranchId !== 'all') params.branchId = selectedBranchId
+        params.reportId = currentReport.id
+        if (currentReport.id === 'salesDaily') {
+          if (selectedStaffId) params.staffId = selectedStaffId
+          if (selectedDailyCustomerId) params.customerId = selectedDailyCustomerId
+          if (selectedPaymentMethod) params.paymentMethod = selectedPaymentMethod
+        }
+        const result = await currentReport.apiFn(params)
+        setReportData(result)
+      } else {
+        // Offline — generate from local IndexedDB data
+        const params: any = {}
+        if (from) params.from = from
+        if (to) params.to = to
+        const result = await getLocalReportData(currentReport.id, params)
+        setReportData(result)
+      }
+    } catch (error: any) {
+      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'propertyManagement' || currentReport.renderType === 'rental') {
+        setReportData(null)
+        toast({ variant: "destructive", title: "Report unavailable", description: error.message })
+        return
+      }
+      // API failed — try offline
+      try {
+        const result = await getLocalReportData(currentReport.id, { from, to })
+        setReportData(result)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load report', description: error.message })
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [currentReport, from, to, selectedEntityId, selectedBranchId, selectedStaffId, selectedDailyCustomerId, selectedPaymentMethod, toast, online])
+
+  useEffect(() => {
+    if (!currentReport) {
+      setReportData(null)
+      return
+    }
+    // Entity selection is optional — load report with or without entity
+    loadReport()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport, selectedEntityId, selectedBranchId, selectedStaffId, selectedDailyCustomerId, selectedPaymentMethod, from, to])
+
+  const canExport = hasPermission('canExportReport')
+
+  // Statement columns definition with proper formatting
+  const statementColumns: NonNullable<ReportItem['columns']> = [
+    { key: 'date', label: 'Date', format: 'date' },
+    { key: 'type', label: 'Transaction Type', format: 'text' },
+    { key: 'description', label: 'Description', format: 'text' },
+    { key: 'reference', label: 'Reference', format: 'text' },
+    { key: 'paymentMethod', label: 'Payment Method', format: 'text' },
+    { key: 'debit', label: 'Debit', format: 'currency' },
+    { key: 'credit', label: 'Credit', format: 'currency' },
+    { key: 'balance', label: 'Balance', format: 'currency' },
+  ]
+
+  const dailyBusinessColumns: NonNullable<ReportItem['columns']> = [
+    { key: 'section', label: 'Section', format: 'text' },
+    { key: 'item', label: 'Item', format: 'text' },
+    { key: 'details', label: 'Details', format: 'text' },
+    { key: 'amount', label: 'Amount', format: 'currency' },
+    { key: 'cashAmount', label: 'Debit / Cash In', format: 'currency' },
+    { key: 'creditAmount', label: 'Credit / Cash Out', format: 'currency' },
+    { key: 'balance', label: 'Balance', format: 'currency' },
+  ]
+
+  const buildDailyBusinessExportRows = (data: any) => {
+    const rows: any[] = []
+    const pushAmount = (section: string, item: string, amount: any, details = '') => rows.push({ section, item, details, amount, cashAmount: null, creditAmount: null, balance: null })
+    const summary = data?.summary || {}
+    const cash = data?.cashMovement || {}
+    const profitability = data?.profitability || {}
+    ;[
+      ['Cash at Hand', cash.cashAtHand, 'Closing cash till balance for the selected branch, staff and period'],
+      ['Cash Sales', summary.cashSales, 'Sales paid by cash'],
+      ['Credit Sales', summary.creditSales, 'Customer balances created by credit invoices; credit/debit notes are adjustments listed separately'],
+      ['Debt Collections', summary.debtCollections, 'Payments on old credit'],
+      ['Cost of Sales (COGS)', profitability.cogs, 'Inventory cost recognized for products sold'],
+      ['Operating Expenses', summary.operatingExpenses ?? summary.expenses, 'Recognized running costs, excluding Cost of Sales (COGS)'],
+      ['Net Cash Movement', cash.netCashMovement, 'Cash till receipts minus payments, refunds and transfers'],
+      ['Gross Profit', profitability.grossProfit, 'Sales minus COGS'],
+      ['Net Profit', profitability.netProfit, 'Gross profit minus operating expenses'],
+    ].forEach(([item, amount, details]) => pushAmount('Day Balancing Totals', String(item), amount, String(details)))
+    Object.entries(data?.summary || {}).forEach(([key, value]) => pushAmount('Summary', key.replace(/([A-Z])/g, ' $1'), value))
+    Object.entries(data?.cashMovement || {}).forEach(([key, value]) => pushAmount('Cash Status', key.replace(/([A-Z])/g, ' $1'), value))
+    Object.entries(data?.profitability || {}).forEach(([key, value]) => pushAmount('Profitability', key.replace(/([A-Z])/g, ' $1'), value))
+    const expenseRows = Array.isArray(data?.expenses) ? data.expenses : []
+    const expenseCategoryTotals = expenseRows.reduce((acc: Record<string, { total: number; count: number }>, row: any) => {
+      const key = row.category || 'Uncategorized'
+      acc[key] = acc[key] || { total: 0, count: 0 }
+      acc[key].total += Number(row.amount || 0)
+      acc[key].count += 1
+      return acc
+    }, {})
+    Object.entries(expenseCategoryTotals).forEach(([category, value]) => rows.push({ section: 'Expense Breakdown', item: category, details: `${value.count} transaction${value.count === 1 ? '' : 's'}`, amount: value.total, cashAmount: null, creditAmount: null, balance: null }))
+    expenseRows.forEach((row: any) => rows.push({ section: 'Recognized Expenses', item: row.description || row.category || displayReference(row.reference, row.id, 'EXP'), details: `${row.category || 'Uncategorized'} - ${String(row.paymentMethod || 'cash').replace(/_/g, ' ')} - ${row.account || 'No account'} - ${row.staff || 'Unknown'}`, amount: row.amount || 0, cashAmount: 0, creditAmount: row.amount || 0, balance: null }))
+    ;(data?.customerActivity || []).forEach((row: any) => rows.push({ section: 'Customer Activity', item: row.name, details: row.phone || '', amount: Number(row.cashSales || 0) + Number(row.creditSales || 0), cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.currentBalance || 0 }))
+    ;(data?.staffActivity || []).forEach((row: any) => rows.push({ section: 'Staff Activity', item: row.name, details: `Collections ${formatCurrency(row.collections || 0)}`, amount: row.sales || 0, cashAmount: row.cashSales || 0, creditAmount: row.creditSales || 0, balance: row.cashHeld || 0 }))
+    ;(data?.productActivity || []).forEach((row: any) => rows.push({ section: 'Product Activity', item: row.name, details: `Qty ${row.quantitySold || 0}, Stock ${row.currentStock ?? ''}`, amount: row.salesValue || 0, cashAmount: row.cogs || 0, creditAmount: row.grossProfit || 0, balance: null }))
+    ;(data?.staffTills || []).forEach((row: any) => rows.push({ section: 'Cash Accounts', item: row.name, details: `${String(row.type || '').replace(/_/g, ' ')} - ${row.staff || 'Unassigned'}`, amount: row.expectedClosing ?? row.balance ?? 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.openingCash || 0 }))
+    ;(data?.transactions || []).filter((row: any) => row.kind === 'cash-movement' || row.kind === 'transfer').forEach((row: any) => rows.push({ section: 'Cash and Account Movements', item: displayReference(row.reference, row.id, row.type || 'MOV'), details: `${row.account || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.direction ? `- ${String(row.direction).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || 0, creditAmount: row.credit || 0, balance: row.balanceAfter || null }))
+    ;(data?.cashLedger || []).forEach((row: any) => rows.push({ section: 'Cash Till Ledger', item: displayReference(row.reference, row.id, row.type || 'MOV'), details: [row.account, row.description].filter(Boolean).join(' - '), amount: row.amount, cashAmount: row.debit, creditAmount: row.credit, balance: row.balance }))
+    ;(data?.transactions || []).forEach((row: any) => rows.push({ section: 'Transactions', item: displayReference(row.reference, row.id, row.type || row.kind || 'TRX'), details: `${row.customer || ''} ${row.staff ? `- ${row.staff}` : ''} ${row.paymentMethod ? `- ${String(row.paymentMethod).replace(/_/g, ' ')}` : ''}`, amount: row.amount || 0, cashAmount: row.debit || row.cashAmount || 0, creditAmount: row.credit || row.creditAmount || 0, balance: row.customerBalance || 0 }))
+    return rows
+  }
+
+  // Get data and columns for export based on report type
+  const getExportData = () => {
+    if (currentReport?.renderType === 'rental') {
+      const columns = currentReport.columns || []
+      if (currentReport.id === 'rentalsSummary') {
+        const rows = (currentReport.summaryKeys || []).map((metric) => {
+          const value = reportData?.[metric.key] ?? 0
+          return { metric: metric.label, value: metric.format === 'currency' ? formatCurrency(Number(value) || 0) : new Intl.NumberFormat().format(Number(value) || 0) }
+        })
+        return { data: rows, columns: [textCol('metric', 'Metric'), textCol('value', 'Value')] }
+      }
+      if (currentReport.id === 'rentalsDaily') {
+        const monetaryKeys = new Set(['rentalCharges', 'rentalPayments', 'depositsReceived', 'depositsRefunded', 'damageFees', 'outstandingBalance'])
+        const summaryRows = Object.entries(reportData?.summary || {}).filter(([key]) => monetaryKeys.has(key)).map(([key, value]) => ({ type: 'Period Summary', reference: key.replace(/([A-Z])/g, ' $1'), amount: value }))
+        return { data: [...summaryRows, ...(reportData?.transactions || [])], columns }
+      }
+      return { data: reportData?.data || [], columns }
+    }
+    if (currentReport?.renderType === 'propertyManagement') {
+      if (currentReport.id === 'propertyRenterStatement') return { data: reportData?.entries || [], columns: currentReport.columns }
+      return { data: reportData?.[currentReport.dataKey || ''] || [], columns: currentReport.columns }
+    }
+    if (currentReport?.id === 'salesWeekly') {
+      return {
+        data: reportData?.transactions || [],
+        columns: [dateCol('date', 'Date'), textCol('reference', 'Receipt'), textCol('customer', 'Customer'), textCol('staff', 'Staff'), textCol('branch', 'Branch'), textCol('paymentMethod', 'Method'), textCol('item', 'Item'), textCol('quantity', 'Qty'), currencyCol('grossAmount', 'Gross Sales'), currencyCol('revenue', 'Net Revenue'), currencyCol('tax', 'Tax'), currencyCol('discount', 'Discount')],
+      }
+    }
+    if (currentReport?.renderType === 'trialBalance') {
+      return { data: reportData?.accounts || [], columns: currentReport.columns }
+    }
+    if (currentReport?.renderType === 'balanceSheet') {
+      const rows = ['assets', 'liabilities', 'equity'].flatMap((section) => [
+        ...(reportData?.lineItems?.[section] || []).map((item: any) => ({ section, account: item.label, amount: item.amount })),
+        { section, account: 'Total ' + section, amount: reportData?.[section]?.['total' + section[0].toUpperCase() + section.slice(1)] || 0 },
+      ])
+      rows.push({ section: 'Reconciliation', account: 'Difference', amount: reportData?.difference || 0 })
+      return { data: rows, columns: [textCol('section', 'Section'), textCol('account', 'Account'), currencyCol('amount', 'Amount')] }
+    }
+    if (currentReport?.renderType === 'statement' && reportData?.transactions) {
+      return { data: reportData.transactions, columns: statementColumns }
+    }
+    if (currentReport?.renderType === 'dailyBusiness') {
+      return { data: buildDailyBusinessExportRows(reportData), columns: dailyBusinessColumns }
+    }
+    if (currentReport?.renderType === 'aging') {
+      return { data: reportData?.transactions || [], columns: currentReport.columns }
+    }
+    return { data: reportData?.data || reportData, columns: currentReport?.columns }
+  }
+
+  const reportTitle = () => {
+    const entityName = reportData?.customer?.name || reportData?.supplier?.name || ''
+    if (currentReport?.id === 'propertyRenterStatement' && reportData?.tenancy?.tenantName) return `${currentReport.label} - ${reportData.tenancy.tenantName}`
+    if (currentReport?.renderType === 'statement' && entityName) return `${currentReport.label} - ${entityName}`
+    if (currentReport?.renderType === 'dailyBusiness' && reportData?.header?.businessName) return `${currentReport.label} - ${reportData.header.businessName}`
+    return currentReport?.label || 'Report'
+  }
+
+  const getExportCharts = () => {
+    if (currentReport?.renderType === 'propertyManagement') {
+      return getPropertyManagementChartSpecs(currentReport.id, reportData)
+    }
+    if (currentReport?.id === 'salesWeekly' && reportData?.weeklyTrend?.length) return [{
+      title: 'Weekly sales and net revenue', labelKey: 'label', rows: reportData.weeklyTrend,
+      series: [{ key: 'grossSales', label: 'Gross sales', color: '#0f9f6e', format: 'currency' as const }, { key: 'revenue', label: 'Net revenue', color: '#3987d7', format: 'currency' as const }],
+    }]
+    if (currentReport?.id === 'salesDaily') {
+      const rows = buildDailySalesTrend(reportData?.transactions || [])
+      return rows.length ? [{
+        title: 'Daily sales activity', labelKey: 'label', rows,
+        series: [{ key: 'sales', label: 'Sales', color: '#0f9f6e', format: 'currency' as const }, { key: 'collections', label: 'Customer repayments', color: '#e5a11a', format: 'currency' as const }, { key: 'returns', label: 'Returns', color: '#d65757', format: 'currency' as const }, { key: 'expenses', label: 'Operating expenses', color: '#8b6bc4', format: 'currency' as const }, { key: 'netRevenue', label: 'Net revenue', color: '#3987d7', format: 'currency' as const }],
+      }] : []
+    }
+    return currentReport && ['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id)
+      ? getPerformanceChartSpecs(currentReport.id, reportData)
+      : []
+  }
+
+  const handlePrint = () => {
+    const { data, columns } = getExportData()
+    printReport(
+      data,
+      reportTitle(),
+      currentReport?.categoryLabel || '',
+      columns,
+      reportData?.summary,
+      businessInfo || undefined,
+      getExportCharts()
+    )
+  }
+
+  const handleExportExcel = () => {
+    const { data, columns } = getExportData()
+    exportToExcel(
+      data,
+      reportTitle(),
+      columns,
+      reportData?.summary,
+      businessInfo || undefined,
+      getExportCharts()
+    )
+  }
+
+  const handleExportPDF = () => {
+    const { data, columns } = getExportData()
+    exportToPDF(
+      data,
+      reportTitle(),
+      currentReport?.categoryLabel,
+      columns,
+      reportData?.summary,
+      businessInfo || undefined,
+      getExportCharts()
+    )
+  }
+
+  return (
+    <div>
+      {!currentReport ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <BarChart3 className="h-12 w-12 text-muted-foreground/50" />
+            <p className="mt-4 text-lg font-medium">Select a report from the sidebar</p>
+            <p className="mt-1 text-sm text-muted-foreground">Choose from 70 report types across 10 categories</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Header + filters */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">{currentReport.label}</h1>
+                <p className="text-sm text-muted-foreground">{currentReport.categoryLabel}</p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                {currentReport.id === 'salesDaily' && (
+                  <div className="flex items-center gap-1 rounded-md border p-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const value = new Date().toISOString().slice(0, 10); setFrom(value); setTo(value) }}>Today</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const date = new Date(); date.setDate(date.getDate() - 1); const value = date.toISOString().slice(0, 10); setFrom(value); setTo(value) }}>Yesterday</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(''); setTo('') }}>Custom</Button>
+                  </div>
+                )}
+                {currentReport.id === 'salesWeekly' && (
+                  <div className="flex items-center gap-1 rounded-md border p-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const range = weekRangeForInput(0); setFrom(range.from); setTo(range.to) }}>This week</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { const range = weekRangeForInput(-1); setFrom(range.from); setTo(range.to) }}>Last week</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(''); setTo('') }}>Current week</Button>
+                  </div>
+                )}
+                {currentReport.entityType && (
+                  <div>
+                    <Label className="text-xs">
+                      {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : currentReport.entityType === 'tenancy' ? 'Tenant / tenancy' : 'Product'}
+                    </Label>
+                    <Select value={selectedEntityId || 'all'} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
+                      <SelectTrigger className="w-[200px]">
+                        <SelectValue placeholder={currentReport.entityType === 'tenancy' ? 'Select tenant...' : `Select ${currentReport.entityType}...`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {currentReport.entityType !== 'tenancy' && <SelectItem value="all">All {currentReport.entityType}s</SelectItem>}
+                        {entityList.length === 0 ? (
+                          <SelectItem value="_none" disabled>No {currentReport.entityType === 'tenancy' ? 'tenants' : `${currentReport.entityType}s`} found</SelectItem>
+                        ) : (
+                          entityList.map(e => <SelectItem key={e.id} value={e.id}>{e.label}</SelectItem>)
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {currentReport.showBranchFilter && branchList.length > 0 && (
+                  <div>
+                    <Label className="text-xs">Branch</Label>
+                    <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue placeholder="All Branches" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Branches</SelectItem>
+                        {branchList.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {currentReport.id === 'salesDaily' && (
+                  <>
+                    <div>
+                      <Label className="text-xs">Staff</Label>
+                      <Select value={selectedStaffId || 'all'} onValueChange={(value) => setSelectedStaffId(value === 'all' ? '' : value)}>
+                        <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Staff" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Staff</SelectItem>
+                          {dailyStaffList.map((staff) => <SelectItem key={staff.id} value={staff.id}>{staff.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Customer</Label>
+                      <Select value={selectedDailyCustomerId || 'all'} onValueChange={(value) => setSelectedDailyCustomerId(value === 'all' ? '' : value)}>
+                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="All Customers" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Customers</SelectItem>
+                          {dailyCustomerList.map((customer) => <SelectItem key={customer.id} value={customer.id}>{customer.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Payment Method</Label>
+                      <Select value={selectedPaymentMethod || 'all'} onValueChange={(value) => setSelectedPaymentMethod(value === 'all' ? '' : value)}>
+                        <SelectTrigger className="w-[160px]"><SelectValue placeholder="All Methods" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Methods</SelectItem>
+                          <SelectItem value="cash">Cash</SelectItem>
+                          <SelectItem value="credit">Credit</SelectItem>
+                          <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                          <SelectItem value="bank_transfer">Bank</SelectItem>
+                          <SelectItem value="card">Card</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={() => { setFrom(''); setTo(''); setSelectedBranchId(''); setSelectedStaffId(''); setSelectedDailyCustomerId(''); setSelectedPaymentMethod('') }}>Reset Filters</Button>
+                  </>
+                )}
+                <div>
+                  <Label htmlFor="from" className="text-xs">From</Label>
+                  <Input id="from" type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 w-auto" />
+                </div>
+                <div>
+                  <Label htmlFor="to" className="text-xs">To</Label>
+                  <Input id="to" type="date" value={to} onChange={e => setTo(e.target.value)} className="h-9 w-auto" />
+                </div>
+                <Button onClick={loadReport} disabled={loading} size="sm">
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
+                  Generate
+                </Button>
+                {canExport && (
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>
+                      <Download className="h-4 w-4" />
+                      Export
+                      <ChevronDown className="h-3 w-3 ml-0.5" />
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content className="min-w-[140px] bg-popover text-popover-foreground rounded-md border shadow-md z-50 p-1" sideOffset={4}>
+                        <DropdownMenu.Item className="flex items-center gap-2 px-3 py-2 text-sm outline-none cursor-pointer hover:bg-accent rounded-sm" onSelect={handleExportExcel}>
+                          <FileSpreadsheet className="h-4 w-4" />
+                          Excel
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item className="flex items-center gap-2 px-3 py-2 text-sm outline-none cursor-pointer hover:bg-accent rounded-sm" onSelect={handleExportPDF}>
+                          <Download className="h-4 w-4" />
+                          PDF
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
+                )}
+                <Button onClick={handlePrint} variant="outline" size="sm">
+                  <Printer className="h-4 w-4" />
+                  Print
+                </Button>
+              </div>
+            </div>
+
+            {/* Report content */}
+            <Card>
+              <CardContent className="p-4 lg:p-6">
+                {loading ? (
+                  <div className="flex items-center justify-center py-20">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : reportData ? (
+                  <div className="space-y-4">
+                    {currentReport.renderType !== 'dailyBusiness' && currentReport.renderType !== 'aging' && currentReport.renderType !== 'propertyManagement' && reportData.summary && (
+                      <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">
+                        {Object.entries(reportData.summary).map(([k, v]) => {
+                          // Skip complex objects that should be displayed as breakdowns
+                          if (typeof v === 'object' && v !== null) return null
+                          return (
+                            <div key={k}>
+                              <p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p>
+                              <p className="font-semibold">{typeof v === 'number' ? formatCurrency(v) : String(v)}</p>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {currentReport.renderType === 'propertyManagement' && currentReport.id !== 'propertyRenterStatement' && (
+                      <SummaryCards data={reportData.summary} keys={currentReport.summaryKeys} />
+                    )}
+                    {currentReport.renderType === 'propertyManagement' && currentReport.id === 'propertyRenterStatement' && (
+                      <>
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+                          <div>
+                            <p className="text-xs font-medium uppercase text-muted-foreground">Tenant Statement</p>
+                            <p className="text-lg font-semibold">{reportData.tenancy?.tenantName || 'Tenant'} · {reportData.tenancy?.unit?.property?.name || 'Property'} / {reportData.tenancy?.unit?.unitCode || ''}</p>
+                          </div>
+                          <div className="text-right"><p className="text-xs text-muted-foreground">Closing balance</p><p className="text-xl font-semibold">{formatCurrency(reportData.closingBalance || 0)}</p></div>
+                        </div>
+                      </>
+                    )}
+                    {currentReport.renderType === 'propertyManagement' && currentReport.id !== 'propertyRenterStatement' && (
+                      <PropertyManagementCharts reportId={currentReport.id} data={reportData} />
+                    )}
+                    {currentReport.id === 'salesDiscounts' && reportData?.summary && (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <BreakdownList title="By User" data={reportData.summary.byUser} />
+                        <BreakdownList title="By Branch" data={reportData.summary.byBranch} />
+                        <BreakdownList title="By Product" data={reportData.summary.byProduct} />
+                        <BreakdownList title="By Date" data={reportData.summary.byDate} />
+                      </div>
+                    )}
+                    {currentReport.id === 'financialExpense' && reportData?.summary?.byCategory && <ExpenseCategoryBreakdown summary={reportData.summary} />}
+                    {currentReport.renderType === 'enriched' && (currentReport.id === 'receivablesAging' || currentReport.id === 'payablesAging') && reportData?.summary?.ageGroups && (
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                        <BreakdownList title="Age Groups" data={reportData.summary.ageGroups} />
+                      </div>
+                    )}
+                    {currentReport.id === 'svcJobCards' && <SummaryCards data={reportData} keys={currentReport.summaryKeys} />}
+                    {['performanceBranch', 'performanceProduct', 'performanceCategory', 'performanceTopProducts', 'performanceLeastProducts'].includes(currentReport.id) && (
+                      <BusinessPerformanceCharts reportId={currentReport.id} data={reportData} />
+                    )}
+                    {currentReport.renderType === 'rental' && <RentalReportView reportId={currentReport.id} data={reportData} columns={currentReport.columns} summaryKeys={currentReport.summaryKeys} />}
+                    {currentReport.renderType === 'table' && currentReport.id !== 'executiveSummary' && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'propertyManagement' && <ReportTable data={currentReport.dataKey ? reportData[currentReport.dataKey] || [] : []} columns={currentReport.columns} />}
+                    {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
+                    {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
+                    {currentReport.id === 'salesWeekly' && <WeeklySalesCharts data={reportData} />}
+                    {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.id === 'salesWeekly' ? [] : currentReport.summaryKeys} />}
+                    {currentReport.renderType === 'summary' && (
+                      <>
+                        {currentReport.id === 'salesSummary' ? (
+                          <AdvancedSalesSummary data={reportData} />
+                        ) : currentReport.id === 'inventoryFastMoving' ? (
+                          <AdvancedFastMoving data={reportData} />
+                        ) : currentReport.id === 'performanceBranch' ? (
+                          <AdvancedBranchPerformance data={reportData} />
+                        ) : (
+                          <SummaryCards data={reportData} keys={currentReport.summaryKeys} />
+                        )}
+                      </>
+                    )}
+                    {currentReport.renderType === 'pnL' && <PnLReport data={reportData} />}
+                    {currentReport.renderType === 'balanceSheet' && <BalanceSheetReport data={reportData} />}
+                    {currentReport.renderType === 'trialBalance' && <TrialBalanceReport data={reportData} />}
+                    {currentReport.renderType === 'aging' && <AgingReport data={reportData} />}
+                    {currentReport.renderType === 'ledger' && currentReport.ledgerType && <LedgerReport data={reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'ledger' && !currentReport.ledgerType && <ReportTable data={reportData.data || reportData} columns={currentReport.columns} />}
+                    {currentReport.renderType === 'statement' && <StatementReport data={reportData} keys={currentReport.summaryKeys} />}
+                    {reportData.note && <p className="text-xs text-muted-foreground italic">{reportData.note}</p>}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 text-center">
+                    <FileText className="h-10 w-10 text-muted-foreground/50" />
+                    <p className="mt-3 text-sm text-muted-foreground">{currentReport.entityType === 'tenancy' && !selectedEntityId ? 'Select a tenant to load their statement' : 'Click "Generate" to load the report'}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+    </div>
+  )
+}

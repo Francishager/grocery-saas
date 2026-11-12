@@ -1,0 +1,207 @@
+import { Router } from "express";
+import prisma from "../src/db.js";
+import { authenticateToken, requirePermission, loadUserPermissions } from "../middleware/auth.js";
+import { requireFeature } from "../middleware/featureCheck.js";
+import { notifyOwnerOfDailySalesSummary, notifyOwnerOfExpiringProducts } from "../src/utils/notifications.js";
+import { sendNotificationToUser, sendNotificationToTenant } from "../src/services/fcm.js";
+import { canViewPropertyNotification, filterPropertyManagementNotifications, isPropertyManagementNotification, tenantHasPropertyManagement } from "../src/utils/propertyFeatureAccess.js";
+
+const router = Router();
+
+// List notifications for current user
+router.get("/", authenticateToken, loadUserPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const notifications = await prisma.notification.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { userId: req.user.id },
+          { userId: null },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const businessNotifications = notifications.filter((notification) => notification.type !== "advisor_tip");
+    res.json(await filterPropertyManagementNotifications(tenantId, businessNotifications, req.user, req.userPermissions));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch notifications" });
+  }
+});
+
+// Advisor tips have their own feed and are intentionally excluded from business updates.
+router.get("/advisor-tips", authenticateToken, requirePermission("canUseBusinessAI"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const tips = await prisma.notification.findMany({
+      where: { tenantId, userId: req.user.id, type: "advisor_tip" },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(tips);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch Advisor tips" });
+  }
+});
+
+// Create notification (internal use)
+router.post("/", authenticateToken, requirePermission("canCreateCommunication"), requireFeature("communication"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const { userId, channel = "in_app", title, message, type = "info", metadata } = req.body;
+    if (!title || !message) return res.status(400).json({ error: "title and message required" });
+
+    const notif = await prisma.notification.create({
+      data: {
+        tenantId,
+        userId: userId || null,
+        channel,
+        title,
+        message,
+        type,
+        metadata: metadata || undefined,
+      },
+    });
+    res.status(201).json(notif);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create notification" });
+  }
+});
+
+// Mark as read
+router.put("/:id/read", authenticateToken, loadUserPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    const existing = await prisma.notification.findFirst({
+      where: { id: req.params.id, tenantId, OR: [{ userId: req.user.id }, { userId: null }] },
+      select: { id: true, metadata: true },
+    });
+    const propertyDataAllowed = await tenantHasPropertyManagement(tenantId) && canViewPropertyNotification(req.user, req.userPermissions);
+    if (!existing || (isPropertyManagementNotification(existing) && !propertyDataAllowed)) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
+    const updated = await prisma.notification.updateMany({
+      where: { id: req.params.id, tenantId, OR: [{ userId: req.user.id }, { userId: null }] },
+      data: { isRead: true },
+    });
+    if (!updated.count) return res.status(404).json({ error: "Notification not found" });
+    const notif = await prisma.notification.findFirst({ where: { id: req.params.id, tenantId } });
+    res.json(notif);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to mark notification as read" });
+  }
+});
+
+// Mark all as read
+router.put("/read-all", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
+    await prisma.notification.updateMany({
+      where: { tenantId, userId: req.user.id, isRead: false, type: { not: "advisor_tip" } },
+      data: { isRead: true },
+    });
+    res.json({ message: "All notifications marked as read" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to mark all as read" });
+  }
+});
+
+// Unread count
+router.get("/unread-count", authenticateToken, loadUserPermissions, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const notifications = await prisma.notification.findMany({
+      where: { tenantId, userId: req.user.id, isRead: false, type: { not: "advisor_tip" } },
+      select: { metadata: true },
+    });
+    const visible = await filterPropertyManagementNotifications(tenantId, notifications, req.user, req.userPermissions);
+    res.json({ count: visible.length });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get unread count" });
+  }
+});
+
+router.post("/daily-sales-summary", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    const [agg, count, products] = await Promise.all([
+      prisma.sale.aggregate({ where: { tenantId, createdAt: { gte: start, lt: end } }, _sum: { total: true, discount: true, tax: true, subtotal: true } }),
+      prisma.sale.count({ where: { tenantId, createdAt: { gte: start, lt: end } } }),
+      prisma.product.findMany({ where: { tenantId, isActive: { not: false } }, select: { quantity: true, minStock: true, expiryDate: true } }),
+    ]);
+    const lowStockCount = products.filter((product) => (product.quantity || 0) <= (product.minStock || 0)).length;
+    const expiringSoonCount = products.filter((product) => {
+      if (!product.expiryDate) return false;
+      const expiryDate = new Date(product.expiryDate);
+      return expiryDate <= new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000);
+    }).length;
+    const summary = {
+      salesCount: count,
+      totalRevenue: agg._sum.total || 0,
+      totalDiscount: agg._sum.discount || 0,
+      totalTax: agg._sum.tax || 0,
+      lowStockCount,
+      expiringSoonCount,
+      currency: (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { currency: true } }).catch(() => null))?.currency || 'UGX',
+    };
+    const notification = await notifyOwnerOfDailySalesSummary({ tenantId, summary });
+    res.json({ message: 'Daily sales summary notification queued', summary, notification });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to queue daily sales summary' });
+  }
+});
+
+// Send broadcast (SMS/Email template — actual sending would need provider integration)
+router.post("/expiry-alert", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const products = await prisma.product.findMany({
+      where: { tenantId, isActive: { not: false }, expiryDate: { not: null } },
+      select: { id: true, name: true, quantity: true, expiryDate: true },
+    });
+    const notification = await notifyOwnerOfExpiringProducts({ tenantId, products });
+    res.json({
+      message: notification ? 'Expiry alert notification sent' : 'No products expiring soon',
+      notification,
+      expiringCount: notification ? notification.metadata?.expiringCount || 0 : 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send expiry alert' });
+  }
+});
+
+router.post("/broadcast", authenticateToken, requirePermission("canCreateCommunication"), requireFeature("communication"), async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id;
+    const { channel = "in_app", title, message, type = "info", targetAll = true } = req.body;
+    if (!title || !message) return res.status(400).json({ error: "title and message required" });
+
+    if (targetAll) {
+      // Create notification for all tenant users
+      const users = await prisma.user.findMany({ where: { tenantId, isActive: true } });
+      const notifs = await Promise.all(
+        users.map((u) =>
+          prisma.notification.create({
+            data: { tenantId, userId: u.id, channel, title, message, type },
+          })
+        )
+      );
+      // Push to all tenant devices
+      sendNotificationToTenant(tenantId, { title, body: message, data: { url: '/notifications' } }).catch((err) => console.error('Broadcast FCM push failed:', err));
+      res.status(201).json({ message: `Broadcast sent to ${notifs.length} users`, count: notifs.length });
+    } else {
+      const notif = await prisma.notification.create({
+        data: { tenantId, channel, title, message, type },
+      });
+      // Push to all tenant devices
+      sendNotificationToTenant(tenantId, { title, body: message, data: { url: '/notifications' } }).catch((err) => console.error('Broadcast FCM push failed:', err));
+      res.status(201).json(notif);
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Failed to send broadcast" });
+  }
+});
+
+export default router;

@@ -1,0 +1,1316 @@
+import { servicePagePermissions, serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
+import { canViewReportItem, GRANULAR_REPORT_PERMISSION_KEYS } from '@/lib/reportPermissions'
+import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
+import { MessageSquare, Trash2 } from 'lucide-react'
+import { trashPermissions } from '@/lib/trashPermissions'
+import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar, Store, Handshake, Table2, Beaker, ChefHat, Wine, Home, Activity } from 'lucide-react'
+import { useState, useEffect, type ComponentType } from 'react'
+import { cacheTenantFormattingSettings, cn } from '@/lib/utils'
+import { getApiBaseUrl } from '@/lib/apiConfig'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { appNotify } from '@/lib/appFeedback'
+import { useLanguage } from '@/contexts/LanguageContext'
+import { useTheme } from '@/contexts/ThemeContext'
+import { Button } from '@/components/ui/button'
+import { SyncIndicator } from '@/components/SyncIndicator'
+import { NotificationBell } from '@/components/NotificationBell'
+import { WidgetLauncher } from '@/components/widgets/WidgetLauncher'
+import { PlannerReminderWatcher } from '@/components/PlannerReminderWatcher'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { apiFetch } from '@/lib/api'
+import OnboardingGuideCard from '@/components/OnboardingGuideCard'
+import OnboardingGuideModal from '@/components/OnboardingGuideModal'
+import UserGuideMenu from '@/components/UserGuideMenu'
+import { SubscriptionBillingReminder } from '@/components/layout/SubscriptionBillingReminder'
+import { BusinessChatWidget } from '@/components/BusinessChatWidget'
+
+const inventorySubItems = [
+  { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
+  { to: '/tenant/inventory/services', label: 'Services', icon: Wrench, permission: 'canViewService', feature: 'inventory.services' },
+  { to: '/tenant/inventory/rentals', label: 'Rental Items', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/inventory/lubricants', label: 'Lubricants & Dry Stock', icon: Droplet, permission: 'canViewProduct', feature: 'fuel_station.lubricants' },
+  { to: '/tenant/inventory/convenience', label: 'Convenience Shop', icon: ShoppingBag, permission: 'canViewProduct', feature: 'fuel_station.convenience' },
+]
+
+const rentalSubItems = [
+  { to: '/tenant/rentals/bookings', label: 'Bookings & Check-out', icon: Calendar, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/planner', label: 'Planner', icon: CalendarClock, permission: ['canViewPlanner', 'canManagePlanner', 'canViewRental'], feature: ['rentals', 'planner'] },
+  { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: ['canViewCRM', 'canViewRental'], feature: ['rentals', 'crm'] },
+  { to: '/tenant/rentals/returns', label: 'Returns', icon: RotateCcw, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/rentals/payments', label: 'Payments & Receipts', icon: Receipt, permission: 'canViewRental', feature: 'rentals' },
+]
+
+const fuelStationSubItems = [
+  { to: '/tenant/fuel-station/tanks', label: 'Tanks & Pumps', icon: Gauge, permission: 'canViewFuelStation', feature: 'fuel_station.pumps' },
+  { to: '/tenant/fuel-station/deliveries', label: 'Fuel Deliveries', icon: Truck, permission: 'canViewFuelStation', feature: 'fuel_station.deliveries' },
+  { to: '/tenant/fuel-station/meter_readings', label: 'Meter Readings', icon: TrendingUpIcon, permission: 'canViewFuelStation', feature: 'fuel_station.meter_readings' },
+  { to: '/tenant/fuel-station/dipstick', label: 'Dipstick Readings', icon: Droplet, permission: 'canViewFuelStation', feature: 'fuel_station.dipstick' },
+  { to: '/tenant/fuel-station/shifts', label: 'Shift Reports', icon: ClipboardIcon, permission: 'canViewFuelStation', feature: 'fuel_station.shift_reports' },
+  { to: '/tenant/fuel-station/pricing', label: 'Price Management', icon: Tags, permission: 'canViewFuelStation', feature: 'fuel_station.pricing' },
+  { to: '/tenant/fuel-station/compliance', label: 'Compliance', icon: ClipboardCheck, permission: 'canViewFuelStation', feature: 'fuel_station.compliance' },
+]
+
+const receivablesSubItems = [
+  { to: '/tenant/receivables/customers', label: 'Customers', icon: CreditCard, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/sales', label: 'Credit Sales', icon: Receipt, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/payments', label: 'Payments', icon: DollarSign, permission: 'canViewReceivable', feature: 'receivables' },
+  { to: '/tenant/receivables/rentals', label: 'Rental Receivables', icon: Clock, permission: 'canViewRental', feature: 'rentals' },
+  { to: '/tenant/receivables/reconciliation', label: 'Payment Reconciliation', icon: ClipboardCheck, permission: 'canViewReceivableReconciliation', feature: 'receivables' },
+  { to: '/tenant/receivables/fuel-cards', label: 'Fuel Cards', icon: CardIcon, permission: 'canViewReceivable', feature: 'fuel_station.fuel_cards' },
+  { to: '/tenant/receivables/credit-accounts', label: 'Credit Accounts', icon: BadgeDollarSign, permission: 'canViewReceivable', feature: 'fuel_station.credit_accounts' },
+]
+
+const serviceSubItems = [
+  { to: '/tenant/service/appointments', label: 'Appointments', icon: CalendarClock, permission: servicePagePermissions('appointments'), feature: 'service' },
+  { to: '/tenant/service/work-orders', label: 'Work Orders', icon: ClipboardList, permission: servicePagePermissions('work-orders'), feature: 'service' },
+  { to: '/tenant/service/contracts', label: 'Contracts', icon: FileText, permission: servicePagePermissions('contracts'), feature: 'service' },
+  { to: '/tenant/service/technicians', label: 'Technicians', icon: UserCog, permission: servicePagePermissions('technicians'), feature: 'service' },
+  { to: '/tenant/service/job-cards', label: 'Job Cards', icon: ClipboardCheck, permission: servicePagePermissions('job-cards'), feature: 'service' },
+  { to: '/tenant/service/feedback', label: 'Feedback', icon: Star, permission: servicePagePermissions('feedback'), feature: 'service' },
+  { to: '/tenant/service/car-wash', label: 'Car Wash', icon: Droplet, permission: servicePagePermissions('car-wash'), feature: 'service' },
+  { to: '/tenant/service/garage', label: 'Garage Services', icon: WrenchIcon, permission: servicePagePermissions('garage'), feature: 'service' },
+]
+
+const salonSubItems = [
+  { to: '/tenant/salon/appointments', label: 'Appointments', icon: CalendarClock, permission: servicePagePermissions('appointments'), feature: 'salon_spa' },
+  { to: '/tenant/salon/stylists', label: 'Stylists', icon: UserCog, permission: 'canViewSalonStylist', feature: 'salon_spa' },
+  { to: '/tenant/salon/chairs', label: 'Chair Schedule', icon: CalendarClock, permission: 'canViewSalonChair', feature: 'salon.chair_scheduling' },
+  { to: '/tenant/salon/commissions', label: 'Stylist Commissions', icon: Award, permission: 'canViewSalonCommission', feature: 'salon.stylist_commissions' },
+]
+
+const clinicSubItems = [
+  { to: '/tenant/clinic/patients', label: 'Patients', icon: Users, feature: 'clinic_management', permission: ['canViewClinicPatients', 'canCreateClinicPatients', 'canEditClinicPatients'] },
+  { to: '/tenant/clinic/appointments', label: 'Appointments', icon: CalendarClock, feature: 'clinic_management', permission: ['canViewClinicAppointments', 'canCreateClinicAppointments', 'canEditClinicAppointments'] },
+  { to: '/tenant/clinic/encounters', label: 'Clinical Encounters', icon: Activity, feature: 'clinic_management', permission: ['canViewClinicEncounters', 'canCreateClinicEncounters'] },
+  { to: '/tenant/clinic/prescriptions', label: 'Prescriptions', icon: FileText, feature: 'clinic_management', permission: ['canViewClinicPrescriptions', 'canCreateClinicPrescriptions'] },
+]
+
+const pharmacySubItems = [
+  { to: '/tenant/pharmacy/queue', label: 'Prescription Queue', icon: ClipboardList, feature: 'pharmacy_management', allFeatures: ['clinic_management'], permission: ['canViewPharmacyPrescriptions', 'canDispensePharmacyPrescriptions'] },
+  { to: '/tenant/pharmacy/catalogue', label: 'Medicine Catalogue', icon: Package, feature: 'pharmacy_management', permission: ['canViewPharmacyCatalogue', 'canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue'] },
+  { to: '/tenant/pharmacy/batches', label: 'Batches & Expiry', icon: Clock, feature: 'pharmacy_management', permission: ['canViewPharmacyBatches', 'canCreatePharmacyBatches'] },
+  { to: '/tenant/pharmacy/history', label: 'Dispensing History', icon: Receipt, feature: 'pharmacy_management', allFeatures: ['clinic_management'], permission: 'canViewPharmacyDispenses' },
+]
+
+const procurementBuyerItems = [
+  { to: '/tenant/procurement/buying/marketplace', label: 'Marketplace', icon: Store, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+  { to: '/tenant/procurement/buying/rfqs', label: 'Quote requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+  { to: '/tenant/procurement/buying/purchases', label: 'Purchases & invoices', icon: Package, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+  { to: '/tenant/procurement/buying/suppliers', label: 'Suppliers', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.buyer' },
+]
+
+const procurementSellerItems = [
+  { to: '/tenant/procurement/selling/studio', label: 'Seller studio', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/rfqs', label: 'Incoming requests', icon: Tags, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/fulfilment', label: 'Sales & fulfilment', icon: Package, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/buyers', label: 'Buyer relationships', icon: Handshake, permission: 'canViewProcurement', feature: 'procurement.seller' },
+  { to: '/tenant/procurement/selling/profile', label: 'Seller profile', icon: Building2, permission: 'canViewProcurement', feature: 'procurement.seller' },
+]
+
+const restaurantSubItems = [
+  { to: '/tenant/restaurant/tables', label: 'Floor & Tables', icon: Table2, permission: 'canViewRestaurant', feature: 'restaurant.tables' },
+  { to: '/tenant/restaurant/orders', label: 'Orders', icon: ClipboardList, permission: 'canViewRestaurant', feature: 'restaurant.orders' },
+  { to: '/tenant/restaurant/kitchen', label: 'Kitchen Queue', icon: ChefHat, permission: 'canViewRestaurant', feature: 'restaurant.kitchen' },
+  { to: '/tenant/restaurant/bar', label: 'Bar Queue', icon: Wine, permission: ['canViewRestaurant', 'canViewBarOrders', 'canViewBarQueue'], feature: 'restaurant.bar' },
+  { to: '/tenant/restaurant/menu', label: 'Menu & Pricing', icon: UtensilsCrossed, permission: 'canViewRestaurant', feature: 'restaurant' },
+  { to: '/tenant/inventory/products?hospitalityView=all', label: 'Inventory & Stockroom', icon: Package, permission: 'canViewProduct', feature: 'restaurant' },
+  { to: '/tenant/restaurant/recipes', label: 'Recipes & Ingredients', icon: Beaker, permission: 'canViewRestaurant', feature: 'restaurant.recipes' },
+  { to: '/tenant/restaurant/reservations', label: 'Reservations', icon: CalendarClock, permission: 'canViewRestaurant', feature: 'restaurant.reservations' },
+  { to: '/tenant/restaurant/delivery', label: 'Deliveries', icon: Truck, permission: 'canViewRestaurant', feature: 'restaurant.delivery' },
+  { to: '/tenant/restaurant/waiters', label: 'Waiters', icon: Users, permission: 'canViewRestaurant', feature: 'restaurant.waiters' },
+  { to: '/tenant/restaurant/happy-hour', label: 'Promotions & Happy Hour', icon: Tags, permission: 'canViewRestaurant', feature: 'restaurant.happy_hour' },
+  { to: '/tenant/restaurant/combos', label: 'Combo Meals', icon: Gift, permission: 'canViewRestaurant', feature: 'restaurant.combos' },
+  { to: '/tenant/restaurant/tips', label: 'Tips', icon: DollarSign, permission: 'canViewRestaurant', feature: 'restaurant.tips' },
+]
+
+const barSubItems = [
+  { to: '/tenant/bar/orders', label: 'Orders', icon: ClipboardList, permission: ['canViewBarOrders', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/queue', label: 'Bar Queue', icon: Wine, permission: ['canViewBarOrders', 'canViewBarQueue'], feature: 'bar' },
+  { to: '/tenant/bar/menu', label: 'Bar Menu', icon: UtensilsCrossed, permission: ['canViewBarMenu', 'canViewBarOrders'], feature: 'bar' },
+]
+
+const navItems = [
+  { to: '/tenant/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'canViewDashboard', feature: 'dashboard' },
+  { to: '/tenant/sales', label: 'Sales', icon: ShoppingCart, feature: 'sales', permission: 'canViewSale' },
+  { to: '/tenant/ai-advisor', label: 'AI Advisor', icon: MessageSquare, permission: 'canUseBusinessAI' },
+  { to: '/tenant/inventory', label: 'Inventory', icon: Package, feature: 'inventory', permission: 'canViewProduct', isInventory: true },
+  { to: '/tenant/receivables', label: 'Receivables', icon: CreditCard, feature: 'receivables', permission: 'canViewReceivable', isReceivables: true },
+  { to: '/tenant/payables', label: 'Payables', icon: Building2, feature: 'payables', permission: 'canViewPayable' },
+  { to: '/tenant/procurement', label: 'Procurement Network', icon: Truck, permission: 'canViewProcurement', isProcurement: true },
+  { to: '/tenant/rentals/bookings', label: 'Rentals', icon: Clock, permission: 'canViewRental', feature: 'rentals', isRentals: true },
+  { to: '/tenant/rentals/planner', label: 'Planner', icon: CalendarClock, permission: ['canViewPlanner', 'canManagePlanner'], feature: 'planner', isStandalonePlanner: true },
+  { to: '/tenant/rentals/crm', label: 'CRM', icon: Users, permission: 'canViewCRM', feature: 'crm', isStandaloneCRM: true },
+  { to: '/tenant/property-management/portfolio', label: 'Property Management', icon: Building2, isPropertyManagement: true },
+  { to: '/tenant/restaurant', label: 'Restaurant & Bar', icon: UtensilsCrossed, feature: 'restaurant', permission: 'canViewRestaurant', isRestaurant: true },
+  { to: '/tenant/bar/queue', label: 'Bar', icon: Wine, feature: 'bar', permission: ['canViewBarMenu', 'canViewBarOrders', 'canViewBarQueue'], isBar: true },
+  { to: '/tenant/clinic/patients', label: 'Clinic Management', icon: Activity, feature: 'clinic_management', isClinic: true },
+  { to: '/tenant/pharmacy/catalogue', label: 'Pharmacy Management', icon: Package, feature: 'pharmacy_management', isPharmacy: true },
+  { to: '/tenant/fuel-station', label: 'Fuel Station', icon: Fuel, feature: 'fuel_station', permission: 'canViewFuelStation', isFuelStation: true },
+  { to: '/tenant/manufacturing', label: 'Manufacturing', icon: Factory, feature: 'manufacturing', permission: 'canViewManufacturing' },
+  { to: '/tenant/agriculture', label: 'Agriculture', icon: Sprout, feature: 'agriculture', permission: 'canViewAgriculture' },
+  { to: '/tenant/service', label: 'Service Business', icon: Wrench, feature: 'service', permission: ['appointments','work-orders','contracts','technicians','job-cards','feedback','car-wash','garage'].flatMap(servicePagePermissions), isService: true },
+  { to: '/tenant/salon/chairs', label: 'Salon & Spa', icon: Award, feature: 'salon_spa', isSalon: true },
+  { to: '/tenant/returns', label: 'Returns & Refunds', icon: RotateCcw, feature: 'sales.returns', permission: 'canRefundSale' },
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: 'canViewAccounting', isAccounting: true },
+  { to: '/tenant/hr', label: 'HR Management', icon: Users, feature: 'hr', permission: 'canViewHR', isHR: true },
+  { to: '/tenant/communication', label: 'Communication', icon: Bell, feature: 'communication', permission: 'canViewCommunication' },
+  { to: '/tenant/integrations', label: 'Integrations', icon: Plug, feature: 'integrations', permission: 'canViewSettings' },
+  { to: '/tenant/reports', label: 'Reports', icon: TrendingUp, feature: 'reports', permission: GRANULAR_REPORT_PERMISSION_KEYS, isReports: true },
+  { to: '/tenant/audit', label: 'Audit Log', icon: ClipboardList, feature: 'audit', permission: 'canViewAuditReport' },
+  { to: '/tenant/settings', label: 'Business Settings', icon: Settings, permission: 'canViewSettings', feature: 'settings', isSettings: true },
+  { to: '/tenant/data-importer', label: 'Data Importer', icon: FileSpreadsheet, permission: 'canImportInventory', feature: 'developer.data_importer' },
+  { to: '/tenant/referrals', label: 'Refer & Earn', icon: Gift, permission: 'canViewSettings', feature: 'referrals' },
+]
+
+interface ReportSubItem { id: string; label: string; permission?: string }
+interface ReportCategoryDef { id: string; label: string; icon: ComponentType<{ className?: string }>; permission: string | string[]; feature?: string; items: ReportSubItem[] }
+
+const reportCategories: ReportCategoryDef[] = [
+  {
+    id: 'sales', label: 'Sales Reports', icon: ShoppingCart, permission: 'canViewSalesReport', feature: 'reports.sales',
+    items: [
+      { id: 'salesSummary', label: 'Sales Summary' },
+      { id: 'salesDaily', label: 'Daily Sales Report' },
+      { id: 'salesWeekly', label: 'Weekly Sales Report' },
+      { id: 'salesMonthly', label: 'Monthly Sales Report' },
+      { id: 'salesByProduct', label: 'Sales by Product' },
+      { id: 'salesByCategory', label: 'Sales by Category' },
+      { id: 'salesByCustomer', label: 'Sales by Customer' },
+      { id: 'salesByUser', label: 'Sales by User/Cashier' },
+      { id: 'salesServiceJobs', label: 'Product & Service Jobs' },
+      { id: 'salesByBranch', label: 'Sales by Branch' },
+      { id: 'salesDiscounts', label: 'Discount Report' },
+      { id: 'salesReturns', label: 'Returns & Refunds Report' },
+    ],
+  },
+  {
+    id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport', feature: 'reports.inventory',
+    items: [
+      { id: 'inventoryStock', label: 'Current Stock Report' },
+      { id: 'inventoryValuation', label: 'Stock Valuation Report' },
+      { id: 'inventoryLowStock', label: 'Low Stock Report' },
+      { id: 'inventoryOutOfStock', label: 'Out of Stock Report' },
+      { id: 'inventoryStockMovement', label: 'Stock Movement Report' },
+      { id: 'inventoryAdjustments', label: 'Inventory Adjustment Report' },
+      { id: 'inventoryExpiry', label: 'Expiry Report' },
+      { id: 'inventoryDamaged', label: 'Damaged/Lost Stock Report' },
+      { id: 'inventoryFastMoving', label: 'Fast Moving Products' },
+      { id: 'inventorySlowMoving', label: 'Slow Moving Products' },
+      { id: 'inventoryProductLedger', label: 'Product Ledger' },
+    ],
+  },
+  {
+    id: 'financial', label: 'Financial Reports', icon: DollarSign, permission: 'canViewFinancialReport', feature: 'reports.financial',
+    items: [
+      { id: 'financialProfitLoss', label: 'Profit & Loss Report' },
+      { id: 'financialIncome', label: 'Income Report' },
+      { id: 'financialExpense', label: 'Expense Report' },
+      { id: 'financialCashFlow', label: 'Cash Flow Report' },
+      { id: 'financialTrialBalance', label: 'Trial Balance' },
+      { id: 'financialBalanceSheet', label: 'Balance Sheet' },
+      { id: 'financialGeneralLedger', label: 'General Ledger' },
+      { id: 'financialBankTransactions', label: 'Bank Transactions Report' },
+      { id: 'financialTax', label: 'Tax Report (VAT, GST)' },
+    ],
+  },
+  {
+    id: 'customers', label: 'Customer Reports', icon: Users, permission: 'canViewCustomerReport', feature: 'reports.customers',
+    items: [
+      { id: 'customersList', label: 'Customer List Report' },
+      { id: 'customersSales', label: 'Customer Sales Report' },
+      { id: 'customersBalance', label: 'Customer Balance Report' },
+      { id: 'customersReceivables', label: 'Customer Receivables Report' },
+      { id: 'customersTop', label: 'Top Customers Report' },
+      { id: 'customersLedger', label: 'Customer Ledger' },
+      { id: 'customersStatement', label: 'Customer Statement' },
+      { id: 'customersCreditNotes', label: 'Credit Notes Report' },
+    ],
+  },
+  {
+    id: 'suppliers', label: 'Supplier Reports', icon: Building2, permission: 'canViewSupplierReport', feature: 'reports.suppliers',
+    items: [
+      { id: 'suppliersList', label: 'Supplier List Report' },
+      { id: 'suppliersPurchases', label: 'Supplier Purchases Report' },
+      { id: 'suppliersPayables', label: 'Supplier Payables Report' },
+      { id: 'suppliersBalance', label: 'Supplier Balance Report' },
+      { id: 'suppliersStatement', label: 'Supplier Statement' },
+      { id: 'suppliersDebitNotes', label: 'Debit Notes Report' },
+      { id: 'suppliersLedger', label: 'Supplier Ledger' },
+    ],
+  },
+  {
+    id: 'receivables', label: 'Receivables Reports', icon: CreditCard, permission: 'canViewReceivablesReport', feature: 'reports.financial',
+    items: [
+      { id: 'receivablesOutstanding', label: 'Outstanding Invoices' },
+      { id: 'receivablesAging', label: 'Customer Aging Report' },
+      { id: 'receivablesCollection', label: 'Collection Report' },
+      { id: 'receivablesOverdue', label: 'Overdue Accounts Report' },
+      { id: 'receivablesCreditNotes', label: 'Credit Notes Report' },
+    ],
+  },
+  {
+    id: 'payables', label: 'Payables Reports', icon: FileText, permission: 'canViewPayablesReport', feature: 'reports.financial',
+    items: [
+      { id: 'payablesOutstanding', label: 'Outstanding Bills Report' },
+      { id: 'payablesAging', label: 'Supplier Aging Report' },
+      { id: 'payablesPaymentHistory', label: 'Payment History Report' },
+      { id: 'payablesOverdue', label: 'Overdue Supplier Balances' },
+      { id: 'payablesDebitNotes', label: 'Debit Notes Report' },
+    ],
+  },
+  {
+    id: 'performance', label: 'Business Performance Reports', icon: BarChart3, permission: 'canViewPerformanceReport', feature: 'reports.performance',
+    items: [
+      { id: 'performanceBranch', label: 'Branch Performance Report' },
+      { id: 'performanceProduct', label: 'Product Performance Report' },
+      { id: 'performanceCategory', label: 'Category Performance Report' },
+      { id: 'performanceUserActivity', label: 'User Activity Report' },
+      { id: 'performanceTopProducts', label: 'Top Selling Products' },
+      { id: 'performanceLeastProducts', label: 'Least Selling Products' },
+    ],
+  },
+  {
+    id: 'services', label: 'Service Reports', icon: Wrench, permission: 'canViewServiceReport', feature: 'reports.services',
+    items: [
+      { id: 'servicesSummary', label: 'Service Summary' },
+      { id: 'servicesList', label: 'Service List' },
+      { id: 'servicesSales', label: 'Service Sales Report' },
+      { id: 'servicesByCategory', label: 'Service Sales by Category' },
+      { id: 'servicesByBranch', label: 'Service Sales by Branch' },
+      { id: 'servicesTop', label: 'Top Services' },
+    ],
+  },
+  {
+    id: 'rentals', label: 'Rental Reports', icon: Clock, permission: 'canViewRentalReport', feature: 'reports.rentals',
+    items: [
+      { id: 'rentalsSummary', label: 'Rental Summary' },
+      { id: 'rentalsList', label: 'Rental List Report' },
+      { id: 'rentalsByItem', label: 'Rental by Item' },
+      { id: 'rentalsByCustomer', label: 'Rental by Customer' },
+      { id: 'rentalsByBranch', label: 'Rental by Branch' },
+      { id: 'rentalsActive', label: 'Active Rentals' },
+      { id: 'rentalsOverdue', label: 'Overdue Rentals' },
+      { id: 'rentalsReturns', label: 'Rental Returns Report' },
+      { id: 'rentalsDaily', label: 'Daily Rental Report' },
+      { id: 'rentalsMonthly', label: 'Monthly Rental Report' },
+    ],
+  },
+  {
+    id: 'property-management', label: 'Property Management Reports', icon: Building2, permission: 'canViewPropertyReports',
+    items: [
+      { id: 'propertyRentRoll', label: 'Rent Roll' },
+      { id: 'propertyRentArrears', label: 'Rent Arrears & Aging' },
+      { id: 'propertyRentCollections', label: 'Rent Collections' },
+      { id: 'propertyRenterStatement', label: 'Tenant Statement', permission: 'canViewPropertyStatements' },
+      { id: 'propertyPaymentPlans', label: 'Repayment Plan Progress' },
+      { id: 'propertyOwnerPayables', label: 'Landlord Payables', permission: 'canViewPayable' },
+      { id: 'propertyOwnerPayouts', label: 'Landlord Payout History' },
+      { id: 'propertyPlotSales', label: 'Plot Sales & Receivables', permission: 'canViewPropertySales' },
+      { id: 'propertyPlotPurchases', label: 'Plot Purchases & Supplier Payables', permission: 'canViewPropertyLandPurchases' },
+    ],
+  },
+  {
+    id: 'fuel', label: 'Fuel Station Reports', icon: Fuel, permission: 'canViewFuelStationReport', feature: 'fuel_station.reports',
+    items: [
+      { id: 'fuelSalesSummary', label: 'Fuel Sales Summary' },
+      { id: 'fuelByPump', label: 'Sales by Pump' },
+      { id: 'fuelByTank', label: 'Tank Stock Report' },
+      { id: 'fuelDeliveries', label: 'Fuel Deliveries Report' },
+      { id: 'fuelShiftSummary', label: 'Shift Summary Report' },
+      { id: 'fuelLubricantSales', label: 'Lubricant Sales Report' },
+      { id: 'fuelCarWash', label: 'Car Wash Income Report' },
+      { id: 'fuelMeterReadings', label: 'Meter Readings Report' },
+    ],
+  },
+  {
+    id: 'manufacturing', label: 'Manufacturing Reports', icon: Factory, permission: 'canViewManufacturingReport', feature: 'manufacturing.reports',
+    items: [
+      { id: 'mfgProductionSummary', label: 'Production Summary' },
+      { id: 'mfgByProduct', label: 'Production by Product' },
+      { id: 'mfgWasteReport', label: 'Waste Report' },
+      { id: 'mfgCostAnalysis', label: 'Production Cost Analysis' },
+      { id: 'mfgBOMReport', label: 'BOM / Recipe Report' },
+    ],
+  },
+  {
+    id: 'agriculture', label: 'Agriculture Reports', icon: Sprout, permission: 'canViewAgricultureReport', feature: 'agriculture.reports',
+    items: [
+      { id: 'agriHarvestSummary', label: 'Harvest Summary' },
+      { id: 'agriByField', label: 'Harvest by Field' },
+      { id: 'agriByLivestock', label: 'Production by Livestock' },
+      { id: 'agriExpenseReport', label: 'Farm Expense Report' },
+      { id: 'agriYieldReport', label: 'Yield per Acre Report' },
+    ],
+  },
+  {
+    id: 'service', label: 'Service Business Reports', icon: Wrench, permission: Object.values(serviceReportPermissions), feature: 'service.reports',
+    items: [
+      { id: 'svcAppointmentSummary', label: 'Appointment Summary' },
+      { id: 'svcByTechnician', label: 'Jobs by Technician' },
+      { id: 'svcByStatus', label: 'Work Orders by Status' },
+      { id: 'svcRevenueReport', label: 'Service Revenue Report' },
+      { id: 'svcContractReport', label: 'Active Contracts Report' },
+      { id: 'svcFeedbackReport', label: 'Customer Feedback Report' },
+      { id: 'svcJobCardReport', label: 'Job Card Summary' },
+      { id: 'svcContractUtilization', label: 'Contract Utilization' },
+    ],
+  },
+]
+
+const accountingSubItems = [
+  { to: '/tenant/accounting', label: 'Accounting', icon: Calculator, feature: 'accounting', permission: ['canViewAccounting', 'canCreateAccounting', 'canEditAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose', 'canDeleteAccounting', 'canReverseAccountingEntry', 'canViewChartOfAccounts', 'canCreateChartOfAccounts', 'canEditChartOfAccounts'] },
+  { to: '/tenant/accounting/financial-year-close', label: 'Financial-year Close', icon: FileSpreadsheet, feature: 'accounting', permission: ['canViewAccounting', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose'] },
+  { to: '/tenant/accounting/transactions', label: 'Transaction Accounts', icon: Wallet, feature: ['accounting', 'expenses'], permission: 'canViewTransactionAccount' },
+  { to: '/tenant/credit-debit-notes', label: 'Credit & Debit Notes', icon: Receipt, feature: 'accounting', permission: ['canViewReceivable', 'canViewPayable', 'canViewAccounting'] },
+  { to: '/tenant/transfers', label: 'Branch Transfers', icon: ArrowRightLeft, feature: 'inventory.transfers', permission: 'canTransferStock' },
+  { to: '/tenant/accounting/staff-till', label: 'Staff Till Sheet', icon: Users, feature: 'accounting', permission: 'canViewStaffTillSheet' },
+]
+
+const hrAccountingSubItems = [
+  { to: '/tenant/hr/accounting/overview', label: 'Overview', icon: Calculator, feature: 'hr', permission: ['canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/mappings', label: 'Account Mappings', icon: Settings, feature: 'hr', permission: ['canManageHRPayrollSettings', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/calculator', label: 'Salary Calculator', icon: Calculator, feature: 'hr', permission: ['canViewHR', 'canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/payroll', label: 'Payroll Posting', icon: Receipt, feature: 'hr', permission: ['canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/payments', label: 'Salary Payments', icon: Wallet, feature: 'hr', permission: ['canPayHRPayroll', 'canManageHRPayroll'] },
+  { to: '/tenant/hr/accounting/advances', label: 'Advances / Loans', icon: BadgeDollarSign, feature: 'hr', permission: ['canCreateHRPayroll', 'canPayHRPayroll', 'canManageHRPayroll'] },
+]
+
+const hrSubItems = [
+  { to: '/tenant/hr/employees', label: 'Employees', icon: Users, feature: 'hr', permission: ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee', 'canDeleteHREmployee'] },
+  { to: '/tenant/hr/departments', label: 'Departments', icon: Building2, feature: 'hr', permission: ['canViewHR', 'canManageHRStructure'] },
+  { to: '/tenant/hr/positions', label: 'Positions', icon: Badge, feature: 'hr', permission: ['canViewHR', 'canManageHRStructure'] },
+  { to: '/tenant/hr/units-teams', label: 'Teams', icon: Users, feature: 'hr', permission: ['canViewHR', 'canManageHRStructure'] },
+  { to: '/tenant/hr/contracts', label: 'Contracts', icon: FileText, feature: 'hr', permission: ['canViewHRContracts', 'canManageHRContracts'] },
+  { to: '/tenant/hr/documents', label: 'Documents', icon: ClipboardList, feature: 'hr', permission: ['canViewHRDocuments', 'canManageHRDocuments'] },
+  { to: '/tenant/hr/attendance', label: 'Attendance', icon: Clock, feature: 'hr', permission: ['canViewHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canApproveHRAttendance', 'canManageHRAttendance'] },
+  { to: '/tenant/hr/attendance/check', label: 'Check In/Out', icon: Clock, feature: 'hr', permission: ['canRecordHRAttendance', 'canRecordOwnHRAttendance', 'canManageHRAttendance'] },
+  { to: '/tenant/hr/shifts', label: 'Shifts', icon: Clock, feature: 'hr', permission: 'canViewHRShifts' },
+  { to: '/tenant/hr/leaves', label: 'Leave Requests', icon: Calendar, feature: 'hr', permission: ['canViewHRLeave', 'canRequestHRLeave'] },
+  { to: '/tenant/hr/leaves/approval', label: 'Leave Approvals', icon: ClipboardCheck, feature: 'hr', permission: 'canApproveHRLeave' },
+  { to: '/tenant/hr/accounting/overview', label: 'HR Accounting', icon: Calculator, feature: 'hr', permission: ['canViewHR', 'canViewHRPayroll', 'canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHRPayroll'], children: hrAccountingSubItems },
+]
+
+const settingsSubItems = [
+  { to: '/tenant/settings', label: 'Business Profile', icon: Building2, feature: 'settings', permission: 'canViewSettings' },
+  { to: '/tenant/branches', label: 'Branches', icon: GitBranch, feature: 'multi_branch', permission: 'canViewBranch' },
+  { to: '/tenant/tax', label: 'Tax Management', icon: DollarSign, feature: 'settings.taxes', permission: 'canViewTax' },
+  { to: '/tenant/receipt-settings', label: 'Receipt Settings', icon: FileText, feature: 'settings', permission: 'canViewReceipt' },
+  { to: '/tenant/roles', label: 'Roles & Permissions', icon: Shield, feature: 'settings.roles', permission: 'canViewStaff' },
+]
+
+export function TenantLayout() {
+  const { t } = useLanguage()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [reportsExpanded, setReportsExpanded] = useState(false)
+  const [settingsExpanded, setSettingsExpanded] = useState(false)
+  const [inventoryExpanded, setInventoryExpanded] = useState(false)
+  const [rentalsExpanded, setRentalsExpanded] = useState(false)
+  const [accountingExpanded, setAccountingExpanded] = useState(false)
+  const [fuelStationExpanded, setFuelStationExpanded] = useState(false)
+  const [receivablesExpanded, setReceivablesExpanded] = useState(false)
+  const [restaurantExpanded, setRestaurantExpanded] = useState(false)
+  const [barExpanded, setBarExpanded] = useState(false)
+  const [propertyManagementExpanded, setPropertyManagementExpanded] = useState(false)
+  const [serviceExpanded, setServiceExpanded] = useState(false)
+  const [salonExpanded, setSalonExpanded] = useState(false)
+  const [clinicExpanded, setClinicExpanded] = useState(false)
+  const [pharmacyExpanded, setPharmacyExpanded] = useState(false)
+  const [procurementExpanded, setProcurementExpanded] = useState(false)
+  const [procurementBuyerExpanded, setProcurementBuyerExpanded] = useState(false)
+  const [procurementSellerExpanded, setProcurementSellerExpanded] = useState(false)
+  const [hrExpanded, setHRExpanded] = useState(false)
+  const [hrAccountingExpanded, setHRAccountingExpanded] = useState(false)
+  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
+  const [onboardingCompleted, setOnboardingCompleted] = useState(false)
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false)
+  const [searchParams] = useSearchParams()
+  const activeReportId = searchParams.get('report')
+  const { user, logout, hasPermission, hasCompletedOnboarding, refreshOnboardingStatus, tokens, switchBusiness } = useJWTAuth()
+  const tenantId = user?.tenantId || (user as any)?.tenant_id
+  const [businesses, setBusinesses] = useState<Array<{ id: string; name: string; businessType?: string | null }>>([])
+  const [switchingBusiness, setSwitchingBusiness] = useState(false)
+  const onboardingStorageKey = user?.id ? `jibu_sales_onboarding_seen_${user.id}` : 'jibu_sales_onboarding_seen_guest'
+  const { theme, toggleTheme } = useTheme()
+  const { canAccessFeature, loading } = useFeatureAccess()
+  const navigate = useNavigate()
+  const location = useLocation()
+  useEffect(() => {
+    if (!tokens?.accessToken || !tenantId || user?.isPlatformUser) { setBusinesses([]); return }
+    const controller = new AbortController()
+    fetch(`${getApiBaseUrl()}/api/auth/businesses`, { headers: { Authorization: `Bearer ${tokens.accessToken}` }, signal: controller.signal })
+      .then(async response => response.ok ? response.json() : null)
+      .then(data => setBusinesses(Array.isArray(data?.businesses) ? data.businesses : []))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [tokens?.accessToken, tenantId, user?.isPlatformUser])
+  const handleBusinessSwitch = async (nextTenantId: string) => {
+    if (!nextTenantId || nextTenantId === tenantId) return
+    setSwitchingBusiness(true)
+    try {
+      await switchBusiness(nextTenantId)
+      navigate('/tenant/dashboard', { replace: true })
+    } catch (error) {
+      appNotify(error instanceof Error ? error.message : 'Could not switch business.')
+    } finally {
+      setSwitchingBusiness(false)
+    }
+  }
+  const [waiterMode, setWaiterMode] = useState(() => sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
+  const handleLogout = () => {
+    sessionStorage.removeItem('restaurant.activeWaiterId')
+    sessionStorage.removeItem('restaurant.waiterSessionToken')
+    sessionStorage.removeItem('restaurant.waiterKioskMode')
+    setWaiterMode(false)
+    logout()
+    navigate('/login')
+  }
+  const handleWaiterSignOut = () => {
+    sessionStorage.removeItem('restaurant.activeWaiterId')
+    sessionStorage.removeItem('restaurant.waiterSessionToken')
+    window.dispatchEvent(new Event('restaurant-waiter-session-changed'))
+  }
+
+  useEffect(() => {
+    const syncWaiterMode = () => setWaiterMode(sessionStorage.getItem('restaurant.waiterKioskMode') === 'true')
+    syncWaiterMode()
+    window.addEventListener('restaurant-waiter-session-changed', syncWaiterMode)
+    return () => window.removeEventListener('restaurant-waiter-session-changed', syncWaiterMode)
+  }, [])
+
+  useEffect(() => {
+    if (!waiterMode) return
+    const allowedPaths = ['/tenant/restaurant/orders', '/tenant/restaurant/menu']
+    if (!allowedPaths.includes(location.pathname)) navigate('/tenant/restaurant/orders', { replace: true })
+  }, [waiterMode, location.pathname, navigate])
+
+  useEffect(() => {
+    if (!tenantId) return
+    let cancelled = false
+
+    apiFetch('/api/settings/business-profile')
+      .then(async (res) => {
+        if (!res.ok) return
+        const data = await res.json().catch(() => null)
+        if (!cancelled && data) cacheTenantFormattingSettings(data)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [tenantId])
+
+  useEffect(() => {
+    if (!tenantId || !user?.id) return
+    const path = location.pathname
+    const featureByPrefix: Array<[string, string]> = [
+      ['/tenant/dashboard', 'Dashboard'], ['/tenant/sales', 'Sales'], ['/tenant/ai-advisor', 'AI Advisor'],
+      ['/tenant/inventory', 'Inventory'], ['/tenant/receivables', 'Receivables'], ['/tenant/payables', 'Payables'],
+      ['/tenant/rentals', 'Rentals'], ['/tenant/restaurant', 'Restaurant'], ['/tenant/fuel-station', 'Fuel Station'],
+      ['/tenant/manufacturing', 'Manufacturing'], ['/tenant/agriculture', 'Agriculture'], ['/tenant/service', 'Service Business'],
+      ['/tenant/returns', 'Returns'], ['/tenant/accounting', 'Accounting'], ['/tenant/hr', 'HR Management'],
+      ['/tenant/communication', 'Communication'], ['/tenant/integrations', 'Integrations'], ['/tenant/reports', 'Reports'],
+      ['/tenant/audit', 'Audit Log'], ['/tenant/settings', 'Business Settings'], ['/tenant/branches', 'Branches'],
+      ['/tenant/tax', 'Tax Management'], ['/tenant/receipt-settings', 'Receipt Settings'], ['/tenant/roles', 'Roles & Permissions'],
+      ['/tenant/data-importer', 'Data Importer'], ['/tenant/referrals', 'Refer & Earn'],
+    ]
+    let feature = featureByPrefix.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1] || 'Other'
+    if (feature === 'Reports') {
+      const reportId = new URLSearchParams(location.search).get('report')
+      if (reportId && /^[a-zA-Z0-9_-]{1,64}$/.test(reportId)) feature = `Report:${reportId}`
+    }
+
+    const eventKey = `jibusales_feature_view_${tenantId}_${user.id}_${feature}`
+    let recordPageView = true
+    try {
+      const previous = Number(sessionStorage.getItem(eventKey) || 0)
+      recordPageView = Date.now() - previous >= 5 * 60 * 1000
+      if (recordPageView) sessionStorage.setItem(eventKey, String(Date.now()))
+    } catch { /* telemetry should never block navigation */ }
+
+    const report = (kind: 'view' | 'engagement', metrics: { activeMs: number; interactionCount: number; maxScrollDepth: number }) => {
+      void apiFetch('/api/audit/feature-view', {
+        method: 'POST',
+        keepalive: true,
+        body: JSON.stringify({ feature, kind, ...metrics }),
+      }).catch(() => {})
+    }
+    const idleTimeoutMs = 60_000
+    let lastActivityAt = Date.now()
+    let lastTickAt = lastActivityAt
+    let wasVisible = document.visibilityState === 'visible'
+    let lastInteractionEventAt = 0
+    let interactionCount = 0
+    let activeMs = 0
+    let maxScrollDepth = 0
+    const currentScrollDepth = () => {
+      const root = document.documentElement
+      return Math.max(0, Math.min(100, Math.round((window.scrollY / Math.max(1, root.scrollHeight - window.innerHeight)) * 100)))
+    }
+    const accumulateActiveTime = (now: number) => {
+      if (wasVisible) activeMs += Math.max(0, Math.min(now, lastActivityAt + idleTimeoutMs) - lastTickAt)
+      lastTickAt = now
+    }
+    const markActivity = () => {
+      const now = Date.now()
+      accumulateActiveTime(now)
+      lastActivityAt = now
+      if (now - lastInteractionEventAt >= 300) {
+        interactionCount += 1
+        lastInteractionEventAt = now
+      }
+      maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth())
+    }
+    const flushEngagement = () => {
+      const now = Date.now()
+      accumulateActiveTime(now)
+      maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth())
+      if (activeMs > 0 || interactionCount > 0 || maxScrollDepth > 0) {
+        report('engagement', { activeMs: Math.min(activeMs, 60_000), interactionCount, maxScrollDepth })
+        activeMs = 0
+        interactionCount = 0
+        maxScrollDepth = currentScrollDepth()
+      }
+    }
+    if (recordPageView) report('view', { activeMs: 0, interactionCount: 0, maxScrollDepth: 0 })
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'touchstart', 'wheel', 'scroll', 'keydown']
+    activityEvents.forEach(eventName => window.addEventListener(eventName, markActivity, { passive: true }))
+    const timer = window.setInterval(flushEngagement, 15_000)
+    const handleVisibility = () => {
+      const now = Date.now()
+      if (document.visibilityState === 'hidden') {
+        accumulateActiveTime(now)
+        wasVisible = false
+        flushEngagement()
+      } else {
+        wasVisible = true
+        lastActivityAt = now
+        lastTickAt = now
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pagehide', flushEngagement)
+    return () => {
+      window.clearInterval(timer)
+      activityEvents.forEach(eventName => window.removeEventListener(eventName, markActivity))
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pagehide', flushEngagement)
+      flushEngagement()
+    }
+  }, [tenantId, user?.id, location.pathname, location.search])
+
+  const setExpandedGroup = (group: string | null) => {
+    setReportsExpanded(group === 'reports')
+    setSettingsExpanded(group === 'settings')
+    setInventoryExpanded(group === 'inventory')
+    setRentalsExpanded(group === 'rentals')
+    setAccountingExpanded(group === 'accounting')
+    setFuelStationExpanded(group === 'fuel')
+    setReceivablesExpanded(group === 'receivables')
+    setRestaurantExpanded(group === 'restaurant')
+    setBarExpanded(group === 'bar')
+    setPropertyManagementExpanded(group === 'property-management')
+    setServiceExpanded(group === 'service')
+    setSalonExpanded(group === 'salon')
+    setClinicExpanded(group === 'clinic')
+    setPharmacyExpanded(group === 'pharmacy')
+    setProcurementExpanded(group === 'procurement')
+    setHRExpanded(group === 'hr')
+  }
+  const toggleExpandedGroup = (group: string, isExpanded: boolean) => {
+    setExpandedGroup(isExpanded ? null : group)
+  }
+  const toggleReports = () => toggleExpandedGroup('reports', reportsExpanded)
+  const toggleSettings = () => toggleExpandedGroup('settings', settingsExpanded)
+  const toggleInventory = () => toggleExpandedGroup('inventory', inventoryExpanded)
+  const toggleRentals = () => toggleExpandedGroup('rentals', rentalsExpanded)
+  const toggleAccounting = () => toggleExpandedGroup('accounting', accountingExpanded)
+  const toggleFuelStation = () => toggleExpandedGroup('fuel', fuelStationExpanded)
+  const toggleReceivables = () => toggleExpandedGroup('receivables', receivablesExpanded)
+  const toggleService = () => toggleExpandedGroup('service', serviceExpanded)
+  const toggleSalon = () => toggleExpandedGroup('salon', salonExpanded)
+  const toggleClinic = () => toggleExpandedGroup('clinic', clinicExpanded)
+  const togglePharmacy = () => toggleExpandedGroup('pharmacy', pharmacyExpanded)
+  const toggleRestaurant = () => toggleExpandedGroup('restaurant', restaurantExpanded)
+  const toggleBar = () => toggleExpandedGroup('bar', barExpanded)
+  const togglePropertyManagement = () => toggleExpandedGroup('property-management', propertyManagementExpanded)
+  const toggleProcurement = () => toggleExpandedGroup('procurement', procurementExpanded)
+  const toggleHR = () => toggleExpandedGroup('hr', hrExpanded)
+
+  // Keep only the current page's top-level section expanded.
+  useEffect(() => {
+    const path = location.pathname
+    let group: string | null = null
+    if (path.startsWith('/tenant/inventory')) group = 'inventory'
+    else if (path.startsWith('/tenant/rentals')) group = 'rentals'
+    else if (path.startsWith('/tenant/accounting') || path === '/tenant/transfers') group = 'accounting'
+    else if (path.startsWith('/tenant/fuel-station')) group = 'fuel'
+    else if (path.startsWith('/tenant/receivables')) group = 'receivables'
+    else if (path.startsWith('/tenant/service')) group = 'service'
+    else if (path.startsWith('/tenant/salon')) group = 'salon'
+    else if (path.startsWith('/tenant/clinic')) group = 'clinic'
+    else if (path.startsWith('/tenant/pharmacy')) group = 'pharmacy'
+    else if (path.startsWith('/tenant/bar')) group = 'bar'
+    else if (path.startsWith('/tenant/restaurant')) group = 'restaurant'
+    else if (path.startsWith('/tenant/property-management')) group = 'property-management'
+    else if (path.startsWith('/tenant/procurement')) group = 'procurement'
+    else if (path.startsWith('/tenant/hr')) group = 'hr'
+    else if (path === '/tenant/reports' || searchParams.get('view') === 'reports') group = 'reports'
+    else if (path.startsWith('/tenant/settings')) group = 'settings'
+    setExpandedGroup(group)
+
+    if (location.pathname.startsWith('/tenant/procurement')) {
+      if (location.pathname.startsWith('/tenant/procurement/buying')) setProcurementBuyerExpanded(true)
+      if (location.pathname.startsWith('/tenant/procurement/selling')) setProcurementSellerExpanded(true)
+    }
+    if (location.pathname.startsWith('/tenant/hr/accounting')) setHRAccountingExpanded(true)
+  }, [location.pathname, location.search])
+  function hasRequiredPermission(permission?: string | string[]) {
+    if (!permission) return true
+    const permissions = Array.isArray(permission) ? permission : [permission]
+    return permissions.some((perm) => hasPermission(perm))
+  }
+
+  function subItemVisible(item: { feature?: string | string[] | null; allFeatures?: string[]; permission?: string | string[] }) {
+    if (item.feature) {
+      const features = Array.isArray(item.feature) ? item.feature : [item.feature]
+      if (!features.some((feature) => canAccessFeature(feature))) return false
+    }
+    if (item.allFeatures?.some((feature) => !canAccessFeature(feature))) return false
+    if (item.permission && !hasRequiredPermission(item.permission)) return false
+    return true
+  }
+  const visibleHRSubItems = hrSubItems
+    .map((item: any) => item.children ? { ...item, children: item.children.filter(subItemVisible) } : item)
+    .filter((item: any) => item.children ? item.children.length > 0 && subItemVisible(item) : subItemVisible(item))
+  const visibleInventorySubItems = inventorySubItems.filter(subItemVisible)
+  const visibleRentalSubItems = canAccessFeature('rentals') ? rentalSubItems.filter(subItemVisible) : []
+  const visibleAccountingSubItems = accountingSubItems.filter(subItemVisible)
+  const visibleFuelStationSubItems = fuelStationSubItems.filter(subItemVisible)
+  const visibleReceivablesSubItems = receivablesSubItems.filter(subItemVisible)
+  const visibleServiceSubItems = serviceSubItems.filter(subItemVisible)
+  const visibleSalonSubItems = salonSubItems.filter(subItemVisible)
+  const visibleClinicSubItems = clinicSubItems.filter(subItemVisible)
+  const visiblePharmacySubItems = pharmacySubItems.filter(subItemVisible)
+  const visibleRestaurantSubItems = restaurantSubItems.filter(subItemVisible).filter(item =>
+    !waiterMode || ['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(item.to)
+  )
+  const visibleBarSubItems = canAccessFeature('bar') ? barSubItems.filter(subItemVisible) : []
+  const propertyManagementSubItems = [
+    ...(canAccessFeature('property_management.landlord') ? [
+      { to: '/tenant/property-management/my-properties', label: 'My Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreateProperties', 'canEditProperties', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
+      { to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
+      { to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies'] },
+      { to: '/tenant/property-management/rent', label: 'Rent & Receivables', icon: Wallet, permission: ['canViewPropertyCollections', 'canViewPropertyReports'] },
+    ] : []),
+    ...(canAccessFeature('property_management.agent') ? [
+      { to: '/tenant/property-management/clients', label: 'Landlord Clients', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyOwners', 'canEditPropertyOwners'] },
+      { to: '/tenant/property-management/managed-properties', label: 'Managed Properties', icon: Building2, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreateProperties', 'canEditProperties', 'canCreatePropertyUnits', 'canEditPropertyUnits'] },
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/rental-units', label: 'Rental Units', icon: Home, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canCreatePropertyUnits', 'canEditPropertyUnits'] }] : []),
+      ...(!canAccessFeature('property_management.landlord') ? [{ to: '/tenant/property-management/tenancies', label: 'Tenants & Tenancies', icon: Users, permission: ['canViewPropertyPortfolio', 'canViewPropertyManagement', 'canViewPropertyStatements', 'canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies'] }] : []),
+      { to: '/tenant/property-management/collections', label: 'Rent Collection', icon: Wallet, permission: 'canViewPropertyCollections' },
+      { to: '/tenant/property-management/sales', label: 'Plot Sales & Installments', icon: Receipt, permission: 'canViewPropertySales' },
+      { to: '/tenant/property-management/purchases', label: 'Plot Purchases & Supplier Payments', icon: Receipt, permission: ['canViewPropertyLandPurchases', 'canCreatePropertyLandPurchase', 'canRecordPropertyLandPurchasePayment'] },
+    ] : []),
+  ].filter(subItemVisible)
+  const visiblePropertyManagementSubItems = propertyManagementSubItems
+  const visibleProcurementBuyerItems = procurementBuyerItems.filter(subItemVisible)
+  const visibleProcurementSellerItems = procurementSellerItems.filter(subItemVisible)
+  const visibleSettingsSubItems = settingsSubItems.filter(subItemVisible)
+  const visibleReportCategories = reportCategories.map(cat => ({ ...cat, items: cat.items.filter(item =>
+    cat.id === 'service'
+      ? hasPermission(serviceReportPermissions[serviceReportIds[item.id]])
+      : canViewReportItem(item.id, item.permission || cat.permission, hasPermission)
+  ) })).filter((cat) => {
+    if (!cat.items.length) return false
+    if (cat.id === 'property-management' && !canAccessFeature('property_management.landlord') && !canAccessFeature('property_management.agent')) return false
+    if (cat.feature && !canAccessFeature(cat.feature)) return false
+    return true
+  })
+  const visibleNavItems = navItems.filter((item) => {
+    if (waiterMode) return item.isRestaurant && visibleRestaurantSubItems.length > 0
+    if (item.feature === 'dashboard') return canAccessFeature('dashboard')
+    if (item.isPropertyManagement) return visiblePropertyManagementSubItems.length > 0
+    if (item.isRentals) return visibleRentalSubItems.length > 0
+    if (item.isSalon) return canAccessFeature('salon_spa') && visibleSalonSubItems.length > 0
+    if (item.isClinic) return canAccessFeature('clinic_management') && visibleClinicSubItems.length > 0
+    if (item.isPharmacy) return canAccessFeature('pharmacy_management') && visiblePharmacySubItems.length > 0
+    if (item.isRestaurant) return visibleRestaurantSubItems.length > 0
+    if (item.isBar) return visibleBarSubItems.length > 0
+    if (item.isService && canAccessFeature('salon_spa')) return false
+    if (item.isStandalonePlanner) return !canAccessFeature('rentals') && canAccessFeature('planner') && hasRequiredPermission(item.permission)
+    if (item.isStandaloneCRM) return !canAccessFeature('rentals') && canAccessFeature('crm') && hasRequiredPermission(item.permission)
+    if (item.isInventory) return visibleInventorySubItems.length > 0
+    if (item.isProcurement) return visibleProcurementBuyerItems.length > 0 || visibleProcurementSellerItems.length > 0
+    // Special handling for Communication: only show if the exact 'communication' feature is enabled
+    // (not when only sub-features like 'communication.notifications' are enabled)
+    if (item.feature === 'communication') {
+      return canAccessFeature('communication') && hasRequiredPermission(item.permission)
+    }
+
+    if (item.feature && !canAccessFeature(item.feature)) {
+      if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
+      if (item.isSettings && visibleSettingsSubItems.length > 0) return true
+      if (item.isReports && visibleReportCategories.length > 0) return true
+      return false
+    }
+    if (item.permission && !hasRequiredPermission(item.permission)) {
+      // For parent items with sub-items, show if any sub-item is visible
+      if (item.isAccounting && visibleAccountingSubItems.length > 0) return true
+      if (item.isInventory && visibleInventorySubItems.length > 0) return true
+      if (item.isFuelStation && visibleFuelStationSubItems.length > 0) return true
+      if (item.isReceivables && visibleReceivablesSubItems.length > 0) return true
+      if (item.isService && visibleServiceSubItems.length > 0) return true
+      if (item.isRestaurant && visibleRestaurantSubItems.length > 0) return true
+      if (item.isBar && visibleBarSubItems.length > 0) return true
+      if (item.isHR && visibleHRSubItems.length > 0) return true
+      if (item.isSettings && visibleSettingsSubItems.length > 0) return true
+      if (item.isReports && visibleReportCategories.length > 0) return true
+      // For standalone items with no sub-items, hide strictly
+      return false
+    }
+    return true
+  })
+
+  const toggleCat = (catId: string) => {
+    setExpandedCats(prev => {
+      if (prev.has(catId)) return new Set()
+      return new Set([catId])
+    })
+  }
+
+  const completeOnboarding = async () => {
+    try {
+      const apiBase = getApiBaseUrl()
+      await fetch(`${apiBase}/api/onboarding/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokens?.accessToken || ''}`,
+        },
+      })
+    } catch {
+      // Ignore and still update local UI state
+    }
+
+    setOnboardingCompleted(true)
+    setShowOnboardingModal(false)
+    await refreshOnboardingStatus()
+  }
+
+  const dismissOnboarding = () => {
+    setShowOnboardingModal(false)
+  }
+
+  useEffect(() => {
+    setOnboardingCompleted(hasCompletedOnboarding)
+  }, [hasCompletedOnboarding])
+
+  useEffect(() => {
+    if (user?.id) {
+      refreshOnboardingStatus()
+    }
+  }, [user?.id, refreshOnboardingStatus])
+
+  useEffect(() => {
+    if (!user?.id) return
+
+    // Show guide on every login/reload until the user completes it via the backend
+    if (onboardingCompleted) {
+      setShowOnboardingModal(false)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowOnboardingModal(true)
+    }, 800)
+    return () => window.clearTimeout(timer)
+  }, [user?.id, onboardingCompleted])
+
+  const selectReport = (reportId: string) => {
+    navigate(`/tenant/reports?report=${serviceReportIds[reportId] || reportId}`)
+    setSidebarOpen(false)
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {/* Full-height vertical sidebar */}
+      <aside className={cn(
+        'fixed left-0 top-0 z-50 h-screen w-80 max-w-[88vw] transform bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] shadow-xl transition-transform duration-200 ease-in-out lg:w-64 lg:max-w-none lg:translate-x-0',
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      )}>
+        <div className="flex h-full flex-col">
+          {/* Fixed logo + Dashboard */}
+          <div className="border-b border-white/10 px-4 pt-4 pb-2">
+            <div className="flex items-center gap-2 mb-3">
+              <img src="/img/jibusales_logo.png" alt="jibuSales" className="h-8 w-auto object-contain" />
+            </div>
+            {waiterMode ? <div className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-200">Waiter service</div> : (() => { const dashItem = visibleNavItems.find(i => i.feature === 'dashboard') || navItems[0]; const DashIcon = dashItem.icon; return (
+            <NavLink to={dashItem.to} onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+<DashIcon className="h-6 w-6 lg:h-5 lg:w-5" />{t(dashItem.label)}
+            </NavLink>
+            ) })()}
+          </div>
+          {/* Scrollable nav items */}
+          <nav className="flex-1 space-y-2 overflow-y-auto p-4 sm:p-5 lg:space-y-1 lg:p-4">
+            {visibleNavItems.filter(i => i.feature !== 'dashboard').map((item) =>
+              item.isPropertyManagement ? (
+                <div key={item.to}>
+                  <button
+                    type="button"
+                    aria-expanded={propertyManagementExpanded}
+                    onClick={togglePropertyManagement}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', propertyManagementExpanded || location.pathname.startsWith('/tenant/property-management') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{t(item.label)}</span>
+                    {propertyManagementExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {propertyManagementExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visiblePropertyManagementSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                      <sub.icon className="h-4 w-4" />{t(sub.label)}
+                    </NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isRentals ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={rentalsExpanded} onClick={toggleRentals}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', rentalsExpanded || location.pathname.startsWith('/tenant/rentals') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{t(item.label)}</span>
+                    {rentalsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {rentalsExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleRentalSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                      <sub.icon className="h-4 w-4" />{t(sub.label)}
+                    </NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isInventory ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleInventory()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', inventoryExpanded || location.pathname.startsWith('/tenant/inventory') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+              <span className="flex-1 text-left">{t(item.label)}</span>
+                    {inventoryExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {inventoryExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleInventorySubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+<sub.icon className="h-4 w-4" />{t(sub.label)}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isAccounting ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleAccounting()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', accountingExpanded || location.pathname.startsWith('/tenant/accounting') || location.pathname === '/tenant/transfers' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+<span className="flex-1 text-left">{t(item.label)}</span>
+                    {accountingExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {accountingExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleAccountingSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => {
+                            const fullPath = location.pathname + location.search
+                            const isExact = fullPath === sub.to
+                            return cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isExact ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')
+                          }}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isFuelStation ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleFuelStation()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', fuelStationExpanded || location.pathname.startsWith('/tenant/fuel-station') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {fuelStationExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {fuelStationExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleFuelStationSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isReceivables ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleReceivables()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', receivablesExpanded || location.pathname.startsWith('/tenant/receivables') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {receivablesExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {receivablesExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleReceivablesSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isProcurement ? (
+                <div key={item.to}>
+                  <button
+                    onClick={toggleProcurement}
+                    aria-expanded={procurementExpanded}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', procurementExpanded || location.pathname.startsWith('/tenant/procurement') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{t(item.label)}</span>
+                    {procurementExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {procurementExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleProcurementBuyerItems.length > 0 && <div>
+                      <button type="button" aria-expanded={procurementBuyerExpanded} onClick={() => setProcurementBuyerExpanded((expanded) => !expanded)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white">
+                        <ShoppingBag className="h-4 w-4" /><span className="flex-1 text-left">Buyer</span>{procurementBuyerExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      </button>
+                      {procurementBuyerExpanded && <div className="ml-3 space-y-1 border-l border-white/10 pl-2">{visibleProcurementBuyerItems.map((sub) => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}</div>}
+                    </div>}
+                    {visibleProcurementSellerItems.length > 0 && <div>
+                      <button type="button" aria-expanded={procurementSellerExpanded} onClick={() => setProcurementSellerExpanded((expanded) => !expanded)} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white">
+                        <Building2 className="h-4 w-4" /><span className="flex-1 text-left">Seller</span>{procurementSellerExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      </button>
+                      {procurementSellerExpanded && <div className="ml-3 space-y-1 border-l border-white/10 pl-2">{visibleProcurementSellerItems.map((sub) => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}</div>}
+                    </div>}
+                  </div>}
+                </div>
+              ) : item.isService ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleService()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', serviceExpanded || location.pathname.startsWith('/tenant/service') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {serviceExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {serviceExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleServiceSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : item.isSalon ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={salonExpanded} onClick={toggleSalon}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', salonExpanded || location.pathname.startsWith('/tenant/salon') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {salonExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {salonExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleSalonSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isRestaurant ? (
+                <div key={item.to}>
+                  <button
+                    type="button"
+                    aria-expanded={restaurantExpanded}
+                    onClick={toggleRestaurant}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', restaurantExpanded || location.pathname.startsWith('/tenant/restaurant') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{t(item.label)}</span>
+                    {restaurantExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {restaurantExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleRestaurantSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => {
+                      const isExact = location.pathname + location.search === sub.to.replace('/tenant', '') || location.pathname + location.search === sub.to
+                      return cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive && isExact ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')
+                    }}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isBar ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={barExpanded} onClick={toggleBar}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', barExpanded || location.pathname.startsWith('/tenant/bar') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {barExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {barExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleBarSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isClinic ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={clinicExpanded} onClick={toggleClinic}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', clinicExpanded || location.pathname.startsWith('/tenant/clinic') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {clinicExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {clinicExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visibleClinicSubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isPharmacy ? (
+                <div key={item.to}>
+                  <button type="button" aria-expanded={pharmacyExpanded} onClick={togglePharmacy}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', pharmacyExpanded || location.pathname.startsWith('/tenant/pharmacy') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" /><span className="flex-1 text-left">{t(item.label)}</span>
+                    {pharmacyExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {pharmacyExpanded && <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                    {visiblePharmacySubItems.map(sub => <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)} className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}><sub.icon className="h-4 w-4" />{t(sub.label)}</NavLink>)}
+                  </div>}
+                </div>
+              ) : item.isReports ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleReports()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', reportsExpanded || activeReportId ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {reportsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {reportsExpanded && (
+                    <div className="mt-1 space-y-1">
+                      {visibleReportCategories.map(cat => {
+                        const catExpanded = expandedCats.has(cat.id)
+                        return (
+                          <div key={cat.id}>
+                            <button
+                              onClick={() => toggleCat(cat.id)}
+                              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/10 hover:text-white"
+                            >
+                              <cat.icon className="h-4 w-4" />
+<span className="flex-1 text-left">{t(cat.label)}</span>
+                              {catExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                            </button>
+                            {catExpanded && (
+                              <div className="ml-4 border-l border-white/10 pl-2">
+                                {cat.items.map(rpt => (
+                                  <button
+                                    key={rpt.id}
+                                    onClick={() => selectReport(rpt.id)}
+                                    className={cn('flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors', activeReportId === rpt.id ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}
+                                  >
+{t(rpt.label)}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : item.isHR ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleHR()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', hrExpanded || location.pathname.startsWith('/tenant/hr') ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {hrExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {hrExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleHRSubItems.map((sub: any) => {
+                        const childItems = sub.children || []
+                        const isAccountingActive = location.pathname.startsWith('/tenant/hr/accounting')
+                        if (childItems.length > 0) {
+                          return (
+                            <div key={sub.to}>
+                              <button
+                                type="button"
+                                onClick={() => setHRAccountingExpanded((prev) => !prev)}
+                                className={cn(
+                                  'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+                                  isAccountingActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                                )}
+                              >
+                                <sub.icon className="h-4 w-4" />
+<span className="flex-1 text-left">{t(sub.label)}</span>
+                                {hrAccountingExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              </button>
+                              {hrAccountingExpanded && (
+                                <div className="ml-4 mt-1 space-y-1 border-l border-white/10 pl-2">
+                                  {childItems.map((child: any) => (
+                                    <NavLink key={child.to} to={child.to} onClick={() => setSidebarOpen(false)}
+                                      className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive || (child.to.endsWith('/overview') && location.pathname === '/tenant/hr/accounting') ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+<child.icon className="h-4 w-4" />{t(child.label)}
+                                    </NavLink>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        }
+                        return (
+                          <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                            className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                            <sub.icon className="h-4 w-4" />{sub.label}
+                          </NavLink>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : item.isSettings ? (
+                <div key={item.to}>
+                  <button
+                    onClick={() => toggleSettings()}
+                    className={cn('flex w-full min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', settingsExpanded ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}
+                  >
+                    <item.icon className="h-6 w-6 lg:h-5 lg:w-5" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {settingsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                  {settingsExpanded && (
+                    <div className="ml-4 border-l border-white/10 pl-2 mt-1 space-y-1">
+                      {visibleSettingsSubItems.map(sub => (
+                        <NavLink key={sub.to} to={sub.to} onClick={() => setSidebarOpen(false)}
+                          className={({ isActive }) => cn('flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors', isActive ? 'bg-primary/20 font-medium text-white' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>
+                          <sub.icon className="h-4 w-4" />{sub.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
+                  className={({ isActive }) => {
+                    const fullPath = location.pathname + location.search
+                    const isExact = fullPath === item.to || (isActive && !item.to.includes('?'))
+                    return cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isExact ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')
+                  }}>
+<item.icon className="h-6 w-6 lg:h-5 lg:w-5" />{t(item.label)}
+                </NavLink>
+              )
+            )}
+            {!waiterMode && loading && <div className="px-3 py-2 text-sm text-slate-500">Loading plan features...</div>}
+            {!waiterMode && <OnboardingGuideCard
+              hasCompleted={onboardingCompleted}
+              onStatusChange={completeOnboarding}
+            />}
+            {!waiterMode && <UserGuideMenu />}
+            {!waiterMode && trashPermissions.some(hasPermission) && (
+              <NavLink to="/tenant/trash" onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => cn('flex min-h-12 items-center gap-4 rounded-lg px-4 py-3 text-base font-medium transition-colors lg:min-h-0 lg:gap-3 lg:px-3 lg:py-2 lg:text-sm', isActive ? 'bg-primary text-primary-foreground shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white')}>
+                <Trash2 className="h-6 w-6 lg:h-5 lg:w-5" />{t('Trash')}
+              </NavLink>
+            )}
+          </nav>
+        </div>
+      </aside>
+      {/* Content area: navbar starts after sidebar, then main content */}
+      <div className="lg:pl-64">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
+            {businesses.length > 1 && <label className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-sm">
+              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="sr-only">Switch business</span>
+              <select aria-label="Switch business" value={tenantId || ''} disabled={switchingBusiness} onChange={event => void handleBusinessSwitch(event.target.value)} className="max-w-[min(42vw,15rem)] bg-transparent text-foreground outline-none disabled:opacity-60">
+                {businesses.map(business => <option key={business.id} value={business.id}>{business.name}</option>)}
+              </select>
+            </label>}
+          </div>
+          <div className="flex-1" />
+          {!waiterMode && <><SyncIndicator />
+          <BusinessChatWidget />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label="Toggle theme"
+          >
+            {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+          </button>
+          <NotificationBell />
+          <WidgetLauncher /></>}
+          {waiterMode ? <Button variant="outline" size="sm" onClick={handleWaiterSignOut} title="Sign out this waiter and let the next waiter confirm their PIN"><LogOut className="mr-2 h-4 w-4" />Sign out waiter</Button> : <div className="group relative">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground shadow-sm ring-offset-background transition hover:ring-2 hover:ring-ring hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 overflow-hidden"
+              aria-label="User profile"
+            >
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
+              ) : (
+                user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'
+              )}
+            </button>
+            {!waiterMode && <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border bg-popover p-3 text-popover-foreground opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+              <div className="mb-3 border-b pb-3 flex items-center gap-3">
+                {user?.avatar ? (
+                  <img src={user.avatar} alt="Avatar" className="h-10 w-10 rounded-full object-cover" />
+                ) : (
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+                    {user?.name?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-sm font-semibold">{user?.name || 'User'}</p>
+                  <p className="truncate text-xs text-muted-foreground">{user?.email || ''}</p>
+                  <p className="text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
+                </div>
+              </div>
+              <div className="space-y-1 mb-2">
+                <Button variant="ghost" size="sm" className="h-9 w-full justify-start" onClick={() => navigate('/tenant/profile')}>
+                  <Users className="mr-2 h-4 w-4" />
+                  My Profile
+                </Button>
+              </div>
+              <div className="border-t pt-2">
+                <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-destructive hover:text-destructive" onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Logout
+                </Button>
+              </div>
+            </div>}
+          </div>}
+        </header>
+        <main className="overflow-x-clip p-4 lg:p-6">
+          {waiterMode && !['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(location.pathname)
+            ? <p role="status" className="py-12 text-center text-sm text-muted-foreground">Opening the waiter order screen…</p>
+            : <Outlet />}
+        </main>
+      </div>
+      {!waiterMode && <OnboardingGuideModal
+        isOpen={showOnboardingModal}
+        onClose={dismissOnboarding}
+        onComplete={completeOnboarding}
+      />}
+      {!waiterMode && <SubscriptionBillingReminder />}
+      {!waiterMode && !loading && canAccessFeature('rentals') && hasPermission('canViewRental') && <PlannerReminderWatcher />}
+    </div>
+  )
+}
+

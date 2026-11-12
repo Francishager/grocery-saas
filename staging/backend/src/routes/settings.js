@@ -1,0 +1,239 @@
+import { Router } from "express";
+import { Prisma } from "@prisma/client";
+import prisma from "../db.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
+import { tenantIdFromUser } from "../utils/branchAccess.js";
+import multer from "multer";
+import cloudinary from "cloudinary";
+import { validateWorkingHours, validateTimezone, workingHoursAdmin } from "../utils/workingHours.js";
+import { validCoordinates } from "../utils/attendanceLocation.js";
+
+const router = Router();
+const SYSTEM_DATE_FORMAT = "DD/MM/YY";
+
+const withSystemDateFormat = (tenant) => tenant ? { ...tenant, dateFormat: SYSTEM_DATE_FORMAT } : tenant;
+
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+
+// Get tenant settings
+router.get("/", authenticateToken, requirePermission("canViewSettings"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true, name: true, slug: true, email: true, phone: true, address: true, businessType: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
+        logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
+        taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
+        createdAt: true, updatedAt: true, workingHours: true,
+      },
+    });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json(withSystemDateFormat(tenant));
+  } catch (err) {
+    console.error("Get settings error:", err);
+    res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+// Get tenant invoice profile. Receipts/invoices need business details even for
+// users who can sell or collect receivables but cannot edit settings.
+router.get("/business-profile", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true, name: true, slug: true, email: true, phone: true, address: true, businessType: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
+        logo: true, currency: true, timezone: true, dateFormat: true, taxRate: true, taxEnabled: true, taxId: true,
+        receiptHeader: true, receiptFooter: true,
+      },
+    });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json(withSystemDateFormat(tenant));
+  } catch (err) {
+    console.error("Get business profile error:", err);
+    res.status(500).json({ error: "Failed to load business profile" });
+  }
+});
+
+// Update tenant settings
+router.put("/", authenticateToken, requirePermission("canEditSettings"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const { name, email, phone, address, attendanceLatitude, attendanceLongitude, attendanceRadiusMeters, currency, timezone, dateFormat, taxRate, taxEnabled, taxId, receiptHeader, receiptFooter } = req.body;
+    const data = {};
+    if (req.body.workingHours !== undefined) {
+      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canManageWorkingHours')) {
+        return res.status(403).json({ error: 'Staff access management permission is required to change working hours.' });
+      }
+      data.workingHours = validateWorkingHours(req.body.workingHours) ?? Prisma.DbNull;
+    }
+    if (name !== undefined) data.name = name;
+    if (email !== undefined) data.email = email;
+    if (phone !== undefined) data.phone = phone || null;
+    if (address !== undefined) data.address = address || null;
+    if (attendanceLatitude !== undefined || attendanceLongitude !== undefined) {
+      if (attendanceLatitude === null && attendanceLongitude === null) {
+        data.attendanceLatitude = null;
+        data.attendanceLongitude = null;
+      } else if (!validCoordinates({ latitude: attendanceLatitude, longitude: attendanceLongitude })) {
+        return res.status(400).json({ error: 'A valid business GPS location is required.' });
+      } else {
+        const businessAddress = address !== undefined ? String(address || '').trim() : (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { address: true } }))?.address;
+        if (!businessAddress) return res.status(400).json({ error: 'Set the business address before capturing its attendance location.' });
+        data.attendanceLatitude = attendanceLatitude;
+        data.attendanceLongitude = attendanceLongitude;
+      }
+    }
+    if (attendanceRadiusMeters !== undefined) {
+      const radius = Number(attendanceRadiusMeters);
+      if (!Number.isInteger(radius) || radius < 25 || radius > 2000) return res.status(400).json({ error: 'Attendance radius must be between 25 and 2,000 metres.' });
+      data.attendanceRadiusMeters = radius;
+    }
+    if (currency !== undefined) data.currency = currency;
+    if (timezone !== undefined) {
+      data.timezone = validateTimezone(timezone);
+      if (!workingHoursAdmin(req.user) && !req.user.permissions?.includes('canManageWorkingHours')) {
+        const current = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } });
+        if (current?.timezone !== timezone) return res.status(403).json({ error: 'Staff access management permission is required to change the business timezone.' });
+      }
+    }
+    data.dateFormat = SYSTEM_DATE_FORMAT;
+    if (taxRate !== undefined) data.taxRate = parseFloat(taxRate) || 0;
+    if (taxEnabled !== undefined) data.taxEnabled = Boolean(taxEnabled);
+    if (taxId !== undefined) data.taxId = taxId || null;
+    if (receiptHeader !== undefined) data.receiptHeader = receiptHeader || null;
+    if (receiptFooter !== undefined) data.receiptFooter = receiptFooter || null;
+
+    const tenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data,
+      select: {
+        id: true, name: true, slug: true, email: true, phone: true, address: true, attendanceLatitude: true, attendanceLongitude: true, attendanceRadiusMeters: true,
+        logo: true, status: true, currency: true, timezone: true, dateFormat: true, taxRate: true,
+        taxEnabled: true, taxId: true, receiptHeader: true, receiptFooter: true,
+        createdAt: true, updatedAt: true, workingHours: true,
+      },
+    });
+    res.json({ message: "Settings updated", tenant: withSystemDateFormat(tenant) });
+  } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "Email already in use" });
+    if (err instanceof RangeError) return res.status(400).json({ error: err.message });
+    console.error("Update settings error:", err);
+    res.status(500).json({ error: "Failed to update settings" });
+  }
+});
+
+// Get tax config only (no canViewSettings permission required — needed by sales/POS for all staff)
+router.get("/tax-config", authenticateToken, async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { taxEnabled: true, taxRate: true, taxId: true, currency: true, dateFormat: true },
+    });
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+    res.json(withSystemDateFormat(tenant));
+  } catch (err) {
+    console.error("Get tax config error:", err);
+    res.status(500).json({ error: "Failed to load tax config" });
+  }
+});
+
+// EFRIS is an explicit, tenant-scoped opt-in. This stores setup intent only;
+// it does not submit receipts or change the existing sales tax workflow.
+router.get("/efris-config", authenticateToken, requirePermission("canViewTax"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const config = await prisma.integrationConfig.findUnique({
+      where: { tenantId_provider: { tenantId, provider: "efris" } },
+      select: { settings: true },
+    });
+    const settings = config?.settings && typeof config.settings === "object" ? config.settings : {};
+    res.json({
+      enabled: settings.optedIn === true,
+      connectionStatus: "not_connected",
+    });
+  } catch (err) {
+    console.error("Get EFRIS setup error:", err);
+    res.status(500).json({ error: "Failed to load EFRIS setup" });
+  }
+});
+
+router.put("/efris-config", authenticateToken, requirePermission("canManageTax"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+    if (typeof req.body?.enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled must be a boolean" });
+    }
+
+    const existing = await prisma.integrationConfig.findUnique({
+      where: { tenantId_provider: { tenantId, provider: "efris" } },
+      select: { settings: true },
+    });
+    const previousSettings = existing?.settings && typeof existing.settings === "object" ? existing.settings : {};
+    const settings = { ...previousSettings, optedIn: req.body.enabled };
+    await prisma.integrationConfig.upsert({
+      where: { tenantId_provider: { tenantId, provider: "efris" } },
+      create: {
+        tenantId,
+        provider: "efris",
+        displayName: "URA EFRIS",
+        isActive: false,
+        settings,
+      },
+      update: { settings },
+    });
+
+    res.json({ enabled: req.body.enabled, connectionStatus: "not_connected" });
+  } catch (err) {
+    console.error("Update EFRIS setup error:", err);
+    res.status(500).json({ error: "Failed to update EFRIS setup" });
+  }
+});
+
+// Upload logo image.
+router.post("/logo", authenticateToken, requirePermission("canEditSettings"), upload.single("logo"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const stream = cloudinary.v2.uploader.upload_stream(
+      { folder: `jibusales/logos/${tenantId}`, public_id: `logo-${Date.now()}`, overwrite: true },
+      async (error, cloudResult) => {
+        if (error) {
+          console.error("Upload error:", error);
+          return res.status(500).json({ error: "Failed to upload logo" });
+        }
+        const logoUrl = cloudResult.secure_url;
+        await prisma.tenant.update({ where: { id: tenantId }, data: { logo: logoUrl } });
+        res.json({ message: "Logo uploaded", logo: logoUrl });
+      }
+    );
+    stream.end(req.file.buffer);
+  } catch (err) {
+    console.error("Upload logo error:", err);
+    res.status(500).json({ error: "Failed to upload logo" });
+  }
+});
+
+export default router;

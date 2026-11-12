@@ -1,0 +1,50 @@
+[
+  {
+    "id": "cmsjzh05401xwufy98muuaiew",
+    "tenantId": "cms8rr22503iycxem8r0h3zuj",
+    "accountId": "cms8tok6v03v7cxem1kjkxi5s",
+    "type": "sale",
+    "amount": 290000,
+    "balanceAfter": 1945800,
+    "reference": "RCP-1786169952723",
+    "description": "Sale: RCP-1786169952723",
+    "userId": "cms8t63xr03tkcxemtmu5jk06",
+    "createdAt": "2026-08-08T06:19:12.761Z"
+  },
+  {
+    "id": "cmssthh1v000212qknpeda3zm",
+    "tenantId": "cms8rr22503iycxem8r0h3zuj",
+    "accountId": "cms8tok6v03v7cxem1kjkxi5s",
+    "type": "journal_out",
+    "amount": 290000,
+    "balanceAfter": -290000,
+    "reference": "RCP-1786169952723",
+    "description": "Reversal: orphan cash transactions for RCP-1786169952723",
+    "userId": "cms8t63xr03tkcxemtmu5jk06",
+    "createdAt": "2026-08-14T10:41:32.560Z"
+  },
+  {
+    "id": "cmsjzf68e01xlufy9utx86v0u",
+    "tenantId": "cms8rr22503iycxem8r0h3zuj",
+    "accountId": "cms8tok6v03v7cxem1kjkxi5s",
+    "type": "sale",
+    "amount": 1650000,
+    "balanceAfter": 1655800,
+    "reference": "RCP-1786169867306",
+    "description": "Sale: RCP-1786169867306",
+    "userId": "cms8t63xr03tkcxemtmu5jk06",
+    "createdAt": "2026-08-08T06:17:47.342Z"
+  },
+  {
+    "id": "cmssthiwg000512qk6ww2r99x",
+    "tenantId": "cms8rr22503iycxem8r0h3zuj",
+    "accountId": "cms8tok6v03v7cxem1kjkxi5s",
+    "type": "journal_out",
+    "amount": 1650000,
+    "balanceAfter": -1940000,
+    "reference": "RCP-1786169867306",
+    "description": "Reversal: orphan cash transactions for RCP-1786169867306",
+    "userId": "cms8t63xr03tkcxemtmu5jk06",
+    "createdAt": "2026-08-14T10:41:34.961Z"
+  }
+]

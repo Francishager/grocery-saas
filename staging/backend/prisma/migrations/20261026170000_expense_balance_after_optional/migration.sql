@@ -1,0 +1,5 @@
+ALTER TABLE "expenses"
+  ADD COLUMN IF NOT EXISTS "balanceAfter" DOUBLE PRECISION;
+
+ALTER TABLE "expenses"
+  ALTER COLUMN "balanceAfter" DROP NOT NULL;

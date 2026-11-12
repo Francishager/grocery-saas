@@ -1,0 +1,513 @@
+// Permission-related constants
+import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_CATEGORIES } from '@/lib/servicePermissions'
+
+export interface Permission {
+  id: string
+  name: string
+  description: string
+  category: string
+  /** Whether this permission is for platform-level (SaaS Admin) only */
+  isPlatformLevel?: boolean
+  /** Whether this permission accesses business data */
+  accessesBusinessData?: boolean
+}
+
+export interface Role {
+  id: string
+  name: string
+  description: string
+  permissions: string[]
+  isSystem: boolean
+  /** Whether this role is a platform-level role (SaaS Admin) */
+  isPlatformRole?: boolean
+}
+
+// Permission categories
+export const permissionCategories = [
+  { id: 'platform', name: 'Platform Management', description: 'SaaS platform administration' },
+  { id: 'tenants', name: 'Tenant Management', description: 'Business tenant management' },
+  { id: 'dashboard', name: 'Dashboard' },
+  { id: 'sales', name: 'Sales' },
+  { id: 'purchases', name: 'Purchases / Payables' },
+  { id: 'inventory', name: 'Inventory' },
+  { id: 'expenses', name: 'Expenses' },
+  { id: 'customers', name: 'Customers / Receivables' },
+  { id: 'suppliers', name: 'Suppliers' },
+  { id: 'procurement', name: 'Procurement Network' },
+  { id: 'reports', name: 'Reports' },
+  { id: 'users', name: 'Staff & Access' },
+  { id: 'hr', name: 'HR Management' },
+  { id: 'branches', name: 'Branches' },
+  { id: 'settings', name: 'Settings' },
+  { id: 'receipts', name: 'Receipts' },
+  { id: 'tax', name: 'Tax' },
+  { id: 'services', name: 'Services' },
+  { id: 'rentals', name: 'Rentals' },
+  { id: 'planner', name: 'Planner' },
+  { id: 'crm', name: 'CRM' },
+  { id: 'property_management', name: 'Property Management' },
+  { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'bar_menu', name: 'Bar Menu' },
+  { id: 'bar_orders', name: 'Bar Orders' },
+  { id: 'clinic_patients', name: 'Clinic Patients' },
+  { id: 'clinic_appointments', name: 'Clinic Appointments' },
+  { id: 'clinic_encounters', name: 'Clinic Encounters' },
+  { id: 'clinic_prescriptions', name: 'Clinic Prescriptions' },
+  { id: 'pharmacy_catalogue', name: 'Pharmacy Catalogue' },
+  { id: 'pharmacy_batches', name: 'Pharmacy Batches & Expiry' },
+  { id: 'bar_operations', name: 'Bar Operations' },
+  { id: 'fuel_station', name: 'Fuel Station' },
+  { id: 'manufacturing', name: 'Manufacturing' },
+  { id: 'agriculture', name: 'Agriculture' },
+  ...SERVICE_PERMISSION_CATEGORIES,
+  { id: 'communication', name: 'Communication' },
+  { id: 'team_messaging', name: 'Team Messaging' },
+  { id: 'accounting', name: 'Accounting' },
+  { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
+  { id: 'billing', name: 'Billing & Subscription' },
+]
+
+// All permissions
+export const permissions: Permission[] = [
+  // Platform Management (SaaS Admin only - no business data access)
+  { id: 'platform_admin', name: 'JibuSales Admin', description: 'Full platform administration access', category: 'platform', isPlatformLevel: true },
+  { id: 'view_all_tenants', name: 'View All Tenants', description: 'View all business tenants', category: 'tenants', isPlatformLevel: true },
+  { id: 'manage_tenants', name: 'Manage Tenants', description: 'Create, edit, delete business tenants', category: 'tenants', isPlatformLevel: true },
+  { id: 'suspend_tenants', name: 'Suspend Tenants', description: 'Suspend or activate business tenants', category: 'tenants', isPlatformLevel: true },
+  { id: 'view_tenant_billing', name: 'View Tenant Billing', description: 'View tenant subscription and billing', category: 'billing', isPlatformLevel: true },
+  { id: 'manage_tenant_billing', name: 'Manage Tenant Billing', description: 'Manage tenant subscriptions and payments', category: 'billing', isPlatformLevel: true },
+  { id: 'invite_business_owners', name: 'Invite Business Owners', description: 'Send invitations to create business owner accounts', category: 'tenants', isPlatformLevel: true },
+  { id: 'view_platform_analytics', name: 'View Platform Analytics', description: 'View platform-wide analytics and metrics', category: 'platform', isPlatformLevel: true },
+  { id: 'manage_plans', name: 'Manage Subscription Plans', description: 'Create and edit subscription plans', category: 'billing', isPlatformLevel: true },
+  { id: 'view_platform_users', name: 'View Platform Users', description: 'View all users across platform', category: 'users', isPlatformLevel: true },
+  
+  // Business Data Permissions (Tenant-level only)
+  // Dashboard
+  { id: 'canViewDashboard', name: 'View Dashboard', description: 'View dashboard overview', category: 'dashboard', accessesBusinessData: true },
+  
+  // Sales
+  { id: 'canViewSale', name: 'View Sales', description: 'View sales list and details', category: 'sales', accessesBusinessData: true },
+  { id: 'canCreateSale', name: 'Create Sales', description: 'Create new sales', category: 'sales', accessesBusinessData: true },
+  { id: 'canEditSale', name: 'Edit Sales', description: 'Edit existing sales', category: 'sales', accessesBusinessData: true },
+  { id: 'canDeleteSale', name: 'Delete Sales', description: 'Delete sales records', category: 'sales', accessesBusinessData: true },
+  { id: 'canRefundSale', name: 'Process Refunds', description: 'Process sales refunds', category: 'sales', accessesBusinessData: true },
+  
+  // Purchases / Payables
+  { id: 'canViewPurchase', name: 'View Purchases', description: 'View purchases list and details', category: 'purchases', accessesBusinessData: true },
+  { id: 'canCreatePurchase', name: 'Create Purchases', description: 'Create new purchases', category: 'purchases', accessesBusinessData: true },
+  { id: 'canEditPurchase', name: 'Edit Purchases', description: 'Edit existing purchases', category: 'purchases', accessesBusinessData: true },
+  { id: 'canDeletePurchase', name: 'Delete Purchases', description: 'Delete purchase records', category: 'purchases', accessesBusinessData: true },
+  
+  // Payables
+  { id: 'canViewPayable', name: 'View Payables', description: 'View payables list and details', category: 'purchases', accessesBusinessData: true },
+  { id: 'canCreatePayable', name: 'Create Payables', description: 'Create new payables', category: 'purchases', accessesBusinessData: true },
+  { id: 'canEditPayable', name: 'Edit Payables', description: 'Edit existing payables', category: 'purchases', accessesBusinessData: true },
+  { id: 'canDeletePayable', name: 'Delete Payables', description: 'Delete payable records', category: 'purchases', accessesBusinessData: true },
+  
+  // Inventory
+  { id: 'canViewProduct', name: 'View Inventory', description: 'View inventory list and details', category: 'inventory', accessesBusinessData: true },
+  { id: 'canCreateProduct', name: 'Create Products', description: 'Add new inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canViewPriceHistory', name: 'View Price History', description: 'View historical product selling price and cost price changes', category: 'inventory', accessesBusinessData: true },
+  { id: 'canEditProduct', name: 'Edit Products', description: 'Edit inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canDeleteProduct', name: 'Delete Products', description: 'Delete inventory items', category: 'inventory', accessesBusinessData: true },
+  { id: 'canAdjustStock', name: 'Adjust Stock', description: 'Make stock adjustments', category: 'inventory', accessesBusinessData: true },
+  { id: 'canTransferStock', name: 'Transfer Stock', description: 'Transfer stock between branches', category: 'inventory', accessesBusinessData: true },
+  
+  // Expenses
+  { id: 'canViewExpense', name: 'View Expense Records', description: 'View expense records and details', category: 'expenses', accessesBusinessData: true },
+  { id: 'canCreateExpense', name: 'Create Expense Records', description: 'Create new expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canEditExpense', name: 'Edit Expense Records', description: 'Edit existing expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canDeleteExpense', name: 'Delete Expense Records', description: 'Delete expense records', category: 'expenses', accessesBusinessData: true },
+  { id: 'canViewStaffTillSheet', name: 'View Staff Till Sheet', description: 'View staff till sheet and cash movement summary', category: 'accounting', accessesBusinessData: true },
+  
+  // Customers / Receivables
+  { id: 'canViewCustomer', name: 'View Customers', description: 'View customers list', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerPhone', name: 'View Customer Phone Numbers', description: 'View full customer phone numbers', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerEmail', name: 'View Customer Email Addresses', description: 'View customer email addresses', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerIdentity', name: 'View Customer Identity Documents', description: 'View customer profile photos and National ID images', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerAddress', name: 'View Customer Addresses', description: 'View customer physical addresses', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerBalance', name: 'View Customer Balances & Credit Limits', description: 'View opening/current balances, limits, and trust scores', category: 'customers', accessesBusinessData: true },
+  { id: 'canCreateCustomerCreditLimit', name: 'Create Customer Credit Limits', description: 'Set an initial credit limit when creating a customer', category: 'customers', accessesBusinessData: true },
+  { id: 'canEditCustomerCreditLimit', name: 'Edit Customer Credit Limits', description: 'Change an existing customer credit limit or credit account', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerSalesHistory', name: 'View Customer Sales History', description: 'View customer sales, items, amounts, and receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerPaymentsHistory', name: 'View Customer Payment History', description: 'View customer payments, methods, amounts, and receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerReturnsHistory', name: 'View Customer Returns History', description: 'View customer returns, returned items, and refunds', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerCreditNotesHistory', name: 'View Customer Credit Note History', description: 'View customer credit notes and adjustments', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerWithdrawalsHistory', name: 'View Customer Withdrawal History', description: 'View customer withdrawals and receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerBusinessActivity', name: 'View Customer Service & Order Activity', description: 'View customer service and operational activity', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewCustomerNotes', name: 'View Customer Notes', description: 'View private notes on customer profiles', category: 'customers', accessesBusinessData: true },
+  { id: 'canRecordCustomerPayment', name: 'Record Customer Payments', description: 'Record payments against customer balances and unapplied funds', category: 'customers', accessesBusinessData: true },
+  { id: 'canPrintCustomerReceipts', name: 'Print & Download Customer Receipts', description: 'Reprint or download customer transaction receipts', category: 'customers', accessesBusinessData: true },
+  { id: 'canCreateCustomer', name: 'Create Customers', description: 'Create new customers', category: 'customers', accessesBusinessData: true },
+  { id: 'canEditCustomer', name: 'Edit Customers', description: 'Edit existing customers', category: 'customers', accessesBusinessData: true },
+  { id: 'canDeleteCustomer', name: 'Delete Customers', description: 'Delete customer records', category: 'customers', accessesBusinessData: true },
+  
+  // Receivables
+  { id: 'canViewReceivable', name: 'View Receivables', description: 'View receivables list and details', category: 'customers', accessesBusinessData: true },
+  { id: 'canCreateReceivable', name: 'Create Receivables', description: 'Create new receivables', category: 'customers', accessesBusinessData: true },
+  { id: 'canEditReceivable', name: 'Edit Receivables', description: 'Edit existing receivables', category: 'customers', accessesBusinessData: true },
+  { id: 'canDeleteReceivable', name: 'Delete Receivables', description: 'Delete receivable records', category: 'customers', accessesBusinessData: true },
+  { id: 'canViewReceivableReconciliation', name: 'View Receivable Reconciliation', description: 'View customer receipt mismatches and review history', category: 'customers', accessesBusinessData: true },
+  { id: 'canReviewReceivableReconciliation', name: 'Review Receivable Reconciliation', description: 'Record an auditable review decision without changing financial records', category: 'customers', accessesBusinessData: true },
+  { id: 'canApplyReceivableReconciliation', name: 'Apply Receivable Reconciliation', description: 'Apply verified receipt allocations without changing customer or cash balances', category: 'customers', accessesBusinessData: true },
+  
+  // Suppliers
+  { id: 'canViewSupplier', name: 'View Suppliers', description: 'View suppliers list', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canCreateSupplier', name: 'Create Suppliers', description: 'Create new suppliers', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canEditSupplier', name: 'Edit Suppliers', description: 'Edit existing suppliers', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canDeleteSupplier', name: 'Delete Suppliers', description: 'Delete supplier records', category: 'suppliers', accessesBusinessData: true },
+  { id: 'canViewProcurement', name: 'View Procurement Marketplace', description: 'Discover opted-in suppliers, marketplace offers, and open RFQs', category: 'procurement', accessesBusinessData: true },
+  { id: 'canFollowMarketplaceSellers', name: 'Follow Marketplace Sellers', description: 'Follow visible sellers and receive updates when they publish listings, price changes, or campaigns', category: 'procurement', accessesBusinessData: true },
+  { id: 'canManageSupplierNetwork', name: 'Manage Supplier Relationships', description: 'Request, approve, suspend, and manage supplier relationships', category: 'procurement', accessesBusinessData: true },
+  { id: 'canCreateMarketplaceListing', name: 'Publish Marketplace Listings', description: 'Create and publish product or service offers to the selected marketplace audience', category: 'procurement', accessesBusinessData: true },
+  { id: 'canChangeMarketplacePrice', name: 'Publish Marketplace Price Changes', description: 'Change offer prices and record the reason in price history', category: 'procurement', accessesBusinessData: true },
+  { id: 'canCreateMarketplacePromotion', name: 'Publish Marketplace Promotions', description: 'Create time-limited promotions tied to your marketplace listings', category: 'procurement', accessesBusinessData: true },
+  { id: 'canRunMarketplaceAds', name: 'Run Marketplace Sponsored Offers', description: 'Publish a sponsored placement tied to an active listing; does not authorize paid ad spend', category: 'procurement', accessesBusinessData: true },
+  { id: 'canManageMarketplacePromotions', name: 'Manage Marketplace Campaigns', description: 'Pause, resume, or cancel the business’s promotions and sponsored offers', category: 'procurement', accessesBusinessData: true },
+  { id: 'canCreateProcurementRFQ', name: 'Create Procurement RFQs', description: 'Create private or open requests for quotation', category: 'procurement', accessesBusinessData: true },
+  { id: 'canRespondToProcurementRFQ', name: 'Respond to Procurement RFQs', description: 'Submit or revise quotes for authorised RFQs', category: 'procurement', accessesBusinessData: true },
+  { id: 'canManageProcurementQuotes', name: 'Review Procurement Quotes', description: 'Review, compare, negotiate, and select quotes received by this business', category: 'procurement', accessesBusinessData: true },
+  { id: 'canCreateProcurementOrder', name: 'Create Purchase Orders', description: 'Create purchase orders from selected supplier quotes', category: 'procurement', accessesBusinessData: true },
+  { id: 'canApproveProcurementOrder', name: 'Approve Purchase Orders', description: 'Approve purchase orders before sending them to suppliers', category: 'procurement', accessesBusinessData: true },
+  { id: 'canAcknowledgeProcurementOrder', name: 'Acknowledge Purchase Orders', description: 'Accept or reject purchase orders addressed to this supplier', category: 'procurement', accessesBusinessData: true },
+  { id: 'canReceiveProcurementGoods', name: 'Receive Procurement Goods', description: 'Record partial or complete deliveries into branch stock', category: 'procurement', accessesBusinessData: true },
+  { id: 'canSubmitProcurementInvoice', name: 'Submit Supplier Invoices', description: 'Submit invoices against acknowledged procurement orders', category: 'procurement', accessesBusinessData: true },
+  { id: 'canReviewProcurementInvoice', name: 'Review Supplier Invoices', description: 'Match, approve, or reject supplier invoices against orders and receipts', category: 'procurement', accessesBusinessData: true },
+  { id: 'canApproveProcurementPayment', name: 'Confirm Buyer-Submitted Marketplace Repayments', description: 'Confirm repayments reported by a buyer before they reduce seller receivables', category: 'procurement', accessesBusinessData: true },
+  { id: 'canRecordProcurementPayment', name: 'Record Seller-Received Marketplace Repayments', description: 'Record funds received by the seller into a permitted transaction account', category: 'procurement', accessesBusinessData: true },
+  
+  // Reports are granted per report from the backend permission schema.
+  { id: 'canViewAuditReport', name: 'View Audit Reports', description: 'View audit log reports', category: 'reports', accessesBusinessData: true },
+  { id: 'canExportReport', name: 'Export Reports', description: 'Export reports to file', category: 'reports', accessesBusinessData: true },
+  
+  // Staff (Tenant-level)
+  { id: 'canViewStaff', name: 'View Staff', description: 'View staff list', category: 'users', accessesBusinessData: true },
+  { id: 'canCreateStaff', name: 'Create Staff', description: 'Add new staff members', category: 'users', accessesBusinessData: true },
+  { id: 'canEditStaff', name: 'Edit Staff', description: 'Edit staff details', category: 'users', accessesBusinessData: true },
+  { id: 'canDeleteStaff', name: 'Delete Staff', description: 'Delete staff members', category: 'users', accessesBusinessData: true },
+
+  // HR Management
+  { id: 'canViewHR', name: 'View HR Management', description: 'Open HR dashboard and view HR records', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHREmployeesForAttendance', name: 'View Employees for Attendance', description: 'View employee names and staff numbers only in Check In/Out', category: 'hr', accessesBusinessData: true },
+  { id: 'canCreateHREmployee', name: 'Create HR Employees', description: 'Create HR employee profiles', category: 'hr', accessesBusinessData: true },
+  { id: 'canEditHREmployee', name: 'Edit HR Employees', description: 'Edit HR employee profiles and status', category: 'hr', accessesBusinessData: true },
+  { id: 'canDeleteHREmployee', name: 'Delete HR Employees', description: 'Deactivate HR employee profiles', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRStructure', name: 'Manage HR Structure', description: 'Create and edit departments, positions, units and teams', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRContracts', name: 'View HR Contracts', description: 'View employee contracts', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRContracts', name: 'Manage HR Contracts', description: 'Create, edit and terminate employee contracts', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRDocuments', name: 'View HR Documents', description: 'View employee documents', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRDocuments', name: 'Manage HR Documents', description: 'Upload, edit and delete employee documents', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRSalaries', name: 'View HR Salaries', description: 'View employee salary records', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRSalaries', name: 'Manage HR Salaries', description: 'Record and manage salary history', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRAttendance', name: 'View HR Attendance', description: 'View attendance records', category: 'hr', accessesBusinessData: true },
+  { id: 'canRecordHRAttendance', name: 'Record Employee Check-In/Out', description: 'Allow a receptionist or supervisor to check employees in and out without payroll access', category: 'hr', accessesBusinessData: true },
+  { id: 'canRecordOwnHRAttendance', name: 'Record Own Check-In/Out', description: 'Allow a staff member to check in and out only their linked employee profile', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRAttendance', name: 'Full Attendance Management', description: 'Legacy broad attendance access; prefer the separate attendance permissions for tighter control', category: 'hr', accessesBusinessData: true },
+  { id: 'canEditHRAttendance', name: 'Edit HR Attendance', description: 'Correct attendance records after check-in/check-out', category: 'hr', accessesBusinessData: true },
+  { id: 'canDeleteHRAttendance', name: 'Delete HR Attendance', description: 'Delete incorrect attendance records', category: 'hr', accessesBusinessData: true },
+  { id: 'canImportHRAttendance', name: 'Import HR Attendance', description: 'Upload attendance records in bulk', category: 'hr', accessesBusinessData: true },
+  { id: 'canConfigureHRAttendance', name: 'Configure HR Attendance', description: 'Change QR, biometric, branch, overtime, and attendance rules', category: 'hr', accessesBusinessData: true },
+  { id: 'canApproveHRAttendance', name: 'Approve HR Attendance', description: 'Approve attendance records', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRShifts', name: 'View HR Shifts', description: 'View shifts and assignments', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRShifts', name: 'Manage HR Shifts', description: 'Create and edit shifts', category: 'hr', accessesBusinessData: true },
+  { id: 'canAssignHRShifts', name: 'Assign HR Shifts', description: 'Assign shifts to employees', category: 'hr', accessesBusinessData: true },
+  { id: 'canApproveHRShifts', name: 'Approve HR Shifts', description: 'Approve shift changes and swaps', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRLeave', name: 'View HR Leave', description: 'View leave requests and balances', category: 'hr', accessesBusinessData: true },
+  { id: 'canRequestHRLeave', name: 'Request HR Leave', description: 'Create and submit leave requests', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRLeaveTypes', name: 'Manage HR Leave Types', description: 'Configure leave types and allocations', category: 'hr', accessesBusinessData: true },
+  { id: 'canApproveHRLeave', name: 'Approve HR Leave', description: 'Approve or reject leave requests', category: 'hr', accessesBusinessData: true },
+  { id: 'canViewHRPayroll', name: 'View HR Payroll', description: 'View payroll and salary payable information', category: 'hr', accessesBusinessData: true },
+  { id: 'canCreateHRPayroll', name: 'Create Payroll Drafts', description: 'Prepare payroll records and calculate earnings, deductions, PAYE, and social security amounts', category: 'hr', accessesBusinessData: true },
+  { id: 'canApproveHRPayroll', name: 'Approve Payroll', description: 'Approve payroll drafts before posting', category: 'hr', accessesBusinessData: true },
+  { id: 'canPostHRPayroll', name: 'Post Payroll To Accounting', description: 'Create accounting entries for payroll, deductions, payables, and recoveries', category: 'hr', accessesBusinessData: true },
+  { id: 'canPayHRPayroll', name: 'Pay Salaries', description: 'Record salary payments from permitted payment accounts', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRPayrollSettings', name: 'Manage HR Payroll Setup', description: 'Configure HR payroll account mappings and payroll accounting setup', category: 'hr', accessesBusinessData: true },
+  { id: 'canManageHRPayroll', name: 'Full Payroll Management', description: 'Legacy broad payroll access; prefer the separate payroll permissions for tighter control', category: 'hr', accessesBusinessData: true },
+  
+  // Branches
+  { id: 'canViewBranch', name: 'View Branches', description: 'View branches list', category: 'branches', accessesBusinessData: true },
+  { id: 'canCreateBranch', name: 'Create Branches', description: 'Create new branches', category: 'branches', accessesBusinessData: true },
+  { id: 'canEditBranch', name: 'Edit Branches', description: 'Edit existing branches', category: 'branches', accessesBusinessData: true },
+  { id: 'canDeleteBranch', name: 'Delete Branches', description: 'Delete branches', category: 'branches', accessesBusinessData: true },
+  
+  // Settings (Tenant-level)
+  { id: 'canViewSettings', name: 'View Settings', description: 'View settings', category: 'settings', accessesBusinessData: true },
+  { id: 'canEditSettings', name: 'Edit Settings', description: 'Modify settings', category: 'settings', accessesBusinessData: true },
+  
+  // Receipts
+  { id: 'canViewReceipt', name: 'View Receipts', description: 'View and print receipts', category: 'receipts', accessesBusinessData: true },
+  { id: 'canCreateReceipt', name: 'Create Receipts', description: 'Generate receipts', category: 'receipts', accessesBusinessData: true },
+  
+  // Discounts
+  { id: 'canGiveDiscount', name: 'Give Discounts', description: 'Apply discounts to sales', category: 'sales', accessesBusinessData: true },
+  
+  // Tax
+  { id: 'canViewTax', name: 'View Tax', description: 'View tax settings', category: 'tax', accessesBusinessData: true },
+  { id: 'canManageTax', name: 'Manage Tax', description: 'Modify tax settings', category: 'tax', accessesBusinessData: true },
+
+  // Services
+  { id: 'canViewService', name: 'View Services', description: 'View service items', category: 'services', accessesBusinessData: true },
+  { id: 'canCreateService', name: 'Create Services', description: 'Create new service items', category: 'services', accessesBusinessData: true },
+  { id: 'canEditService', name: 'Edit Services', description: 'Edit existing service items', category: 'services', accessesBusinessData: true },
+  { id: 'canDeleteService', name: 'Delete Services', description: 'Delete service items', category: 'services', accessesBusinessData: true },
+  { id: 'canManageServiceCategory', name: 'Manage Service Categories', description: 'Create and edit service categories', category: 'services', accessesBusinessData: true },
+
+  // Rentals / Hire
+  { id: 'canViewRental', name: 'View Rentals', description: 'View rental/hire records', category: 'rentals', accessesBusinessData: true },
+  { id: 'canCreateRental', name: 'Create Rentals', description: 'Hire out items to customers', category: 'rentals', accessesBusinessData: true },
+  { id: 'canEditRental', name: 'Edit Rentals', description: 'Edit existing rental records', category: 'rentals', accessesBusinessData: true },
+  { id: 'canDeleteRental', name: 'Cancel Rentals', description: 'Cancel rental bookings', category: 'rentals', accessesBusinessData: true },
+  { id: 'canViewRentalCreditNotes', name: 'View Rental Credit Notes', description: 'View booking-linked rental adjustments and outstanding refunds', category: 'rentals', accessesBusinessData: true },
+  { id: 'canCreateRentalCreditNote', name: 'Issue Rental Credit Notes', description: 'Issue a booking-linked adjustment and post the accounting impact', category: 'rentals', accessesBusinessData: true },
+  { id: 'canEditRentalCreditNote', name: 'Cancel Rental Credit Notes', description: 'Cancel an unrefunded rental credit note and reverse its journal entry', category: 'rentals', accessesBusinessData: true },
+  { id: 'canRefundRentalCreditNote', name: 'Refund Rental Credit Notes', description: 'Refund an outstanding rental credit from a permitted transaction account', category: 'rentals', accessesBusinessData: true },
+  { id: 'canProcessRentalReturn', name: 'Process Returns', description: 'Process return of hired items', category: 'rentals', accessesBusinessData: true },
+  { id: 'canGenerateRentalContract', name: 'Generate rental contract drafts', description: 'Use AI to draft and save rental agreements for review', category: 'rentals', accessesBusinessData: true },
+  { id: 'canViewPlanner', name: 'View Planner', description: 'View your planner tasks, appointments, notes, goals, and reminders', category: 'planner', accessesBusinessData: true },
+  { id: 'canManagePlanner', name: 'Manage Planner', description: 'Create and manage planner entries, share them with teammates, and edit items shared with you', category: 'planner', accessesBusinessData: true },
+  { id: 'canViewCRM', name: 'View CRM', description: 'View CRM contacts, prospects, pipeline, activities, support cases, and campaigns', category: 'crm', accessesBusinessData: true },
+  { id: 'canCreateCRM', name: 'Create CRM records', description: 'Create prospects, interactions, support cases, and campaign drafts', category: 'crm', accessesBusinessData: true },
+  { id: 'canEditCRM', name: 'Edit CRM records', description: 'Edit CRM records and share records you own with selected teammates', category: 'crm', accessesBusinessData: true },
+  { id: 'canDeleteCRM', name: 'Delete CRM records', description: 'Delete CRM workspace records', category: 'crm', accessesBusinessData: true },
+  { id: 'canViewPropertyManagement', name: 'Property Management (Legacy)', description: 'Legacy portfolio access; collections and statements require their dedicated permissions', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyPortfolio', name: 'View Property Portfolio', description: 'View owners, properties, units, tenancy details, occupancy, and portfolio summaries', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyCollections', name: 'View Property Collections', description: 'View rent/deposit payment history and reprint receipts', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyStatements', name: 'View Tenancy Statements', description: 'Open and print tenant rent statements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewTenantPersonalDetails', name: 'View Tenant Household Details', description: 'View optional marital, spouse, children, household size, and origin details', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageTenantPersonalDetails', name: 'Manage Tenant Household Details', description: 'Record and update optional household details on tenancy agreements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManagePropertyOwners', name: 'Manage Property Owners', description: 'Create and update landlord/owner records', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageProperties', name: 'Manage Properties', description: 'Create and update managed properties', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManagePropertyUnits', name: 'Manage Units', description: 'Create and update rental units and rent terms', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCreateTenancies', name: 'Create Tenancies', description: 'Create agreements and assign tenants to vacant units', category: 'property_management', accessesBusinessData: true },
+  { id: 'canEditTenancies', name: 'Edit Tenancy Details', description: 'Edit tenant details, tenancy terms, rent schedule, and agreement information', category: 'property_management', accessesBusinessData: true },
+  { id: 'canEndTenancies', name: 'End Tenancies', description: 'End active agreements after reviewing outstanding rent', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageTenancies', name: 'Manage Tenancies (Legacy)', description: 'Legacy combined permission for creating and ending agreements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordRentPayment', name: 'Record Rent Payments', description: 'Record rent receipts and allocate to rent periods', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordTenantDeposit', name: 'Record Tenant Deposits', description: 'Collect security deposits as liabilities', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRefundTenantDeposit', name: 'Refund Tenant Deposits', description: 'Refund held deposits with audited cash and ledger reversals', category: 'property_management', accessesBusinessData: true },
+  { id: 'canVoidRentPayment', name: 'Void Rent Payments', description: 'Reverse a rent receipt with a reason', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageRentPayment', name: 'Manage Rent Payments (Legacy)', description: 'Legacy combined permission for voiding rent payments and refunding tenant deposits', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewRentPaymentPlans', name: 'View Rent Payment Plans', description: 'View tenant repayment schedules, balances, installments, and payment history', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageRentPaymentPlans', name: 'Manage Rent Payment Plans', description: 'Create and cancel tenant arrears plans with balanced accounting reclassification', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewRentPromises', name: 'View Tenant Payment Promises', description: 'View promises to pay, fulfillment history, and kept, partial, upcoming, or missed counts', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageRentPromises', name: 'Record Tenant Payment Promises', description: 'Record promises against unpaid rent and track outcomes from posted receipts without creating accounting entries', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewTenantNotes', name: 'View Tenant Communication Notes', description: 'View tenant communication history, follow-up priorities, and completion status', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManageTenantNotes', name: 'Record Tenant Communication Notes', description: 'Add new tenant communication notes', category: 'property_management', accessesBusinessData: true },
+  { id: 'canEditTenantNotes', name: 'Edit Tenant Communication Notes', description: 'Edit existing tenant communication notes and follow-up details', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCompleteTenantNotes', name: 'Complete Tenant Follow-ups', description: 'Mark an open tenant follow-up as completed', category: 'property_management', accessesBusinessData: true },
+  { id: 'canAddTenantNoteFollowUps', name: 'Add Tenant Note Follow-ups', description: 'Append dated follow-up entries to an existing tenant communication note', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyReports', name: 'View Property Reports', description: 'View rent collection, balances, arrears, and statements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordOwnerPayout', name: 'Record Landlord Payouts', description: 'Pay collected rent to property owners and record cash and payable movements', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertySales', name: 'View Plot Sales', description: 'View plot contracts, installments, receipts, and outstanding balances', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCreatePropertySale', name: 'Create Plot Sales', description: 'Create owned-land or brokered-land sale contracts with full or installment payment terms', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordPropertySalePayment', name: 'Record Plot Sale Payments', description: 'Receive buyer payments to permitted transaction accounts and issue receipts', category: 'property_management', accessesBusinessData: true },
+  { id: 'canVoidPropertySalePayment', name: 'Reverse Plot Sale Payments', description: 'Void a receipt with a balanced cash, receivable, and installment reversal', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCancelPropertySale', name: 'Cancel Plot Sales', description: 'Cancel contracts that have no posted payments and reverse their journals', category: 'property_management', accessesBusinessData: true },
+  { id: 'canManagePropertyLandInventory', name: 'Manage Plot Inventory Cost', description: 'Record owned-plot cost basis and opening inventory journal entries', category: 'property_management', accessesBusinessData: true },
+  { id: 'canViewPropertyLandPurchases', name: 'View Plot Purchases', description: 'View owned plot acquisition records, supplier balances, payment history, and receipts', category: 'property_management', accessesBusinessData: true },
+  { id: 'canCreatePropertyLandPurchase', name: 'Record Plot Purchases', description: 'Record an owned plot purchase and post inventory cost, cash, and supplier payable', category: 'property_management', accessesBusinessData: true },
+  { id: 'canRecordPropertyLandPurchasePayment', name: 'Pay Plot Suppliers', description: 'Record permitted transaction-account payments against plot purchase balances', category: 'property_management', accessesBusinessData: true },
+  
+  // Restaurant & Bar
+  { id: 'canViewRestaurant', name: 'View Restaurant', description: 'Access restaurant & bar module', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canCreateRestaurant', name: 'Create Restaurant or Bar Orders', description: 'Create orders in enabled restaurant or standalone bar workflows.', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canEditRestaurant', name: 'Edit Restaurant or Bar Orders', description: 'Edit orders in enabled restaurant or standalone bar workflows.', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canDeleteRestaurant', name: 'Cancel Restaurant or Bar Orders', description: 'Cancel orders in enabled restaurant or standalone bar workflows.', category: 'restaurant', accessesBusinessData: true },
+  { id: 'canViewBarQueue', name: 'View Bar Queue and Orders', description: 'View and print bar tickets and orders without Restaurant access.', category: 'bar_operations', accessesBusinessData: true },
+  { id: 'canUpdateBarQueue', name: 'Update Bar Ticket Status', description: 'Advance bar-station ticket items through preparation and serving.', category: 'bar_operations', accessesBusinessData: true },
+  { id: 'canViewBarMenu', name: 'View Bar Menu', description: 'View bar menu items.', category: 'bar_menu', accessesBusinessData: true },
+  { id: 'canCreateBarMenu', name: 'Add Bar Menu Items', description: 'Add items to the bar menu.', category: 'bar_menu', accessesBusinessData: true },
+  { id: 'canEditBarMenu', name: 'Edit Bar Menu Items', description: 'Edit bar menu details and availability.', category: 'bar_menu', accessesBusinessData: true },
+  { id: 'canDeleteBarMenu', name: 'Remove Bar Menu Items', description: 'Remove bar menu entries without deleting inventory or sales history.', category: 'bar_menu', accessesBusinessData: true },
+  { id: 'canViewBarOrders', name: 'View Bar Orders', description: 'View bar orders and ticket details.', category: 'bar_orders', accessesBusinessData: true },
+  { id: 'canCreateBarOrders', name: 'Create Bar Orders', description: 'Create orders from active bar menu items.', category: 'bar_orders', accessesBusinessData: true },
+  { id: 'canEditBarOrders', name: 'Edit Bar Orders', description: 'Update bar order status and complete bar-only orders.', category: 'bar_orders', accessesBusinessData: true },
+  { id: 'canCancelBarOrders', name: 'Cancel Bar Orders', description: 'Cancel open bar orders.', category: 'bar_orders', accessesBusinessData: true },
+  { id: 'canViewClinicPatients', name: 'View Clinic Patients', description: 'View patient profiles and medical record numbers.', category: 'clinic_patients', accessesBusinessData: true },
+  { id: 'canCreateClinicPatients', name: 'Register Clinic Patients', description: 'Register new clinic patient profiles.', category: 'clinic_patients', accessesBusinessData: true },
+  { id: 'canEditClinicPatients', name: 'Edit Clinic Patients', description: 'Edit existing clinic patient profiles.', category: 'clinic_patients', accessesBusinessData: true },
+  { id: 'canViewClinicAppointments', name: 'View Clinic Appointments', description: 'View scheduled clinic appointments.', category: 'clinic_appointments', accessesBusinessData: true },
+  { id: 'canCreateClinicAppointments', name: 'Create Clinic Appointments', description: 'Schedule clinic appointments.', category: 'clinic_appointments', accessesBusinessData: true },
+  { id: 'canEditClinicAppointments', name: 'Edit Clinic Appointments', description: 'Update appointment details and status.', category: 'clinic_appointments', accessesBusinessData: true },
+  { id: 'canViewClinicEncounters', name: 'View Clinical Encounters', description: 'View clinical encounters and notes.', category: 'clinic_encounters', accessesBusinessData: true },
+  { id: 'canCreateClinicEncounters', name: 'Record Clinical Encounters', description: 'Record clinical encounters and treatment notes.', category: 'clinic_encounters', accessesBusinessData: true },
+  { id: 'canViewClinicPrescriptions', name: 'View Clinic Prescriptions', description: 'View prescriptions issued by the clinic.', category: 'clinic_prescriptions', accessesBusinessData: true },
+  { id: 'canCreateClinicPrescriptions', name: 'Create Clinic Prescriptions', description: 'Create prescriptions for clinic patients.', category: 'clinic_prescriptions', accessesBusinessData: true },
+  { id: 'canViewPharmacyCatalogue', name: 'View Pharmacy Catalogue', description: 'View medicine catalogue details.', category: 'pharmacy_catalogue', accessesBusinessData: true },
+  { id: 'canCreatePharmacyCatalogue', name: 'Add Pharmacy Catalogue Items', description: 'Link shared inventory products as pharmacy medicines.', category: 'pharmacy_catalogue', accessesBusinessData: true },
+  { id: 'canEditPharmacyCatalogue', name: 'Edit Pharmacy Catalogue Items', description: 'Edit pharmacy medicine details.', category: 'pharmacy_catalogue', accessesBusinessData: true },
+  { id: 'canViewPharmacyBatches', name: 'View Pharmacy Batches', description: 'View medicine batch and expiry details.', category: 'pharmacy_batches', accessesBusinessData: true },
+  { id: 'canCreatePharmacyBatches', name: 'Allocate Pharmacy Batches', description: 'Allocate received stock to batches without changing inventory quantities.', category: 'pharmacy_batches', accessesBusinessData: true },
+
+  // Fuel Station
+  { id: 'canViewFuelStation', name: 'View Fuel Station', description: 'Access fuel station module', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canCreateFuelStation', name: 'Create Fuel Station', description: 'Create pumps, tanks, deliveries, shifts', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canEditFuelStation', name: 'Edit Fuel Station', description: 'Edit fuel station records', category: 'fuel_station', accessesBusinessData: true },
+  { id: 'canDeleteFuelStation', name: 'Delete Fuel Station', description: 'Delete fuel station records', category: 'fuel_station', accessesBusinessData: true },
+
+  // Manufacturing
+  { id: 'canViewManufacturing', name: 'View Manufacturing', description: 'Access manufacturing module', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canCreateManufacturing', name: 'Create Manufacturing', description: 'Create production orders, waste records, BOMs', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canEditManufacturing', name: 'Edit Manufacturing', description: 'Edit manufacturing records', category: 'manufacturing', accessesBusinessData: true },
+  { id: 'canDeleteManufacturing', name: 'Delete Manufacturing', description: 'Delete manufacturing records', category: 'manufacturing', accessesBusinessData: true },
+
+  // Agriculture
+  { id: 'canViewAgriculture', name: 'View Agriculture', description: 'Access agriculture module', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canCreateAgriculture', name: 'Create Agriculture', description: 'Create fields, livestock, harvests, expenses', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canEditAgriculture', name: 'Edit Agriculture', description: 'Edit agriculture records', category: 'agriculture', accessesBusinessData: true },
+  { id: 'canDeleteAgriculture', name: 'Delete Agriculture', description: 'Delete agriculture records', category: 'agriculture', accessesBusinessData: true },
+
+  // Service Business (appointments, work orders, contracts)
+  ...SERVICE_PERMISSION_DEFINITIONS.map(p => ({ ...p, accessesBusinessData: true })),
+
+  // Communication
+  { id: 'canViewCommunication', name: 'View Communication Records', description: 'View business communication and notification records', category: 'communication', accessesBusinessData: true },
+  { id: 'canCreateCommunication', name: 'Create Communication Records', description: 'Create business communication and notification records', category: 'communication', accessesBusinessData: true },
+  { id: 'canViewTeamMessaging', name: 'View Team Messaging', description: 'Open team chats, conversations, and active business-user contacts', category: 'team_messaging', accessesBusinessData: true },
+  { id: 'canSendTeamMessages', name: 'Send Team Messages', description: 'Start private team chats and send messages', category: 'team_messaging', accessesBusinessData: true },
+  { id: 'canEditCommunication', name: 'Edit Communication', description: 'Edit communication templates and settings', category: 'communication', accessesBusinessData: true },
+  { id: 'canDeleteCommunication', name: 'Delete Communication', description: 'Delete communication records', category: 'communication', accessesBusinessData: true },
+
+  // Accounting
+  { id: 'canViewAccounting', name: 'View Accounting Module', description: 'Open the accounting module, chart of accounts, journals, and ledgers', category: 'accounting', accessesBusinessData: true },
+  { id: 'canCreateAccounting', name: 'Create Accounting Entries', description: 'Create journal entries and accounting records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canEditAccounting', name: 'Edit Accounting Entries', description: 'Edit accounting records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canDeleteAccounting', name: 'Delete Accounting Entries', description: 'Delete accounting records', category: 'accounting', accessesBusinessData: true },
+  { id: 'canReverseAccountingEntry', name: 'Reverse Accounting Entries', description: 'Reverse posted expense journal entries with auditable opposite entries', category: 'accounting', accessesBusinessData: true },
+  { id: 'canPostToProtectedAccounts', name: 'Post to Protected System Accounts', description: 'Make exceptional manual corrections to protected accounts with a required reason and reference', category: 'accounting', accessesBusinessData: true },
+  { id: 'canViewChartOfAccounts', name: 'View Chart of Accounts', description: 'View account structure, categories, balances, and history', category: 'accounting', accessesBusinessData: true },
+  { id: 'canCreateChartOfAccounts', name: 'Create Chart of Accounts', description: 'Create normal ledger accounts and account categories', category: 'accounting', accessesBusinessData: true },
+  { id: 'canEditChartOfAccounts', name: 'Edit Chart of Accounts', description: 'Edit or deactivate normal ledger accounts and account categories', category: 'accounting', accessesBusinessData: true },
+
+  // Transaction Accounts & Cash Movements
+  { id: 'canViewTransactionAccount', name: 'View Transaction Accounts', description: 'View cash, safe, bank, mobile money, and card transaction accounts', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseAnyTransactionAccount', name: 'Use Any Transaction Account', description: 'Legacy broad access to transaction accounts. Prefer the separate account-type permissions for tighter control.', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOtherCashAccount', name: 'Use Other Cash Accounts', description: 'Legacy broad access to other cash accounts. Prefer own till, other staff till, safe, bank, mobile money, and card permissions.', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOwnCashAccount', name: 'Use Own Assigned Cash Till', description: 'Use only the cash till assigned to this staff member for permitted transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseOtherStaffCashAccount', name: 'Use Other Staff Cash Tills', description: 'Use cash tills assigned to other staff members without granting safe, bank, mobile money, or card access', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseSafeAccount', name: 'Use Safe Accounts', description: 'Use business safe or vault accounts for permitted cash movements and transactions', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseBankAccount', name: 'Use Bank Accounts', description: 'Use bank accounts for permitted payments, collections, and journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseMobileMoneyAccount', name: 'Use Mobile Money Accounts', description: 'Use mobile money transaction accounts for permitted payments, collections, and journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canUseCardAccount', name: 'Use Card Accounts', description: 'Use card or POS clearing accounts for permitted card payments and journal movements', category: 'transactions', accessesBusinessData: true },
+  { id: 'canCreateTransactionAccount', name: 'Create Transaction Accounts', description: 'Create cash tills, safe accounts, bank accounts, mobile money accounts, and card accounts', category: 'transactions', accessesBusinessData: true },
+  { id: 'canEditTransactionAccount', name: 'Edit Transaction Accounts', description: 'Update transaction account details, assignments, status, and balances', category: 'transactions', accessesBusinessData: true },
+  { id: 'canDeleteTransactionAccount', name: 'Deactivate Transaction Accounts', description: 'Deactivate transaction accounts that should no longer be used', category: 'transactions', accessesBusinessData: true },
+  { id: 'canCreateWithdrawal', name: 'Record Customer Withdrawals', description: 'Record customer withdrawals and update the linked transaction account', category: 'transactions', accessesBusinessData: true },
+
+  // Payment Methods
+  { id: 'canUseCash', name: 'Use Assigned Cash Account', description: 'Use the cash or safe account assigned to this user for permitted cash transactions', category: 'payment_methods', accessesBusinessData: true },
+  { id: 'canUseMobileMoney', name: 'Use Mobile Money', description: 'Use mobile money accounts for permitted transactions', category: 'payment_methods', accessesBusinessData: true },
+  { id: 'canUseBank', name: 'Use Bank Accounts', description: 'Use bank accounts for permitted transactions', category: 'payment_methods', accessesBusinessData: true },
+  { id: 'canUseCard', name: 'Use Card Accounts', description: 'Use card accounts for permitted transactions', category: 'payment_methods', accessesBusinessData: true },
+  
+  // Data Import
+  { id: 'canImportInventory', name: 'Import Inventory Data', description: 'Bulk import products and inventory via CSV/Excel', category: 'inventory', accessesBusinessData: true },
+  
+  // Billing (Tenant-level - for business owners)
+  { id: 'view_own_billing', name: 'View Own Billing', description: 'View own subscription and billing', category: 'billing' },
+  { id: 'manage_own_billing', name: 'Manage Own Billing', description: 'Manage own subscription and payments', category: 'billing' },
+]
+
+// Business data permissions (for filtering)
+export const businessDataPermissions = permissions
+  .filter((p) => p.accessesBusinessData)
+  .map((p) => p.id)
+
+// Platform-level permissions (SaaS Admin only)
+export const platformPermissions = permissions
+  .filter((p) => p.isPlatformLevel)
+  .map((p) => p.id)
+
+// Predefined roles
+export const roles: Role[] = [
+  {
+    id: 'saas_admin',
+    name: 'JibuSales Admin',
+    description: 'JibuSales Admin - manages tenants but cannot access business data',
+    isSystem: true,
+    isPlatformRole: true,
+    permissions: [
+      'platform_admin',
+      'view_all_tenants',
+      'manage_tenants',
+      'suspend_tenants',
+      'view_tenant_billing',
+      'manage_tenant_billing',
+      'invite_business_owners',
+      'view_platform_analytics',
+      'manage_plans',
+      'view_platform_users',
+    ],
+  },
+  {
+    id: 'owner',
+    name: 'Owner',
+    description: 'Business owner — permissions must be explicitly assigned',
+    isSystem: true,
+    permissions: [],
+  },
+  {
+    id: 'accountant',
+    name: 'Accountant',
+    description: 'Financial management access — permissions must be assigned by business owner',
+    isSystem: true,
+    permissions: [],
+  },
+  {
+    id: 'attendant',
+    name: 'Attendant',
+    description: 'Sales and basic inventory access — permissions must be assigned by business owner',
+    isSystem: true,
+    permissions: [],
+  },
+  {
+    id: 'manager',
+    name: 'Manager',
+    description: 'Branch manager access — permissions must be assigned by business owner',
+    isSystem: false,
+    permissions: [],
+  },
+]
+
+// Permission options for select
+export const permissionOptions = permissions.map((p) => ({
+  value: p.id,
+  label: p.name,
+  category: p.category,
+}))
+
+// Role options for select
+export const roleOptions = roles.map((r) => ({
+  value: r.id,
+  label: r.name,
+}))
+
+// Get permission by ID
+export const getPermissionById = (id: string): Permission | undefined => {
+  return permissions.find((p) => p.id === id)
+}
+
+// Get role by ID
+export const getRoleById = (id: string): Role | undefined => {
+  return roles.find((r) => r.id === id)
+}
+
+// Get permissions by category
+export const getPermissionsByCategory = (category: string): Permission[] => {
+  return permissions.filter((p) => p.category === category)
+}
+
+// Get role permissions
+export const getRolePermissions = (roleId: string): string[] => {
+  const role = getRoleById(roleId)
+  return role?.permissions || []
+}
+
+// Check if role has permission
+export const hasPermission = (roleId: string, permissionId: string): boolean => {
+  const rolePermissions = getRolePermissions(roleId)
+  return rolePermissions.includes(permissionId)
+}
+
+export default permissions
+

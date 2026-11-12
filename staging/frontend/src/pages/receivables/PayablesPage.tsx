@@ -1,0 +1,1202 @@
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
+import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/hooks/use-toast'
+import { api, apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { formatCurrency, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
+import CreateSupplierModal from '@/components/modals/CreateSupplierModal'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalSuppliers, getLocalPurchases, getLocalPayablePayments, getLocalProducts } from '@/db/hybrid'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
+import { 
+  Building2, 
+  FileText, 
+  TrendingUp,
+  Wallet,
+  Settings,
+  Plus,
+  Search,
+  Filter,
+  Download,
+  Eye,
+  Edit,
+  Trash2,
+  Calendar,
+  ArrowUpRight,
+  ArrowDownRight
+} from 'lucide-react'
+
+interface Supplier {
+  id: string
+  name: string
+  email?: string
+  phone?: string
+  address?: string
+  balance: number
+  openingBalance?: number
+  openingBalanceOutstanding?: number
+  openingBalanceDate?: string | null
+  openingBalanceNote?: string
+  status: 'active' | 'inactive' | 'blocked'
+  notes?: string
+}
+
+interface SupplierPurchase {
+  id: string
+  refNo: string
+  supplier: {
+    id: string
+    name: string
+    phone?: string
+  }
+  user: {
+    id: string
+    fname: string
+    lname: string
+  }
+  total: number
+  currency?: string | null
+  foreignTotal?: number | null
+  amountPaid: number
+  balance: number
+  paymentStatus: 'paid' | 'partial' | 'unpaid' | 'overdue'
+  dueDate?: string
+  notes?: string
+  fuelDelivery?: {
+    invoiceNo?: string | null
+    litres: number
+    unitCost: number
+    tank?: { name: string; fuelType: string }
+  } | null
+  items: Array<{
+    product: {
+      id: string
+      name: string
+      sku: string
+    }
+    quantity: number
+    cost: number
+    total: number
+  }>
+  createdAt: string
+}
+
+interface SupplierPayment {
+  id: string
+  amount: number
+  currency?: string | null
+  foreignAmount?: number | null
+  paymentMethod: string
+  reference?: string
+  notes?: string
+  createdAt: string
+  supplier: {
+    id: string
+    name: string
+    phone?: string
+  }
+  purchase?: {
+    id: string
+    refNo: string
+  }
+}
+
+interface PurchaseDraftItem {
+  productId: string
+  quantity: string
+  cost: string
+}
+
+const createEmptyPurchaseItem = (): PurchaseDraftItem => ({
+  productId: '',
+  quantity: '1',
+  cost: '',
+})
+
+const parseAmount = (value: string | number | undefined) => {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount : 0
+}
+
+const readResponseError = async (response: Response, fallback: string) => {
+  const data = await response.json().catch(() => ({}))
+  return data?.error || data?.message || fallback
+}
+
+const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex items-start justify-between gap-4 border-b py-2 last:border-b-0">
+    <span className="text-sm text-muted-foreground">{label}</span>
+    <span className="text-right text-sm font-medium break-words">{value || 'Not set'}</span>
+  </div>
+)
+
+export default function PayablesPage() {
+  const { hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const baseCurrency = getTenantCurrency()
+  const navigate = useNavigate()
+  const { toast } = useToast()
+  const online = useOnlineStatus()
+  
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [supplierOptions, setSupplierOptions] = useState<Supplier[]>([])
+  const [products, setProducts] = useState<InventoryItem[]>([])
+  const [purchases, setPurchases] = useState<SupplierPurchase[]>([])
+  const [payments, setPayments] = useState<SupplierPayment[]>([])
+  const [landlordPayables, setLandlordPayables] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [activeTab, setActiveTab] = useState<'suppliers' | 'purchases' | 'payments' | 'landlords'>('suppliers')
+  const [summary, setSummary] = useState<any>(null)
+  const [showSupplierModal, setShowSupplierModal] = useState(false)
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false)
+  const [savingPurchase, setSavingPurchase] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [selectedPurchase, setSelectedPurchase] = useState<SupplierPurchase | null>(null)
+  const [selectedSupplierForPayment, setSelectedSupplierForPayment] = useState<Supplier | null>(null)
+  const [selectedSupplierDetail, setSelectedSupplierDetail] = useState<Supplier | null>(null)
+  const [selectedPurchaseDetail, setSelectedPurchaseDetail] = useState<SupplierPurchase | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentCurrency, setPaymentCurrency] = useState(baseCurrency)
+  const [paymentRateToBase, setPaymentRateToBase] = useState<number | null>(1)
+  const [paymentUnitsPerBase, setPaymentUnitsPerBase] = useState<number | null>(1)
+  const [purchaseCurrency, setPurchaseCurrency] = useState(baseCurrency)
+  const [purchaseRateToBase, setPurchaseRateToBase] = useState<number | null>(1)
+  const [purchaseUnitsPerBase, setPurchaseUnitsPerBase] = useState<number | null>(1)
+  const [paymentMethod, setPaymentMethod] = useState('cash')
+  const [mobileProvider, setMobileProvider] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+  const [purchaseForm, setPurchaseForm] = useState({
+    supplierId: '',
+    refNo: '',
+    amountPaid: '0',
+    notes: '',
+  })
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseDraftItem[]>([createEmptyPurchaseItem()])
+  const suppliersEnabled = hasPermission('canViewPayable')
+  const landlordPayablesEnabled = suppliersEnabled && (hasFeature('property_management.landlord') || hasFeature('property_management.agent'))
+
+  useEffect(() => {
+    if (!landlordPayablesEnabled) {
+      setLandlordPayables([])
+      if (activeTab === 'landlords') setActiveTab('suppliers')
+    }
+  }, [landlordPayablesEnabled, activeTab])
+
+  useEffect(() => {
+    if (!suppliersEnabled) {
+      setLoading(false)
+      return
+    }
+
+    if (activeTab === 'suppliers') {
+      loadSuppliers()
+    }
+    if (activeTab === 'purchases') loadPurchases()
+    if (activeTab === 'payments') loadPayments()
+    if (activeTab === 'landlords' && landlordPayablesEnabled) {
+      api.get<any[]>('/api/property-management/payables/owners').then(setLandlordPayables).catch(error => toast({ title: 'Error', description: error instanceof Error ? error.message : 'Could not load landlord payables', variant: 'destructive' }))
+    }
+    loadPayablesSummary()
+  }, [suppliersEnabled, activeTab, searchTerm, statusFilter, landlordPayablesEnabled])
+
+  const loadSuppliers = async (
+    showPageLoading = true,
+    overrides?: { search?: string; status?: string }
+  ) => {
+    try {
+      if (showPageLoading) setLoading(true)
+      if (online) {
+        const params = new URLSearchParams({
+          ...((overrides?.search ?? searchTerm) && { search: overrides?.search ?? searchTerm }),
+          ...((overrides?.status ?? statusFilter) !== 'all' && { status: overrides?.status ?? statusFilter })
+        })
+        const response = await apiFetch(`/api/payables/suppliers?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setSuppliers(data.suppliers)
+        } else {
+          throw new Error(await readResponseError(response, 'Failed to load suppliers'))
+        }
+      } else {
+        const local = await getLocalSuppliers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
+        setSuppliers(local)
+      }
+    } catch (error) {
+      try {
+        const local = await getLocalSuppliers(overrides?.search ?? searchTerm, overrides?.status ?? statusFilter)
+        setSuppliers(local)
+      } catch {
+        toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to load suppliers', variant: 'destructive' })
+      }
+    } finally {
+      if (showPageLoading) setLoading(false)
+    }
+  }
+
+  const loadPurchases = async () => {
+    try {
+      if (online) {
+        const response = await apiFetch('/api/payables/purchases')
+        if (response.ok) {
+          const data = await response.json()
+          setPurchases(data.purchases)
+        }
+      } else {
+        const local = await getLocalPurchases()
+        setPurchases(local)
+      }
+    } catch (error) {
+      try { setPurchases(await getLocalPurchases()) } catch {}
+    }
+  }
+
+  const loadPayments = async () => {
+    try {
+      if (online) {
+        const response = await apiFetch('/api/payables/payments')
+        if (response.ok) {
+          const data = await response.json()
+          setPayments(data.payments)
+        }
+      } else {
+        const local = await getLocalPayablePayments()
+        setPayments(local)
+      }
+    } catch (error) {
+      try { setPayments(await getLocalPayablePayments()) } catch {}
+    }
+  }
+
+  const loadPayablesSummary = async () => {
+    try {
+      const response = await apiFetch('/api/payables/payables/summary')
+      if (response.ok) {
+        const data = await response.json()
+        setSummary(data)
+      }
+    } catch (error) {
+      console.error('Failed to load summary:', error)
+    }
+  }
+
+  const loadProducts = async () => {
+    try {
+      if (online) {
+        const data = await inventoryApi.list()
+        setProducts(data)
+      } else {
+        const local = await getLocalProducts()
+        setProducts(local)
+      }
+    } catch (error: any) {
+      try {
+        const local = await getLocalProducts()
+        setProducts(local)
+      } catch {
+        toast({ title: 'Error', description: error.message || 'Failed to load products', variant: 'destructive' })
+      }
+    }
+  }
+
+  const loadSupplierOptions = async () => {
+    try {
+      const response = await apiFetch('/api/payables/suppliers?status=active&limit=100')
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to load supplier options'))
+      }
+      const data = await response.json()
+      setSupplierOptions(data.suppliers || [])
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to load supplier options',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const openPurchaseModal = () => {
+    setShowPurchaseModal(true)
+    loadSupplierOptions()
+    if (products.length === 0) loadProducts()
+  }
+
+  const updatePurchaseItem = (index: number, patch: Partial<PurchaseDraftItem>) => {
+    setPurchaseItems((prev) =>
+      prev.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)
+    )
+  }
+
+  const handlePurchaseProductChange = (index: number, productId: string) => {
+    const product = products.find((item) => String(item.id) === productId)
+    const itemType = (product as any)?.itemType
+    const defaultCost = itemType === 'rental'
+      ? (product as any)?.rentalPrice || product?.cost_price || 0
+      : product?.cost_price || product?.unit_price || 0
+    updatePurchaseItem(index, {
+      productId,
+      cost: product ? String(defaultCost) : '',
+    })
+  }
+
+  const purchaseTotal = purchaseItems.reduce((sum, item) => {
+    return sum + parseAmount(item.cost) * Math.max(1, parseInt(item.quantity, 10) || 1)
+  }, 0)
+
+  const createPurchase = async (event: React.FormEvent) => {
+    event.preventDefault()
+
+    const items = purchaseItems
+      .filter((item) => item.productId)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
+        cost: parseAmount(item.cost),
+      }))
+
+    if (!purchaseForm.supplierId || items.length === 0) {
+      toast({
+        title: 'Missing purchase details',
+        description: 'Select a supplier and at least one item.',
+        variant: 'destructive'
+      })
+      return
+    }
+    if (purchaseCurrency !== baseCurrency && (!purchaseRateToBase || !purchaseUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
+
+    setSavingPurchase(true)
+    try {
+      const response = await apiFetch('/api/payables/purchases', {
+        method: 'POST',
+        body: JSON.stringify({
+          supplierId: purchaseForm.supplierId,
+          refNo: purchaseForm.refNo || undefined,
+          items,
+          total: purchaseTotal,
+          amountPaid: parseAmount(purchaseForm.amountPaid),
+          currency: purchaseCurrency,
+          unitsPerBase: purchaseUnitsPerBase,
+          notes: purchaseForm.notes || undefined,
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to create purchase'))
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Purchase recorded successfully'
+      })
+      setShowPurchaseModal(false)
+      setPurchaseForm({
+        supplierId: '',
+        refNo: '',
+        amountPaid: '0',
+        notes: '',
+      })
+      setPurchaseCurrency(baseCurrency)
+      setPurchaseRateToBase(1)
+      setPurchaseUnitsPerBase(1)
+      setPurchaseItems([createEmptyPurchaseItem()])
+      loadPurchases()
+      if (activeTab === 'suppliers') loadSuppliers()
+      loadSupplierOptions()
+      loadPayablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to create purchase',
+        variant: 'destructive'
+      })
+    } finally {
+      setSavingPurchase(false)
+    }
+  }
+
+  const recordPayment = async () => {
+    const supplier = selectedPurchase?.supplier || selectedSupplierForPayment
+    if (!supplier) {
+      toast({ variant: 'destructive', title: 'Select a supplier first' })
+      return
+    }
+    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+      toast({ variant: 'destructive', title: 'Enter a valid payment amount' })
+      return
+    }
+    if (paymentCurrency !== baseCurrency && (!paymentRateToBase || !paymentUnitsPerBase)) {
+      toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+      return
+    }
+
+    try {
+      const response = await apiFetch('/api/payables/payments', {
+        method: 'POST',
+        body: JSON.stringify({
+          supplierId: supplier.id,
+          ...(selectedPurchase ? { purchaseId: selectedPurchase.id } : {}),
+          amount: parseFloat(paymentAmount),
+          currency: paymentCurrency,
+          unitsPerBase: paymentUnitsPerBase,
+          paymentMethod,
+          mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
+          phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
+          transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
+          notes: `Payment recorded via dashboard`
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(await readResponseError(response, 'Failed to record payment'))
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Payment recorded successfully'
+      })
+      setShowPaymentModal(false)
+      setSelectedPurchase(null)
+      setSelectedSupplierForPayment(null)
+      setPaymentAmount('')
+      setPaymentCurrency(baseCurrency)
+      setPaymentRateToBase(1)
+      setPaymentUnitsPerBase(1)
+      setPaymentMethod('cash')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      loadPurchases()
+      if (activeTab === 'suppliers') loadSuppliers()
+      loadSupplierOptions()
+      loadPayments()
+      loadPayablesSummary()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to record payment',
+        variant: 'destructive'
+      })
+    }
+  }
+
+  const getStatusBadge = (status: string) => {
+    const variants = {
+      active: 'default',
+      inactive: 'secondary',
+      blocked: 'destructive'
+    }
+    return (
+      <Badge variant={variants[status as keyof typeof variants]}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    )
+  }
+
+  const getPaymentStatusBadge = (status: string) => {
+    const variants = {
+      paid: 'default',
+      partial: 'secondary',
+      unpaid: 'destructive',
+      overdue: 'destructive'
+    }
+    return (
+      <Badge variant={variants[status as keyof typeof variants]}>
+        {status.charAt(0).toUpperCase() + status.slice(1)}
+      </Badge>
+    )
+  }
+
+  const closeDetails = () => {
+    setSelectedSupplierDetail(null)
+    setSelectedPurchaseDetail(null)
+  }
+
+  const formatUserName = (user?: SupplierPurchase['user']) => {
+    const name = `${user?.fname || ''} ${user?.lname || ''}`.trim()
+    return name || 'Unknown'
+  }
+
+  if (!hasPermission('canViewPayable')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Building2 className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-lg font-semibold">Access Denied</h2>
+          <p className="text-muted-foreground">You don't have permission to access supplier management.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Payables Management</h1>
+          <p className="text-muted-foreground">Manage suppliers and outstanding payments</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => {
+            setEditingSupplier(null)
+            setShowSupplierModal(true)
+          }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Supplier
+          </Button>
+          <Button onClick={openPurchaseModal}>
+            <FileText className="h-4 w-4 mr-2" />
+            New Purchase
+          </Button>
+        </div>
+      </div>
+
+      <UsageLimitBanner resource="suppliers" label="Suppliers" currentCount={suppliers.length} />
+
+      {/* Tabs */}
+      <div className="flex space-x-1 border-b">
+        {(['suppliers', 'purchases', 'payments', ...(landlordPayablesEnabled ? ['landlords'] : [])] as string[]).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab as any)}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+              activeTab === tab
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab === 'landlords' ? 'Landlord Payables' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-4 py-4">
+        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search suppliers..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="max-w-sm"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+            <SelectItem value="blocked">Blocked</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Content */}
+      {activeTab === 'suppliers' && (
+        <div className="grid gap-4">
+          {loading ? (
+            <div className="col-span-full text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            suppliers.map((supplier) => (
+              <Card key={supplier.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Building2 className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{supplier.name}</h3>
+                        <p className="text-sm text-muted-foreground">{supplier.phone}</p>
+                        <p className="text-sm text-muted-foreground">{supplier.email}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {getStatusBadge(supplier.status)}
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Outstanding Balance</p>
+                      <p className="text-lg font-bold text-red-600">
+                        {supplier.balance.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      {hasPermission('canCreatePayable') && Number(supplier.openingBalanceOutstanding || 0) > 0 && (
+                        <Button size="sm" onClick={() => {
+                          setSelectedSupplierForPayment(supplier)
+                          setSelectedPurchase(null)
+                          setPaymentAmount(String(supplier.openingBalanceOutstanding))
+                          setShowPaymentModal(true)
+                        }}>
+                          <Wallet className="h-4 w-4 mr-1" />
+                          Record Payment
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => setSelectedSupplierDetail(supplier)}>
+                        <Eye className="h-4 w-4 mr-1" />
+                        View Details
+                      </Button>
+                      <Button size="sm" variant="outline" className="ml-2" onClick={() => {
+                        setEditingSupplier(supplier)
+                        setShowSupplierModal(true)
+                      }}>
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'purchases' && (
+        <div className="grid gap-4">
+          {loading ? (
+            <div className="col-span-full text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            purchases.map((purchase) => (
+              <Card key={purchase.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold">{purchase.refNo}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        From {purchase.supplier.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDisplayDate(purchase.createdAt)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      {getPaymentStatusBadge(purchase.paymentStatus)}
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Total Amount</p>
+                      <p className="font-semibold">{purchase.total.toFixed(2)}</p>
+                      {purchase.currency && purchase.currency !== baseCurrency && purchase.foreignTotal != null && <p className="text-xs text-muted-foreground">{Number(purchase.foreignTotal).toLocaleString()} {purchase.currency} · base {Number(purchase.total).toLocaleString()} {baseCurrency}</p>}
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Amount Paid</p>
+                      <p className="font-semibold">{purchase.amountPaid.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Balance</p>
+                      <p className="font-semibold text-red-600">{purchase.balance.toFixed(2)}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 flex gap-2">
+                    {purchase.balance > 0 && (
+                      <Button 
+                        size="sm"
+                        onClick={() => {
+                          setSelectedPurchase(purchase)
+                          setSelectedSupplierForPayment(null)
+                          setPaymentAmount(String(purchase.balance))
+                          setShowPaymentModal(true)
+                        }}
+                      >
+                        <Wallet className="h-4 w-4 mr-1" />
+                        Record Payment
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => setSelectedPurchaseDetail(purchase)}>
+                      <FileText className="h-4 w-4 mr-1" />
+                      View Details
+                    </Button>
+                    <TransactionReceiptButton data={{
+                      title: 'Supplier purchase record', reference: purchase.refNo || `PUR-${purchase.id.slice(-8)}`,
+                      date: purchase.createdAt, amount: purchase.total, partyLabel: 'Supplier', partyName: purchase.supplier.name,
+                      fields: [{ label: 'Amount paid', value: purchase.amountPaid }, { label: 'Balance', value: purchase.balance }, { label: 'Payment status', value: purchase.paymentStatus }, { label: 'Recorded by', value: `${purchase.user?.fname || ''} ${purchase.user?.lname || ''}`.trim() }, { label: 'Notes', value: purchase.notes }],
+                    }} />
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'payments' && (
+        <div className="grid gap-4">
+          {loading ? (
+            <div className="col-span-full text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            payments.map((payment) => (
+              <Card key={payment.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold">{payment.amount.toFixed(2)}</h3>
+                      {payment.currency && payment.currency !== baseCurrency && payment.foreignAmount != null && <p className="text-xs text-muted-foreground">{payment.foreignAmount.toLocaleString()} {payment.currency} → {payment.amount.toLocaleString()} {baseCurrency}</p>}
+                      <p className="text-sm text-muted-foreground">
+                        To {payment.supplier.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDisplayDate(payment.createdAt)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <Badge variant="outline">
+                        {payment.paymentMethod}
+                      </Badge>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4">
+                    {payment.reference && (
+                      <p className="text-sm text-muted-foreground">
+                        Reference: {payment.reference}
+                      </p>
+                    )}
+                    {payment.notes && (
+                      <p className="text-sm text-muted-foreground">
+                        Notes: {payment.notes}
+                      </p>
+                    )}
+                    <div className="mt-3"><TransactionReceiptButton data={{
+                      title: 'Supplier payment receipt', reference: payment.reference || `PAY-${payment.id.slice(-8)}`,
+                      date: payment.createdAt, amount: payment.amount, partyLabel: 'Supplier', partyName: payment.supplier.name,
+                      fields: [{ label: 'Payment method', value: payment.paymentMethod }, { label: 'Purchase reference', value: payment.purchase?.refNo }, { label: 'Reference', value: payment.reference }, { label: 'Notes', value: payment.notes }],
+                    }} /></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'landlords' && landlordPayablesEnabled && (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted/50 text-left"><tr><th className="p-3">Landlord</th><th className="p-3 text-right">Managed properties</th><th className="p-3 text-right">Rent accrued</th><th className="p-3 text-right">Paid out</th><th className="p-3 text-right">Payable balance</th><th className="p-3">Action</th></tr></thead>
+            <tbody>{landlordPayables.filter(owner => `${owner.name} ${owner.phone || ''} ${owner.email || ''}`.toLowerCase().includes(searchTerm.toLowerCase())).map(owner => <tr key={owner.id} className="border-t"><td className="p-3"><div className="font-medium">{owner.name}</div><div className="text-xs text-muted-foreground">{owner.phone || owner.email || 'No contact details'}</div></td><td className="p-3 text-right">{owner.propertyCount}</td><td className="p-3 text-right">{formatCurrency(owner.rentAccrued)}</td><td className="p-3 text-right">{formatCurrency(owner.paid)}</td><td className="p-3 text-right font-semibold">{formatCurrency(owner.balance)}</td><td className="p-3">{hasPermission('canRecordOwnerPayout') && (hasPermission('canViewPropertyPortfolio') || hasPermission('canViewPropertyManagement')) && <Button size="sm" variant="outline" onClick={() => navigate('/tenant/property-management/clients', { state: { recordOwnerPayout: owner.id } })}>Record payout</Button>}</td></tr>)}</tbody>
+          </table>
+          {!landlordPayables.length && <p className="p-6 text-center text-sm text-muted-foreground">No managed landlord balances are recorded.</p>}
+        </div>
+      )}
+
+      <CreateSupplierModal
+        isOpen={showSupplierModal}
+        initialData={editingSupplier || undefined}
+        onClose={() => {
+          setShowSupplierModal(false)
+          setEditingSupplier(null)
+        }}
+        onSuccess={(supplier) => {
+          setSuppliers((prev) => [supplier, ...prev.filter((item) => item.id !== supplier.id)])
+          setSupplierOptions((prev) => [supplier, ...prev.filter((item) => item.id !== supplier.id)])
+          setEditingSupplier(null)
+          if (activeTab === 'suppliers') loadSuppliers()
+          loadPayablesSummary()
+        }}
+      />
+
+      {/* Purchase Modal */}
+      {showPurchaseModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h3 className="text-lg font-semibold mb-4">New Supplier Purchase</h3>
+            <form onSubmit={createPurchase} className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label>Supplier</Label>
+                  <Select
+                    value={purchaseForm.supplierId}
+                    onValueChange={(value) => setPurchaseForm((prev) => ({ ...prev, supplierId: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select supplier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(supplierOptions.length ? supplierOptions : suppliers).map((supplier) => (
+                        <SelectItem key={supplier.id} value={supplier.id}>
+                          {supplier.name} {supplier.phone ? `(${supplier.phone})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="purchaseRef">Reference / Invoice No.</Label>
+                  <Input
+                    id="purchaseRef"
+                    value={purchaseForm.refNo}
+                    onChange={(event) => setPurchaseForm((prev) => ({ ...prev, refNo: event.target.value }))}
+                    placeholder="Auto-generated if blank"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label>Items</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPurchaseItems((prev) => [...prev, createEmptyPurchaseItem()])}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Item
+                  </Button>
+                </div>
+
+                {purchaseItems.map((item, index) => {
+                  const selectedItem = products.find((p) => String(p.id) === item.productId)
+                  const selectedItemType = (selectedItem as any)?.itemType
+                  const isService = selectedItemType === 'service'
+                  const isRental = selectedItemType === 'rental'
+                  return (
+                  <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_100px_140px_40px]">
+                    <FormSelectSearch
+                      options={products.map((product) => {
+                        const pType = (product as any)?.itemType || 'product'
+                        const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
+                        const identifiers = [product.product_id, product.barcode, product.size, product.brand, product.design].filter(Boolean)
+                        return {
+                          value: String(product.id),
+                          label: `[${typeLabel}] ${product.product_name}${identifiers.length ? ` (${identifiers.join(' · ')})` : ''}`,
+                        }
+                      })}
+                      value={item.productId}
+                      onChange={(value) => handlePurchaseProductChange(index, String(value || ''))}
+                      placeholder="Select item"
+                      searchPlaceholder="Search item, SKU, barcode, size, brand..."
+                      emptyText="No matching items found"
+                      clearable={false}
+                      className="h-10 w-full border-input bg-background text-foreground"
+                    />
+                    <Input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(event) => updatePurchaseItem(index, { quantity: event.target.value })}
+                      placeholder={isService ? 'Hours' : isRental ? 'Periods' : 'Qty'}
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.cost}
+                      onChange={(event) => updatePurchaseItem(index, { cost: event.target.value })}
+                      placeholder="Unit cost"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={purchaseItems.length === 1}
+                      onClick={() => setPurchaseItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  )
+                })}
+              </div>
+
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={purchaseCurrency} enabled={hasFeature('settings.currencies')} amount={purchaseRateToBase ? purchaseTotal / purchaseRateToBase : 0} onCurrencyChange={setPurchaseCurrency} onRateChange={(rate, units) => { setPurchaseRateToBase(rate); setPurchaseUnitsPerBase(units) }} />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="purchasePaid">Amount Paid ({purchaseCurrency})</Label>
+                  <Input
+                    id="purchasePaid"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    max={purchaseRateToBase ? purchaseTotal / purchaseRateToBase : purchaseTotal}
+                    value={purchaseForm.amountPaid}
+                    onChange={(event) => setPurchaseForm((prev) => ({ ...prev, amountPaid: event.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="purchaseNotes">Notes</Label>
+                  <Textarea
+                    id="purchaseNotes"
+                    aiWritingField
+                    value={purchaseForm.notes}
+                    onChange={(event) => setPurchaseForm((prev) => ({ ...prev, notes: event.target.value }))}
+                    rows={2}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-md border p-4 text-sm">
+                <div className="flex justify-between">
+                  <span>Total Cost</span>
+                  <span className="font-semibold">{formatCurrency(purchaseTotal)}</span>
+                </div>
+                {purchaseCurrency !== baseCurrency && purchaseRateToBase && <div className="flex justify-between text-muted-foreground"><span>Transaction total ({purchaseCurrency})</span><span>{formatCurrency(purchaseTotal / purchaseRateToBase, purchaseCurrency)}</span></div>}
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Balance after payment</span>
+                  <span>{formatCurrency(Math.max(0, purchaseTotal - parseAmount(purchaseForm.amountPaid) * Number(purchaseRateToBase || 1)))}</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShowPurchaseModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={savingPurchase}>
+                  {savingPurchase ? 'Saving...' : 'Record Purchase'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      {showPaymentModal && (selectedPurchase || selectedSupplierForPayment) && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">Record Payment</h3>
+            <div className="space-y-4">
+              <div>
+                <Label>Supplier</Label>
+                <p className="font-medium">{selectedPurchase?.supplier.name || selectedSupplierForPayment?.name}</p>
+                {selectedPurchase ? (
+                  <p className="text-sm text-muted-foreground">Ref: {selectedPurchase.refNo}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Payment against opening balance</p>
+                )}
+                <p className="text-sm text-red-600">Balance: {formatCurrency(selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding ?? 0)}</p>
+              </div>
+              
+              <div>
+                <Label htmlFor="amount">Payment Amount</Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  placeholder="0.00"
+                  max={(selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding) != null ? (selectedPurchase?.balance ?? selectedSupplierForPayment?.openingBalanceOutstanding)! / (paymentRateToBase || 1) : undefined}
+                />
+                {paymentCurrency !== baseCurrency && paymentRateToBase && <p className="mt-1 text-xs text-muted-foreground">Supplier payable/cash posting: {(Number(paymentAmount || 0) * paymentRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {baseCurrency}</p>}
+              </div>
+              <TransactionCurrencyControl baseCurrency={baseCurrency} currency={paymentCurrency} enabled={hasFeature('settings.currencies')} amount={Number(paymentAmount || 0)} onCurrencyChange={setPaymentCurrency} onRateChange={(rate, units) => { setPaymentRateToBase(rate); setPaymentUnitsPerBase(units) }} />
+              
+              <div>
+                <Label htmlFor="paymentMethod">Payment Method</Label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                    <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {paymentMethod === 'mobile_money' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details (optional)</p>
+                  <div>
+                    <Label>Network Provider</Label>
+                    <select
+                      value={mobileProvider}
+                      onChange={(e) => setMobileProvider(e.target.value)}
+                      className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Select provider</option>
+                      <option value="MTN">MTN</option>
+                      <option value="Airtel">Airtel</option>
+                      <option value="Zamtel">Zamtel</option>
+                      <option value="Vodafone">Vodafone</option>
+                      <option value="M-Pesa">M-Pesa</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Supplier Phone Number</Label>
+                    <Input
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      placeholder="e.g. 0977123456"
+                      type="tel"
+                    />
+                  </div>
+                  <div>
+                    <Label>Transaction ID</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'card' && (
+                <div className="space-y-3 p-3 rounded-lg border bg-muted/30">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details (optional)</p>
+                  <div>
+                    <Label>Transaction ID</Label>
+                    <Input
+                      value={transactionId}
+                      onChange={(e) => setTransactionId(e.target.value)}
+                      placeholder="e.g. TXN123456789"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => {
+                setShowPaymentModal(false)
+                setSelectedPurchase(null)
+                setSelectedSupplierForPayment(null)
+              }}>
+                Cancel
+              </Button>
+              <Button onClick={recordPayment} disabled={
+                !paymentAmount || parseFloat(paymentAmount) <= 0
+              }>
+                Record Payment
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(selectedSupplierDetail || selectedPurchaseDetail) && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {selectedSupplierDetail ? selectedSupplierDetail.name : selectedPurchaseDetail?.refNo}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {selectedSupplierDetail ? 'Supplier details' : 'Supplier purchase details'}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={closeDetails}>
+                Close
+              </Button>
+            </div>
+
+            {selectedSupplierDetail && (
+              <div className="space-y-4">
+                <div>
+                  <DetailRow label="Status" value={getStatusBadge(selectedSupplierDetail.status)} />
+                  <DetailRow label="Phone" value={selectedSupplierDetail.phone} />
+                  <DetailRow label="Email" value={selectedSupplierDetail.email} />
+                  <DetailRow label="Address" value={selectedSupplierDetail.address} />
+                  <DetailRow label="Outstanding Balance" value={formatCurrency(selectedSupplierDetail.balance)} />
+                  <DetailRow label="Opening Balance" value={formatCurrency(selectedSupplierDetail.openingBalance || 0)} />
+                  <DetailRow
+                    label="Opening Balance Date"
+                    value={selectedSupplierDetail.openingBalanceDate ? formatDisplayDate(selectedSupplierDetail.openingBalanceDate) : 'Not set'}
+                  />
+                  <DetailRow label="Opening Balance Note" value={selectedSupplierDetail.openingBalanceNote} />
+                  <DetailRow label="Notes" value={selectedSupplierDetail.notes} />
+                </div>
+              </div>
+            )}
+
+            {selectedPurchaseDetail && (
+              <div className="space-y-5">
+                <div>
+                  <DetailRow label="Supplier" value={selectedPurchaseDetail.supplier.name} />
+                  <DetailRow label="Status" value={getPaymentStatusBadge(selectedPurchaseDetail.paymentStatus)} />
+                  <DetailRow label="Total" value={formatCurrency(selectedPurchaseDetail.total)} />
+                  <DetailRow label="Amount Paid" value={formatCurrency(selectedPurchaseDetail.amountPaid)} />
+                  <DetailRow label="Balance" value={formatCurrency(selectedPurchaseDetail.balance)} />
+                  <DetailRow
+                    label="Due Date"
+                    value={selectedPurchaseDetail.dueDate ? formatDisplayDate(selectedPurchaseDetail.dueDate) : 'Not set'}
+                  />
+                  <DetailRow label="Recorded By" value={formatUserName(selectedPurchaseDetail.user)} />
+                  <DetailRow label="Created" value={new Date(selectedPurchaseDetail.createdAt).toLocaleString()} />
+                  <DetailRow label="Notes" value={selectedPurchaseDetail.notes} />
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold">{selectedPurchaseDetail.fuelDelivery ? 'Fuel Delivery' : 'Items'}</h4>
+                  <div className="space-y-2">
+                    {selectedPurchaseDetail.fuelDelivery ? (
+                      <div className="rounded-md border p-3 text-sm">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-medium">{selectedPurchaseDetail.fuelDelivery.tank?.fuelType || 'Fuel'} · {selectedPurchaseDetail.fuelDelivery.tank?.name || 'Tank'}</p>
+                            <p className="text-xs text-muted-foreground">Supplier invoice {selectedPurchaseDetail.fuelDelivery.invoiceNo || selectedPurchaseDetail.refNo}</p>
+                          </div>
+                          <p className="font-semibold">{formatCurrency(Number(selectedPurchaseDetail.total || 0))}</p>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{Number(selectedPurchaseDetail.fuelDelivery.litres).toLocaleString()} L × {formatCurrency(Number(selectedPurchaseDetail.fuelDelivery.unitCost || 0))} per litre</p>
+                      </div>
+                    ) : selectedPurchaseDetail.items?.length ? (
+                      selectedPurchaseDetail.items.map((item, index) => (
+                        <div key={`${item.product?.id || index}-${index}`} className="rounded-md border p-3 text-sm">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="font-medium">{item.product?.name || 'Product'}</p>
+                              <p className="text-xs text-muted-foreground">{item.product?.sku || 'No SKU'}</p>
+                            </div>
+                            <p className="font-semibold">{formatCurrency(Number(item.total || 0))}</p>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Qty {item.quantity} x {formatCurrency(Number(item.cost || 0))}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No items found for this purchase.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

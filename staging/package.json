@@ -1,0 +1,37 @@
+{
+  "name": "grocery-saas",
+  "version": "1.0.0",
+  "description": "Multi-tenant SaaS grocery management system with inventory, sales, receipts, reports, subscriptions, and role-based access (SaaS Admin, Owner, Accountant, Attendant) powered by Node.js, Grist API, and a Bootstrap/Tailwind frontend.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node backend/src/app.js",
+    "dev": "nodemon backend/src/app.js",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "cd frontend && npm install && npm run build",
+    "build:server": "npm install",
+    "obfuscate:admin": "node scripts/obfuscate-admin.mjs",
+    "test": "npm run test:reports",
+    "test:reports": "npm --prefix backend run test:reports && npm --prefix frontend run test:reports"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@casl/ability": "^6.7.3",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
+    "chart.js": "^4.5.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^7.0.6",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "4.1.1",
+    "nodemon": "^3.1.10"
+  }
+}

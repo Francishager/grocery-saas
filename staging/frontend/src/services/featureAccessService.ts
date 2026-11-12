@@ -1,0 +1,487 @@
+import { useState, useEffect, useCallback } from 'react'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { apiFetch } from '@/lib/api'
+
+export interface Feature {
+  name: string
+  displayName: string
+  description?: string
+  category: string
+  icon?: string
+  enabled: boolean
+  source: 'plan' | 'override' | 'default'
+}
+
+export interface FeatureAccess {
+  [featureName: string]: {
+    enabled: boolean
+    source: 'plan' | 'override' | 'default'
+  }
+}
+
+export interface UsageLimits {
+  maxProducts: number
+  maxUsers: number
+  maxBranches: number
+  maxCustomers: number
+  maxSuppliers: number
+}
+
+// Legacy aliases removed — features are now controlled granularly via PlanFeature and TenantFeature tables.
+
+class FeatureAccessService {
+  private static instance: FeatureAccessService
+  private features: FeatureAccess = {}
+  private usageLimits: UsageLimits | null = null
+  private loading = false
+  private loadingTenantId: string | null = null
+  private loadRequestId = 0
+  private loadedTenantId: string | null = null
+  private error: string | null = null
+  private listeners: Array<() => void> = []
+  private refreshTimer: number | null = null
+  private refreshTenantId: string | null = null
+  private refreshInFlight = false
+  private visibilityHandler: (() => void) | null = null
+
+  private constructor() {}
+
+  static getInstance(): FeatureAccessService {
+    if (!FeatureAccessService.instance) {
+      FeatureAccessService.instance = new FeatureAccessService()
+    }
+    return FeatureAccessService.instance
+  }
+
+  // Subscribe to feature changes
+  subscribe(listener: () => void) {
+    this.listeners.push(listener)
+    return () => {
+      const index = this.listeners.indexOf(listener)
+      if (index > -1) {
+        this.listeners.splice(index, 1)
+      }
+    }
+  }
+
+  private notifyListeners() {
+    this.listeners.forEach(listener => listener())
+  }
+
+  // Load features for current tenant
+  async loadFeatures(tenantId?: string) {
+    if (!tenantId) return
+    // Skip if already loaded for this tenant and not in error state
+    if (this.loadedTenantId === tenantId && !this.error && Object.keys(this.features).length > 0) return
+    // A request for another tenant must not prevent this tenant's entitlements
+    // from loading, nor may its late response overwrite the current tenant.
+    if (this.loading && this.loadingTenantId === tenantId) return
+
+    const requestId = ++this.loadRequestId
+    this.loading = true
+    this.loadingTenantId = tenantId
+    this.error = null
+    if (this.loadedTenantId !== tenantId) {
+      this.features = {}
+      this.usageLimits = null
+    }
+    this.notifyListeners()
+
+    try {
+      const response = await apiFetch('/api/admin/me/features', { cache: 'no-store' })
+
+      if (!response.ok) {
+        throw new Error(`Feature access could not be checked (${response.status})`)
+      }
+
+      const data = await response.json()
+      if (requestId !== this.loadRequestId) return
+      this.features = this.normalizeFeatures(data.features || {})
+      this.loadedTenantId = tenantId
+      localStorage.setItem('cachedFeatures', JSON.stringify(this.features))
+
+      // Load usage limits
+      await this.loadUsageLimits(tenantId)
+
+    } catch (error) {
+      if (requestId !== this.loadRequestId) return
+      console.error('Failed to load features:', error)
+      if (this.loadedTenantId !== tenantId) {
+        this.features = {}
+        this.usageLimits = null
+        localStorage.removeItem('cachedFeatures')
+        this.loadedTenantId = null
+      }
+      this.error = error instanceof Error ? error.message : 'Failed to load features'
+    } finally {
+      if (requestId === this.loadRequestId) {
+        this.loading = false
+        this.loadingTenantId = null
+        this.notifyListeners()
+      }
+    }
+  }
+
+  private normalizeFeatures(rawFeatures: string[] | FeatureAccess): FeatureAccess {
+    const normalized: FeatureAccess = {}
+
+    const setFeature = (name: string, enabled: boolean = true, source: 'plan' | 'override' | 'default' = 'plan') => {
+      if (!name) return
+      normalized[name] = { enabled, source }
+    }
+
+    if (Array.isArray(rawFeatures)) {
+      rawFeatures.forEach((name) => setFeature(name, true, 'plan'))
+      return normalized
+    }
+
+    Object.entries(rawFeatures).forEach(([name, access]) => {
+      setFeature(name, access.enabled, access.source)
+    })
+
+    return normalized
+  }
+
+  // Load usage limits
+  private async loadUsageLimits(tenantId: string) {
+    try {
+      const response = await apiFetch(`/api/tenants/${tenantId}/limits`)
+      
+      if (response.ok) {
+        const data = await response.json()
+        this.usageLimits = data.usageLimit
+        // Cache for offline use
+        if (this.usageLimits) {
+          localStorage.setItem('cachedUsageLimits', JSON.stringify(this.usageLimits))
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load usage limits:', error)
+      // Try cached limits
+      const cached = localStorage.getItem('cachedUsageLimits')
+      if (cached) {
+        try { this.usageLimits = JSON.parse(cached) } catch {}
+      }
+    }
+  }
+
+  // Check if feature is enabled (primary API).
+  // Tenant access is strict: a feature must be included by the plan or by an
+  // explicit tenant override. Parent modules do not unlock every child page.
+  isFeatureEnabled(featureName: string): boolean {
+    // Try the exact feature name first
+    const entry = this.features[featureName]
+    if (entry !== undefined) return entry.enabled === true
+
+    // Try common aliases (underscore <-> hyphen) and module fallbacks
+    const aliases = this.generateFeatureAliases(featureName)
+    for (const alias of aliases) {
+      const e = this.features[alias]
+      if (e !== undefined) return e.enabled === true
+    }
+
+    return false
+  }
+
+  // Generate common alias permutations for a feature name
+  private generateFeatureAliases(featureName: string): string[] {
+    const aliases = new Set<string>()
+    aliases.add(featureName)
+
+    // underscore <-> hyphen variants
+    aliases.add(featureName.replace(/_/g, '-'))
+    aliases.add(featureName.replace(/-/g, '_'))
+
+    const equivalentFeatures: Record<string, string[]> = {
+      'fuel_station.tanks': ['fuel_station.pumps'],
+      'fuel_station.pumps': ['fuel_station.tanks'],
+      'service.car_wash': ['fuel_station.car_wash'],
+      'fuel_station.car_wash': ['service.car_wash'],
+      'service.garage': ['fuel_station.garage'],
+      'fuel_station.garage': ['service.garage'],
+    }
+
+    for (const equivalent of equivalentFeatures[featureName] || []) {
+      aliases.add(equivalent)
+      aliases.add(equivalent.replace(/_/g, '-'))
+      aliases.add(equivalent.replace(/-/g, '_'))
+    }
+
+    return Array.from(aliases)
+  }
+
+  // Check any of the provided feature names for availability
+  isAnyFeatureEnabled(featureNames: string[] | string): boolean {
+    const names = Array.isArray(featureNames) ? featureNames : [featureNames]
+    for (const name of names) {
+      if (this.isFeatureEnabled(name)) return true
+    }
+    return false
+  }
+
+  // Alias for isFeatureEnabled — matches spec naming convention hasFeature('inventory.products')
+  hasFeature(featureName: string): boolean {
+    return this.isFeatureEnabled(featureName)
+  }
+
+  // Get feature info
+  getFeature(featureName: string): Feature | null {
+    const featureAccess = this.features[featureName]
+    if (!featureAccess) return null
+
+    return {
+      name: featureName,
+      displayName: featureName.charAt(0).toUpperCase() + featureName.slice(1).replace(/_/g, ' '),
+      category: this.getFeatureCategory(featureName),
+      enabled: featureAccess.enabled,
+      source: featureAccess.source
+    }
+  }
+
+  // Get feature category — derived from module name
+  private getFeatureCategory(featureName: string): string {
+    const module = featureName.split('.')[0]
+    const coreModules = ['dashboard', 'sales', 'inventory', 'customers', 'reports', 'settings']
+    const advancedModules = ['suppliers', 'receivables', 'payables', 'expenses', 'multi_branch', 'audit', 'rentals', 'hr', 'service', 'accounting', 'restaurant', 'fuel_station', 'manufacturing', 'agriculture', 'production', 'assets', 'developer', 'referrals']
+    const integrationModules = ['communication', 'integrations']
+    if (coreModules.includes(module)) return 'core'
+    if (advancedModules.includes(module)) return 'advanced'
+    if (integrationModules.includes(module)) return 'integration'
+    return 'other'
+  }
+
+  // Check if user can access feature
+  canAccessFeature(featureName: string | string[], userRole?: string): boolean {
+    // SaaS Admin can access everything
+    if (userRole === 'saas_admin' || userRole === 'SaaS Admin') return true
+
+    // Strict feature gating: access is only allowed once the tenant feature
+    // state has been loaded and the feature is explicitly enabled.
+    if (this.loading) return false
+
+    return Array.isArray(featureName)
+      ? this.isAnyFeatureEnabled(featureName)
+      : this.isFeatureEnabled(featureName)
+  }
+
+  // Get all features by category
+  getFeaturesByCategory(category: string): Feature[] {
+    return Object.entries(this.features)
+      .filter(([name, _]) => this.getFeatureCategory(name) === category)
+      .map(([name, access]) => ({
+        name,
+        displayName: name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' '),
+        category: this.getFeatureCategory(name),
+        enabled: access.enabled,
+        source: access.source
+      }))
+  }
+
+  // Check usage limits
+  checkUsageLimit(type: keyof UsageLimits, current: number): boolean {
+    if (!this.usageLimits) return true
+    return current <= this.usageLimits[type]
+  }
+
+  // Get usage limit
+  getUsageLimit(type: keyof UsageLimits): number {
+    return this.usageLimits?.[type] || 0
+  }
+
+  // Get normalized feature access map
+  getFeatureAccess(): FeatureAccess {
+    return this.features
+  }
+
+  // Get all usage limits
+  getUsageLimits(): UsageLimits | null {
+    return this.usageLimits
+  }
+
+  // Get loading state
+  isLoading(): boolean {
+    return this.loading
+  }
+
+  // Get error
+  getError(): string | null {
+    return this.error
+  }
+
+  // Clear error
+  clearError() {
+    this.error = null
+    this.notifyListeners()
+  }
+
+  // Reset service
+  reset() {
+    this.loadRequestId += 1
+    this.stopAutoRefresh()
+    this.features = {}
+    this.usageLimits = null
+    localStorage.removeItem('cachedFeatures')
+    this.loading = false
+    this.loadingTenantId = null
+    this.loadedTenantId = null
+    this.error = null
+    this.notifyListeners()
+  }
+
+  // Force reload — clears cache and reloads (use after plan changes)
+  async forceReload(tenantId?: string) {
+    this.loadRequestId += 1
+    this.features = {}
+    this.usageLimits = null
+    this.loadedTenantId = null
+    this.loading = false
+    this.loadingTenantId = null
+    this.error = null
+    this.notifyListeners()
+    return this.loadFeatures(tenantId)
+  }
+
+  async refreshFeatures(tenantId: string) {
+    if (!tenantId || this.refreshInFlight) return
+    this.refreshInFlight = true
+    try {
+      const response = await apiFetch('/api/admin/me/features', { cache: 'no-store' })
+      if (!response.ok) return
+      const data = await response.json()
+      if (this.refreshTenantId !== tenantId) return
+      this.features = this.normalizeFeatures(data.features || {})
+      this.loadedTenantId = tenantId
+      this.error = null
+      try { localStorage.setItem('cachedFeatures', JSON.stringify(this.features)) } catch { /* Cache is optional. */ }
+      this.notifyListeners()
+    } catch {
+      // Keep the last verified feature map during temporary network failures.
+    } finally {
+      this.refreshInFlight = false
+    }
+  }
+
+  startAutoRefresh(tenantId: string) {
+    if (typeof window === 'undefined') return
+    if (!tenantId) {
+      this.stopAutoRefresh()
+      return
+    }
+    if (this.refreshTenantId === tenantId && this.refreshTimer !== null) return
+    this.stopAutoRefresh()
+    this.refreshTenantId = tenantId
+    this.visibilityHandler = () => {
+      if (document.visibilityState === 'visible') void this.refreshFeatures(tenantId)
+    }
+    document.addEventListener('visibilitychange', this.visibilityHandler)
+    this.refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void this.refreshFeatures(tenantId)
+    }, 30_000)
+  }
+
+  private stopAutoRefresh() {
+    if (this.refreshTimer !== null && typeof window !== 'undefined') window.clearInterval(this.refreshTimer)
+    if (this.visibilityHandler && typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.visibilityHandler)
+    this.refreshTimer = null
+    this.refreshTenantId = null
+    this.visibilityHandler = null
+  }
+}
+
+// Export singleton instance
+export const featureAccessService = FeatureAccessService.getInstance()
+
+// Hook for using feature access
+export function useFeatureAccess() {
+  const { user } = useJWTAuth()
+  const [features, setFeatures] = useState<FeatureAccess>({})
+  const [usageLimits, setUsageLimits] = useState<UsageLimits | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Subscribe to feature service changes
+    const syncState = () => {
+      setFeatures({ ...featureAccessService.getFeatureAccess() })
+      setUsageLimits(featureAccessService.getUsageLimits())
+      setLoading(featureAccessService.isLoading())
+      setError(featureAccessService.getError())
+    }
+    const unsubscribe = featureAccessService.subscribe(syncState)
+
+    // Sync immediately in case the service already has data
+    syncState()
+
+    // Load features if we have a tenant — always reload on user/tenant change
+    if (user?.tenantId) {
+      if (!featureAccessService.isLoading()) {
+        featureAccessService.loadFeatures(user.tenantId)
+      }
+      featureAccessService.startAutoRefresh(user.tenantId)
+    } else {
+      // No tenantId — not loading
+      setLoading(false)
+      featureAccessService.startAutoRefresh('')
+    }
+
+    return unsubscribe
+  }, [user?.tenantId, user?.id])
+
+  const isFeatureEnabled = (featureName: string) => {
+    return featureAccessService.isFeatureEnabled(featureName)
+  }
+
+  const hasFeature = useCallback((featureName: string) => {
+    return featureAccessService.hasFeature(featureName)
+  }, [])
+
+  const hasAnyFeature = useCallback((featureNames: string[] | string) => {
+    return featureAccessService.isAnyFeatureEnabled(featureNames)
+  }, [])
+
+  const canAccessFeature = useCallback((featureName: string | string[]) => {
+    return featureAccessService.canAccessFeature(featureName, user?.role)
+  }, [user?.role])
+
+  const getFeature = (featureName: string) => {
+    return featureAccessService.getFeature(featureName)
+  }
+
+  const getFeaturesByCategory = (category: string) => {
+    return featureAccessService.getFeaturesByCategory(category)
+  }
+
+  const checkUsageLimit = (type: keyof UsageLimits, current: number) => {
+    return featureAccessService.checkUsageLimit(type, current)
+  }
+
+  const getUsageLimit = (type: keyof UsageLimits) => {
+    return featureAccessService.getUsageLimit(type)
+  }
+
+  const clearError = () => {
+    featureAccessService.clearError()
+  }
+
+  const retryFeatureLoad = useCallback(() => {
+    if (user?.tenantId) return featureAccessService.forceReload(user.tenantId)
+    return Promise.resolve()
+  }, [user?.tenantId])
+
+  return {
+    features,
+    usageLimits,
+    loading,
+    error,
+    isFeatureEnabled,
+    hasFeature,
+    hasAnyFeature,
+    canAccessFeature,
+    getFeature,
+    getFeaturesByCategory,
+    checkUsageLimit,
+    getUsageLimit,
+    clearError,
+    retryFeatureLoad
+  }
+}

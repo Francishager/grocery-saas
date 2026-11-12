@@ -1,0 +1,720 @@
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
+import { featureAccessService } from '@/services/featureAccessService'
+import { isLoginTransportError } from '@/lib/authNetworkError'
+import { getApiAuthEndpoint } from '@/lib/apiConfig'
+
+export interface User {
+  id: string
+  email: string
+  name: string
+  fname?: string
+  lname?: string
+  phone?: string
+  preferredLanguage?: string
+  theme?: 'light' | 'dark' | null
+  role: string
+  permissions: string[]
+  workingHoursAccess?: { restricted: boolean; allowed?: boolean; timezone?: string }
+  avatar?: string
+  institutionId?: string
+  branchId?: string
+  preferences?: Record<string, any>
+  /** Whether this user is a platform-level user (SaaS Admin) */
+  isPlatformUser?: boolean
+  /** Tenant ID for business users */
+  tenantId?: string
+  tenantStatus?: string | null
+  accessibleBusinesses?: Array<{ id: string; name: string; businessType?: string | null; status?: string; logo?: string | null }>
+  cashAccountId?: string | null
+  cashAccount?: { id: string; name: string; type: string } | null
+}
+
+export interface AuthTokens {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+  tokenType: string
+}
+
+export interface LoginResult {
+  user?: User
+  tokens?: AuthTokens
+  forceReset?: boolean
+  email?: string
+  message?: string
+}
+
+export interface JWTAuthContextValue {
+  /** Current user */
+  user: User | null
+  /** Authentication tokens */
+  tokens: AuthTokens | null
+  /** Whether user is authenticated */
+  isAuthenticated: boolean
+  /** Loading state */
+  loading: boolean
+  /** Error state */
+  error: string | null
+  /** Login */
+  login: (email: string, password: string) => Promise<LoginResult>
+  /** Logout */
+  logout: () => Promise<void>
+  /** Register */
+  register: (data: { email: string; password: string; name: string }) => Promise<void>
+  /** Refresh tokens */
+  refreshTokens: () => Promise<boolean>
+  /** Switch to another SaaS-admin-authorized business */
+  switchBusiness: (tenantId: string) => Promise<void>
+  /** Update user */
+  updateUser: (updates: Partial<User>) => void
+  /** Check if user has permission */
+  hasPermission: (permission: string) => boolean
+  /** Check if user has role */
+  hasRole: (role: string) => boolean
+  /** Check if user is SaaS Admin (platform user) */
+  isPlatformUser: () => boolean
+  /** Check if user can access business data */
+  canAccessBusinessData: () => boolean
+  /** Clear error */
+  clearError: () => void
+  /** Set tokens manually */
+  setTokens: (tokens: AuthTokens) => void
+  /** Onboarding status */
+  hasCompletedOnboarding: boolean
+  /** Refresh onboarding status from backend */
+  refreshOnboardingStatus: () => Promise<void>
+}
+
+const JWTAuthContext = createContext<JWTAuthContextValue | undefined>(undefined)
+const SESSION_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000
+const SESSION_ACTIVITY_STORAGE_KEY = 'auth_last_activity'
+
+export interface JWTAuthProviderProps {
+  children: ReactNode
+  /** API endpoint for authentication */
+  apiEndpoint?: string
+  /** Storage key for tokens */
+  tokenStorageKey?: string
+  /** Storage key for user */
+  userStorageKey?: string
+  /** Callback when user logs in */
+  onLogin?: (user: User, tokens: AuthTokens) => void
+  /** Callback when user logs out */
+  onLogout?: () => void
+  /** Callback when tokens are refreshed */
+  onTokenRefresh?: (tokens: AuthTokens) => void
+  /** Auto refresh tokens before expiry */
+  autoRefresh?: boolean
+  /** Refresh threshold in seconds before expiry */
+  refreshThreshold?: number
+}
+
+export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
+  children,
+  apiEndpoint,
+  tokenStorageKey = 'auth_tokens',
+  userStorageKey = 'auth_user',
+  onLogin,
+  onLogout,
+  onTokenRefresh,
+  autoRefresh = true,
+  refreshThreshold = 300, // 5 minutes before expiry
+}) => {
+  const resolvedApiEndpoint = apiEndpoint || getApiAuthEndpoint()
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(userStorageKey)
+      if (stored) {
+        try {
+          return JSON.parse(stored)
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+    return null
+  })
+
+  const [tokens, setTokens] = useState<AuthTokens | null>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(tokenStorageKey)
+      if (stored) {
+        try {
+          return JSON.parse(stored)
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+    return null
+  })
+
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false)
+
+  const isAuthenticated = !!user && !!tokens
+
+  const offlineCacheKey = 'offline_auth_cache'
+
+  const refreshOnboardingStatus = useCallback(async () => {
+    if (!tokens?.accessToken) {
+      setHasCompletedOnboarding(false)
+      return
+    }
+
+    try {
+      const response = await fetch(`${resolvedApiEndpoint.replace(/\/api\/auth$/, '')}/api/onboarding/status`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setHasCompletedOnboarding(Boolean(data?.completed))
+      }
+    } catch {
+      setHasCompletedOnboarding(false)
+    }
+  }, [resolvedApiEndpoint, tokens?.accessToken])
+
+  const persistAuth = (newUser: User | null, newTokens: AuthTokens | null) => {
+    if (typeof window !== 'undefined') {
+      if (newUser && newTokens) {
+        localStorage.setItem(userStorageKey, JSON.stringify(newUser))
+        localStorage.setItem(tokenStorageKey, JSON.stringify(newTokens))
+        // Also persist to offline cache — survives logout so user can log in offline later
+        localStorage.setItem(offlineCacheKey, JSON.stringify({
+          email: newUser.email,
+          user: newUser,
+          tokens: newTokens,
+          savedAt: new Date().toISOString(),
+        }))
+      } else {
+        localStorage.removeItem(userStorageKey)
+        localStorage.removeItem(tokenStorageKey)
+        // NOTE: do NOT remove offlineCacheKey here — it persists for offline login
+      }
+    }
+  }
+
+  const login = useCallback(async (email: string, password: string) => {
+    setLoading(true)
+    setError(null)
+    let loginResponseReceived = false
+
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      const response = await (async () => {
+        try {
+          return await fetch(`${resolvedApiEndpoint}/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+            signal: controller.signal,
+          })
+        } finally {
+          clearTimeout(timeoutId)
+        }
+      })()
+      if (response.headers.get('x-jibusales-proxy-error') === 'upstream-unreachable') {
+        throw new TypeError('The API server could not be reached')
+      }
+      loginResponseReceived = true
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        if (response.status === 429) {
+          const retryAfter = Number(response.headers.get('retry-after'))
+          const waitMessage = Number.isFinite(retryAfter) && retryAfter > 0
+            ? ` Try again in about ${Math.ceil(retryAfter / 60)} minute(s).`
+            : ''
+          const policy = typeof data.policy === 'string' ? ` (${data.policy})` : ''
+          throw new Error(`${data.error || data.message || 'Login is temporarily rate-limited.'}${policy}${waitMessage}`)
+        }
+        throw new Error(data.message || data.error || 'Login failed')
+      }
+
+      const data = await response.json()
+
+      // Handle force-reset response from backend
+      if (data.forceReset) {
+        return data
+      }
+
+      const { user: userData, tokens: tokenData } = data
+
+      setUser(userData)
+      setTokens(tokenData)
+      persistAuth(userData, tokenData)
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
+      await refreshOnboardingStatus()
+      // Reset feature access service on login so stale features from previous session don't persist
+      featureAccessService.reset()
+      onLogin?.(userData, tokenData)
+      return { user: userData, tokens: tokenData }
+    } catch (err) {
+      // Network error — try offline login with cached credentials
+      // Covers: Chrome "Failed to fetch", Firefox "NetworkError", Safari "Load failed",
+      //         AbortError (timeout), ERR_CONNECTION_TIMED_OUT
+      const isNetworkError = !loginResponseReceived && isLoginTransportError(err)
+
+      if (isNetworkError) {
+        // Check offline cache first (survives logout), then fall back to active session keys
+        const offlineCacheStr = localStorage.getItem(offlineCacheKey)
+        const cachedUserStr = localStorage.getItem(userStorageKey)
+        const cachedTokensStr = localStorage.getItem(tokenStorageKey)
+        // Silent — checking cached credentials for offline login
+
+        // Try offline cache (persists even after logout)
+        if (offlineCacheStr) {
+          try {
+            const cache = JSON.parse(offlineCacheStr)
+            const cachedUser = cache.user
+            const cachedTokens = cache.tokens
+            // Silent
+            if (cachedUser?.email?.toLowerCase() === email.toLowerCase()) {
+              if (cachedUser.tenantId && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(cachedUser.role)) {
+                return Promise.reject(new Error('Staff sign-in requires an internet connection to verify working hours.'))
+              }
+              const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
+              if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
+                return Promise.reject(new Error('This business account is suspended due to subscription. Contact the JibuSales Support Team to reactivate it.'))
+              }
+              setUser(cachedUser)
+              setTokens(cachedTokens)
+              persistAuth(cachedUser, cachedTokens)
+              localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
+              // Silent
+              return { user: cachedUser, tokens: cachedTokens }
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+
+        // Fall back to active session keys (in case logout didn't clear them)
+        if (cachedUserStr && cachedTokensStr) {
+          try {
+            const cachedUser = JSON.parse(cachedUserStr)
+            const cachedTokens = JSON.parse(cachedTokensStr)
+            // Silent
+            if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+              if (cachedUser.tenantId && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(cachedUser.role)) {
+                return Promise.reject(new Error('Staff sign-in requires an internet connection to verify working hours.'))
+              }
+              const cachedTenantStatus = String(cachedUser?.tenantStatus || '').toLowerCase()
+              if (cachedTenantStatus === 'suspended' || cachedTenantStatus === 'cancelled') {
+                return Promise.reject(new Error('This business account is suspended due to subscription. Contact the JibuSales Support Team to reactivate it.'))
+              }
+              setUser(cachedUser)
+              setTokens(cachedTokens)
+              persistAuth(cachedUser, cachedTokens)
+              localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
+              // Silent
+              return { user: cachedUser, tokens: cachedTokens }
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+        throw new Error('Unable to reach the server. Check your connection or try again later. If you have logged in before on this device, use the same email to sign in offline.')
+      }
+      setError(err instanceof Error ? err.message : 'Login failed')
+      throw err
+    } finally {
+      setLoading(false)
+    }
+  }, [resolvedApiEndpoint, onLogin, tokenStorageKey, userStorageKey, refreshOnboardingStatus])
+
+  const logout = useCallback(async () => {
+    setLoading(true)
+
+    try {
+      if (tokens?.accessToken) {
+        await fetch(`${resolvedApiEndpoint}/logout`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${tokens.accessToken}`,
+          },
+        })
+      }
+    } catch {
+      // Ignore logout API errors
+    } finally {
+      setUser(null)
+      setTokens(null)
+      persistAuth(null, null)
+      localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY)
+      // Reset feature access service on logout
+      featureAccessService.reset()
+      // Clear IndexedDB to prevent cross-tenant data leakage
+      void import('@/db/index').then(({ clearTenantData }) => clearTenantData()).catch(() => {})
+      setLoading(false)
+      onLogout?.()
+    }
+  }, [resolvedApiEndpoint, tokens, onLogout])
+
+  // Keep active sessions usable while ending sessions after 24 hours of inactivity.
+  useEffect(() => {
+    if (!user || !tokens) return
+
+    const now = Date.now()
+    const storedActivity = Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY))
+    if (Number.isFinite(storedActivity) && storedActivity > 0 && now - storedActivity >= SESSION_IDLE_TIMEOUT_MS) {
+      void logout()
+      return
+    }
+    if (!storedActivity) localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(now))
+
+    let lastSavedAt = now
+    let lastCheckedAt = 0
+    let expired = false
+    const readLastActivity = () => Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY))
+    const isExpired = (currentTime: number) => {
+      const lastActivity = readLastActivity()
+      return Number.isFinite(lastActivity) && lastActivity > 0 && currentTime - lastActivity >= SESSION_IDLE_TIMEOUT_MS
+    }
+    const recordActivity = () => {
+      const currentTime = Date.now()
+      if (expired) return
+      if (currentTime - lastCheckedAt >= 1_000) {
+        lastCheckedAt = currentTime
+        if (isExpired(currentTime)) {
+          expired = true
+          void logout()
+          return
+        }
+      }
+      if (currentTime - lastSavedAt < 60_000) return
+      lastSavedAt = currentTime
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(currentTime))
+    }
+    const checkInactivity = () => {
+      const currentTime = Date.now()
+      lastCheckedAt = currentTime
+      if (isExpired(currentTime)) {
+        expired = true
+        void logout()
+      }
+    }
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'click', 'mousemove', 'scroll', 'wheel']
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, recordActivity, { passive: true }))
+    const interval = window.setInterval(checkInactivity, 60_000)
+    window.addEventListener('storage', checkInactivity)
+    window.addEventListener('focus', checkInactivity)
+    document.addEventListener('visibilitychange', checkInactivity)
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, recordActivity))
+      window.clearInterval(interval)
+      window.removeEventListener('storage', checkInactivity)
+      window.removeEventListener('focus', checkInactivity)
+      document.removeEventListener('visibilitychange', checkInactivity)
+    }
+  }, [user?.id, Boolean(tokens), logout])
+
+  const register = useCallback(async (data: { email: string; password: string; name: string }) => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`${resolvedApiEndpoint}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+
+      if (!response.ok) {
+        const resData = await response.json()
+        throw new Error(resData.message || 'Registration failed')
+      }
+
+      const resData = await response.json()
+      const { user: userData, tokens: tokenData } = resData
+
+      setUser(userData)
+      setTokens(tokenData)
+      persistAuth(userData, tokenData)
+      onLogin?.(userData, tokenData)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed')
+      throw err
+    } finally {
+      setLoading(false)
+    }
+  }, [resolvedApiEndpoint, onLogin])
+
+  const switchBusiness = useCallback(async (tenantId: string) => {
+    if (!tokens?.accessToken) throw new Error('Sign in again to switch businesses.')
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch(`${resolvedApiEndpoint}/switch-business`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokens.accessToken}` },
+        body: JSON.stringify({ tenantId }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error || data.message || 'Could not switch business.')
+      setUser(data.user)
+      setTokens(data.tokens)
+      persistAuth(data.user, data.tokens)
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()))
+      featureAccessService.reset()
+      await refreshOnboardingStatus()
+      onLogin?.(data.user, data.tokens)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not switch business.'
+      setError(message)
+      throw err
+    } finally {
+      setLoading(false)
+    }
+  }, [tokens?.accessToken, resolvedApiEndpoint, refreshOnboardingStatus, onLogin])
+
+  const refreshTokens = useCallback(async () => {
+    if (!tokens?.refreshToken) return false
+
+    try {
+      const response = await fetch(`${resolvedApiEndpoint}/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+      })
+
+      if (!response.ok) {
+        const data = await response.clone().json().catch(() => ({}))
+        if (response.status === 403 && ['TENANT_SUSPENDED', 'TENANT_CANCELLED', 'TENANT_NOT_FOUND', 'OUTSIDE_WORKING_HOURS'].includes(data?.code)) {
+          sessionStorage.setItem(
+            'tenant_account_blocked_message',
+            data?.message || data?.error || 'This business account is not active.'
+          )
+        }
+        // 401/403 means the refresh token is actually invalid/expired — logout
+        if (response.status === 401 || response.status === 403) {
+          logout()
+        }
+        // Other status codes (5xx, etc.) — server issue, keep cached session
+        return false
+      }
+
+      const data = await response.json()
+      // /refresh returns { user, tokens } — update both
+      if (data.tokens) {
+        setTokens(data.tokens)
+        if (data.user) {
+          setUser(data.user)
+          persistAuth(data.user, data.tokens)
+        } else {
+          persistAuth(user, data.tokens)
+        }
+        onTokenRefresh?.(data.tokens)
+        return true
+      }
+      return false
+    } catch {
+      // Network error (offline, DNS failure, timeout, etc.) — keep cached session
+      // The user can still use the app offline with their existing token
+      // Silent
+      return false
+    }
+  }, [resolvedApiEndpoint, tokens, user, logout, onTokenRefresh])
+
+  const updateUser = useCallback((updates: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return prev
+      const updated = { ...prev, ...updates }
+      persistAuth(updated, tokens)
+      return updated
+    })
+  }, [tokens])
+
+  const hasPermission = useCallback((permission: string): boolean => {
+    if (!user) return false
+    if (user.role === 'owner' || user.role === 'saas_admin') return true
+    const perms = user.permissions || []
+    return perms.includes(permission) || perms.includes('*')
+  }, [user])
+
+  const hasRole = useCallback((role: string): boolean => {
+    if (!user) return false
+    return user.role === role
+  }, [user])
+
+  const isPlatformUser = useCallback((): boolean => {
+    if (!user) return false
+    return user.isPlatformUser === true || user.role === 'saas_admin'
+  }, [user])
+
+  const canAccessBusinessData = useCallback((): boolean => {
+    if (!user) return false
+    // Platform users (SaaS Admin) cannot access business data
+    if (isPlatformUser()) return false
+    // Business users: must have a tenant ID or a business role
+    return !!user.tenantId || !!user.institutionId || ['owner', 'manager', 'accountant', 'attendant'].includes(user.role)
+  }, [user, isPlatformUser])
+
+  const clearError = useCallback(() => {
+    setError(null)
+  }, [])
+
+  const setTokensManually = useCallback((newTokens: AuthTokens) => {
+    setTokens(newTokens)
+    persistAuth(user, newTokens)
+  }, [user])
+
+  // Check if access token is expired on mount and refresh if needed
+  useEffect(() => {
+    if (!tokens?.accessToken || !tokens?.refreshToken) return
+    try {
+      const payload = JSON.parse(atob(tokens.accessToken.split('.')[1]))
+      if (payload.exp * 1000 < Date.now()) {
+        refreshTokens()
+      }
+    } catch {
+      refreshTokens()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Recheck live staff access; only an explicit auth/access denial should end a session.
+  useEffect(() => {
+    if (!tokens?.accessToken || !user) return
+    const staffSession = Boolean(user.tenantId) && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(user.role)
+    let cancelled = false
+    let pending = false
+    let controller: AbortController | null = null
+    const revokeAccess = (message: string) => {
+      sessionStorage.setItem('tenant_account_blocked_message', message)
+      setError(message)
+      setUser(null)
+      setTokens(null)
+      persistAuth(null, null)
+      localStorage.removeItem(offlineCacheKey)
+      featureAccessService.reset()
+    }
+    const refreshUser = async () => {
+      if (pending || cancelled) return
+      pending = true
+      controller = new AbortController()
+      const timeout = window.setTimeout(() => controller?.abort(), 15000)
+      try {
+            let activeTokens = tokens
+        let response = await fetch(`${resolvedApiEndpoint}/me`, {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+          signal: controller.signal,
+        })
+        if (response.status === 401) {
+          const refreshed = await refreshTokens()
+          if (!refreshed) return
+          try {
+            const refreshedTokens = JSON.parse(localStorage.getItem(tokenStorageKey) || 'null') as AuthTokens | null
+            if (refreshedTokens?.accessToken && refreshedTokens.accessToken !== tokens.accessToken) {
+                  activeTokens = refreshedTokens
+              response = await fetch(`${resolvedApiEndpoint}/me`, {
+                headers: { Authorization: `Bearer ${refreshedTokens.accessToken}` },
+                signal: controller.signal,
+              })
+            }
+          } catch {
+            // Keep the original response; the normal unauthorized handling below applies.
+          }
+        }
+        const data = await response.json().catch(() => ({}))
+        if (cancelled) return
+        if (response.ok && data.user) {
+          const nextUser = data.user as User
+          setUser(previous => JSON.stringify(previous) === JSON.stringify(nextUser) ? previous : nextUser)
+          persistAuth(data.user, activeTokens)
+        } else if (response.status === 401 || response.status === 403) {
+          revokeAccess(data.message || data.error || 'Please sign in again.')
+        }
+      } catch {
+        // A transient network failure must not erase a valid session. Protected API
+        // routes still enforce working hours when the server can be reached again.
+      } finally {
+        window.clearTimeout(timeout)
+        pending = false
+      }
+    }
+    refreshUser()
+    refreshOnboardingStatus()
+    const interval = staffSession ? window.setInterval(refreshUser, 30000) : null
+    window.addEventListener('focus', refreshUser)
+    window.addEventListener('online', refreshUser)
+    return () => {
+      cancelled = true
+      controller?.abort()
+      if (interval !== null) window.clearInterval(interval)
+      window.removeEventListener('focus', refreshUser)
+      window.removeEventListener('online', refreshUser)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens?.accessToken, tokens?.refreshToken, user?.id, user?.role, resolvedApiEndpoint, refreshTokens, tokenStorageKey])
+
+  // Auto refresh tokens before expiry
+  useEffect(() => {
+    if (!autoRefresh || !tokens) return
+
+    const expiresIn = tokens.expiresIn * 1000 // Convert to milliseconds
+    const refreshTime = expiresIn - refreshThreshold * 1000
+    const refreshIfExpiring = () => {
+      try {
+        const payload = JSON.parse(atob(tokens.accessToken.split('.')[1]))
+        if (payload.exp * 1000 - Date.now() <= refreshThreshold * 1000) refreshTokens()
+      } catch {
+        refreshTokens()
+      }
+    }
+
+    const timeoutId = setTimeout(() => {
+      refreshTokens()
+    }, refreshTime)
+    window.addEventListener('focus', refreshIfExpiring)
+    document.addEventListener('visibilitychange', refreshIfExpiring)
+
+    return () => {
+      clearTimeout(timeoutId)
+      window.removeEventListener('focus', refreshIfExpiring)
+      document.removeEventListener('visibilitychange', refreshIfExpiring)
+    }
+  }, [autoRefresh, tokens, refreshThreshold, refreshTokens])
+
+  const value: JWTAuthContextValue = {
+    user,
+    tokens,
+    isAuthenticated,
+    loading,
+    error,
+    login,
+    logout,
+    register,
+    refreshTokens,
+    switchBusiness,
+    updateUser,
+    hasPermission,
+    hasRole,
+    isPlatformUser,
+    canAccessBusinessData,
+    clearError,
+    setTokens: setTokensManually,
+    hasCompletedOnboarding,
+    refreshOnboardingStatus,
+  }
+
+  return (
+    <JWTAuthContext.Provider value={value}>
+      {children}
+    </JWTAuthContext.Provider>
+  )
+}
+
+export const useJWTAuth = (): JWTAuthContextValue => {
+  const context = useContext(JWTAuthContext)
+  if (!context) {
+    throw new Error('useJWTAuth must be used within a JWTAuthProvider')
+  }
+  return context
+}
+
+export default JWTAuthContext

@@ -1,0 +1,108 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import ts from 'typescript';
+
+const require = createRequire(import.meta.url);
+const root = fileURLToPath(new URL('../src/', import.meta.url));
+const notificationSource = readFileSync(root + '/lib/notificationDisplay.ts', 'utf8');
+const notificationModule = { exports: {} };
+new Function('exports', 'require', 'module', ts.transpileModule(notificationSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(notificationModule.exports, require, notificationModule);
+const { notificationActionLink } = notificationModule.exports;
+const greetingSource = readFileSync(root + '/lib/loginGreeting.ts', 'utf8');
+const greetingModule = { exports: {} };
+new Function('exports', 'require', 'module', ts.transpileModule(greetingSource, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(greetingModule.exports, require, greetingModule);
+const { loginGreeting } = greetingModule.exports;
+function sourceFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const path = dir + '/' + entry.name;
+    return entry.isDirectory() ? sourceFiles(path) : /\.[jt]sx?$/.test(path) ? [path] : [];
+  });
+}
+
+test('every page uses in-app feedback and awaits confirmation before proceeding', () => {
+  const violations = [];
+  for (const path of sourceFiles(root)) {
+    const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+    function visit(node) {
+      if (ts.isCallExpression(node)) {
+        const name = node.expression.getText(source);
+        if (['alert', 'window.alert', 'confirm', 'window.confirm', 'prompt', 'window.prompt'].includes(name)) violations.push(path + ': native ' + name);
+        if (['appConfirm', 'appPrompt'].includes(name) && !ts.isAwaitExpression(node.parent)) violations.push(path + ': confirmation must be awaited');
+      }
+      if (ts.isNewExpression(node) && ['Notification', 'window.Notification'].includes(node.expression.getText(source))) violations.push(path + ': native foreground notification');
+      ts.forEachChild(node, visit);
+    }
+    visit(source);
+  }
+  assert.deepEqual(violations, []);
+});
+
+test('global feedback hosts remain mounted and sale/print messages can coexist', () => {
+  const app = readFileSync(root + '/App.tsx', 'utf8');
+  assert.match(app, /<AppFeedback\s*\/>/);
+  assert.match(app, /<Toaster\s*\/>/);
+  const limit = readFileSync(root + '/hooks/use-toast.ts', 'utf8').match(/TOAST_LIMIT\s*=\s*(\d+)/);
+  assert.ok(Number(limit?.[1]) >= 4);
+});
+
+test('transient notifications share a four-second timer and fully fade out', () => {
+  assert.match(readFileSync(root + '/components/ui/toaster.tsx', 'utf8'), /ToastProvider duration=\{4000\}/);
+  for (const file of ['/components/NotificationBell.tsx', '/lib/appFeedback.tsx']) {
+    assert.doesNotMatch(readFileSync(root + file, 'utf8'), /duration\s*:/, 'Do not extend popup timers per notification type');
+  }
+  assert.match(readFileSync(root + '/components/ui/toast.tsx', 'utf8'), /data-\[state=closed\]:fade-out-0/);
+});
+
+test('notification polling pauses in hidden tabs and AI daily tips are not posted on every poll', () => {
+  const bell = readFileSync(root + '/components/NotificationBell.tsx', 'utf8');
+  assert.match(bell, /document\.visibilityState !== 'visible'/);
+  assert.match(bell, /document\.addEventListener\('visibilitychange', refreshIfVisible\)/);
+  assert.match(bell, /dailyTipsDoneRef\.current !== tipDayKey/);
+  assert.match(bell, /Date\.now\(\) - previousAttempt\.at >= 5 \* 60 \* 1000/);
+});
+
+test('Advisor tips stay out of business updates and use their own feed and unread count', () => {
+  const bell = readFileSync(root + '/components/NotificationBell.tsx', 'utf8');
+  const communication = readFileSync(root + '/pages/CommunicationPage.tsx', 'utf8');
+  const backend = readFileSync(new URL('../../backend/routes/notifications.js', import.meta.url), 'utf8');
+  assert.match(bell, /apiFetch\('\/api\/notifications\/advisor-tips'\)/);
+  assert.match(bell, /const \[advisorTips, setAdvisorTips\]/);
+  assert.match(bell, /const unreadAdvisorCount = advisorTips\.filter/);
+  assert.match(bell, /\.filter\(item => item\.type !== 'advisor_tip'\)/);
+  assert.match(communication, /filter\(\(item: any\) => item\.type !== 'advisor_tip'\)/);
+  assert.match(backend, /router\.get\("\/advisor-tips", authenticateToken, requirePermission\("canUseBusinessAI"\)/);
+  assert.match(backend, /businessNotifications = notifications\.filter\(\(notification\) => notification\.type !== "advisor_tip"\)/);
+  assert.match(backend, /isRead: false, type: \{ not: "advisor_tip" \}/);
+});
+
+test('login greetings use the account holder name, including older first/last-name profiles', () => {
+  assert.equal(loginGreeting({ name: '  Delice  ', fname: 'Other', lname: 'Name' }), 'Welcome back, Delice!');
+  assert.equal(loginGreeting({ name: ' ', fname: ' Aimable ', lname: ' Cyuzuzo ' }), 'Welcome back, Aimable Cyuzuzo!');
+  assert.equal(loginGreeting({ fname: 'Jane' }), 'Welcome back, Jane!');
+  assert.equal(loginGreeting({ name: '<Admin>' }), 'Welcome back, <Admin>!');
+  assert.equal(loginGreeting({}), 'Welcome back!');
+  assert.equal(loginGreeting(), 'Welcome back!');
+  for (const file of ['/pages/auth/LoginPage.tsx', '/pages/auth/SaaSAdminLoginPage.tsx']) {
+    assert.match(readFileSync(root + file, 'utf8'), /title: loginGreeting\(result.user\)/, 'Use the successful response, not a previous session');
+  }
+});
+
+test('stock alerts deep-link to a specific product stock-in form', () => {
+  const bell = readFileSync(root + '/components/NotificationBell.tsx', 'utf8');
+  const inventory = readFileSync(root + '/pages/InventoryPage.tsx', 'utf8');
+  const backend = readFileSync(new URL('../../backend/src/utils/notifications.js', import.meta.url), 'utf8');
+  assert.match(bell, /inventory\/products\?productId=\$\{encodeURIComponent\(String\(p\.id\)\)\}&stockAction=stock_in/);
+  assert.match(backend, /productId=\$\{encodeURIComponent\(String\(product\.id\)\)\}&stockAction=stock_in/);
+  assert.match(inventory, /await inventoryApi\.get\(productId\)/);
+  assert.match(inventory, /openStockAdjust\(item, requestedAction\)/);
+});
+
+test('stock detail action is only available to users with stock-adjustment permission', () => {
+  const link = '/tenant/inventory/products?productId=product-1&stockAction=stock_in';
+  assert.equal(notificationActionLink(link, false), undefined);
+  assert.equal(notificationActionLink(link, true), link);
+  assert.equal(notificationActionLink('/tenant/reports', false), '/tenant/reports');
+});

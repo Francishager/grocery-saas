@@ -1,0 +1,152 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  rentalInvoiceLines,
+  rentalReceiptLines,
+  rentalDepositReceiptLines,
+  rentalDepositRefundLines,
+  rentalDepositForfeitLines,
+  rentalRevenueRecognitionLines,
+  rentalMixedRevenueRecognitionLines,
+  rentalConsumableCostLines,
+  allocateRentalLineAmounts,
+  rentalDamageChargeLines,
+  rentalCreditNoteLines,
+  rentalCancellationLines,
+  heldRentalDeposit,
+} from '../src/services/rentalAccountingService.js'
+
+const config = {
+  receivableAccountId: 'rental-ar',
+  revenueAccountId: 'rental-income',
+  deferredRevenueAccountId: 'unearned-rent',
+  depositLiabilityAccountId: 'deposit-liability',
+  taxPayableAccountId: 'tax-payable',
+  renterCreditPayableAccountId: 'renter-credit-payable',
+  openingEquityAccountId: 'rental-opening-equity',
+  cancellationFeeRevenueAccountId: 'cancellation-fee-revenue',
+}
+
+function assertBalanced(lines) {
+  const debits = lines.reduce((sum, line) => sum + line.debit, 0)
+  const credits = lines.reduce((sum, line) => sum + line.credit, 0)
+  assert.equal(debits, credits)
+}
+
+test('rental invoice separates receivable, unearned rent, and output tax', () => {
+  const lines = rentalInvoiceLines(config, { total: 120, tax: 20, reference: 'HIRE-1' })
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['rental-ar', 120, 0], ['unearned-rent', 0, 100], ['tax-payable', 0, 20],
+  ])
+  assertBalanced(lines)
+})
+
+test('rent receipts settle receivables while reservation advances stay unearned', () => {
+  const collection = rentalReceiptLines(config, { amount: 45, cashAccountId: 'cash-ledger', reference: 'R-1' })
+  const advance = rentalReceiptLines(config, { amount: 45, cashAccountId: 'cash-ledger', reference: 'R-2', advance: true })
+  assert.equal(collection[1].accountId, config.receivableAccountId)
+  assert.equal(advance[1].accountId, config.deferredRevenueAccountId)
+  assertBalanced(collection)
+  assertBalanced(advance)
+})
+
+test('security deposits remain liabilities until refund or forfeiture', () => {
+  const receipt = rentalDepositReceiptLines(config, { amount: 100, cashAccountId: 'cash-ledger', reference: 'D-1' })
+  const refund = rentalDepositRefundLines(config, { amount: 60, cashAccountId: 'cash-ledger', reference: 'D-2' })
+  const forfeiture = rentalDepositForfeitLines(config, { amount: 40, reference: 'D-3' })
+  assert.equal(receipt[1].accountId, config.depositLiabilityAccountId)
+  assert.equal(refund[0].accountId, config.depositLiabilityAccountId)
+  assert.equal(forfeiture[1].accountId, config.revenueAccountId)
+  assertBalanced(receipt)
+  assertBalanced(refund)
+  assertBalanced(forfeiture)
+})
+
+test('only collected security deposits are treated as refundable or held', () => {
+  assert.equal(heldRentalDeposit({ depositAmount: 300, depositPaid: 0, depositRefunded: 0, depositStatus: 'not_required' }), 0)
+  assert.equal(heldRentalDeposit({ depositAmount: 500, depositPaid: 200, depositRefunded: 50, depositStatus: 'held' }), 150)
+  assert.equal(heldRentalDeposit({ depositAmount: 500, depositPaid: 0, depositRefunded: 100, depositStatus: 'held' }), 400)
+})
+
+test('earned rent and assessed damage charges post as balanced entries', () => {
+  const earned = rentalRevenueRecognitionLines(config, { amount: 100, reference: 'HIRE-1' })
+  const damage = rentalDamageChargeLines(config, { amount: 15, reference: 'HIRE-1' })
+  assert.equal(earned[0].accountId, config.deferredRevenueAccountId)
+  assert.equal(earned[1].accountId, config.revenueAccountId)
+  assert.equal(damage[0].accountId, config.receivableAccountId)
+  assertBalanced(earned)
+  assertBalanced(damage)
+})
+
+test('rental credit notes reverse earned income and split receivable credit from refund payable', () => {
+  const lines = rentalCreditNoteLines(config, { amount: 118, taxAmount: 18, appliedAmount: 70, refundDue: 48, earned: true, reference: 'RCN-1' })
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['rental-income', 100, 0], ['tax-payable', 18, 0], ['rental-ar', 0, 70], ['renter-credit-payable', 0, 48],
+  ])
+  assertBalanced(lines)
+})
+
+test('rental credit notes against historical opening receivables do not fabricate current revenue reversals', () => {
+  const lines = rentalCreditNoteLines(config, { amount: 50, taxAmount: 7.63, appliedAmount: 50, historical: true, reference: 'RCN-OLD' })
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['rental-opening-equity', 50, 0], ['rental-ar', 0, 50],
+  ])
+  assertBalanced(lines)
+})
+
+test('rental cancellation allocates advances to fee, unpaid fee to receivable, and excess to refund payable', () => {
+  const feePaidByAdvance = rentalCancellationLines(config, { advanceAmount: 50, feeAmount: 80, taxAmount: 12.2, refundDue: 0, feeReceivable: 30, reference: 'RNT-CAN-1' })
+  assert.deepEqual(feePaidByAdvance.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['unearned-rent', 50, 0],
+    ['rental-ar', 30, 0],
+    ['cancellation-fee-revenue', 0, 67.8],
+    ['tax-payable', 0, 12.2],
+  ])
+  assertBalanced(feePaidByAdvance)
+
+  const excessAdvance = rentalCancellationLines(config, { advanceAmount: 100, feeAmount: 30, taxAmount: 4.58, refundDue: 70, feeReceivable: 0, reference: 'RNT-CAN-2' })
+  assert.equal(excessAdvance.find(line => line.accountId === 'renter-credit-payable').credit, 70)
+  assertBalanced(excessAdvance)
+})
+
+test('mixed booking line allocation preserves booking discount, tax, and net totals to the cent', () => {
+  const allocation = allocateRentalLineAmounts(
+    [{ totalAmount: 200 }],
+    [{ totalAmount: 100, lineType: 'service' }, { totalAmount: 50, lineType: 'consumable' }],
+    10,
+    18,
+  )
+  const rows = [...allocation.items, ...allocation.chargeLines]
+  assert.equal(Math.round(rows.reduce((sum, row) => sum + row.discountAmount, 0) * 100), 1000)
+  assert.equal(Math.round(rows.reduce((sum, row) => sum + row.taxAmount, 0) * 100), 6120)
+  assert.equal(Math.round(rows.reduce((sum, row) => sum + row.netAmount, 0) * 100), 27880)
+  assert.equal(allocation.chargeLines[1].lineType, 'consumable')
+})
+
+test('delivery fees are separately visible booking lines and reconcile into rental totals and tax', () => {
+  const allocation = allocateRentalLineAmounts(
+    [{ totalAmount: 100 }],
+    [{ label: 'Delivery charge', category: 'delivery', lineType: 'service', totalAmount: 20 }],
+    0,
+    18,
+  )
+  const lines = [...allocation.items, ...allocation.chargeLines]
+  assert.equal(lines.reduce((sum, line) => sum + line.totalAmount, 0), 120)
+  assert.equal(allocation.taxAmount, 21.6)
+  assert.equal(allocation.chargeLines[0].category, 'delivery')
+  assert.equal(lines.reduce((sum, line) => sum + line.totalAmount, 0) + allocation.taxAmount, 141.6)
+})
+
+test('consumable stock cost and mixed revenue post to separate mapped accounts', () => {
+  const mixedConfig = { ...config, salesRevenueAccountId: 'goods-revenue', inventoryAccountId: 'inventory', costOfGoodsSoldAccountId: 'consumables-cogs' }
+  const recognition = rentalMixedRevenueRecognitionLines(mixedConfig, { amount: 120, goodsAmount: 35, reference: 'HIRE-2' })
+  const cogs = rentalConsumableCostLines(mixedConfig, { amount: 18, reference: 'HIRE-2' })
+  assert.deepEqual(recognition.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['unearned-rent', 120, 0], ['rental-income', 0, 85], ['goods-revenue', 0, 35],
+  ])
+  assert.deepEqual(cogs.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['consumables-cogs', 18, 0], ['inventory', 0, 18],
+  ])
+  assertBalanced(recognition)
+  assertBalanced(cogs)
+})

@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import prisma from "../src/db.js";
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, scopedWhere } from "../src/utils/branchAccess.js";
 import { requireFeature, requireAnyFeature, hasFeatureAccess } from "../middleware/featureCheck.js";
@@ -11,7 +11,6 @@ import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCash
 import { allocateHistoricalPaymentBalances } from "../src/services/rentalHistoricalEntryService.js";
 
 const router = Router();
-const prisma = new PrismaClient();
 const contractRequests = new Map();
 const crmCollections = new Set(["leads", "activities", "cases", "campaigns"]);
 const crmStages = new Set(["new", "qualified", "proposal", "won", "lost"]);

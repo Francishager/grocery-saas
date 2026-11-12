@@ -1,0 +1,155 @@
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, Fuel, KeyRound, LoaderCircle } from 'lucide-react'
+import { useState } from 'react'
+import { cn } from '@/lib/utils'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useTheme } from '@/contexts/ThemeContext'
+import { Button } from '@/components/ui/button'
+import { SyncIndicator } from '@/components/SyncIndicator'
+import { apiFetch } from '@/lib/api'
+import { appNotify } from '@/lib/appFeedback'
+
+const navItems: Array<{ to: string; label: string; icon: typeof LayoutDashboard; permission: string; permissions?: string[] }> = [
+  { to: '/saas/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'view_platform_analytics' },
+  { to: '/saas/businesses', label: 'Businesses', icon: Building2, permission: 'view_all_tenants' },
+  { to: '/saas/plans', label: 'Plans & Pricing', icon: CreditCard, permission: 'view_tenant_billing' },
+  { to: '/saas/features', label: 'Features', icon: Settings, permission: 'view_tenant_billing', permissions: ['view_tenant_billing', 'view_all_tenants'] },
+  { to: '/saas/hr-settings', label: 'HR Module', icon: Users, permission: 'view_all_tenants' },
+  { to: '/saas/subscriptions', label: 'Subscriptions', icon: Wallet, permission: 'view_tenant_billing' },
+  { to: '/saas/owners', label: 'Owners', icon: Users, permission: 'view_platform_users', permissions: ['view_platform_users', 'invite_business_owners'] },
+  { to: '/saas/staff', label: 'Platform Staff', icon: Users, permission: 'manage_platform_staff' },
+  { to: '/saas/invitations', label: 'Invitations', icon: Mail, permission: 'invite_business_owners' },
+  { to: '/saas/audit', label: 'Audit Logs', icon: Activity, permission: 'view_platform_analytics' },
+  { to: '/saas/referrals', label: 'Referrals', icon: Gift, permission: 'view_platform_analytics' },
+  { to: '/saas/user-guide', label: 'User Guide', icon: BookOpen, permission: 'view_platform_content' },
+  { to: '/saas/manufacturing-guide', label: 'Manufacturing Guide', icon: Factory, permission: 'view_platform_content' },
+  { to: '/saas/procurement-guide', label: 'Procurement Guide', icon: Store, permission: 'view_platform_content' },
+  { to: '/saas/fuel-station-guide', label: 'Fuel Station Guide', icon: Fuel, permission: 'view_platform_content' },
+]
+
+export function SaaSAdminLayout() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { user, logout } = useJWTAuth()
+  const { theme, toggleTheme } = useTheme()
+  const navigate = useNavigate()
+  const [testingEmail, setTestingEmail] = useState(false)
+  const handleLogout = () => { logout(); navigate('/saas/login') }
+  const handleTestEmail = async () => {
+    setTestingEmail(true)
+    try {
+      const response = await apiFetch('/api/admin/email/test', { method: 'POST' })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error([result.error, result.detail].filter(Boolean).join(' '))
+      appNotify(result.message || 'Test email accepted for delivery.')
+    } catch (error) {
+      appNotify(error instanceof Error ? error.message : 'Email test failed. Check the backend mail logs.')
+    } finally {
+      setTestingEmail(false)
+    }
+  }
+  const visibleNavItems = user?.role === 'platform_staff'
+    ? navItems.filter(item => (item.permissions || [item.permission]).every(permission => user.permissions?.includes(permission)))
+    : navItems
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      {/* Full-height vertical sidebar */}
+      <aside className={cn(
+        'fixed left-0 top-0 z-50 h-screen w-64 transform bg-slate-900 shadow-lg transition-transform duration-200 ease-in-out lg:translate-x-0',
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      )}>
+        <div className="flex h-full flex-col text-white">
+          {/* Fixed logo + Dashboard */}
+          <div className="border-b border-slate-800 px-4 pt-4 pb-2">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600"><Shield className="h-5 w-5 text-white" /></div>
+              <span className="text-lg font-bold text-white">jibuSales</span>
+              <span className="text-[10px] bg-blue-600 px-1.5 py-0.5 rounded font-medium text-white">ADMIN</span>
+            </div>
+            {visibleNavItems.some(item => item.to === '/saas/dashboard') && (() => { const item = visibleNavItems.find(entry => entry.to === '/saas/dashboard')!; const DashIcon = item.icon; return (
+            <NavLink to={item.to} onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white')}>
+              <DashIcon className="h-5 w-5" />{item.label}
+            </NavLink>
+            ) })()}
+          </div>
+          {/* Scrollable nav items */}
+          <nav className="flex-1 space-y-1 overflow-y-auto p-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-track]:bg-transparent">
+            {visibleNavItems.filter(item => item.to !== '/saas/dashboard').map((item) => (
+              <NavLink key={item.to} to={item.to} onClick={() => setSidebarOpen(false)}
+                className={({ isActive }) => cn('flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors', isActive ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white')}>
+                <item.icon className="h-5 w-5" />{item.label}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
+      </aside>
+      {/* Content area: navbar starts after sidebar, then main content */}
+      <div className="lg:pl-64">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background px-4 lg:px-6">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="lg:hidden text-foreground hover:bg-muted" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
+          </div>
+          <div className="flex-1" />
+          <SyncIndicator />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label="Toggle theme"
+          >
+            {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+          </button>
+          <div className="group relative">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-sm font-semibold text-white shadow-sm ring-offset-background transition hover:ring-2 hover:ring-blue-400 hover:ring-offset-2 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 overflow-hidden"
+              aria-label="Admin profile"
+            >
+              {user?.name?.[0]?.toUpperCase() || 'A'}
+            </button>
+            <div className="invisible absolute right-0 top-full z-50 mt-2 w-64 rounded-lg border border-slate-700 bg-slate-900 p-3 text-white opacity-0 shadow-lg transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+              <div className="mb-3 border-b border-slate-700 pb-3 flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-blue-600/20 flex items-center justify-center text-blue-400 font-bold">
+                  {user?.name?.[0]?.toUpperCase() || 'A'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-sm font-semibold">{user?.name || 'Admin'}</p>
+                  <p className="truncate text-xs text-slate-400">{user?.email || ''}</p>
+                  <p className="text-xs text-slate-400">JibuSales Admin</p>
+                </div>
+              </div>
+              <div className="border-t border-slate-700 pt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800"
+                  onClick={() => navigate(`/forgot-password?email=${encodeURIComponent(user?.email || '')}&returnTo=%2Fsaas%2Flogin`)}
+                >
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  Reset password
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800"
+                  onClick={handleTestEmail}
+                  disabled={testingEmail}
+                >
+                  {testingEmail ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+                  {testingEmail ? 'Testing email...' : 'Send test email'}
+                </Button>
+                <Button variant="ghost" size="sm" className="h-9 w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800" onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Logout
+                </Button>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="overflow-x-hidden p-4 lg:p-6"><Outlet /></main>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,1000 @@
+import express from 'express'
+import prisma from '../src/db.js'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
+import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
+import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
+import { checkUsageLimit } from '../src/utils/usageLimits.js'
+import { buildSupplierStatementData } from '../src/utils/reportingHelpers.js'
+import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
+import { getPayablesAccountingConfig, getCashAccountLedgerId, postPayablesJournal, supplierOpeningBalanceLines, supplierPaymentLines, supplierPurchaseLines } from '../src/services/payablesAccountingService.js'
+import { registerProcurementSupplierPaymentApproval } from '../src/services/procurementSellerAccountingService.js'
+import { createTenantNotification } from '../src/utils/notifications.js'
+import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
+
+const router = express.Router()
+const toMoney = (value, fallback = 0) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
+  const type = String(cashAccount?.type || '').toLowerCase()
+  if (paymentMethod === 'cash') return type === 'cash' || type === 'safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque' || paymentMethod === 'bank') return type === 'bank'
+  if (paymentMethod === 'mobile_money') return type === 'mobile_money'
+  if (paymentMethod === 'card') return type === 'card'
+  return false
+}
+
+async function resolvePaymentCashAccount(client, scope, req, paymentMethod, cashAccountId = null) {
+  if (cashAccountId) {
+    const account = await client.cashAccount.findFirst({
+      where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true }
+    })
+    if (!account) {
+      throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
+    }
+    if (!canUseTransactionAccountForPayment(req, account, paymentMethod)) {
+      throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} payments from this account`), { statusCode: 403 })
+    }
+    if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
+      throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} payments`), { statusCode: 400 })
+    }
+    return account
+  }
+
+  if (req.userCashAccountId) {
+    const account = await client.cashAccount.findFirst({
+      where: { id: req.userCashAccountId, tenantId: scope.tenantId, isActive: true }
+    })
+    if (
+      account &&
+      cashAccountMatchesPaymentMethod(account, paymentMethod) &&
+      canUseTransactionAccountForPayment(req, account, paymentMethod)
+    ) {
+      return account
+    }
+  }
+
+  throw Object.assign(
+    new Error(`Select an existing ${paymentMethodAccountLabel(paymentMethod)} account for ${paymentMethod} payments. Create it first in Transaction Accounts if it does not exist.`),
+    { statusCode: 400, code: 'PAYMENT_ACCOUNT_REQUIRED' }
+  )
+}
+
+const paymentMethodAccountLabel = (paymentMethod) => {
+  if (paymentMethod === 'cash') return 'cash or safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque' || paymentMethod === 'bank') return 'bank'
+  if (paymentMethod === 'mobile_money') return 'mobile money'
+  if (paymentMethod === 'card') return 'card'
+  return 'matching'
+}
+
+const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
+
+router.get('/accounting-config', authenticateToken, requireAnyPermission(['canViewPayable', 'canViewAccounting', 'canEditAccounting']), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const [config, accounts] = await Promise.all([
+      getPayablesAccountingConfig(prisma, tenantId),
+      prisma.account.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, code: true, name: true, type: true, subType: true, description: true, _count: { select: { children: true } } },
+        orderBy: { code: 'asc' },
+      }),
+    ])
+    res.json({ config, accounts: accounts.filter((account) => !account._count.children && !String(account.description || '').includes('cashAccount:')) })
+  } catch (error) {
+    handleBranchError(res, error, 'Failed to load payables accounting mappings')
+  }
+})
+
+router.put('/accounting-config', authenticateToken, requirePermission('canEditAccounting'), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const fields = ['payableAccountId', 'openingBalanceEquityAccountId', 'purchaseExpenseAccountId', 'inventoryAccountId', 'purchaseReturnsAccountId']
+    const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
+    values.isEnabled = req.body?.isEnabled === true
+    const previous = await getPayablesAccountingConfig(prisma, tenantId)
+    const changed = !previous || fields.some((field) => (previous[field] || null) !== values[field]) || Boolean(previous.isEnabled) !== values.isEnabled
+    if (changed) return res.status(409).json({ error: 'Supplier accounting mappings and posting status are system-managed and cannot be changed manually.', code: 'SYSTEM_MANAGED_ACCOUNTING_CONFIG' })
+    res.json({ config: previous })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to save payables accounting mappings')
+  }
+})
+
+const canManageOpeningBalance = (req) => (
+  openingBalanceRoles.has(req.user?.role) ||
+  req.user?.isPlatformUser ||
+  (req.user?.permissions || []).includes('*')
+)
+
+const hasOpeningBalanceInput = (body) => (
+  Object.prototype.hasOwnProperty.call(body, 'openingBalance') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceDate') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceNote')
+)
+
+const parseOpeningBalanceDate = (value, openingBalance) => {
+  if (!value) return openingBalance > 0 ? new Date() : null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const paymentStatusFor = (total, amountPaid) => {
+  if (amountPaid >= total) return 'paid'
+  if (amountPaid > 0) return 'partial'
+  return 'unpaid'
+}
+
+const userSelect = { select: { id: true, fname: true, lname: true } }
+
+const withUser = (record) => {
+  if (!record) return record
+  const { User, ...rest } = record
+  return { ...rest, user: User || record.user || null }
+}
+
+// === SUPPLIERS ===
+
+router.get('/suppliers/:id/statement', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    const [supplier, purchases, payments] = await Promise.all([
+      prisma.supplier.findFirst({ where: scopedWhere(scope, { id }) }),
+      prisma.supplierPurchase.findMany({
+        where: scopedWhere(scope, { supplierId: id }),
+        include: { supplier: true, fuelDelivery: { include: { tank: { select: { name: true, fuelType: true } } } }, items: { include: { product: { select: { id: true, name: true, sku: true } } } } },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.supplierPayment.findMany({
+        where: scopedWhere(scope, { supplierId: id }),
+        include: { supplier: true, purchase: { select: { id: true, refNo: true } } },
+        orderBy: { createdAt: 'desc' }
+      })
+    ])
+
+    if (!supplier) {
+      return res.status(404).json({ error: 'Supplier not found' })
+    }
+
+    res.json(buildSupplierStatementData(supplier, purchases, payments))
+  } catch (error) {
+    console.error('Get supplier statement error:', error)
+    handleBranchError(res, error, 'Failed to fetch supplier statement')
+  }
+})
+
+// Get all suppliers for tenant
+router.get('/suppliers', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { page = 1, limit = 50, search, status } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = scopedWhere(scope, {
+      ...(status && status !== 'all' && { status }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } }
+        ]
+      })
+    })
+
+    const [suppliers, total] = await Promise.all([
+      prisma.supplier.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.supplier.count({ where })
+    ])
+
+    const [openPurchaseBalances, openLandPurchaseBalances] = suppliers.length ? await Promise.all([
+      prisma.supplierPurchase.groupBy({
+        by: ['supplierId'],
+        where: scopedWhere(scope, { supplierId: { in: suppliers.map((supplier) => supplier.id) }, balance: { gt: 0 } }),
+        _sum: { balance: true }
+      }),
+      prisma.propertyLandPurchase.groupBy({
+        by: ['supplierId'],
+        where: { tenantId: scope.tenantId, supplierId: { in: suppliers.map((supplier) => supplier.id) }, balance: { gt: 0 } },
+        _sum: { balance: true }
+      }),
+    ]) : [[], []]
+    const openPurchasesBySupplier = new Map()
+    for (const row of [...openPurchaseBalances, ...openLandPurchaseBalances]) openPurchasesBySupplier.set(row.supplierId, (openPurchasesBySupplier.get(row.supplierId) || 0) + Number(row._sum.balance || 0))
+    const suppliersWithOpeningBalanceDue = suppliers.map((supplier) => ({
+      ...supplier,
+      openingBalanceOutstanding: Math.max(0, Number(supplier.balance || 0) - (openPurchasesBySupplier.get(supplier.id) || 0))
+    }))
+
+    res.json({
+      suppliers: suppliersWithOpeningBalanceDue,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit))
+      }
+    })
+  } catch (error) {
+    console.error('Get suppliers error:', error)
+    handleBranchError(res, error, 'Failed to fetch suppliers')
+  }
+})
+
+// Create new supplier
+router.post('/suppliers', authenticateToken, requirePermission('canCreatePayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const { name, email, phone, address, notes, openingBalanceNote } = req.body
+    if (!name?.trim()) {
+      return res.status(400).json({ error: 'Supplier name is required' })
+    }
+
+    const openingBalance = toMoney(req.body.openingBalance, 0)
+    if (openingBalance < 0) {
+      return res.status(400).json({ error: 'Opening balance cannot be negative' })
+    }
+
+    if ((openingBalance > 0 || req.body.openingBalanceDate || openingBalanceNote) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalance)
+    if (req.body.openingBalanceDate && !openingBalanceDate) {
+      return res.status(400).json({ error: 'Opening balance date is invalid' })
+    }
+
+    await checkUsageLimit(scope.tenantId, 'suppliers')
+
+    // Check if supplier already exists
+    if (phone?.trim()) {
+      const existingSupplier = await prisma.supplier.findFirst({
+        where: {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          phone
+        }
+      })
+
+      if (existingSupplier) {
+        return res.status(400).json({ error: 'Supplier with this phone number already exists' })
+      }
+    }
+
+    const supplier = await prisma.$transaction(async (tx) => {
+      const created = await tx.supplier.create({
+        data: {
+          name: name.trim(), email, phone, address, balance: openingBalance, openingBalance,
+          openingBalanceDate, openingBalanceNote, notes, tenantId: scope.tenantId, branchId: scope.branchId,
+        }
+      })
+      if (openingBalance > 0) {
+        const config = await getPayablesAccountingConfig(tx, scope.tenantId)
+        if (config?.isEnabled) await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_OPENING_BALANCE', sourceId: created.id,
+          date: openingBalanceDate || new Date(), reference: created.name,
+          description: `Opening balance for supplier ${created.name}`,
+          lines: supplierOpeningBalanceLines(config, openingBalance),
+        })
+      }
+      return created
+    })
+
+    res.status(201).json(supplier)
+  } catch (error) {
+    if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
+    console.error('Create supplier error:', error)
+    handleBranchError(res, error, 'Failed to create supplier')
+  }
+})
+
+// Update supplier
+router.put('/suppliers/:id', authenticateToken, requirePermission('canEditPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const { name, email, phone, address, status, notes, branchId, openingBalanceNote } = req.body
+
+    // Check if supplier belongs to tenant
+    const existingSupplier = await prisma.supplier.findFirst({
+      where: scopedWhere(scope, { id })
+    })
+
+    if (!existingSupplier) {
+      return res.status(404).json({ error: 'Supplier not found' })
+    }
+
+    if (hasOpeningBalanceInput(req.body) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const existingOpeningBalance = toMoney(existingSupplier.openingBalance, 0)
+    let openingBalanceDelta = 0
+    const openingBalanceData = {}
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalance')) {
+      const openingBalance = toMoney(req.body.openingBalance, 0)
+      if (openingBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance cannot be negative' })
+      }
+
+      openingBalanceDelta = openingBalance - existingOpeningBalance
+      if (openingBalanceDelta !== 0) {
+        const transactionCount = await Promise.all([
+          prisma.supplierPurchase.count({ where: scopedWhere(scope, { supplierId: id }) }),
+          prisma.supplierPayment.count({ where: scopedWhere(scope, { supplierId: id }) }),
+          prisma.debitNote.count({ where: scopedWhere(scope, { supplierId: id, status: { not: 'cancelled' } }) })
+        ]).then((counts) => counts.reduce((sum, count) => sum + count, 0))
+
+        if (transactionCount > 0 && req.body.confirmOpeningBalanceChange !== true) {
+          return res.status(409).json({
+            error: 'Changing opening balance after transactions exist requires confirmation',
+            requiresConfirmation: true
+          })
+        }
+      }
+
+      const nextBalance = toMoney(existingSupplier.balance, 0) + openingBalanceDelta
+      if (nextBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance change would make the supplier balance negative' })
+      }
+
+      openingBalanceData.openingBalance = openingBalance
+      openingBalanceData.balance = nextBalance
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceDate')) {
+      const openingBalanceForDate = Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')
+        ? openingBalanceData.openingBalance
+        : existingOpeningBalance
+      const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalanceForDate)
+      if (req.body.openingBalanceDate && !openingBalanceDate) {
+        return res.status(400).json({ error: 'Opening balance date is invalid' })
+      }
+      openingBalanceData.openingBalanceDate = openingBalanceDate
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceNote')) {
+      openingBalanceData.openingBalanceNote = openingBalanceNote
+    }
+
+    const data = { name, email, phone, address, status, notes, ...openingBalanceData }
+
+    if (branchId !== undefined) {
+      const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {
+        source: 'body',
+        requireBranch: true,
+        allowOwnerAll: false
+      })
+      data.branchId = targetScope.branchId
+    }
+
+    const supplier = await prisma.$transaction(async (tx) => {
+      const updated = await tx.supplier.update({ where: { id }, data })
+      if (openingBalanceDelta !== 0) {
+        const config = await getPayablesAccountingConfig(tx, scope.tenantId)
+        const positive = openingBalanceDelta > 0
+        const amount = Math.abs(openingBalanceDelta)
+        if (config?.isEnabled) await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: updated.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_OPENING_BALANCE_ADJUSTMENT', sourceId: `${updated.id}-${Date.now()}`,
+          date: new Date(), reference: updated.name, description: `Supplier opening balance adjustment for ${updated.name}`,
+          lines: positive ? supplierOpeningBalanceLines(config, amount) : [
+            { accountId: config.payableAccountId, debit: amount, credit: 0, description: 'Reduce supplier opening payable' },
+            { accountId: config.openingBalanceEquityAccountId, debit: 0, credit: amount, description: 'Reverse opening balance migration equity' },
+          ],
+        })
+      }
+      return updated
+    })
+
+    res.json(supplier)
+  } catch (error) {
+    console.error('Update supplier error:', error)
+    handleBranchError(res, error, 'Failed to update supplier')
+  }
+})
+
+// === SUPPLIER PURCHASES ===
+
+// Get all supplier purchases
+router.get('/purchases', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { page = 1, limit = 50, supplierId, paymentStatus, startDate, endDate } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = scopedWhere(scope, {
+      ...(supplierId && { supplierId }),
+      ...(paymentStatus && { paymentStatus }),
+      ...(startDate && endDate && {
+        createdAt: {
+          gte: new Date(startDate),
+          lte: new Date(endDate)
+        }
+      })
+    })
+
+    const [purchases, total] = await Promise.all([
+      prisma.supplierPurchase.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        include: {
+          supplier: true,
+          branch: true,
+          User: userSelect,
+          items: {
+            include: {
+              product: { select: { id: true, name: true, sku: true } }
+            }
+          },
+          fuelDelivery: { include: { tank: { select: { name: true, fuelType: true } } } }
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.supplierPurchase.count({ where })
+    ])
+
+    res.json({
+      purchases: purchases.map(withUser),
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit))
+      }
+    })
+  } catch (error) {
+    console.error('Get purchases error:', error)
+    handleBranchError(res, error, 'Failed to fetch purchases')
+  }
+})
+
+// Create new supplier purchase
+router.post('/purchases', authenticateToken, requirePermission('canCreatePayable'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const { 
+      supplierId, 
+      items, 
+      refNo,
+      amountPaid = 0,
+      paymentMethod,
+      cashAccountId,
+      mobileProvider,
+      phoneNumber,
+      transactionId,
+      notes,
+      currency,
+      unitsPerBase
+    } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+
+    if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one purchase item is required' })
+
+    const supplier = await prisma.supplier.findFirst({
+      where: scopedWhere(scope, { id: supplierId })
+    })
+
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' })
+    if (supplier.status !== 'active') return res.status(400).json({ error: 'Supplier is not active' })
+
+    const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
+    const products = await prisma.product.findMany({
+      where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } })
+    })
+    const productsById = new Map(products.map((product) => [product.id, product]))
+    if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
+
+    const purchaseItems = items.map((item) => {
+      const product = productsById.get(item.productId)
+      const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1)
+      const cost = toMoney(item.cost, product?.cost || 0)
+
+      return {
+        productId: item.productId,
+        quantity,
+        cost,
+        total: cost * quantity,
+        oldCost: product.cost
+      }
+    })
+
+    const computedTotal = purchaseItems.reduce((sum, item) => sum + item.total, 0)
+    const foreignPaidAmount = toMoney(amountPaid)
+    const paid = Math.min(toBaseCurrency(foreignPaidAmount, fx.rateToBase), computedTotal)
+    const balance = Math.max(0, computedTotal - paid)
+    const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+
+    if (paid > 0 && !canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, req.body.cashAccountId || req.userCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    // Generate reference number if not provided
+    const purchaseRefNo = refNo || `PUR-${Date.now()}`
+
+    const purchase = await prisma.$transaction(async (tx) => {
+      let paymentLedgerId = null
+      if (balance > 0) {
+        await tx.supplier.update({
+          where: { id: supplierId },
+          data: { balance: { increment: balance } }
+        })
+      }
+
+      const createdPurchase = await tx.supplierPurchase.create({
+        data: {
+          refNo: purchaseRefNo,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          supplierId,
+          userId: req.user.id,
+          total: computedTotal,
+          currency: fx.currency,
+          foreignTotal: toTransactionCurrency(computedTotal, fx.rateToBase),
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          amountPaid: paid,
+          balance,
+          paymentStatus: finalPaymentStatus,
+          notes,
+          dueDate: balance > 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined
+        },
+        include: {
+          supplier: true,
+          branch: true,
+          User: userSelect
+        }
+      })
+
+      await tx.supplierPurchaseItem.createMany({
+        data: purchaseItems.map(item => ({
+          purchaseId: createdPurchase.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          cost: item.cost,
+          total: item.total
+        }))
+      })
+
+      for (const item of purchaseItems) {
+        const product = productsById.get(item.productId)
+        if (product && product.itemType === 'service') continue
+        await tx.product.update({
+          where: { id: item.productId },
+          data: {
+            quantity: {
+              increment: item.quantity
+            },
+            cost: item.cost
+          }
+        })
+        if (Number(item.oldCost || 0) !== Number(item.cost || 0)) {
+          await tx.productPriceHistory.create({
+            data: {
+              productId: item.productId,
+              tenantId: scope.tenantId,
+              branchId: scope.branchId,
+              oldCost: item.oldCost,
+              newCost: item.cost,
+              source: 'supplier_purchase',
+              reference: createdPurchase.refNo,
+              reason: 'Supplier purchase cost update',
+              changedByUserId: req.user?.id || null
+            }
+          })
+        }
+      }
+
+      if (paid > 0) {
+        const payment = await tx.supplierPayment.create({
+          data: {
+            tenantId: scope.tenantId,
+            branchId: scope.branchId,
+            supplierId,
+            purchaseId: createdPurchase.id,
+            amount: paid,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
+            paymentMethod: resolvedPaymentMethod,
+            mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+            phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+            transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
+            reference: purchaseRefNo,
+            notes: notes ? `Paid at purchase: ${notes}` : 'Paid at purchase'
+          }
+        })
+
+        const paymentAccount = await resolvePaymentCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
+        if (String(paymentAccount.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+          throw Object.assign(new Error(`This payment posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.`), { statusCode: 409 })
+        }
+        if (Number(paymentAccount.balance || 0) < paid) {
+          throw Object.assign(new Error(`Insufficient funds in ${paymentAccount.name}. Available: ${Number(paymentAccount.balance || 0).toFixed(2)}, Required: ${paid.toFixed(2)}`), { statusCode: 400 })
+        }
+
+        const updatedAccount = await tx.cashAccount.update({
+          where: { id: paymentAccount.id },
+          data: { balance: { decrement: paid } }
+        })
+
+        await tx.cashTransaction.create({
+          data: {
+            tenantId: scope.tenantId,
+            accountId: paymentAccount.id,
+            type: 'payment',
+            amount: paid,
+            balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
+            reference: purchaseRefNo || payment.id,
+            description: `Supplier purchase payment: ${supplier.name}`,
+            userId: req.user.id
+          }
+        })
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, paymentAccount.id)
+        paymentLedgerId = await getCashAccountLedgerId(tx, scope.tenantId, paymentAccount.id)
+      }
+
+      const payableConfig = await getPayablesAccountingConfig(tx, scope.tenantId)
+      if (payableConfig?.isEnabled) {
+        if (paid > 0 && !paymentLedgerId) throw Object.assign(new Error('The selected payment account is not linked to a chart-of-accounts transaction ledger.'), { statusCode: 409 })
+        await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_PURCHASE', sourceId: createdPurchase.id,
+          date: createdPurchase.createdAt, reference: createdPurchase.refNo,
+          description: `Supplier purchase ${createdPurchase.refNo || ''}`.trim(),
+          lines: supplierPurchaseLines(payableConfig, createdPurchase, purchaseItems.map((item) => ({ ...item, product: productsById.get(item.productId) })), paymentLedgerId),
+        })
+      }
+
+      return createdPurchase
+    })
+
+    res.status(201).json({ ...withUser(purchase), baseCurrency: fx.baseCurrency })
+  } catch (error) {
+    console.error('Create purchase error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to create purchase')
+  }
+})
+
+// === SUPPLIER PAYMENTS ===
+
+// Get supplier payments
+router.get('/payments', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { page = 1, limit = 50, supplierId, startDate, endDate } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = scopedWhere(scope, {
+      ...(supplierId && { supplierId }),
+      ...(startDate && endDate && {
+        createdAt: {
+          gte: new Date(startDate),
+          lte: new Date(endDate)
+        }
+      })
+    })
+
+    const [payments, total] = await Promise.all([
+      prisma.supplierPayment.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        include: {
+          supplier: { select: { id: true, name: true, phone: true } },
+          purchase: { select: { id: true, refNo: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.supplierPayment.count({ where })
+    ])
+
+    res.json({
+      payments,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit))
+      }
+    })
+  } catch (error) {
+    console.error('Get supplier payments error:', error)
+    handleBranchError(res, error, 'Failed to fetch supplier payments')
+  }
+})
+
+// Record supplier payment
+router.post('/payments', authenticateToken, requirePermission('canCreatePayable'), requireTenant, requireCashAccount, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const { supplierId, purchaseId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+    const foreignAmount = toMoney(amount)
+    const paidAmount = toBaseCurrency(foreignAmount, fx.rateToBase)
+    if (!supplierId) return res.status(400).json({ error: 'Supplier is required' })
+    if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
+
+    const resolvedPaymentMethod = paymentMethod || 'mobile_money'
+
+    // Gate payment method by permission
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    // Get supplier
+    const supplier = await prisma.supplier.findFirst({
+      where: scopedWhere(scope, { id: supplierId })
+    })
+
+    if (!supplier) {
+      return res.status(404).json({ error: 'Supplier not found' })
+    }
+
+    let purchase = null
+    if (purchaseId) {
+      purchase = await prisma.supplierPurchase.findFirst({
+        where: scopedWhere(scope, { id: purchaseId, supplierId })
+      })
+      if (!purchase) return res.status(404).json({ error: 'Purchase not found for this supplier' })
+      if (paidAmount > purchase.balance) return res.status(400).json({ error: 'Payment exceeds purchase balance' })
+    } else {
+      const [openPurchases, openLandPurchases, currentSupplier] = await Promise.all([
+        prisma.supplierPurchase.aggregate({
+          where: scopedWhere(scope, { supplierId, balance: { gt: 0 } }),
+          _sum: { balance: true }
+        }),
+        prisma.propertyLandPurchase.aggregate({ where: { tenantId: scope.tenantId, supplierId, balance: { gt: 0 } }, _sum: { balance: true } }),
+        prisma.supplier.findFirst({ where: scopedWhere(scope, { id: supplierId }) })
+      ])
+      const openingBalanceOutstanding = Math.max(0, Number(currentSupplier?.balance || 0) - Number(openPurchases._sum.balance || 0) - Number(openLandPurchases._sum.balance || 0))
+      if (paidAmount > openingBalanceOutstanding) {
+        return res.status(400).json({ error: 'Payment exceeds the supplier opening balance still outstanding' })
+      }
+    }
+
+    const cashAccountUsed = await resolvePaymentCashAccount(prisma, scope, req, resolvedPaymentMethod, cashAccountId)
+    if (String(cashAccountUsed.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+      return res.status(409).json({ error: `This payment posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.` })
+    }
+    if (Number(cashAccountUsed.balance || 0) < paidAmount) {
+      return res.status(400).json({
+        error: `Insufficient funds in ${cashAccountUsed.name}. Available: ${Number(cashAccountUsed.balance || 0).toFixed(2)} ${cashAccountUsed.currency}, Required: ${paidAmount.toFixed(2)}`,
+        code: 'INSUFFICIENT_FUNDS'
+      })
+    }
+
+    const payment = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "suppliers" WHERE "id" = ${supplierId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const lockedSupplier = await tx.supplier.findFirst({ where: scopedWhere(scope, { id: supplierId, status: 'active' }) })
+      if (!lockedSupplier || paidAmount > Number(lockedSupplier.balance || 0) + 0.001) throw Object.assign(new Error('The supplier balance changed. Refresh and enter a payment within its current balance.'), { statusCode: 409 })
+      let lockedPurchase = purchase
+      if (purchaseId) {
+        await tx.$queryRaw`SELECT "id" FROM "supplier_purchases" WHERE "id" = ${purchaseId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+        lockedPurchase = await tx.supplierPurchase.findFirst({ where: { id: purchaseId, tenantId: scope.tenantId, supplierId } })
+        if (!lockedPurchase || paidAmount > Number(lockedPurchase.balance || 0)) throw Object.assign(new Error('The supplier purchase balance changed. Refresh and enter a payment within its current balance.'), { statusCode: 409 })
+      }
+      const createdPayment = await tx.supplierPayment.create({
+        data: {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          supplierId,
+          purchaseId,
+          amount: paidAmount,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          paymentMethod: resolvedPaymentMethod,
+          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
+          reference,
+          notes
+        }
+      })
+
+      const updatedAccount = await tx.cashAccount.update({
+        where: { id: cashAccountUsed.id },
+        data: { balance: { decrement: paidAmount } }
+      })
+
+      await tx.cashTransaction.create({
+        data: {
+          tenantId: scope.tenantId,
+          accountId: cashAccountUsed.id,
+          type: 'payment',
+          amount: paidAmount,
+          balanceAfter: updatedAccount.balance,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          reference: reference || createdPayment.id,
+          description: `Supplier payment: ${supplier.name}`,
+          userId: req.user.id
+        }
+      })
+
+      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, cashAccountUsed.id)
+      const payableConfig = await getPayablesAccountingConfig(tx, scope.tenantId)
+      if (payableConfig?.isEnabled) {
+        const ledgerAccountId = await getCashAccountLedgerId(tx, scope.tenantId, cashAccountUsed.id)
+        if (!ledgerAccountId) throw Object.assign(new Error('The selected payment account is not linked to a chart-of-accounts transaction ledger.'), { statusCode: 409 })
+        await postPayablesJournal(tx, {
+          tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+          sourceType: 'SUPPLIER_PAYMENT', sourceId: createdPayment.id,
+          date: createdPayment.createdAt, reference: reference || createdPayment.id,
+          description: `Supplier payment: ${supplier.name}`,
+          lines: supplierPaymentLines(payableConfig, paidAmount, ledgerAccountId, reference),
+        })
+      }
+
+      const newBalance = Math.max(0, lockedSupplier.balance - paidAmount)
+      await tx.supplier.update({
+        where: { id: supplierId },
+        data: { balance: newBalance }
+      })
+
+      if (lockedPurchase) {
+        const newAmountPaid = Math.min(lockedPurchase.total, lockedPurchase.amountPaid + paidAmount)
+        const newPurchaseBalance = Math.max(0, lockedPurchase.balance - paidAmount)
+
+        await tx.supplierPurchase.update({
+          where: { id: purchaseId },
+          data: {
+            amountPaid: newAmountPaid,
+            balance: newPurchaseBalance,
+            paymentStatus: newPurchaseBalance <= 0 ? 'paid' : 'partial'
+          }
+        })
+        const marketplaceApproval = await registerProcurementSupplierPaymentApproval(tx, { supplierPayment: createdPayment, purchaseId })
+        return { payment: createdPayment, marketplaceApproval }
+      }
+
+      return { payment: createdPayment, marketplaceApproval: null }
+    })
+
+    if (payment.marketplaceApproval) {
+      try {
+        const [reviewers, sellerTenant] = await Promise.all([
+          prisma.userPermission.findMany({
+            where: { canApproveProcurementPayment: true, user: { tenantId: payment.marketplaceApproval.sellerTenantId, isActive: true } },
+            select: { userId: true },
+          }),
+          prisma.tenant.findUnique({ where: { id: payment.marketplaceApproval.sellerTenantId }, select: { ownerId: true } }),
+        ])
+        const reviewerIds = [...new Set([...reviewers.map(({ userId }) => userId), sellerTenant?.ownerId].filter(Boolean))]
+        await Promise.all(reviewerIds.map((userId) => createTenantNotification({
+          tenantId: payment.marketplaceApproval.sellerTenantId,
+          userId,
+          title: 'Marketplace repayment awaiting approval',
+          message: 'A buyer submitted a repayment. Approve it to apply it to the seller receivable.',
+          type: 'procurement',
+          metadata: { url: '/tenant/procurement', paymentApprovalId: payment.marketplaceApproval.id },
+        })))
+      } catch (notificationError) {
+        console.error('Marketplace repayment notification failed:', notificationError)
+      }
+    }
+    res.status(201).json({ ...payment.payment, baseCurrency: fx.baseCurrency })
+  } catch (error) {
+    console.error('Record supplier payment error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to record payment')
+  }
+})
+
+// === PAYABLES REPORTS ===
+
+// Get payables summary
+router.get('/payables/summary', authenticateToken, requirePermission('canViewPayable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const supplierWhere = scopedWhere(scope)
+    const purchaseWhere = scopedWhere(scope, {
+      balance: { gt: 0 },
+      paymentStatus: { not: 'paid' }
+    })
+
+    const [totalPayables, overdueCount, agingPurchases] = await Promise.all([
+      // Total amount owed
+      prisma.supplier.aggregate({
+        where: supplierWhere,
+        _sum: { balance: true }
+      }),
+      
+      // Overdue purchases count
+      prisma.supplierPurchase.count({
+        where: scopedWhere(scope, {
+          balance: { gt: 0 },
+          dueDate: { lt: new Date() }
+        })
+      }),
+
+      // Aging report
+      prisma.supplierPurchase.findMany({
+        where: purchaseWhere,
+        include: { supplier: { select: { id: true, name: true, phone: true } } },
+        orderBy: { balance: 'desc' }
+      })
+    ])
+
+    const agingBySupplier = new Map()
+    agingPurchases.forEach((purchase) => {
+      const current = agingBySupplier.get(purchase.supplierId) || {
+        supplier_id: purchase.supplierId,
+        supplier_name: purchase.supplier?.name || 'Supplier',
+        phone: purchase.supplier?.phone,
+        total_owed: 0,
+        overdue_purchases: 0,
+        latest_due: null
+      }
+      current.total_owed += Number(purchase.balance || 0)
+      current.overdue_purchases += 1
+      if (!current.latest_due || (purchase.dueDate && purchase.dueDate > current.latest_due)) {
+        current.latest_due = purchase.dueDate
+      }
+      agingBySupplier.set(purchase.supplierId, current)
+    })
+
+    const agingReportRows = Array.from(agingBySupplier.values())
+      .sort((a, b) => b.total_owed - a.total_owed)
+
+    res.json({
+      totalPayables: totalPayables._sum.balance || 0,
+      overdueCount,
+      agingReport: agingReportRows
+    })
+  } catch (error) {
+    console.error('Payables summary error:', error)
+    handleBranchError(res, error, 'Failed to fetch payables summary')
+  }
+})
+
+export default router

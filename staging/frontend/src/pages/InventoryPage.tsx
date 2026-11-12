@@ -1,0 +1,2618 @@
+import { appConfirm } from '@/lib/appFeedback'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { Check, ChevronsUpDown, Plus, Search, X, Edit, Trash2, ScanBarcode, Package, WifiOff, History, MoreHorizontal, Printer } from 'lucide-react'
+import { inventoryApi, categoriesApi, branchesApi, settingsApi, apiFetch, type BranchOption, type InventoryItem, type InventoryMovementDetail, type ProductPriceHistory } from '@/lib/api'
+import BarcodeScanner from '@/components/BarcodeScanner'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { cn, formatCurrency } from '@/lib/utils'
+import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalProducts, getLocalBranches } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { UsageLimitBanner } from '@/components/UsageLimitBanner'
+import { Pagination } from '@/components/Pagination'
+import { usePagination } from '@/hooks/usePagination'
+import { db } from '@/db/index'
+import ServiceList from '@/components/ServiceList'
+import IncludedServicesPicker from '@/components/IncludedServicesPicker'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { generateInternalEan13Barcode, printProductBarcode } from '@/lib/barcodeLabel'
+import CreatableProductAttribute from '@/components/CreatableProductAttribute'
+import { ToastAction } from '@/components/ui/toast'
+
+interface SellingUnit {
+  id?: string
+  unitName: string
+  conversionFactor: number
+  sellingPrice: number
+  isDefault: boolean
+}
+
+interface ProductAttributeOptions {
+  sizes: string[]
+  brands: string[]
+  designs: string[]
+}
+
+interface FormData {
+  linkedItemIds: string[]
+  product_id: string
+  product_name: string
+  quantity: number | ''
+  unit_price: number
+  cost_price: number | ''
+  low_stock_alert: number
+  barcode: string
+  size: string
+  brand: string
+  design: string
+  sku: string
+  batchNumber: string
+  expiryDate: string
+  categoryId: string
+  branchId: string
+  baseUnit: string
+  contentsPerBaseUnit: number | ''
+  contentsUnit: string
+  itemType: 'product' | 'service' | 'rental'
+  description: string
+  estimatedHours: number | ''
+  duration: string
+}
+
+type MovementPreset = 'today' | 'yesterday' | 'week' | 'custom'
+type StockAdjustmentType = 'stock_in' | 'stock_out'
+type DailyMovement = NonNullable<InventoryItem['dailyMovement']>
+type MovementCardKind = 'products_sold' | 'units_sold' | 'receivable_units' | 'stock_received' | 'other_stock_out' | 'returns' | 'low_stock' | 'out_of_stock'
+
+interface MovementCardConfig {
+  id: MovementCardKind
+  label: string
+  value: number
+  summaryLabel: string
+}
+
+interface MovementSummary {
+  productsSold: number
+  unitsSold: number
+  receivableUnitsSold: number
+  stockReceived: number
+  otherStockOut: number
+  returns: number
+  lowStockProducts: number
+  outOfStockProducts: number
+}
+
+interface MovementModalState {
+  title: string
+  rows: InventoryMovementDetail[]
+  total: number
+  summaryLabel: string
+  productRows: Array<{
+    id: string | number
+    name: string
+    sku: string
+    category: string
+    branch: string
+    metric: number
+    openingStock: number
+    stockIn: number
+    soldToday: number
+    receivableSold: number
+    otherStockOut: number
+    returns: number
+    closingStock: number
+    currentStock: number
+    lowStockAlert: number
+    status: string
+  }>
+}
+
+interface StockAdjustState {
+  item: InventoryItem
+  adjustmentType: StockAdjustmentType
+  quantity: string
+  unitId: string
+  reason: string
+}
+
+interface PriceHistoryState {
+  item: InventoryItem
+  rows: ProductPriceHistory[]
+  loading: boolean
+}
+
+const initialFormData: FormData = {
+  linkedItemIds: [],
+  product_id: '',
+  product_name: '',
+  quantity: '',
+  unit_price: 0,
+  cost_price: '',
+  low_stock_alert: 5,
+  barcode: '',
+  size: '',
+  brand: '',
+  design: '',
+  sku: '',
+  batchNumber: '',
+  expiryDate: '',
+  categoryId: '',
+  branchId: '',
+  baseUnit: 'Piece',
+  contentsPerBaseUnit: '',
+  contentsUnit: '',
+  itemType: 'product',
+  description: '',
+  estimatedHours: '',
+  duration: '',
+}
+
+const emptyProductAttributeOptions: ProductAttributeOptions = { sizes: [], brands: [], designs: [] }
+
+const emptyMovementSummary: MovementSummary = {
+  productsSold: 0,
+  unitsSold: 0,
+  receivableUnitsSold: 0,
+  stockReceived: 0,
+  otherStockOut: 0,
+  returns: 0,
+  lowStockProducts: 0,
+  outOfStockProducts: 0,
+}
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const movementParamsForPreset = (preset: MovementPreset, customDate: string) => {
+  const today = new Date()
+  const start = new Date(today)
+  const end = new Date(today)
+
+  if (preset === 'yesterday') {
+    start.setDate(start.getDate() - 1)
+    end.setDate(end.getDate() - 1)
+  } else if (preset === 'week') {
+    const day = start.getDay()
+    const mondayOffset = day === 0 ? -6 : 1 - day
+    start.setDate(start.getDate() + mondayOffset)
+  } else if (preset === 'custom' && customDate) {
+    return { from: customDate, to: customDate }
+  }
+
+  return { from: formatDateInput(start), to: formatDateInput(end) }
+}
+
+const defaultMovementForItem = (item: InventoryItem): DailyMovement => ({
+  openingStock: item.quantity || 0,
+  stockIn: 0,
+  soldToday: 0,
+  posSold: 0,
+  receivableSold: 0,
+  otherStockOut: 0,
+  returns: 0,
+  closingStock: item.quantity || 0,
+  currentStock: item.quantity || 0,
+  stockInDetails: [],
+  soldDetails: [],
+  otherStockOutDetails: [],
+  returnDetails: [],
+})
+
+const formatQty = (value: number | undefined | null) =>
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(Number(value || 0))
+const toStockPrecision = (value: number) => Number(value.toFixed(6))
+const isValidStockQuantity = (value: number, allowZero = true, precision = 3) => {
+  const scale = 10 ** precision
+  return Number.isFinite(value) && value >= (allowZero ? 0 : Number.EPSILON) && Math.abs(value * scale - Math.round(value * scale)) < 1e-7
+}
+const normalizeUnitKey = (value: string) => value.trim().toLocaleLowerCase().replace(/\s+/g, ' ').replace(/s$/, '')
+const unitFactorFromPackageContents = (unitName: string, contentsUnit: string, contentsPerBaseUnit: number) =>
+  contentsPerBaseUnit > 0 && normalizeUnitKey(unitName) === normalizeUnitKey(contentsUnit)
+    ? 1 / contentsPerBaseUnit
+    : null
+const requiresPackageContents = (unitName: string) => ['box', 'carton', 'dose', 'packet', 'pack', 'case', 'crate'].includes(normalizeUnitKey(unitName))
+const canDefinePackageContents = (unitName: string) => requiresPackageContents(unitName) || normalizeUnitKey(unitName) !== 'piece'
+
+export default function InventoryPage() {
+  const { hasFeature } = useFeatureAccess()
+  const restaurantFeatureEnabled = hasFeature('restaurant')
+  const multiUnitEnabled = hasFeature('inventory.multi_unit')
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categoryQuery, setCategoryQuery] = useState('')
+  const [categorySaving, setCategorySaving] = useState(false)
+  const [categoriesLoading, setCategoriesLoading] = useState(false)
+  const [categoriesError, setCategoriesError] = useState<string | null>(null)
+  const categoryRequestRef = useRef(0)
+  const [items, setItems] = useState<InventoryItem[]>([])
+  const [hospitalityBusiness, setHospitalityBusiness] = useState(false)
+  const [hospitalityBusinessType, setHospitalityBusinessType] = useState('')
+  const [hospitalityClassificationsLoaded, setHospitalityClassificationsLoaded] = useState(false)
+  const [hospitalityIngredientIds, setHospitalityIngredientIds] = useState<Set<string>>(new Set())
+  const [hospitalityMenuItems, setHospitalityMenuItems] = useState<Map<string, string>>(new Map())
+  const [movementItems, setMovementItems] = useState<InventoryItem[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
+  const [inventoryError, setInventoryError] = useState<string | null>(null)
+  const inventoryRequestRef = useRef(0)
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [productAttributeOptions, setProductAttributeOptions] = useState<ProductAttributeOptions>(emptyProductAttributeOptions)
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [branchFilter, setBranchFilter] = useState('')
+  const [formData, setFormData] = useState<FormData>(initialFormData)
+  const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false)
+  const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
+  const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+  const [openingStockUnitName, setOpeningStockUnitName] = useState('')
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
+  const [scannerFailed, setScannerFailed] = useState(false)
+  const [itemTypeFilter, setItemTypeFilter] = useState<'all' | 'product'>('all')
+  const [movementPreset, setMovementPreset] = useState<MovementPreset>('today')
+  const [customMovementDate, setCustomMovementDate] = useState(formatDateInput(new Date()))
+  const [movementSummary, setMovementSummary] = useState<MovementSummary>(emptyMovementSummary)
+  const [movementModal, setMovementModal] = useState<MovementModalState | null>(null)
+  const [stockAdjust, setStockAdjust] = useState<StockAdjustState | null>(null)
+  const [stockAdjustSaving, setStockAdjustSaving] = useState(false)
+  const [priceHistory, setPriceHistory] = useState<PriceHistoryState | null>(null)
+  const [openActionMenu, setOpenActionMenu] = useState<string | number | null>(null)
+  const { tab: urlTab } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const handledStockLink = useRef<string | null>(null)
+  const lockedType = urlTab === 'products' ? 'product' : urlTab === 'services' ? 'service' : null
+  const isServicesPage = lockedType === 'service'
+  const categoryPickerRef = useRef<HTMLDivElement | null>(null)
+  const formRef = useRef<HTMLDivElement | null>(null)
+  const { toast } = useToast()
+  const { user, hasPermission } = useJWTAuth()
+  const online = useOnlineStatus()
+  const canCreateProduct = hasPermission('canCreateProduct')
+  const canViewPriceHistory = hasPermission('canViewPriceHistory')
+  const canEditProduct = hasPermission('canEditProduct')
+  const canDeleteProduct = hasPermission('canDeleteProduct')
+  const canAdjustStockOut = hasPermission('canAdjustStock')
+  const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
+  const openingStockUnit = sellingUnits.find(unit => unit.unitName === openingStockUnitName)
+  const inferredOpeningFactor = openingStockUnitName
+    ? unitFactorFromPackageContents(openingStockUnitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
+    : null
+  const openingStockFactor = Number(inferredOpeningFactor || openingStockUnit?.conversionFactor || 1)
+  const openingStockBaseQuantity = toStockPrecision(Number(formData.quantity || 0) * openingStockFactor)
+  const canViewRestaurant = hasPermission('canViewRestaurant')
+  const hospitalityView = searchParams.get('hospitalityView') || 'all'
+  const showHospitalityInventory = hospitalityBusiness && restaurantFeatureEnabled && canViewRestaurant && lockedType === 'product'
+  const hospitalityViewLabel: Record<string, string> = { all: 'All stock', ingredients: 'Recipe ingredients', menu: 'Menu items', bar: 'Bar stock', supplies: 'Unlinked stock' }
+  const hospitalityBusinessLabel = hospitalityBusinessType === 'hotel_restaurant' ? 'Hotel & Restaurant' : hospitalityBusinessType === 'bar' ? 'Bar' : hospitalityBusinessType === 'bakery' ? 'Bakery' : 'Restaurant'
+
+  useEffect(() => {
+    let active = true
+    setHospitalityClassificationsLoaded(false)
+    settingsApi.getBusinessProfile().then(async (profile: any) => {
+      if (!active) return
+      const type = String(profile?.businessType || '').toLowerCase()
+      const hospitalityTypes = new Set(['restaurant', 'bar', 'restaurant_bar', 'cafe', 'coffee_shop', 'fast_food', 'hotel_restaurant', 'bakery'])
+      const isHospitality = hospitalityTypes.has(type)
+      setHospitalityBusinessType(type)
+      setHospitalityBusiness(isHospitality)
+      if (!isHospitality || !restaurantFeatureEnabled || !canViewRestaurant) {
+        setHospitalityIngredientIds(new Set())
+        setHospitalityMenuItems(new Map())
+        setHospitalityClassificationsLoaded(true)
+        return
+      }
+      const [recipesResponse, menuResponse] = await Promise.all([
+        apiFetch('/api/restaurant/recipes'),
+        apiFetch('/api/restaurant/menu'),
+      ])
+      const [recipes, menu] = await Promise.all([
+        recipesResponse.ok ? recipesResponse.json() : Promise.resolve([]),
+        menuResponse.ok ? menuResponse.json() : Promise.resolve([]),
+      ])
+      if (!active) return
+      setHospitalityIngredientIds(new Set((Array.isArray(recipes) ? recipes : []).filter((recipe: any) => recipe.isActive).flatMap((recipe: any) => (recipe.ingredients || []).map((ingredient: any) => String(ingredient.productId)))))
+      setHospitalityMenuItems(new Map((Array.isArray(menu) ? menu : []).map((entry: any) => [String(entry.productId), String(entry.station || 'kitchen')])))
+      setHospitalityClassificationsLoaded(true)
+    }).catch(() => {
+      if (!active) return
+      setHospitalityBusiness(false)
+      setHospitalityClassificationsLoaded(true)
+    })
+    return () => { active = false }
+  }, [restaurantFeatureEnabled, canViewRestaurant])
+
+  // Determine create/edit/delete permission based on the active item type
+  const activeType = lockedType || itemTypeFilter
+  const canCreateCurrent = isServicesPage ? hasPermission('canCreateService') : canCreateProduct
+  const canEditCurrent = isServicesPage ? hasPermission('canEditService') : canEditProduct
+  const canDeleteCurrent = isServicesPage ? hasPermission('canDeleteService') : canDeleteProduct
+  const canManageInventory = canCreateCurrent || canEditCurrent
+  const categoryType = lockedType || formData.itemType
+  const canCreateCategory = hasPermission(categoryType === 'service' ? 'canCreateService' : categoryType === 'rental' ? 'canCreateRental' : 'canCreateProduct')
+
+  const filteredItems = useMemo(() => {
+    let result = items
+    if (showHospitalityInventory && hospitalityView !== 'all') {
+      result = result.filter(item => {
+        const id = String(item.id)
+        const isIngredient = hospitalityIngredientIds.has(id)
+        const menuStation = hospitalityMenuItems.get(id)
+        if (hospitalityView === 'ingredients') return isIngredient
+        if (hospitalityView === 'menu') return Boolean(menuStation)
+        if (hospitalityView === 'bar') return menuStation === 'bar'
+        if (hospitalityView === 'supplies') return !isIngredient && !menuStation
+        return true
+      })
+    }
+    if (showUncategorizedOnly) {
+      result = result.filter((item) => (item as any).isUncategorized)
+    }
+    return result
+  }, [items, showUncategorizedOnly, showHospitalityInventory, hospitalityView, hospitalityIngredientIds, hospitalityMenuItems])
+
+  const categoryNameById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category.name])),
+    [categories]
+  )
+
+  const { paginatedItems, currentPage, totalPages, totalItems, goToPage, resetPage, pageSize } = usePagination(filteredItems, 10)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppliedSearch(searchQuery.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
+
+  useEffect(() => {
+    resetPage()
+  }, [appliedSearch, branchFilter, activeType, showUncategorizedOnly, movementPreset, customMovementDate, hospitalityView, resetPage])
+
+  useEffect(() => {
+    if (currentPage > Math.max(1, totalPages)) goToPage(Math.max(1, totalPages))
+  }, [currentPage, totalPages, goToPage])
+
+  useEffect(() => {
+    closeForm()
+    setItems([])
+    setMovementItems([])
+    setOpenActionMenu(null)
+  }, [lockedType])
+
+  useEffect(() => {
+    loadCategories()
+    return () => { categoryRequestRef.current += 1 }
+  }, [categoryType])
+
+  useEffect(() => {
+    loadBranches()
+  }, [user?.id])
+
+  useEffect(() => {
+    loadInventory()
+    return () => { inventoryRequestRef.current += 1 }
+  }, [appliedSearch, branchFilter, activeType, movementPreset, customMovementDate, online, canManageInventory])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        categoryPickerRef.current &&
+        !categoryPickerRef.current.contains(event.target as Node)
+      ) {
+        setCategoryOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const loadCategories = async () => {
+    const requestId = ++categoryRequestRef.current
+    setCategoriesLoading(true)
+    setCategoriesError(null)
+    setCategories([])
+    try {
+      const data = await categoriesApi.list(categoryType)
+      if (requestId !== categoryRequestRef.current) return
+      setCategories(Array.isArray(data) ? data : [])
+    } catch (error: any) {
+      if (requestId !== categoryRequestRef.current) return
+      setCategoriesError(error?.message || 'Unable to load categories')
+    } finally {
+      if (requestId === categoryRequestRef.current) setCategoriesLoading(false)
+    }
+  }
+
+  const loadProductAttributeOptions = async () => {
+    try {
+      if (online) {
+        const options = await inventoryApi.getAttributeOptions()
+        setProductAttributeOptions({
+          sizes: Array.isArray(options?.sizes) ? options.sizes : [],
+          brands: Array.isArray(options?.brands) ? options.brands : [],
+          designs: Array.isArray(options?.designs) ? options.designs : [],
+        })
+        return
+      }
+      const localProducts = await db.products.toArray()
+      const valuesFor = (field: 'size' | 'brand' | 'design') => [...new Set(localProducts
+        .filter(product => !product.itemType || product.itemType === 'product')
+        .map(product => String(product[field] || '').trim())
+        .filter(Boolean))].sort((a, b) => a.localeCompare(b))
+      setProductAttributeOptions({ sizes: valuesFor('size'), brands: valuesFor('brand'), designs: valuesFor('design') })
+    } catch {
+      setProductAttributeOptions(emptyProductAttributeOptions)
+    }
+  }
+
+  const createCategory = async () => {
+    const name = categoryQuery.normalize('NFKC').trim().replace(/\s+/g, ' ')
+    if (!name || !canCreateCategory || categorySaving || !online) return
+    const requestId = categoryRequestRef.current
+    setCategorySaving(true)
+    try {
+      const { category } = await categoriesApi.create({ name, categoryType })
+      if (requestId !== categoryRequestRef.current) return
+      setCategories(current => [...current.filter(row => row.id !== category.id), category].sort((a, b) => a.name.localeCompare(b.name)))
+      setFormData(current => ({ ...current, categoryId: category.id }))
+      setCategoryOpen(false)
+      setCategoryQuery('')
+      toast({ title: 'Category saved' })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Unable to create category', description: error?.message })
+    } finally {
+      setCategorySaving(false)
+    }
+  }
+
+  const loadBranches = async () => {
+    try {
+      if (online) {
+        const data = await branchesApi.active()
+        setBranches(data)
+        if (user?.role !== 'owner') setBranchFilter(current => current || defaultBranchId(user, data))
+      } else {
+        const local = await getLocalBranches()
+        setBranches(local as any)
+      }
+    } catch (error) {
+      try {
+        const local = await getLocalBranches()
+        setBranches(local as any)
+      } catch {
+        console.error('Failed to load branches:', error)
+        toast({
+          variant: 'destructive',
+          title: 'Failed to load branches',
+          description: 'Branch selection is unavailable. Please refresh and try again.',
+        })
+      }
+    }
+  }
+
+  const loadInventory = async () => {
+    const requestId = ++inventoryRequestRef.current
+    const typeFilter = activeType === 'all' ? undefined : activeType
+    setLoading(true)
+    setInventoryError(null)
+    try {
+      if (online) {
+        if (isServicesPage) {
+          const services = await inventoryApi.list(appliedSearch, branchFilter || undefined, 'service')
+          if (requestId !== inventoryRequestRef.current) return
+          setItems(services)
+          setMovementItems([])
+          setMovementSummary(emptyMovementSummary)
+          return
+        }
+        const data = await inventoryApi.listWithDailyMovements(
+          appliedSearch,
+          branchFilter || undefined,
+          typeFilter,
+          movementParams
+        )
+        if (requestId !== inventoryRequestRef.current) return
+        setItems(Array.isArray(data?.products) ? data.products : [])
+        setMovementItems(Array.isArray(data?.movementProducts) ? data.movementProducts : data?.products || [])
+        setMovementSummary({ ...emptyMovementSummary, ...(data?.movementSummary || {}) })
+      } else {
+        const local = await getLocalProducts(appliedSearch, branchFilter || undefined, typeFilter)
+        if (requestId !== inventoryRequestRef.current) return
+        setItems(local)
+        setMovementItems(local)
+        setMovementSummary(emptyMovementSummary)
+      }
+    } catch (error: any) {
+      if (requestId !== inventoryRequestRef.current) return
+      setItems([])
+      setMovementItems([])
+      setMovementSummary(emptyMovementSummary)
+      setInventoryError(error?.message || `Unable to load ${isServicesPage ? 'services' : 'products'}. Please try again.`)
+    } finally {
+      if (requestId === inventoryRequestRef.current) setLoading(false)
+    }
+  }
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    resetPage()
+    if (appliedSearch === searchQuery.trim()) loadInventory()
+    else setAppliedSearch(searchQuery.trim())
+  }
+
+  const saveSellingUnits = async (productId: string) => {
+    const existingUnits: SellingUnit[] = editingItem ? ((editingItem as any).units || []) : []
+    const retainedIds = new Set(sellingUnits.flatMap(unit => unit.id ? [unit.id] : []))
+
+    for (const unit of existingUnits) {
+      if (unit.id && !retainedIds.has(unit.id)) await inventoryApi.deleteUnit(productId, unit.id)
+    }
+
+    for (const u of sellingUnits) {
+      const inferredFactor = unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
+      const payload = {
+        unitName: u.unitName,
+        conversionFactor: inferredFactor || u.conversionFactor,
+        sellingPrice: u.sellingPrice,
+        isDefault: u.isDefault,
+      }
+      if (u.id) await inventoryApi.updateUnit(productId, u.id, payload)
+      else await inventoryApi.addUnit(productId, payload)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!online && (formData.linkedItemIds.length || editingItem?.includedServices?.length || editingItem?.includedInProducts?.length)) {
+      toast({ variant: 'destructive', title: 'Connect to the internet to save included services' })
+      return
+    }
+    if (!formData.product_name.trim()) {
+      toast({ variant: 'destructive', title: `${isServicesPage ? 'Service' : 'Product'} name is required` })
+      return
+    }
+    if (!formData.categoryId) {
+      toast({ variant: 'destructive', title: 'Category is required' })
+      return
+    }
+    if (formData.itemType !== 'service' && !editingItem && (formData.quantity === '' || typeof formData.quantity !== 'number' || !isValidStockQuantity(formData.quantity) || !isValidStockQuantity(openingStockBaseQuantity, true, 6))) {
+      toast({ variant: 'destructive', title: 'Enter up to 3 decimals for the counted quantity; converted stock is stored to 6 decimals' })
+      return
+    }
+    if (formData.itemType === 'product' && requiresPackageContents(formData.baseUnit) && (!Number(formData.contentsPerBaseUnit) || !formData.contentsUnit.trim())) {
+      toast({ variant: 'destructive', title: `Enter how many inner units are in each ${formData.baseUnit}` })
+      return
+    }
+    if ((formData.contentsPerBaseUnit !== '' && (!Number.isFinite(Number(formData.contentsPerBaseUnit)) || Number(formData.contentsPerBaseUnit) <= 0)) || (Boolean(formData.contentsPerBaseUnit) !== Boolean(formData.contentsUnit.trim()))) {
+      toast({ variant: 'destructive', title: 'Enter both a positive inner-unit count and the inner-unit name' })
+      return
+    }
+    if (!['product', 'service', 'rental'].includes(formData.itemType)) {
+      toast({ variant: 'destructive', title: 'Item type is required' })
+      return
+    }
+    if (formData.itemType !== 'service' && (formData.cost_price === '' || typeof formData.cost_price !== 'number' || !Number.isFinite(formData.cost_price) || formData.cost_price < 0)) {
+      toast({ variant: 'destructive', title: 'Cost price is required and must be a non-negative number' })
+      return
+    }
+    if (!Number.isFinite(formData.unit_price) || formData.unit_price <= 0) {
+      toast({ variant: 'destructive', title: 'Selling price must be greater than 0' })
+      return
+    }
+    if (formData.itemType === 'product') {
+      const unitNames = sellingUnits.map(unit => unit.unitName.trim().toLocaleLowerCase())
+      if (unitNames.some(name => !name) || new Set(unitNames).size !== unitNames.length) {
+        toast({ variant: 'destructive', title: 'Selling unit names must be filled in and unique' })
+        return
+      }
+    }
+    if (canManageInventory && branches.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'No active branch',
+        description: 'Create an active branch before adding branch inventory.',
+      })
+      return
+    }
+
+    if (canManageInventory && !formData.branchId) {
+      toast({
+        variant: 'destructive',
+        title: 'Select a branch',
+        description: 'Choose the branch this inventory item belongs to.',
+      })
+      return
+    }
+
+    const queuedProductData = (barcode: string, quantity: number) => ({
+      name: formData.product_name,
+      linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined,
+      price: formData.unit_price,
+      cost: formData.cost_price === '' ? 0 : Number(formData.cost_price),
+      quantity,
+      minStock: formData.low_stock_alert,
+      sku: formData.product_id || formData.sku,
+      barcode: barcode || null,
+      size: formData.size || null,
+      brand: formData.brand || null,
+      design: formData.design || null,
+      batchNumber: formData.batchNumber || null,
+      expiryDate: formData.expiryDate || null,
+      categoryId: formData.categoryId || null,
+      branchId: formData.branchId || null,
+      baseUnit: formData.baseUnit || 'Piece',
+      contentsPerBaseUnit: formData.contentsPerBaseUnit === '' ? null : Number(formData.contentsPerBaseUnit),
+      contentsUnit: formData.contentsUnit || null,
+      itemType: formData.itemType,
+      serviceCategory: null,
+      estimatedHours: formData.estimatedHours === '' ? null : formData.estimatedHours,
+      duration: formData.duration || null,
+      description: formData.description || null,
+      rentalPrice: null,
+      rentalPeriod: null,
+      depositAmount: null,
+      replacementValue: null,
+    })
+
+    try {
+      if (editingItem) {
+        if (!canEditCurrent) {
+          toast({ variant: 'destructive', title: `You do not have permission to edit ${isServicesPage ? 'services' : 'products'}` })
+          return
+        }
+        if (online) {
+          await inventoryApi.update(String(editingItem.id), { ...formData, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
+          if (formData.itemType === 'product') await saveSellingUnits(String(editingItem.id))
+        } else {
+          const offlineBarcode = formData.barcode.trim() || (editingItem as any).barcode || (formData.itemType === 'product' ? generateInternalEan13Barcode() : '')
+          await db.products.put({
+            id: String(editingItem.id),
+            name: formData.product_name,
+            sku: formData.sku,
+            barcode: offlineBarcode,
+            size: formData.size || undefined,
+            brand: formData.brand || undefined,
+            design: formData.design || undefined,
+            batchNumber: formData.batchNumber || undefined,
+            expiryDate: formData.expiryDate || undefined,
+            price: formData.unit_price,
+            cost: formData.cost_price,
+            quantity: editingItem.quantity,
+            minStock: formData.low_stock_alert,
+            baseUnit: formData.baseUnit,
+            categoryId: formData.categoryId || undefined,
+            branchId: formData.branchId || undefined,
+            itemType: formData.itemType,
+            description: formData.description,
+            estimatedHours: formData.estimatedHours === '' ? undefined : formData.estimatedHours,
+            duration: formData.duration,
+            updatedAt: new Date().toISOString(),
+          })
+          await queueMutation('products', 'update', String(editingItem.id), queuedProductData(offlineBarcode, Number(editingItem.quantity ?? 0)))
+        }
+        toast({ title: 'Item updated successfully' })
+      } else {
+        if (!canCreateCurrent) {
+          toast({ variant: 'destructive', title: `You do not have permission to create ${isServicesPage ? 'services' : 'products'}` })
+          return
+        }
+        let printableProduct: Pick<InventoryItem, 'product_name' | 'barcode' | 'size' | 'brand' | 'design'> | null = null
+        if (online) {
+          const result = await inventoryApi.create({ ...formData, quantity: openingStockBaseQuantity, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
+          const savedProduct = (result as any)?.product || result
+          printableProduct = {
+            product_name: savedProduct?.name || formData.product_name,
+            barcode: savedProduct?.barcode || formData.barcode || undefined,
+            size: savedProduct?.size || formData.size,
+            brand: savedProduct?.brand || formData.brand,
+            design: savedProduct?.design || formData.design,
+          }
+          if (formData.itemType === 'product') {
+            const newId = result?.id || (result as any)?.product?.id
+            if (newId) await saveSellingUnits(String(newId))
+          }
+        } else {
+          const newId = `offline-${Date.now()}`
+          const offlineBarcode = formData.barcode.trim() || (formData.itemType === 'product' ? generateInternalEan13Barcode() : '')
+          await db.products.put({
+            id: newId,
+            name: formData.product_name,
+            sku: formData.sku,
+            barcode: offlineBarcode,
+            size: formData.size || undefined,
+            brand: formData.brand || undefined,
+            design: formData.design || undefined,
+            batchNumber: formData.batchNumber || undefined,
+            expiryDate: formData.expiryDate || undefined,
+            price: formData.unit_price,
+            cost: formData.cost_price,
+            quantity: openingStockBaseQuantity,
+            minStock: formData.low_stock_alert,
+            baseUnit: formData.baseUnit,
+            categoryId: formData.categoryId || undefined,
+            branchId: formData.branchId || undefined,
+            itemType: formData.itemType,
+            description: formData.description,
+            estimatedHours: formData.estimatedHours === '' ? undefined : formData.estimatedHours,
+            duration: formData.duration,
+            updatedAt: new Date().toISOString(),
+          })
+          await queueMutation('products', 'create', newId, queuedProductData(offlineBarcode, openingStockBaseQuantity))
+          printableProduct = {
+            product_name: formData.product_name,
+            barcode: offlineBarcode || undefined,
+            size: formData.size,
+            brand: formData.brand,
+            design: formData.design,
+          }
+        }
+        toast({
+          title: 'Item created successfully',
+          description: printableProduct?.barcode ? `Barcode: ${printableProduct.barcode}` : undefined,
+          action: formData.itemType === 'product' && printableProduct?.barcode ? (
+            <ToastAction altText="Print barcode label" onClick={() => handlePrintBarcode(printableProduct!)}>
+              Print barcode
+            </ToastAction>
+          ) : undefined,
+        })
+      }
+      closeForm()
+      loadInventory()
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to save item',
+        description: error?.message || 'Unknown error',
+      })
+    }
+  }
+
+  const handleDelete = async (id: string | number) => {
+    if (!(await appConfirm('Move this item to Trash? You can restore it within 30 days.'))) return
+
+    try {
+      if (online) {
+        await inventoryApi.delete(String(id))
+      } else {
+        await db.products.delete(String(id))
+        await queueMutation('products', 'delete', String(id))
+      }
+      toast({ title: 'Item deleted successfully' })
+      loadInventory()
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to delete item',
+        description: error?.message || 'Unknown error',
+      })
+    }
+  }
+
+  const openStockAdjust = (item: InventoryItem, adjustmentType: StockAdjustmentType = 'stock_in') => {
+    if (adjustmentType === 'stock_in' ? !hasPermission('canRecordStockIn') && !canAdjustStockOut : !canAdjustStockOut) {
+      toast({ variant: 'destructive', title: adjustmentType === 'stock_in' ? 'You do not have permission to record stock received' : 'You do not have permission to adjust stock out' })
+      return
+    }
+    if (!online) {
+      toast({ variant: 'destructive', title: 'Stock adjustment requires an internet connection' })
+      return
+    }
+    setStockAdjust({
+      item,
+      adjustmentType,
+      quantity: '',
+      unitId: '',
+      reason: adjustmentType === 'stock_in' ? 'Restock' : '',
+    })
+  }
+
+  useEffect(() => {
+    const productId = searchParams.get('productId')
+    const requestedAction = searchParams.get('stockAction')
+    if (!productId || (requestedAction !== 'stock_in' && requestedAction !== 'stock_out')) {
+      handledStockLink.current = null
+      return
+    }
+    const requestKey = `${productId}:${requestedAction}`
+    if (handledStockLink.current === requestKey) return
+    handledStockLink.current = requestKey
+
+    let cancelled = false
+    const openLinkedProduct = async () => {
+      try {
+        const item = online
+          ? await inventoryApi.get(productId)
+          : (await getLocalProducts(undefined, undefined, 'product')).find(product => String(product.id) === productId)
+        if (!cancelled && item) openStockAdjust(item, requestedAction)
+        else if (!cancelled) toast({ variant: 'destructive', title: 'Product not found', description: 'This notification may refer to a product that is no longer available.' })
+      } catch (error: any) {
+        if (!cancelled) toast({ variant: 'destructive', title: 'Unable to open product stock form', description: error?.message || 'Please open the product from inventory and try again.' })
+      } finally {
+        if (!cancelled) {
+          const next = new URLSearchParams(searchParams)
+          next.delete('productId')
+          next.delete('stockAction')
+          setSearchParams(next, { replace: true })
+        }
+      }
+    }
+
+    void openLinkedProduct()
+    return () => {
+      cancelled = true
+      if (handledStockLink.current === requestKey) handledStockLink.current = null
+    }
+  }, [searchParams, online, setSearchParams, toast])
+
+  const closeStockAdjust = () => {
+    setStockAdjust(null)
+    setStockAdjustSaving(false)
+  }
+
+  const handleStockAdjustSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!stockAdjust) return
+
+    const quantity = Number(stockAdjust.quantity)
+    if (!isValidStockQuantity(quantity, false)) {
+      toast({ variant: 'destructive', title: 'Enter a positive quantity with no more than 3 decimal places' })
+      return
+    }
+    const selectedUnit = (stockAdjust.item as any).units?.find((unit: any) => unit.id === stockAdjust.unitId)
+    const isContentsUnit = stockAdjust.unitId === '__contents_unit__'
+    const contentsPerBaseUnit = Number((stockAdjust.item as any).contentsPerBaseUnit || 0)
+    const contentsFactor = isContentsUnit && contentsPerBaseUnit > 0 ? 1 / contentsPerBaseUnit : null
+    if (isContentsUnit && !contentsFactor) {
+      toast({ variant: 'destructive', title: 'This product has no valid package-content conversion.' })
+      return
+    }
+    const baseQuantity = toStockPrecision(quantity * Number(contentsFactor || selectedUnit?.conversionFactor || 1))
+    if (!isValidStockQuantity(baseQuantity, false, 6)) {
+      toast({ variant: 'destructive', title: 'The selected unit converts to more than 6 decimal places of base stock' })
+      return
+    }
+    if (stockAdjust.adjustmentType === 'stock_out' && baseQuantity > Number(stockAdjust.item.quantity || 0)) {
+      toast({ variant: 'destructive', title: 'Stock out cannot exceed current stock' })
+      return
+    }
+
+    setStockAdjustSaving(true)
+    try {
+      await inventoryApi.adjustStock(String(stockAdjust.item.id), {
+        adjustmentType: stockAdjust.adjustmentType,
+        quantity: baseQuantity,
+        enteredQuantity: quantity,
+        unitId: stockAdjust.unitId && !isContentsUnit ? stockAdjust.unitId : undefined,
+        stockUnitName: isContentsUnit ? (stockAdjust.item as any).contentsUnit : undefined,
+        reason: stockAdjust.reason.trim() || undefined,
+        branchId: stockAdjust.item.branchId || stockAdjust.item.branch?.id || null,
+      })
+      toast({ title: stockAdjust.adjustmentType === 'stock_in' ? 'Stock received' : 'Stock adjusted' })
+      closeStockAdjust()
+      loadInventory()
+    } catch (error: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to adjust stock',
+        description: error?.message || 'Unknown error',
+      })
+    } finally {
+      setStockAdjustSaving(false)
+    }
+  }
+
+  const openPriceHistory = async (item: InventoryItem) => {
+    setPriceHistory({ item, rows: [], loading: true })
+    try {
+      const rows = await inventoryApi.getPriceHistory(String(item.id))
+      setPriceHistory({ item, rows, loading: false })
+    } catch (error: any) {
+      setPriceHistory({ item, rows: [], loading: false })
+      toast({
+        variant: 'destructive',
+        title: 'Failed to load price history',
+        description: error?.message || 'Unknown error',
+      })
+    }
+  }
+
+  const openEditForm = (item: InventoryItem) => {
+    void loadProductAttributeOptions()
+    setEditingItem(item)
+    setFormData({
+      product_id: item.product_id || '',
+      linkedItemIds: (item.itemType === 'service' ? item.includedInProducts : item.includedServices)?.map(link => link.id) || [],
+      product_name: item.product_name || '',
+      quantity: item.quantity || 0,
+      unit_price: item.unit_price || 0,
+      cost_price: item.cost_price || 0,
+      low_stock_alert: item.low_stock_alert || 5,
+      barcode: (item as any).barcode || '',
+      size: (item as any).size || '',
+      brand: (item as any).brand || '',
+      design: (item as any).design || '',
+      sku: (item as any).sku || '',
+      batchNumber: (item as any).batchNumber || '',
+      expiryDate: (item as any).expiryDate ? String((item as any).expiryDate).slice(0, 10) : '',
+      categoryId: (item as any).categoryId ? String((item as any).categoryId) : '',
+      branchId: (item as any).branchId || (item as any).branch?.id || (branches.length === 1 ? branches[0].id : ''),
+      baseUnit: (item as any).baseUnit || 'Piece',
+      contentsPerBaseUnit: (item as any).contentsPerBaseUnit ?? '',
+      contentsUnit: (item as any).contentsUnit || '',
+      itemType: item.itemType || 'product',
+      description: (item as any).description || '',
+      estimatedHours: item.estimatedHours ?? '',
+      duration: item.duration || '',
+    })
+    setOpeningStockUnitName('')
+    // Load selling units for this product
+    const units = (item as any).units || []
+    setSellingUnits(units.map((u: any) => ({ id: u.id, unitName: u.unitName, conversionFactor: u.conversionFactor, sellingPrice: u.sellingPrice, isDefault: u.isDefault })))
+    setCategoryOpen(false)
+    setCategoryQuery('')
+    setShowForm(true)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
+  }
+
+  const handlePrintBarcode = (item: Pick<InventoryItem, 'product_name' | 'barcode' | 'size' | 'brand' | 'design'>) => {
+    try {
+      const opened = printProductBarcode({
+        name: item.product_name,
+        barcode: item.barcode,
+        size: item.size,
+        brand: item.brand,
+        design: item.design,
+      })
+      if (!opened) toast({ variant: 'destructive', title: item.barcode ? 'Allow pop-ups to print the barcode label' : 'This item has no barcode to print' })
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Barcode could not be printed', description: error?.message || 'Use a valid EAN-13 barcode.' })
+    }
+  }
+
+  const openNewForm = () => {
+    void loadProductAttributeOptions()
+    setEditingItem(null)
+    setFormData({
+      ...initialFormData,
+      itemType: lockedType || 'product',
+      ...(isServicesPage ? { quantity: 0, cost_price: 0, low_stock_alert: 0, baseUnit: 'Service' } : {}),
+      branchId: defaultBranchId(user, branches),
+    })
+    setSellingUnits([])
+    setOpeningStockUnitName('')
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setCategoryOpen(false)
+    setCategoryQuery('')
+    setShowForm(true)
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingItem(null)
+    setFormData(initialFormData)
+    setSellingUnits([])
+    setOpeningStockUnitName('')
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setShowBarcodeScanner(false)
+    setScannerFailed(false)
+    setCategoryOpen(false)
+    setCategoryQuery('')
+  }
+
+  const addSellingUnit = () => {
+    if (!newUnit.unitName || newUnit.conversionFactor <= 0) return
+    const packageFactor = unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
+    setSellingUnits(prev => [...prev, { ...newUnit, conversionFactor: packageFactor || newUnit.conversionFactor }])
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+  }
+
+  const removeSellingUnit = (idx: number) => {
+    setSellingUnits(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const selectedCategory = categories.find(
+    (category) => String(category.id) === formData.categoryId
+  )
+
+  const filteredCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLowerCase()
+
+    if (!query) return categories
+
+    return categories.filter((category) =>
+      category.name.toLowerCase().includes(query)
+    )
+  }, [categories, categoryQuery])
+
+  const branchNameById = useMemo(() => {
+    return new Map(branches.map((branch) => [String(branch.id), branch.name]))
+  }, [branches])
+
+  const movementParams = useMemo(
+    () => movementParamsForPreset(movementPreset, customMovementDate),
+    [movementPreset, customMovementDate]
+  )
+
+  const movementPeriodLabel = useMemo(() => {
+    if (movementPreset === 'today') return 'Today'
+    if (movementPreset === 'yesterday') return 'Yesterday'
+    if (movementPreset === 'week') return 'This Week'
+    return customMovementDate ? new Date(customMovementDate).toLocaleDateString() : 'Custom Date'
+  }, [movementPreset, customMovementDate])
+
+  const movementForItem = (item: InventoryItem) => item.dailyMovement || defaultMovementForItem(item)
+
+  const statusForItem = (item: InventoryItem, movement = movementForItem(item)) => {
+    if (item.isActive === false) return 'Archived'
+    if (item.itemType === 'service') return 'Service'
+    if (movement.currentStock <= 0) return 'Out of Stock'
+    if (movement.currentStock <= item.low_stock_alert) return 'Low Stock'
+    return 'In Stock'
+  }
+
+  const movementMetricForCard = (item: InventoryItem, kind: MovementCardKind) => {
+    const movement = movementForItem(item)
+    if (kind === 'products_sold') return movement.soldToday > 0 ? 1 : 0
+    if (kind === 'units_sold') return movement.soldToday
+    if (kind === 'receivable_units') return movement.receivableSold
+    if (kind === 'stock_received') return movement.stockIn
+    if (kind === 'other_stock_out') return movement.otherStockOut
+    if (kind === 'returns') return movement.returns
+    if (item.isActive === false || item.itemType === 'service') return 0
+    if (kind === 'low_stock') return movement.currentStock <= item.low_stock_alert ? 1 : 0
+    if (kind === 'out_of_stock') return movement.currentStock <= 0 ? 1 : 0
+    return 0
+  }
+
+  const detailRowsForCard = (item: InventoryItem, kind: MovementCardKind) => {
+    const movement = movementForItem(item)
+    const baseRows = kind === 'stock_received'
+      ? movement.stockInDetails || []
+      : kind === 'other_stock_out'
+        ? movement.otherStockOutDetails || []
+        : kind === 'returns'
+          ? movement.returnDetails || []
+          : kind === 'receivable_units'
+            ? (movement.soldDetails || []).filter((row) => String(row.type || '').toLowerCase().includes('receivable'))
+            : kind === 'products_sold' || kind === 'units_sold'
+              ? movement.soldDetails || []
+              : []
+
+    return baseRows.map((row) => ({
+      ...row,
+      productName: `${row.productName || item.product_name}${item.isActive === false ? ' (Archived)' : ''}`,
+      productSku: row.productSku || item.product_id || item.sku || '',
+      branchName: row.branchName || item.branch?.name || branchNameById.get(String(item.branchId || '')) || '',
+    }))
+  }
+
+  const buildMovementProductRow = (item: InventoryItem, metric: number) => {
+    const movement = movementForItem(item)
+    return {
+      id: item.id,
+      name: `${item.product_name}${item.isActive === false ? ' (Archived)' : ''}`,
+      sku: item.product_id || item.sku || '-',
+      category: item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-',
+      branch: item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-',
+      metric,
+      openingStock: movement.openingStock,
+      stockIn: movement.stockIn,
+      soldToday: movement.soldToday,
+      receivableSold: movement.receivableSold,
+      otherStockOut: movement.otherStockOut,
+      returns: movement.returns,
+      closingStock: movement.closingStock,
+      currentStock: movement.currentStock,
+      lowStockAlert: item.low_stock_alert,
+      status: statusForItem(item, movement),
+    }
+  }
+
+  const openMovementModal = (item: InventoryItem, kind: 'sold' | 'other' | 'stock_in') => {
+    const cardKind: MovementCardKind = kind === 'sold' ? 'units_sold' : kind === 'stock_in' ? 'stock_received' : 'other_stock_out'
+    const movement = movementForItem(item)
+    const total = kind === 'sold' ? movement.soldToday : kind === 'stock_in' ? movement.stockIn : movement.otherStockOut
+
+    setMovementModal({
+      title: `${item.product_name} - ${kind === 'sold' ? 'Sold' : kind === 'stock_in' ? 'Stock In' : 'Other Stock Out'}`,
+      rows: detailRowsForCard(item, cardKind),
+      total,
+      summaryLabel: kind === 'sold' ? 'Units' : 'Quantity',
+      productRows: [buildMovementProductRow(item, total)],
+    })
+  }
+
+  const openMovementCardModal = (card: MovementCardConfig) => {
+    const productRows = movementItems
+      .map((item) => ({ item, metric: movementMetricForCard(item, card.id) }))
+      .filter(({ metric }) => metric > 0)
+      .map(({ item, metric }) => buildMovementProductRow(item, metric))
+
+    const rows = movementItems.flatMap((item) => detailRowsForCard(item, card.id))
+
+    setMovementModal({
+      title: `${card.label} - ${movementPeriodLabel}`,
+      rows,
+      total: card.value,
+      summaryLabel: card.summaryLabel,
+      productRows,
+    })
+  }
+
+  const movementCards: MovementCardConfig[] = [
+    { id: 'products_sold', label: 'Products Sold', value: movementSummary.productsSold, summaryLabel: 'Products' },
+    { id: 'units_sold', label: 'Units Sold', value: movementSummary.unitsSold, summaryLabel: 'Units' },
+    { id: 'receivable_units', label: 'Receivable Units', value: movementSummary.receivableUnitsSold, summaryLabel: 'Credit Units' },
+    { id: 'stock_received', label: 'Stock Received', value: movementSummary.stockReceived, summaryLabel: 'Units' },
+    { id: 'other_stock_out', label: 'Other Stock Out', value: movementSummary.otherStockOut, summaryLabel: 'Units' },
+    { id: 'returns', label: 'Returns', value: movementSummary.returns, summaryLabel: 'Units' },
+    { id: 'low_stock', label: 'Low Stock', value: movementSummary.lowStockProducts, summaryLabel: 'Products' },
+    { id: 'out_of_stock', label: 'Out of Stock', value: movementSummary.outOfStockProducts, summaryLabel: 'Products' },
+  ]
+
+  const stockAdjustQuantity = Number(stockAdjust?.quantity || 0)
+  const stockAdjustProductUnits = (stockAdjust?.item as any)?.units || []
+  const stockAdjustHasContentsUnit = Boolean(
+    stockAdjust
+      && (stockAdjust.item as any).contentsUnit
+      && Number((stockAdjust.item as any).contentsPerBaseUnit) > 0
+      && !stockAdjustProductUnits.some((unit: any) => normalizeUnitKey(unit.unitName) === normalizeUnitKey((stockAdjust.item as any).contentsUnit))
+  )
+  const stockAdjustUnit = stockAdjust?.unitId === '__contents_unit__'
+    ? {
+        id: '__contents_unit__',
+        unitName: (stockAdjust.item as any).contentsUnit,
+        conversionFactor: 1 / Number((stockAdjust.item as any).contentsPerBaseUnit),
+      }
+    : (() => {
+        const unit = stockAdjustProductUnits.find((candidate: any) => candidate.id === stockAdjust?.unitId)
+        if (!unit || !stockAdjust) return unit
+        const factor = unitFactorFromPackageContents(
+          unit.unitName,
+          (stockAdjust.item as any).contentsUnit || '',
+          Number((stockAdjust.item as any).contentsPerBaseUnit || 0),
+        )
+        return factor ? { ...unit, conversionFactor: factor } : unit
+      })()
+  const stockAdjustFactor = Number(stockAdjustUnit?.conversionFactor || 1)
+  const stockAdjustBaseQuantity = toStockPrecision(stockAdjustQuantity * stockAdjustFactor)
+  const stockAdjustProjectedQuantity = stockAdjust
+    ? stockAdjust.adjustmentType === 'stock_in'
+      ? Number(stockAdjust.item.quantity || 0) + (Number.isFinite(stockAdjustBaseQuantity) ? stockAdjustBaseQuantity : 0)
+      : Number(stockAdjust.item.quantity || 0) - (Number.isFinite(stockAdjustBaseQuantity) ? stockAdjustBaseQuantity : 0)
+    : 0
+
+  const priceHistoryUser = (row: ProductPriceHistory) =>
+    [row.changedBy?.fname, row.changedBy?.lname].filter(Boolean).join(' ').trim() || row.changedBy?.email || '-'
+
+  const priceHistorySource = (source?: string | null) =>
+    String(source || 'manual_update').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+
+  const movementPartyName = (row: InventoryMovementDetail) =>
+    row.customerName || row.supplierName || '-'
+
+  const movementPartyMeta = (row: InventoryMovementDetail) =>
+    row.customerPhone || row.supplierPhone || ''
+
+  const movementAmount = (row: InventoryMovementDetail) => {
+    const amount = row.lineTotal ?? row.saleTotal ?? row.purchaseTotal ?? row.returnTotal
+    return amount == null ? '-' : formatCurrency(amount)
+  }
+
+  const movementBalance = (row: InventoryMovementDetail) => {
+    const balance = row.balance ?? row.customerBalance ?? row.supplierBalance
+    return balance == null ? '-' : formatCurrency(balance)
+  }
+
+  const movementContext = (row: InventoryMovementDetail) =>
+    [row.paymentMethod || row.refundMethod, row.status, row.reason].filter(Boolean).join(' / ') || '-'
+
+  const searching = Boolean(searchQuery.trim() || appliedSearch)
+  const movementSummaryCards = (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {movementCards.map((card) => (
+        <button
+          key={card.id}
+          type="button"
+          onClick={() => openMovementCardModal(card)}
+          className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <p className="text-xs font-medium text-muted-foreground">{card.label}</p>
+          <p className="mt-1 text-xl font-bold text-foreground">{formatQty(card.value)}</p>
+          <p className="text-[11px] text-muted-foreground">{movementPeriodLabel}</p>
+        </button>
+      ))}
+    </div>
+  )
+
+  return (
+    <div className="min-w-0 space-y-6 p-4 md:p-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {showHospitalityInventory ? `${hospitalityBusinessLabel} Inventory · ${hospitalityViewLabel[hospitalityView] || 'All stock'}` : urlTab === 'products' ? 'Products' :
+             urlTab === 'services' ? 'Services' :
+             urlTab === 'rentals' ? 'Rental Items' :
+             urlTab === 'lubricants' ? 'Lubricants & Dry Stock' :
+             urlTab === 'convenience' ? 'Convenience Shop' :
+             'Items'}
+          </h1>
+          <p className="text-muted-foreground">
+            {showHospitalityInventory ? hospitalityBusinessType === 'hotel_restaurant' ? 'Manage restaurant, bar and hotel stock in one inventory, with your existing categories, branch controls and movement history.' : 'Manage ingredients, menu stock and supplies using your existing inventory records, categories and movement history.' : urlTab === 'products' ? 'Manage your product inventory' :
+             urlTab === 'services' ? 'Manage service items' :
+             urlTab === 'rentals' ? 'Manage rental items' :
+             urlTab === 'lubricants' ? 'Manage lubricants and dry stock inventory' :
+             urlTab === 'convenience' ? 'Manage convenience shop inventory' :
+             'Manage your products'}
+          </p>
+        </div>
+        {canCreateCurrent && (
+          <Button onClick={openNewForm}>
+            <Plus className="mr-2 h-4 w-4" />
+            {isServicesPage ? 'Add Service' : showHospitalityInventory ? 'Add Stock Item' : lockedType === 'product' ? 'Add Product' : 'Add Item'}
+          </Button>
+        )}
+      </div>
+
+      {showHospitalityInventory && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label="Hospitality inventory views">
+        <div><h2 className="font-semibold">{hospitalityBusinessLabel} stock</h2><p className="text-sm text-muted-foreground">Recipe ingredients and menu items are linked from Recipes & Ingredients and Menu & Pricing. Other stock stays in this same inventory; use your categories to distinguish hotel areas such as housekeeping, minibar and room supplies.</p></div>
+        <div className="flex max-w-full gap-2 overflow-x-auto pb-1" role="group" aria-label="Filter hospitality stock">
+          {([['all', 'All stock'], ['ingredients', 'Recipe ingredients'], ['menu', 'Menu items'], ['bar', 'Bar stock'], ['supplies', 'Unlinked stock']] as const).map(([value, label]) => <button key={value} type="button" disabled={!hospitalityClassificationsLoaded && value !== 'all'} onClick={() => setSearchParams(current => {
+            const next = new URLSearchParams(current)
+            if (value === 'all') next.delete('hospitalityView')
+            else next.set('hospitalityView', value)
+            return next
+          })} aria-pressed={(hospitalityView === value || (value === 'all' && !['ingredients', 'menu', 'bar', 'supplies'].includes(hospitalityView))) ? 'true' : 'false'} className={cn('shrink-0 rounded-md border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50', (hospitalityView === value || (value === 'all' && !['ingredients', 'menu', 'bar', 'supplies'].includes(hospitalityView))) ? 'border-primary bg-primary/10 text-primary' : 'border-input bg-background text-muted-foreground hover:bg-muted')}>
+            {label}
+          </button>)}
+        </div>
+        {hospitalityView !== 'all' && !hospitalityClassificationsLoaded && <p className="text-xs text-muted-foreground">Loading recipe and menu links…</p>}
+      </section>}
+
+      <UsageLimitBanner resource="products" label={isServicesPage ? 'Services' : 'Products'} currentCount={items.length} />
+
+      {/* Search + Filters */}
+      <form onSubmit={handleSearch} role="search" aria-label={isServicesPage ? 'Service search' : 'Product search'} className="flex min-w-0 flex-wrap gap-2">
+        <div className="flex w-full min-w-0 gap-2 sm:w-auto sm:min-w-72 sm:flex-1">
+          <div className="relative min-w-0 flex-1">
+            <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label={isServicesPage ? 'Search services' : 'Search products'}
+              aria-controls="inventory-results"
+              autoComplete="off"
+              enterKeyHint="search"
+              placeholder={isServicesPage ? 'Search services...' : 'Search items...'}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="min-w-0 pl-9 pr-10"
+            />
+            {searchQuery && (
+              <button type="button" aria-label={isServicesPage ? 'Clear service search' : 'Clear product search'} title="Clear search"
+                className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md hover:bg-muted"
+                onClick={() => { setSearchQuery(''); setAppliedSearch(''); resetPage() }}>
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <Button type="submit" variant="secondary">Search</Button>
+        </div>
+        {!lockedType && (
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setItemTypeFilter('all')}
+            className={cn(
+              "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+              itemTypeFilter === 'all'
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            )}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => setItemTypeFilter('product')}
+            className={cn(
+              "flex items-center gap-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+              itemTypeFilter === 'product'
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <Package className="h-3.5 w-3.5" />
+            Products
+          </button>
+        </div>
+        )}
+        {branches.length > 0 && (
+          <select
+            value={branchFilter}
+            onChange={(event) => setBranchFilter(event.target.value)}
+            className="h-10 min-w-44 rounded-md border border-input bg-background px-3 py-2 text-sm"
+            aria-label="Filter by branch"
+          >
+            <option value="">All branches</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>{branch.name}</option>
+            ))}
+          </select>
+        )}
+        {!isServicesPage && <div className="flex flex-wrap gap-1">
+          {([
+            ['today', 'Today'],
+            ['yesterday', 'Yesterday'],
+            ['week', 'This Week'],
+            ['custom', 'Custom Date'],
+          ] as Array<[MovementPreset, string]>).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setMovementPreset(value)}
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                movementPreset === value
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-input bg-background text-muted-foreground hover:bg-muted"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>}
+        {!isServicesPage && movementPreset === 'custom' && (
+          <Input
+            type="date"
+            value={customMovementDate}
+            onChange={(event) => setCustomMovementDate(event.target.value)}
+            className="h-10 w-auto"
+          />
+        )}
+        <button
+          type="button"
+          onClick={() => setShowUncategorizedOnly(!showUncategorizedOnly)}
+          className={cn(
+            "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+            showUncategorizedOnly
+              ? "border-yellow-300 bg-yellow-100 text-yellow-700"
+              : "border-input bg-background text-muted-foreground hover:bg-muted"
+          )}
+        >
+          {showUncategorizedOnly ? '✓ Uncategorized Only' : 'Show Uncategorized'}
+        </button>
+      </form>
+
+      {!online && !isServicesPage && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <WifiOff className="h-4 w-4" />
+          Daily movement figures are available when the device is online.
+        </div>
+      )}
+
+      {!searching && !isServicesPage && movementSummaryCards}
+
+      {/* Add/Edit Form */}
+      {showForm && (
+        <Card ref={formRef as any}>
+          <CardHeader>
+            <CardTitle>{isServicesPage ? (editingItem ? 'Edit Service' : 'Add Service') : (editingItem ? 'Edit Item' : 'Add New Item')}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
+              {hasFeature('service.job_cards') && ['product', 'service'].includes(formData.itemType) && <IncludedServicesPicker itemType={formData.itemType} branchId={formData.branchId} value={formData.linkedItemIds} onChange={linkedItemIds => setFormData(prev => ({ ...prev, linkedItemIds }))} />}
+              {/* Item Type Toggle - removed service/rental, only product */}
+              {!lockedType && (
+              <div className="sm:col-span-2 space-y-2">
+                <Label>Item Type <span className="text-red-500">*</span></Label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, itemType: 'product' }))}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors",
+                      formData.itemType === 'product'
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-input bg-background text-muted-foreground hover:bg-muted"
+                    )}
+                  >
+                    <Package className="h-4 w-4" />
+                    Product
+                  </button>
+                </div>
+              </div>
+              )}
+
+              {/* Common: Name */}
+              <div className="space-y-2">
+                <Label htmlFor="product_name">{isServicesPage ? 'Service Name' : 'Product Name'}</Label>
+                <Input
+                  id="product_name"
+                  value={formData.product_name}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, product_name: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+
+              {/* Common: Selling Price */}
+              <div className="space-y-2">
+                <Label htmlFor="unit_price">{isServicesPage ? 'Service Price' : 'Current Selling Price'}</Label>
+                <Input
+                  id="unit_price"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={formData.unit_price}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      unit_price: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  required
+                />
+              </div>
+
+              {isServicesPage && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="service-hours">Estimated Hours</Label>
+                    <Input id="service-hours" type="number" min="0" step="0.25"
+                      value={formData.estimatedHours}
+                      onChange={event => setFormData(prev => ({ ...prev, estimatedHours: event.target.value === '' ? '' : Number(event.target.value) }))} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="service-duration">Duration / Billing Period</Label>
+                    <Input id="service-duration" value={formData.duration}
+                      onChange={event => setFormData(prev => ({ ...prev, duration: event.target.value }))} />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="service-description">Service Description</Label>
+                    <Textarea id="service-description" aiWritingField rows={3}
+                      value={formData.description}
+                      onChange={event => setFormData(prev => ({ ...prev, description: event.target.value }))} />
+                  </div>
+                </>
+              )}
+
+              {/* Product fields */}
+              {formData.itemType === 'product' && multiUnitEnabled && (
+                <>
+              <div className="space-y-2">
+                <Label htmlFor="product_id">SKU / Product ID</Label>
+                <Input
+                  id="product_id"
+                  value={formData.product_id || 'Auto-generated from product name'}
+                  disabled
+                  className="bg-muted/50"
+                />
+                <p className="text-xs text-muted-foreground">A unique SKU will be generated automatically when the item is saved, using the category and product name with a dynamic identifier.</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="barcode">Barcode (optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="barcode"
+                    value={formData.barcode}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, barcode: e.target.value }))
+                    }
+                    placeholder="Leave blank to generate automatically"
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => { setShowBarcodeScanner(!showBarcodeScanner); if (!showBarcodeScanner) setScannerFailed(false) }}
+                  >
+                    <ScanBarcode className="h-4 w-4" />
+                  </Button>
+                </div>
+                {showBarcodeScanner && (
+                  <div className="mt-2">
+                    <BarcodeScanner
+                      onScan={(code) => {
+                        setFormData((prev) => ({ ...prev, barcode: code }))
+                        setShowBarcodeScanner(false)
+                        setScannerFailed(false)
+                        toast({ title: 'Barcode captured', description: code })
+                      }}
+                      onClose={() => setShowBarcodeScanner(false)}
+                      onFail={() => { setShowBarcodeScanner(false); setScannerFailed(true) }}
+                      placeholder="Scan barcode for this item..."
+                    />
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">Leave blank to generate a unique printable EAN-13 barcode when you save this product.</p>
+              </div>
+              <CreatableProductAttribute id="product-size" label="Size" value={formData.size} options={productAttributeOptions.sizes} placeholder="Choose or type a size" onChange={size => setFormData(prev => ({ ...prev, size }))} />
+              <CreatableProductAttribute id="product-brand" label="Brand" value={formData.brand} options={productAttributeOptions.brands} placeholder="Choose or type a brand" onChange={brand => setFormData(prev => ({ ...prev, brand }))} />
+              <CreatableProductAttribute id="product-design" label="Design" value={formData.design} options={productAttributeOptions.designs} placeholder="Choose or type a design" onChange={design => setFormData(prev => ({ ...prev, design }))} />
+                </>
+              )}
+
+              {formData.itemType === 'product' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="batchNumber">Batch Number</Label>
+                    <Input
+                      id="batchNumber"
+                      value={formData.batchNumber}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, batchNumber: e.target.value }))}
+                      placeholder="e.g. BATCH-001"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expiryDate">Expiry Date</Label>
+                    <Input
+                      id="expiryDate"
+                      type="date"
+                      value={formData.expiryDate}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, expiryDate: e.target.value }))}
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Category - shared but filtered by type */}
+              <div className="space-y-2">
+                <Label>Category <span className="text-red-500">*</span></Label>
+
+                <div className="relative" ref={categoryPickerRef}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-label="Category"
+                    aria-expanded={categoryOpen}
+                    className={cn("h-auto min-h-10 w-full justify-between whitespace-normal", !formData.categoryId && "border-red-500")}
+                    onClick={() => setCategoryOpen((current) => !current)}
+                  >
+                    <span className={cn("min-w-0 break-words text-left", !selectedCategory && "text-muted-foreground")}>
+                      {selectedCategory?.name || "Select category"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                  </Button>
+
+                  {categoryOpen && (
+                    <div className="absolute left-0 right-0 z-50 mt-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg">
+                      <div className="relative mb-2">
+                        <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          autoFocus
+                          aria-label="Search categories"
+                          maxLength={160}
+                          value={categoryQuery}
+                          onChange={(e) => setCategoryQuery(e.target.value)}
+                          onKeyDown={event => { if (event.key === 'Enter') event.preventDefault() }}
+                          placeholder="Search category..."
+                          className="pl-8"
+                        />
+                      </div>
+
+                      <div className="max-h-60 overflow-y-auto pr-1">
+                        {categoriesLoading ? (
+                          <p role="status" className="px-2 py-4 text-sm text-muted-foreground">Loading categories...</p>
+                        ) : categoriesError ? (
+                          <div role="alert" className="space-y-2 p-2 text-sm">
+                            <p>{categoriesError}</p>
+                            <Button type="button" variant="outline" onClick={loadCategories}>Retry</Button>
+                          </div>
+                        ) : filteredCategories.length === 0 ? (
+                          <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                            {categories.length === 0
+                              ? 'No categories available'
+                              : 'No category found'}
+                          </div>
+                        ) : (
+                          filteredCategories.map((category) => {
+                            const categoryId = String(category.id)
+                            const isSelected = formData.categoryId === categoryId
+
+                            return (
+                              <button
+                                key={categoryId}
+                                type="button"
+                                className={cn(
+                                  "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
+                                  isSelected && "bg-muted font-medium"
+                                )}
+                                onClick={() => {
+                                  setFormData((prev) => ({
+                                    ...prev,
+                                    categoryId,
+                                  }))
+                                  setCategoryQuery('')
+                                  setCategoryOpen(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "h-4 w-4",
+                                    isSelected ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <span className="min-w-0 flex-1 break-words">{category.name}</span>
+                              </button>
+                            )
+                          })
+                        )}
+                      </div>
+                      {canCreateCategory && categoryQuery.trim() && !categoriesLoading && !categoriesError &&
+                        !categories.some(category => category.name.toLowerCase() === categoryQuery.trim().replace(/\s+/g, ' ').toLowerCase()) && (
+                        <Button type="button" variant="outline" disabled={categorySaving || !online}
+                          className="mt-2 h-auto min-h-10 w-full justify-start whitespace-normal text-left"
+                          onClick={createCategory}>
+                          <Plus className="h-4 w-4 shrink-0" />
+                          <span className="min-w-0 break-words">{categorySaving ? 'Saving category...' : `Create ${categoryType} category: ${categoryQuery.trim()}`}</span>
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {canManageInventory && (
+                <div className="space-y-2">
+                  <Label htmlFor="branchId">Branch</Label>
+                  <select
+                    id="branchId"
+                    value={formData.branchId}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, branchId: e.target.value }))
+                    }
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    disabled={branches.length === 0}
+                    required
+                  >
+                    <option value="">
+                      {branches.length === 0 ? 'No active branches' : 'Select branch'}
+                    </option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>{branch.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Product: Quantity, Low Stock, Cost Price, Base Unit */}
+              {formData.itemType === 'product' && (
+                <>
+              {editingItem ? (
+                <div className="space-y-2">
+                  <Label>Current Stock</Label>
+                  <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
+                    <span className="font-semibold tabular-nums">
+                      {formatQty(editingItem.quantity)} {formData.baseUnit || 'Piece'}
+                    </span>
+                    {canAdjustStock && (
+                      <Button type="button" variant="secondary" size="sm" onClick={() => openStockAdjust(editingItem, 'stock_in')}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Stock In
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="quantity">Opening Stock <span className="text-red-500">*</span></Label>
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(120px,0.8fr)] gap-2">
+                    <Input
+                      id="quantity"
+                      type="number"
+                      min="0"
+                      step="0.001"
+                      required
+                      value={formData.quantity}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          quantity: e.target.value === '' ? '' : parseFloat(e.target.value),
+                        }))
+                      }
+                    />
+                    <select value={openingStockUnitName} onChange={event => setOpeningStockUnitName(event.target.value)} className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm">
+                      <option value="">{formData.baseUnit || 'Piece'} (base)</option>
+                      {sellingUnits.map(unit => <option key={unit.unitName} value={unit.unitName}>{unit.unitName}</option>)}
+                      {formData.contentsUnit && Number(formData.contentsPerBaseUnit) > 0 && !sellingUnits.some(unit => normalizeUnitKey(unit.unitName) === normalizeUnitKey(formData.contentsUnit)) && <option value={formData.contentsUnit}>{formData.contentsUnit}</option>}
+                    </select>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {openingStockUnitName ? `1 ${openingStockUnitName} = ${openingStockFactor} ${formData.baseUnit || 'Piece'}. ` : ''}
+                    Inventory is stored as {formatQty(openingStockBaseQuantity)} {formData.baseUnit || 'Piece'}.
+                  </p>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="low_stock_alert">Low Stock Alert</Label>
+                <Input
+                  id="low_stock_alert"
+                  type="number"
+                  min="0"
+                  value={formData.low_stock_alert}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      low_stock_alert: parseInt(e.target.value) || 5,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cost_price">Current Cost Price <span className="text-red-500">*</span></Label>
+                <Input
+                  id="cost_price"
+                  type="number"
+                  min="0"
+                  step="any"
+                  required
+                  value={formData.cost_price}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      cost_price: e.target.value === '' ? '' : parseFloat(e.target.value),
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="baseUnit">Base Unit</Label>
+                <Input
+                  id="baseUnit"
+                  value={formData.baseUnit}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, baseUnit: e.target.value }))
+                  }
+                  placeholder="e.g. Piece, Carton, Box, Dose, Packet"
+                />
+              </div>
+              {canDefinePackageContents(formData.baseUnit) && <div className="space-y-2 sm:col-span-2 rounded-md border border-primary/20 bg-primary/5 p-3">
+                <Label>Contents in each {formData.baseUnit}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {requiresPackageContents(formData.baseUnit)
+                    ? `Enter how many inner units one ${formData.baseUnit} contains.`
+                    : `Optional: define the smaller unit contained in one ${formData.baseUnit}. Enter the actual package contents; JibuSales will not assume a count.`}
+                </p>
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(120px,0.8fr)] gap-2">
+                  <Input type="number" min="0.000001" step="any" value={formData.contentsPerBaseUnit} onChange={event => setFormData(prev => ({ ...prev, contentsPerBaseUnit: event.target.value === '' ? '' : Number(event.target.value) }))} placeholder="Number inside" aria-label={`Number of inner units per ${formData.baseUnit}`}/>
+                  <Input value={formData.contentsUnit} onChange={event => setFormData(prev => ({ ...prev, contentsUnit: event.target.value }))} placeholder="Inner unit, e.g. Piece" aria-label="Inner unit name"/>
+                </div>
+              </div>}
+                </>
+              )}
+
+              {/* Selling Units - product only */}
+              {formData.itemType === 'product' && (
+              <div className="sm:col-span-2 space-y-3 border rounded-lg p-4">
+                <Label className="text-base font-semibold">Selling Units (Multi-UOM)</Label>
+                <p className="text-xs text-muted-foreground">Add different selling units with conversion factors and prices. Stock is tracked in the base unit ({formData.baseUnit || 'Piece'}).</p>
+                <p className="text-xs text-muted-foreground">Factor means base units per 1 selling unit. Examples: with kg as the base, Half kg = 0.5 and Quarter kg = 0.25. With Piece as the base, if one Dose contains 12 pieces, Dose = 12 and Half dose = 6. These conversions are used for stock and cost.</p>
+                {sellingUnits.length > 0 && (
+                  <div className="space-y-2">
+                    {sellingUnits.map((u, idx) => (
+                      <div key={idx} className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
+                        <span className="flex-1 text-sm font-medium">{u.unitName}</span>
+                        <span className="text-xs text-muted-foreground">{unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) || u.conversionFactor} {formData.baseUnit}</span>
+                        <span className="text-sm">{formatCurrency(u.sellingPrice)}</span>
+                        {u.isDefault && <span className="text-xs text-primary font-medium">Default</span>}
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeSellingUnit(idx)}><Trash2 className="h-3 w-3" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex-1 min-w-[120px]">
+                    <Label className="text-xs">Unit Name</Label>
+                    <Input value={newUnit.unitName} onChange={e => setNewUnit(prev => ({ ...prev, unitName: e.target.value }))} placeholder="e.g. Half KG" className="h-8 text-sm" />
+                  </div>
+                  <div className="w-36">
+                    <Label className="text-xs">Base units per selling unit</Label>
+                    <Input type="number" step="any" min="0.000001" value={unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" readOnly={Boolean(unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)))} />
+                  </div>
+                  <div className="w-28">
+                    <Label className="text-xs">Price</Label>
+                    <Input type="number" step="any" min="0" value={newUnit.sellingPrice} onChange={e => setNewUnit(prev => ({ ...prev, sellingPrice: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" />
+                  </div>
+                  <label className="flex items-center gap-1 text-xs h-8">
+                    <input type="checkbox" checked={newUnit.isDefault} onChange={e => setNewUnit(prev => ({ ...prev, isDefault: e.target.checked }))} className="rounded" />
+                    Default
+                  </label>
+                  <Button type="button" variant="secondary" size="sm" onClick={addSellingUnit} className="h-8" disabled={!newUnit.unitName || newUnit.conversionFactor <= 0}>
+                    <Plus className="h-3 w-3 mr-1" />Add
+                  </Button>
+                </div>
+              </div>
+              )}
+
+              <div className="sm:col-span-2 flex gap-2">
+                <Button type="submit">
+                  {isServicesPage ? (editingItem ? 'Update Service' : 'Add Service') : (editingItem ? 'Update Item' : 'Add Item')}
+                </Button>
+                <Button type="button" variant="outline" onClick={closeForm}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Items Table */}
+      <Card id="inventory-results" role="region" aria-label={isServicesPage ? 'Service search results' : 'Product search results'} aria-busy={loading} className="min-w-0">
+        <CardHeader>
+          <CardTitle role="heading" aria-level={2}>
+            {isServicesPage ? 'Services' : activeType === 'all' ? 'All Items' : 'Products'} ({totalItems})
+          </CardTitle>
+          <p role="status" className="break-words text-sm text-muted-foreground">{loading ? `Loading ${isServicesPage ? 'services' : 'products'}...` : appliedSearch ? `Results for "${appliedSearch}"` : ''}</p>
+        </CardHeader>
+        <CardContent>
+          {inventoryError ? (
+            <div role="alert" className="space-y-3 py-6 text-center">
+              <p className="break-words text-sm text-destructive">{inventoryError}</p>
+              <Button variant="outline" onClick={() => loadInventory()}>Retry</Button>
+            </div>
+          ) : loading && items.length === 0 ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+            </div>
+          ) : totalItems === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground mb-4">No items found</p>
+              {canCreateCurrent && !searching && !showUncategorizedOnly && <Button onClick={openNewForm}>
+                <Plus className="mr-2 h-4 w-4" />
+                {isServicesPage ? 'Add First Service' : lockedType === 'product' ? 'Add First Product' : 'Add First Item'}
+              </Button>}
+            </div>
+          ) : (
+            isServicesPage ? <ServiceList items={paginatedItems} categoryNames={categoryNameById} branchNames={branchNameById}
+              onEdit={canEditCurrent ? openEditForm : undefined}
+              onDelete={canDeleteCurrent ? item => handleDelete(item.id) : undefined}
+              onPriceHistory={canViewPriceHistory ? openPriceHistory : undefined} /> :
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1800px] hidden md:table">
+                <thead>
+                  <tr className="border-b text-left">
+                    {!lockedType && <th className="pb-3 pr-4 font-medium whitespace-nowrap">Type</th>}
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">SKU</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Name</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Category</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Branch</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Opening Stock</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Stock In</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Sold Today</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Other Stock Out</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Returns</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Batch</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Expiry</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Cost</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Price</th>
+                    <th className="pb-3 pr-4 font-medium whitespace-nowrap">Status</th>
+                    <th className="pb-3 pr-4 font-medium text-right whitespace-nowrap">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedItems.map((item) => {
+                    const movement = item.dailyMovement || defaultMovementForItem(item)
+                    const stockStatus = movement.currentStock <= 0
+                      ? 'Out of Stock'
+                      : movement.currentStock <= item.low_stock_alert
+                        ? 'Low Stock'
+                        : 'In Stock'
+                    return (
+                    <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
+                      {!lockedType && (
+                      <td className="py-3 pr-4">
+                        <span className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                          "bg-green-100 text-green-700"
+                        )}
+                        >
+                          <Package className="h-3 w-3" />
+                          Product
+                        </span>
+                      </td>
+                      )}
+                      <td className="py-3 pr-4 whitespace-nowrap">{item.product_id || '-'}</td>
+                      <td className="min-w-40 max-w-xs break-words py-3 pr-4 font-medium [overflow-wrap:anywhere]">
+                        {item.product_name}
+                        {(item.brand || item.size || item.design) && <p className="mt-1 text-xs font-normal text-muted-foreground">{[item.brand, item.size, item.design].filter(Boolean).join(' · ')}</p>}
+                        {item.barcode && <p className="mt-1 text-xs font-normal text-muted-foreground">Barcode: {item.barcode}</p>}
+                      </td>
+                      <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
+                        {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
+                      </td>
+                        <td className="py-3 pr-4 text-sm text-muted-foreground whitespace-nowrap">
+                          {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
+                        </td>
+                      <td className="py-3 pr-4 text-right tabular-nums whitespace-nowrap">{formatQty(movement.openingStock)}</td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => openMovementModal(item, 'stock_in')}
+                          disabled={!movement.stockIn}
+                          className={cn(
+                            "rounded px-2 py-1 text-right font-semibold tabular-nums",
+                            movement.stockIn ? "text-green-700 hover:bg-green-100" : "cursor-default text-muted-foreground"
+                          )}
+                        >
+                          {formatQty(movement.stockIn)}
+                        </button>
+                      </td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => openMovementModal(item, 'sold')}
+                          disabled={!movement.soldToday}
+                          className={cn(
+                            "rounded px-2 py-1 text-right font-semibold tabular-nums",
+                            movement.soldToday ? "text-primary hover:bg-primary/10" : "cursor-default text-muted-foreground"
+                          )}
+                        >
+                          {formatQty(movement.soldToday)}
+                        </button>
+                        {movement.receivableSold > 0 && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {formatQty(movement.receivableSold)} receivable
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => openMovementModal(item, 'other')}
+                          disabled={!movement.otherStockOut}
+                          className={cn(
+                            "rounded px-2 py-1 text-right font-semibold tabular-nums",
+                            movement.otherStockOut ? "text-orange-700 hover:bg-orange-100" : "cursor-default text-muted-foreground"
+                          )}
+                        >
+                          {formatQty(movement.otherStockOut)}
+                        </button>
+                      </td>
+                      <td className="py-3 pr-4 text-right tabular-nums whitespace-nowrap">{formatQty(movement.returns)}</td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
+                        <span className={cn(
+                          "font-bold tabular-nums",
+                          movement.currentStock <= item.low_stock_alert ? "text-orange-600" : ""
+                        )}>
+                          {formatQty(movementPreset === 'today' ? movement.currentStock : movement.closingStock)}
+                        </span>
+                        {movementPreset !== 'today' && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Current today: {formatQty(movement.currentStock)}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 whitespace-nowrap">{(item as any).batchNumber || '-'}</td>
+                      <td className="py-3 pr-4 whitespace-nowrap">{(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}</td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
+                        {formatCurrency(item.cost_price)}
+                      </td>
+                      <td className="py-3 pr-4 text-right whitespace-nowrap">
+                        {formatCurrency(item.unit_price)}
+                      </td>
+                      <td className="py-3 pr-4 whitespace-nowrap">
+                        <span className={cn(
+                          "inline-block rounded px-2 py-0.5 text-xs font-semibold",
+                          stockStatus === 'Out of Stock'
+                            ? "bg-red-100 text-red-700"
+                            : stockStatus === 'Low Stock'
+                              ? "bg-orange-100 text-orange-700"
+                              : "bg-green-100 text-green-700"
+                        )}>
+                          {stockStatus}
+                        </span>
+                        {(item as any).isUncategorized && (
+                          <span className="ml-1 inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                            Uncategorized
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-right">
+                        <div className="relative flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="More actions"
+                            onClick={() => setOpenActionMenu(openActionMenu === item.id ? null : item.id)}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+
+                          {openActionMenu === item.id && (
+                            <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
+                              {canAdjustStock && item.itemType !== 'service' && (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                  onClick={() => {
+                                    setOpenActionMenu(null)
+                                    openStockAdjust(item, 'stock_in')
+                                  }}
+                                >
+                                  <Plus className="h-4 w-4 text-green-700" />
+                                  Stock In
+                                </button>
+                              )}
+                              {canViewPriceHistory && <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  openPriceHistory(item)
+                                }}
+                              >
+                                <History className="h-4 w-4" />
+                                Price History
+                              </button>}
+                              {hasFeature('inventory.barcode_printing') && item.barcode && <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => { setOpenActionMenu(null); handlePrintBarcode(item) }}
+                              >
+                                <Printer className="h-4 w-4" />
+                                Print Barcode
+                              </button>}
+                              {canEditCurrent && (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                  onClick={() => {
+                                    setOpenActionMenu(null)
+                                    openEditForm(item)
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                  Edit
+                                </button>
+                              )}
+                              {canDeleteCurrent && (
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent text-destructive"
+                                  onClick={() => {
+                                    setOpenActionMenu(null)
+                                    handleDelete(item.id)
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+
+              {/* Mobile card layout */}
+              <div className="md:hidden space-y-3">
+                {paginatedItems.map((item) => {
+                  const movement = item.dailyMovement || defaultMovementForItem(item)
+                  const stockStatus = movement.currentStock <= 0
+                    ? 'Out of Stock'
+                    : movement.currentStock <= item.low_stock_alert
+                      ? 'Low Stock'
+                      : 'In Stock'
+                  return (
+                  <div key={item.id} className="rounded-lg border p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="break-words font-medium [overflow-wrap:anywhere]">{item.product_name}</p>
+                        <p className="text-xs text-muted-foreground">{item.product_id || '-'}</p>
+                        {(item.brand || item.size || item.design) && <p className="mt-1 break-words text-xs text-muted-foreground">{[item.brand, item.size, item.design].filter(Boolean).join(' · ')}</p>}
+                        {item.barcode && <p className="mt-1 break-all text-xs text-muted-foreground">Barcode: {item.barcode}</p>}
+                      </div>
+                      <div className="relative shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          title="More actions"
+                          onClick={() => setOpenActionMenu(openActionMenu === item.id ? null : item.id)}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                        {openActionMenu === item.id && (
+                          <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-md border bg-popover p-1 shadow-md">
+                            {canAdjustStock && item.itemType !== 'service' && (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  openStockAdjust(item, 'stock_in')
+                                }}
+                              >
+                                <Plus className="h-4 w-4 text-green-700" />
+                                Stock In
+                              </button>
+                            )}
+                            {canViewPriceHistory && <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                              onClick={() => {
+                                setOpenActionMenu(null)
+                                openPriceHistory(item)
+                              }}
+                            >
+                              <History className="h-4 w-4" />
+                              Price History
+                            </button>}
+                            {hasFeature('inventory.barcode_printing') && item.barcode && <button
+                              type="button"
+                              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                              onClick={() => { setOpenActionMenu(null); handlePrintBarcode(item) }}
+                            >
+                              <Printer className="h-4 w-4" />
+                              Print Barcode
+                            </button>}
+                            {canEditCurrent && (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  openEditForm(item)
+                                }}
+                              >
+                                <Edit className="h-4 w-4" />
+                                Edit
+                              </button>
+                            )}
+                            {canDeleteCurrent && (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent text-destructive"
+                                onClick={() => {
+                                  setOpenActionMenu(null)
+                                  handleDelete(item.id)
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 text-sm [&>div]:min-w-0 [&>div]:break-words">
+                      <div>
+                        <span className="text-muted-foreground">Category: </span>
+                        {item.categoryName || categoryNameById.get(String(item.categoryId || '')) || '-'}
+                      </div>
+                        <div>
+                          <span className="text-muted-foreground">Branch: </span>
+                          {item.branch?.name || branchNameById.get(String(item.branchId || '')) || '-'}
+                        </div>
+                      <div>
+                        <span className="text-muted-foreground">Qty: </span>
+                        <span className={item.quantity <= item.low_stock_alert ? 'text-orange-600 font-bold' : ''}>
+                          {item.quantity}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Opening: </span>
+                        {formatQty(movement.openingStock)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Stock In: </span>
+                        <button
+                          type="button"
+                          disabled={!movement.stockIn}
+                          onClick={() => openMovementModal(item, 'stock_in')}
+                          className={cn("font-semibold", movement.stockIn ? "text-green-700 underline-offset-2 hover:underline" : "text-muted-foreground")}
+                        >
+                          {formatQty(movement.stockIn)}
+                        </button>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Sold Today: </span>
+                        <button
+                          type="button"
+                          disabled={!movement.soldToday}
+                          onClick={() => openMovementModal(item, 'sold')}
+                          className={cn("font-semibold", movement.soldToday ? "text-primary underline-offset-2 hover:underline" : "text-muted-foreground")}
+                        >
+                          {formatQty(movement.soldToday)}
+                        </button>
+                        {movement.receivableSold > 0 && (
+                          <span className="text-muted-foreground"> ({formatQty(movement.receivableSold)} receivable)</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Other Out: </span>
+                        <button
+                          type="button"
+                          disabled={!movement.otherStockOut}
+                          onClick={() => openMovementModal(item, 'other')}
+                          className={cn("font-semibold", movement.otherStockOut ? "text-orange-700 underline-offset-2 hover:underline" : "text-muted-foreground")}
+                        >
+                          {formatQty(movement.otherStockOut)}
+                        </button>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Returns: </span>
+                        {formatQty(movement.returns)}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">{movementPreset === 'today' ? 'Current Stock' : 'Closing Stock'}: </span>
+                        <span className={movement.currentStock <= item.low_stock_alert ? 'text-orange-600 font-bold' : 'font-semibold'}>
+                          {formatQty(movementPreset === 'today' ? movement.currentStock : movement.closingStock)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Status: </span>
+                        {stockStatus}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Expiry: </span>
+                        {(item as any).expiryDate ? new Date((item as any).expiryDate).toLocaleDateString() : '-'}
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Price: </span>
+                        {formatCurrency(item.unit_price)}
+                      </div>
+                    </div>
+                    {(item as any).isUncategorized && (
+                      <span className="inline-block px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                        Uncategorized
+                      </span>
+                    )}
+                  </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          <fieldset disabled={loading}>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalItems}
+              pageSize={pageSize}
+              onPageChange={goToPage}
+            />
+          </fieldset>
+        </CardContent>
+      </Card>
+
+      {searching && !isServicesPage && movementSummaryCards}
+
+      {priceHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-5xl rounded-lg bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <h2 className="text-lg font-semibold">Price History</h2>
+                <p className="text-sm text-muted-foreground">{priceHistory.item.product_name}</p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setPriceHistory(null)}>
+                Close
+              </Button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto p-4">
+              {priceHistory.loading ? (
+                <div className="flex h-32 items-center justify-center">
+                  <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-primary" />
+                </div>
+              ) : priceHistory.rows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No price or cost changes have been recorded yet.</p>
+              ) : (
+                <table className="w-full min-w-[820px] text-sm">
+                  <thead>
+                    <tr className="border-b text-left">
+                      <th className="pb-2 font-medium">Date</th>
+                      <th className="pb-2 font-medium">Source</th>
+                      <th className="pb-2 text-right font-medium">Old Cost</th>
+                      <th className="pb-2 text-right font-medium">New Cost</th>
+                      <th className="pb-2 text-right font-medium">Old Selling</th>
+                      <th className="pb-2 text-right font-medium">New Selling</th>
+                      <th className="pb-2 font-medium">Reference</th>
+                      <th className="pb-2 font-medium">Reason</th>
+                      <th className="pb-2 font-medium">User</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {priceHistory.rows.map((row) => (
+                      <tr key={row.id} className="border-b last:border-0">
+                        <td className="py-2 whitespace-nowrap">{new Date(row.createdAt).toLocaleString()}</td>
+                        <td className="py-2">{priceHistorySource(row.source)}</td>
+                        <td className="py-2 text-right tabular-nums">{row.oldCost == null ? '-' : formatCurrency(row.oldCost)}</td>
+                        <td className="py-2 text-right font-semibold tabular-nums">{row.newCost == null ? '-' : formatCurrency(row.newCost)}</td>
+                        <td className="py-2 text-right tabular-nums">{row.oldPrice == null ? '-' : formatCurrency(row.oldPrice)}</td>
+                        <td className="py-2 text-right font-semibold tabular-nums">{row.newPrice == null ? '-' : formatCurrency(row.newPrice)}</td>
+                        <td className="py-2">{row.reference || '-'}</td>
+                        <td className="py-2">{row.reason || '-'}</td>
+                        <td className="py-2">{priceHistoryUser(row)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stockAdjust && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-background shadow-xl">
+            <form onSubmit={handleStockAdjustSubmit}>
+              <div className="border-b px-4 py-3">
+                <h2 className="text-lg font-semibold">Adjust Stock</h2>
+                <p className="text-sm text-muted-foreground">{stockAdjust.item.product_name}</p>
+              </div>
+              <div className="space-y-4 p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Current Stock</p>
+                    <p className="mt-1 font-bold tabular-nums">{formatQty(stockAdjust.item.quantity)}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">New Stock</p>
+                    <p className={cn("mt-1 font-bold tabular-nums", stockAdjustProjectedQuantity < 0 && "text-destructive")}>
+                      {formatQty(stockAdjustProjectedQuantity)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Operation</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      ['stock_in', 'Stock In'],
+                      ...(canAdjustStockOut ? [['stock_out', 'Stock Out'] as [StockAdjustmentType, string][]] : []),
+                    ] as Array<[StockAdjustmentType, string]>).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setStockAdjust((prev) => prev ? { ...prev, adjustmentType: value, reason: value === 'stock_in' && !prev.reason ? 'Restock' : prev.reason } : prev)}
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
+                          stockAdjust.adjustmentType === value
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-input bg-background text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {((stockAdjust.item as any).units?.length > 0 || stockAdjustHasContentsUnit) && <div className="space-y-2">
+                    <Label htmlFor="stockAdjustUnit">Count stock as</Label>
+                    <select id="stockAdjustUnit" value={stockAdjust.unitId} onChange={event => setStockAdjust(prev => prev ? { ...prev, unitId: event.target.value } : prev)} className="h-10 w-full rounded-md border bg-background px-3 text-sm">
+                      <option value="">{stockAdjust.item.baseUnit || 'Piece'} (base)</option>
+                      {(stockAdjust.item as any).units.map((unit: any) => <option key={unit.id} value={unit.id}>{unit.unitName} · {unitFactorFromPackageContents(unit.unitName, (stockAdjust.item as any).contentsUnit || '', Number((stockAdjust.item as any).contentsPerBaseUnit || 0)) || unit.conversionFactor} {stockAdjust.item.baseUnit || 'Piece'}</option>)}
+                      {stockAdjustHasContentsUnit && <option value="__contents_unit__">{(stockAdjust.item as any).contentsUnit} · {formatQty(1 / Number((stockAdjust.item as any).contentsPerBaseUnit))} {stockAdjust.item.baseUnit || 'Piece'}</option>}
+                    </select>
+                  </div>}
+                  <Label htmlFor="stockAdjustQuantity">{stockAdjust.adjustmentType === 'stock_in' ? 'Quantity received' : 'Quantity adjusted'}</Label>
+                  <Input
+                    id="stockAdjustQuantity"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={stockAdjust.quantity}
+                    onChange={(event) => setStockAdjust((prev) => prev ? { ...prev, quantity: event.target.value } : prev)}
+                    required
+                  />
+                  {stockAdjustUnit && <p className="text-xs text-muted-foreground">{stockAdjustQuantity || 0} {stockAdjustUnit.unitName} converts to {formatQty(stockAdjustBaseQuantity)} {stockAdjust.item.baseUnit || 'Piece'}.</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="stockAdjustReason">Reason</Label>
+                  <Input
+                    id="stockAdjustReason"
+                    value={stockAdjust.reason}
+                    onChange={(event) => setStockAdjust((prev) => prev ? { ...prev, reason: event.target.value } : prev)}
+                    placeholder={stockAdjust.adjustmentType === 'stock_in' ? 'Restock' : 'Damage, expiry, correction'}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 border-t px-4 py-3">
+                <Button type="button" variant="outline" onClick={closeStockAdjust} disabled={stockAdjustSaving}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={stockAdjustSaving || stockAdjustProjectedQuantity < 0}>
+                  {stockAdjustSaving ? 'Saving...' : stockAdjust.adjustmentType === 'stock_in' ? 'Record Stock In' : 'Record Stock Out'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {movementModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[92vh] w-full max-w-7xl flex-col rounded-lg bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <h2 className="text-lg font-semibold">{movementModal.title}</h2>
+                <p className="text-sm text-muted-foreground">
+                  {movementPeriodLabel} total: {formatQty(movementModal.total)} {movementModal.summaryLabel.toLowerCase()}
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setMovementModal(null)}>
+                Close
+              </Button>
+            </div>
+            <div className="space-y-5 overflow-auto p-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Total</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatQty(movementModal.total)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Products</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatQty(movementModal.productRows.length)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Transaction Rows</p>
+                  <p className="mt-1 text-xl font-bold tabular-nums">{formatQty(movementModal.rows.length)}</p>
+                </div>
+                <div className="rounded-md border p-3">
+                  <p className="text-xs text-muted-foreground">Period</p>
+                  <p className="mt-1 text-lg font-semibold">{movementPeriodLabel}</p>
+                </div>
+              </div>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">Products</h3>
+                {movementModal.productRows.length === 0 ? (
+                  <p className="rounded-md border py-8 text-center text-sm text-muted-foreground">No products found for this card in the selected period.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full min-w-[1180px] text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b text-left">
+                          <th className="px-3 py-2 font-medium">Product</th>
+                          <th className="px-3 py-2 font-medium">Category</th>
+                          <th className="px-3 py-2 font-medium">Branch</th>
+                          <th className="px-3 py-2 text-right font-medium">{movementModal.summaryLabel}</th>
+                          <th className="px-3 py-2 text-right font-medium">Opening</th>
+                          <th className="px-3 py-2 text-right font-medium">Stock In</th>
+                          <th className="px-3 py-2 text-right font-medium">Sold</th>
+                          <th className="px-3 py-2 text-right font-medium">Credit Sold</th>
+                          <th className="px-3 py-2 text-right font-medium">Other Out</th>
+                          <th className="px-3 py-2 text-right font-medium">Returns</th>
+                          <th className="px-3 py-2 text-right font-medium">Closing</th>
+                          <th className="px-3 py-2 text-right font-medium">Current</th>
+                          <th className="px-3 py-2 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movementModal.productRows.map((row) => (
+                          <tr key={row.id} className="border-b last:border-0">
+                            <td className="px-3 py-2">
+                              <div className="max-w-[260px]">
+                                <p className="font-medium leading-snug">{row.name}</p>
+                                <p className="text-xs text-muted-foreground">{row.sku}</p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">{row.category}</td>
+                            <td className="px-3 py-2">{row.branch}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.metric)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.openingStock)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.stockIn)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.soldToday)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.receivableSold)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.otherStockOut)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatQty(row.returns)}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.closingStock)}</td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.currentStock)}</td>
+                            <td className="px-3 py-2">
+                              <span className={cn(
+                                "inline-flex rounded px-2 py-0.5 text-xs font-semibold",
+                                row.status === 'Out of Stock'
+                                  ? "bg-red-100 text-red-700"
+                                  : row.status === 'Low Stock'
+                                    ? "bg-orange-100 text-orange-700"
+                                    : "bg-green-100 text-green-700"
+                              )}>
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="space-y-2">
+                <h3 className="text-sm font-semibold">Transactions</h3>
+                {movementModal.rows.length === 0 ? (
+                  <p className="rounded-md border py-8 text-center text-sm text-muted-foreground">No transaction rows for this card in the selected period.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full min-w-[1120px] text-sm">
+                      <thead className="bg-muted/40">
+                        <tr className="border-b text-left">
+                          <th className="px-3 py-2 font-medium">Date/Time</th>
+                          <th className="px-3 py-2 font-medium">Product</th>
+                          <th className="px-3 py-2 font-medium">Type</th>
+                          <th className="px-3 py-2 font-medium">Reference</th>
+                          <th className="px-3 py-2 font-medium">Customer/Supplier</th>
+                          <th className="px-3 py-2 text-right font-medium">Qty</th>
+                          <th className="px-3 py-2 text-right font-medium">Amount</th>
+                          <th className="px-3 py-2 text-right font-medium">Balance</th>
+                          <th className="px-3 py-2 font-medium">Method/Status</th>
+                          <th className="px-3 py-2 font-medium">Staff</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {movementModal.rows.map((row, index) => (
+                          <tr key={`${row.reference || index}-${index}`} className="border-b last:border-0">
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {row.time ? new Date(row.time).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="max-w-[240px]">
+                                <p className="font-medium leading-snug">{row.productName || '-'}</p>
+                                <p className="text-xs text-muted-foreground">{row.productSku || row.branchName || ''}</p>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">{row.type || '-'}</td>
+                            <td className="px-3 py-2 font-mono text-xs">{row.reference || '-'}</td>
+                            <td className="px-3 py-2">
+                              <div className="max-w-[220px]">
+                                <p className="font-medium leading-snug">{movementPartyName(row)}</p>
+                                {movementPartyMeta(row) && (
+                                  <p className="text-xs text-muted-foreground">{movementPartyMeta(row)}</p>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatQty(row.quantity)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{movementAmount(row)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{movementBalance(row)}</td>
+                            <td className="px-3 py-2">{movementContext(row)}</td>
+                            <td className="px-3 py-2">{row.staff || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t bg-muted/30 font-bold">
+                          <td className="px-3 py-2" colSpan={5}>Total</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatQty(movementModal.total)}</td>
+                          <td className="px-3 py-2" colSpan={4}></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

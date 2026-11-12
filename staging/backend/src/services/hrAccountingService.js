@@ -1,0 +1,795 @@
+/**
+ * HR Accounting Service
+ * Posts HR transactions into the general ledger and updates account balances.
+ */
+
+import prisma from "../db.js";
+import hrConfigurationService from "./hrConfigurationService.js";
+import { linkedCashAccountId, syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
+
+const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(["asset", "expense", "expenses"]);
+const BALANCE_EPSILON = 0.01;
+const OPENING_BALANCE_EQUITY_NAME = "Opening Balance Equity";
+const OPENING_BALANCE_EQUITY_CODE = "3999";
+
+const ACCOUNT_LABELS = {
+  salaryExpense: "Staff Salaries & Wages expense account",
+  salaryPayable: "Salaries Payable liability account",
+  salaryAdvance: "Employee Advances/Loans asset account",
+  payeTax: "PAYE Tax liability account",
+  socialSecurity: "Social Security liability account",
+};
+
+const HR_ACCOUNT_TYPES = {
+  salaryExpense: new Set(["expense", "expenses"]),
+  salaryPayable: new Set(["liability"]),
+  salaryAdvance: new Set(["asset"]),
+  payeTax: new Set(["liability"]),
+  socialSecurity: new Set(["liability"]),
+};
+
+function money(value) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function normalizeValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function formatAmount(value) {
+  return money(value).toFixed(2);
+}
+
+function setupMessage(missingAccounts = []) {
+  const missing = missingAccounts.length
+    ? missingAccounts.map((key) => ACCOUNT_LABELS[key] || key).join(", ")
+    : "Staff Salaries & Wages, Salaries Payable, and Employee Advances/Loans";
+  return `HR accounting accounts are not configured. Create the required Chart of Accounts first and map them in HR > HR Accounting before posting. Missing: ${missing}.`;
+}
+
+function isDebitNormalAccount(account) {
+  return DEBIT_NORMAL_ACCOUNT_TYPES.has(normalizeValue(account?.type));
+}
+
+function journalLineBalanceDelta(account, debit, credit) {
+  return isDebitNormalAccount(account) ? debit - credit : credit - debit;
+}
+
+function paymentMethodAccountTypes(paymentMethod) {
+  const method = normalizeValue(paymentMethod || "cash");
+  if (method === "cash") return ["cash"];
+  if (method === "safe") return ["safe"];
+  if (method === "bank" || method === "bank_transfer" || method === "cheque") return ["bank"];
+  if (method === "mobile_money") return ["mobile_money"];
+  if (method === "card") return ["card"];
+  return [method];
+}
+
+function paymentMethodAccountLabel(paymentMethod) {
+  const method = normalizeValue(paymentMethod || "cash");
+  if (method === "cash") return "cash";
+  if (method === "safe") return "safe";
+  if (method === "bank" || method === "bank_transfer" || method === "cheque") return "bank";
+  if (method === "mobile_money") return "mobile money";
+  if (method === "card") return "card";
+  return method.replace(/_/g, " ");
+}
+
+function transactionAccountType(account) {
+  const subType = normalizeValue(account?.subType);
+  if (subType.startsWith("transaction_")) return subType.replace("transaction_", "");
+  return linkedCashAccountId(account) ? "cash" : null;
+}
+
+function isTransactionLinkedAccount(account) {
+  const subType = normalizeValue(account?.subType);
+  return subType.startsWith("transaction_") || Boolean(linkedCashAccountId(account));
+}
+
+class HRAccountingService {
+  client(tx) {
+    return tx || prisma;
+  }
+
+  async withTransaction(tx, callback) {
+    if (tx) return callback(tx);
+    return prisma.$transaction(callback);
+  }
+
+  async validateHRAccountConfiguration(tenantId, requiredAccounts = [], tx = null) {
+    const db = this.client(tx);
+    const config = await db.hRAccountingConfig.findUnique({ where: { tenantId } });
+
+    if (!config || !config.isConfigured) {
+      return {
+        isValid: false,
+        missingAccounts: requiredAccounts,
+        error: setupMessage(requiredAccounts),
+      };
+    }
+
+    const missing = [];
+    if (requiredAccounts.includes("salaryExpense") && !config.salaryExpenseAccountId) missing.push("salaryExpense");
+    if (requiredAccounts.includes("salaryPayable") && !config.salaryPayableAccountId) missing.push("salaryPayable");
+    if (requiredAccounts.includes("salaryAdvance") && !config.salaryAdvanceAccountId) missing.push("salaryAdvance");
+    if (requiredAccounts.includes("payeTax") && !config.payeTaxAccountId) missing.push("payeTax");
+    if (requiredAccounts.includes("socialSecurity") && !config.socialSecurityAccountId) missing.push("socialSecurity");
+
+    return {
+      isValid: missing.length === 0,
+      missingAccounts: missing,
+      error: missing.length ? setupMessage(missing) : null,
+      config,
+    };
+  }
+
+  async verifyAccountsExist(tenantId, accountIds, tx = null) {
+    const db = this.client(tx);
+    const ids = [...new Set(accountIds.filter(Boolean))];
+    const accounts = await db.account.findMany({
+      where: { tenantId, id: { in: ids }, isActive: true },
+    });
+    const foundIds = new Set(accounts.map((account) => account.id));
+
+    return {
+      valid: ids.every((id) => foundIds.has(id)),
+      invalidAccounts: ids.filter((id) => !foundIds.has(id)),
+      accounts,
+    };
+  }
+
+  async requirePaymentAccountForMethod(tx, tenantId, paymentAccountId, paymentMethod = "cash", context = "payment", userId = null) {
+    const db = this.client(tx);
+    const method = normalizeValue(paymentMethod || "cash");
+    const account = await db.account.findFirst({
+      where: { id: paymentAccountId, tenantId, isActive: true },
+    });
+
+    if (!account) {
+      const error = new Error(`Select an existing ${paymentMethodAccountLabel(method)} transaction account for ${context}. Create it first in Transaction Accounts if it does not exist.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (normalizeValue(account.type) !== "asset") {
+      const error = new Error(`${context} must use an active Asset transaction account such as Cash, Safe, Bank, Mobile Money, or Card.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const cashAccountId = linkedCashAccountId(account);
+    let resolvedType = transactionAccountType(account);
+    if (cashAccountId) {
+      const cashAccount = await db.cashAccount.findFirst({
+        where: { id: cashAccountId, tenantId, isActive: true },
+        select: { id: true, type: true },
+      });
+
+      if (!cashAccount) {
+        const error = new Error(`The linked transaction account for ${account.name} is missing or inactive. Create/select the ${paymentMethodAccountLabel(method)} account again in Transaction Accounts.`);
+        error.statusCode = 400;
+        throw error;
+      }
+      resolvedType = normalizeValue(cashAccount.type);
+
+      if (method === "cash") {
+        const user = userId
+          ? await db.user.findFirst({
+              where: { id: userId, tenantId, isActive: true },
+              select: { cashAccountId: true },
+            })
+          : null;
+
+        if (!user?.cashAccountId || user.cashAccountId !== cashAccount.id) {
+          const error = new Error(`Cash ${context} must use your assigned cash account.`);
+          error.statusCode = 403;
+          throw error;
+        }
+      }
+    }
+
+    if (method === "cash" && !cashAccountId) {
+      const error = new Error(`Cash ${context} must use your assigned linked cash transaction account.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!resolvedType || !paymentMethodAccountTypes(method).includes(resolvedType)) {
+      const error = new Error(`Selected account must be a ${paymentMethodAccountLabel(method)} transaction account for ${context}.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return account;
+  }
+
+  async requireConfiguredAccounts(tx, tenantId, requiredAccounts, options = {}) {
+    if (requiredAccounts.includes("payeTax") || requiredAccounts.includes("socialSecurity")) {
+      await hrConfigurationService.ensureDefaultDeductionAccounts({
+        tx: this.client(tx),
+        tenantId,
+        branchId: options.branchId || null,
+        userId: options.userId || null,
+      });
+    }
+
+    const validation = await this.validateHRAccountConfiguration(tenantId, requiredAccounts, tx);
+    if (!validation.isValid) {
+      const error = new Error(validation.error || setupMessage(validation.missingAccounts));
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const accountIds = [
+      requiredAccounts.includes("salaryExpense") && validation.config.salaryExpenseAccountId,
+      requiredAccounts.includes("salaryPayable") && validation.config.salaryPayableAccountId,
+      requiredAccounts.includes("salaryAdvance") && validation.config.salaryAdvanceAccountId,
+      requiredAccounts.includes("payeTax") && validation.config.payeTaxAccountId,
+      requiredAccounts.includes("socialSecurity") && validation.config.socialSecurityAccountId,
+    ].filter(Boolean);
+
+    const accountCheck = await this.verifyAccountsExist(tenantId, accountIds, tx);
+    if (!accountCheck.valid) {
+      const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const accountById = new Map(accountCheck.accounts.map((account) => [account.id, account]));
+    const invalidMappings = requiredAccounts.filter((key) => {
+      const accountId = validation.config[`${key}AccountId`];
+      const account = accountById.get(accountId);
+      return account && !HR_ACCOUNT_TYPES[key]?.has(normalizeValue(account.type));
+    });
+    if (invalidMappings.length) {
+      const error = new Error(`Invalid HR accounting account type for: ${invalidMappings.map((key) => ACCOUNT_LABELS[key] || key).join(", ")}. Salary payable must be a liability account, never a cash or other transaction account.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const transactionLinkedMappings = requiredAccounts.filter((key) => {
+      const accountId = validation.config[`${key}AccountId`];
+      const account = accountById.get(accountId);
+      return account && isTransactionLinkedAccount(account);
+    });
+
+    if (transactionLinkedMappings.length) {
+      const error = new Error(
+        `Invalid HR accounting account mapping for: ${transactionLinkedMappings.map((key) => ACCOUNT_LABELS[key] || key).join(", ")}. Payroll posting accounts must be normal Chart of Accounts accounts, not cash, safe, bank, mobile money, card, or other transaction accounts. Select the payment account only when paying the posted salary.`
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return { config: validation.config, accounts: accountCheck.accounts };
+  }
+
+  async ensureOpeningBalanceEquityAccount(tx, tenantId, branchId = null) {
+    const db = this.client(tx);
+    const existingByName = await db.account.findFirst({
+      where: {
+        tenantId,
+        name: OPENING_BALANCE_EQUITY_NAME,
+        type: "equity",
+        isActive: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    if (existingByName) return existingByName;
+
+    for (let suffix = 0; suffix < 100; suffix += 1) {
+      const code = suffix === 0 ? OPENING_BALANCE_EQUITY_CODE : `${OPENING_BALANCE_EQUITY_CODE}-${suffix}`;
+      const existingCode = await db.account.findUnique({
+        where: { tenantId_code: { tenantId, code } },
+      });
+      if (existingCode) continue;
+
+      return db.account.create({
+        data: {
+          tenantId,
+          branchId: branchId || null,
+          code,
+          name: OPENING_BALANCE_EQUITY_NAME,
+          type: "equity",
+          subType: "opening_balance",
+          balance: 0,
+          isActive: true,
+          description: "System account for balances brought forward from before the business started using this system.",
+        },
+      });
+    }
+
+    const error = new Error("Could not create Opening Balance Equity account because all reserved opening balance account codes are already used.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  async nextJournalEntryNo(tx, tenantId) {
+    const today = new Date();
+    const dateStr = today.toISOString().split("T")[0].replace(/-/g, "");
+    const lastEntry = await tx.journalEntry.findFirst({
+      where: { tenantId, entryNo: { startsWith: `JE-${dateStr}-` } },
+      orderBy: { entryNo: "desc" },
+    });
+    const lastSequence = Number(String(lastEntry?.entryNo || "").split("-")[2] || 0);
+    return `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`;
+  }
+
+  normalizeLines(lines) {
+    if (!Array.isArray(lines) || !lines.length) {
+      throw new Error("Journal lines are required");
+    }
+
+    const normalized = lines
+      .map((line, index) => {
+        const debit = money(line.debit);
+        const credit = money(line.credit);
+        const lineNo = index + 1;
+
+        if (!line.accountId) throw new Error(`Select an account for HR journal line ${lineNo}`);
+        if (debit < 0 || credit < 0) throw new Error(`Negative amounts are not allowed on HR journal line ${lineNo}`);
+        if (debit > 0 && credit > 0) throw new Error(`HR journal line ${lineNo} cannot have both debit and credit`);
+
+        return {
+          accountId: line.accountId,
+          debit,
+          credit,
+          description: line.description || null,
+        };
+      })
+      .filter((line) => line.debit > 0 || line.credit > 0);
+
+    if (!normalized.length) throw new Error("Journal lines must contain at least one amount");
+    return normalized;
+  }
+
+  async createJournal(params) {
+    const {
+      tx = null,
+      tenantId,
+      branchId,
+      date = new Date(),
+      description,
+      reference,
+      sourceType,
+      sourceId,
+      userId,
+      lines,
+    } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      if (sourceType && sourceId) {
+        const existing = await db.journalEntry.findFirst({
+          where: { tenantId, sourceType, sourceId },
+          include: { lines: true },
+        });
+        if (existing) return { success: true, journalEntry: existing, alreadyPosted: true };
+      }
+
+      const normalizedLines = this.normalizeLines(lines);
+      const totalDebit = normalizedLines.reduce((sum, line) => sum + line.debit, 0);
+      const totalCredit = normalizedLines.reduce((sum, line) => sum + line.credit, 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.01) {
+        const error = new Error("HR accounting journal is not balanced. Review salary, deduction, advance, and payment account mappings.");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const accountIds = [...new Set(normalizedLines.map((line) => line.accountId))];
+      let accounts = await db.account.findMany({
+        where: { tenantId, id: { in: accountIds }, isActive: true },
+      });
+      const accountsById = new Map(accounts.map((account) => [account.id, account]));
+      if (accountIds.some((accountId) => !accountsById.has(accountId))) {
+        const error = new Error("One or more HR accounting accounts are missing or inactive. Create/configure them in HR > HR Accounting before posting.");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const linkedCashAccountIds = [...new Set(accounts.map(linkedCashAccountId).filter(Boolean))];
+      if (["payroll", "hr_payroll"].includes(normalizeValue(sourceType)) && linkedCashAccountIds.length) {
+        const error = new Error(
+          "Payroll posting cannot use cash, safe, bank, mobile money, card, or other transaction accounts. Reconfigure HR accounting mappings to normal Chart of Accounts accounts, then use the Pay action to reduce the selected payment account."
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+
+      for (const cashAccountId of linkedCashAccountIds) {
+        await syncLinkedTransactionAccountBalance(db, tenantId, cashAccountId).catch(() => null);
+      }
+
+      if (linkedCashAccountIds.length) {
+        accounts = await db.account.findMany({
+          where: { tenantId, id: { in: accountIds }, isActive: true },
+        });
+        accountsById.clear();
+        for (const account of accounts) accountsById.set(account.id, account);
+      }
+
+      const cashAccounts = linkedCashAccountIds.length
+        ? await db.cashAccount.findMany({ where: { tenantId, id: { in: linkedCashAccountIds }, isActive: true } })
+        : [];
+      const cashAccountsById = new Map(cashAccounts.map((account) => [account.id, account]));
+      const accountDeltas = new Map();
+
+      for (const line of normalizedLines) {
+        const account = accountsById.get(line.accountId);
+        const delta = journalLineBalanceDelta(account, line.debit, line.credit);
+        accountDeltas.set(line.accountId, (accountDeltas.get(line.accountId) || 0) + delta);
+      }
+
+      for (const [accountId, delta] of accountDeltas) {
+        const account = accountsById.get(accountId);
+        const cashAccountId = linkedCashAccountId(account);
+        if (!cashAccountId || Math.abs(delta) <= 0) continue;
+
+        const cashAccount = cashAccountsById.get(cashAccountId);
+        if (!cashAccount) {
+          const error = new Error(`Linked transaction account for ${account.name} was not found or is inactive.`);
+          error.statusCode = 400;
+          throw error;
+        }
+
+        const projectedCashBalance = money(cashAccount.balance) + delta;
+        if (delta < 0 && projectedCashBalance < -BALANCE_EPSILON) {
+          const error = new Error(`Insufficient balance in ${cashAccount.name}. Available: ${formatAmount(cashAccount.balance)}, required: ${formatAmount(Math.abs(delta))}.`);
+          error.statusCode = 400;
+          throw error;
+        }
+      }
+
+      const journalEntry = await db.journalEntry.create({
+        data: {
+          entryNo: await this.nextJournalEntryNo(db, tenantId),
+          tenantId,
+          branchId: branchId || null,
+          date: new Date(date),
+          description,
+          reference,
+          status: "posted",
+          userId,
+          sourceType,
+          sourceId,
+          lines: { create: normalizedLines },
+        },
+        include: { lines: true },
+      });
+
+      for (const line of normalizedLines) {
+        const account = accountsById.get(line.accountId);
+        const delta = journalLineBalanceDelta(account, line.debit, line.credit);
+        await db.account.update({
+          where: { id: line.accountId },
+          data: { balance: { increment: delta } },
+        });
+
+        const cashAccountId = linkedCashAccountId(account);
+        if (cashAccountId && Math.abs(delta) > 0) {
+          const updatedCashAccount = await db.cashAccount.update({
+            where: { id: cashAccountId },
+            data: { balance: { increment: delta } },
+          });
+
+          await db.cashTransaction.create({
+            data: {
+              tenantId,
+              accountId: cashAccountId,
+              type: delta >= 0 ? "hr_journal_in" : "hr_journal_out",
+              amount: Math.abs(delta),
+              balanceAfter: updatedCashAccount.balance,
+              reference: reference || sourceId || journalEntry.entryNo,
+              description: description || line.description || "HR journal entry",
+              userId,
+            },
+          });
+        }
+      }
+
+      return { success: true, journalEntry };
+    });
+  }
+
+  async createSalaryAdvanceJournal(params) {
+    const { tx = null, tenantId, branchId, salaryAdvanceId, amount, paymentAccountId, paymentMethod = "cash", employeeName, userId, date } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary advance payment", userId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Salary advance - ${employeeName}`,
+        reference: `ADV-${salaryAdvanceId}`,
+        sourceType: "SALARY_ADVANCE",
+        sourceId: salaryAdvanceId,
+        userId,
+        lines: [
+          { accountId: config.salaryAdvanceAccountId, debit: amount, credit: 0, description: `Salary advance to ${employeeName}` },
+          { accountId: paymentAccountId, debit: 0, credit: amount, description: `Payment for ${employeeName} salary advance` },
+        ],
+      });
+    });
+  }
+
+  async createEmployeeOpeningAdvanceJournal(params) {
+    const { tx = null, tenantId, branchId, salaryAdvanceId, amount, employeeName, userId, date } = params;
+    const openingAmount = money(amount);
+
+    return this.withTransaction(tx, async (db) => {
+      if (openingAmount <= 0) {
+        return { success: true, journalEntry: null, skipped: true };
+      }
+
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"], { branchId, userId });
+      const openingEquity = await this.ensureOpeningBalanceEquityAccount(db, tenantId, branchId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Opening advance/loan balance - ${employeeName}`,
+        reference: `OPEN-ADV-${salaryAdvanceId}`,
+        sourceType: "HR_OPENING_ADVANCE",
+        sourceId: salaryAdvanceId,
+        userId,
+        lines: [
+          { accountId: config.salaryAdvanceAccountId, debit: openingAmount, credit: 0, description: `Opening advance/loan owed by ${employeeName}` },
+          { accountId: openingEquity.id, debit: 0, credit: openingAmount, description: `Opening balance equity - ${employeeName}` },
+        ],
+      });
+    });
+  }
+
+  async createEmployeeOpeningSalaryPayableJournal(params) {
+    const { tx = null, tenantId, branchId, employeeId, amount, employeeName, userId, date } = params;
+    const openingAmount = money(amount);
+
+    return this.withTransaction(tx, async (db) => {
+      if (openingAmount <= 0) {
+        return { success: true, journalEntry: null, skipped: true };
+      }
+
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryPayable"], { branchId, userId });
+      const openingEquity = await this.ensureOpeningBalanceEquityAccount(db, tenantId, branchId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Opening salary payable - ${employeeName}`,
+        reference: `OPEN-SAL-${employeeId}`,
+        sourceType: "HR_OPENING_SALARY_PAYABLE",
+        sourceId: employeeId,
+        userId,
+        lines: [
+          { accountId: openingEquity.id, debit: openingAmount, credit: 0, description: `Opening balance equity - ${employeeName}` },
+          { accountId: config.salaryPayableAccountId, debit: 0, credit: openingAmount, description: `Opening salary owed to ${employeeName}` },
+        ],
+      });
+    });
+  }
+
+  async createPayrollJournal(params) {
+    const {
+      tx = null,
+      tenantId,
+      branchId,
+      payrollId,
+      grossSalary,
+      salaryAdvanceRecovery = 0,
+      paye = 0,
+      socialSecurityTax = 0,
+      employeeName,
+      userId,
+      date,
+    } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const requiredAccounts = ["salaryExpense", "salaryPayable"];
+      if (money(salaryAdvanceRecovery) > 0) requiredAccounts.push("salaryAdvance");
+      if (money(paye) > 0) requiredAccounts.push("payeTax");
+      if (money(socialSecurityTax) > 0) requiredAccounts.push("socialSecurity");
+
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, requiredAccounts, { branchId, userId });
+      const accountedDeductions = money(salaryAdvanceRecovery) + money(paye) + money(socialSecurityTax);
+      const unallocatedDeductions = money(grossSalary) - money(params.netSalaryPayable) - accountedDeductions;
+      if (unallocatedDeductions > 0.01) {
+        throw new Error("Payroll contains health or other deductions without mapped liability accounts. Configure those deductions before posting.");
+      }
+      const salaryPayableCredit = money(params.netSalaryPayable);
+      if (salaryPayableCredit < -0.01) {
+        throw new Error("Payroll deductions exceed gross salary. Review the payroll before posting.");
+      }
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Payroll - ${employeeName}`,
+        reference: `PAYROLL-${payrollId}`,
+        sourceType: "PAYROLL",
+        sourceId: payrollId,
+        userId,
+        lines: [
+          { accountId: config.salaryExpenseAccountId, debit: grossSalary, credit: 0, description: `Salary expense - ${employeeName}` },
+          { accountId: config.salaryPayableAccountId, debit: 0, credit: Math.max(0, salaryPayableCredit), description: `Salary payable and payroll deductions - ${employeeName}` },
+          money(paye) > 0 && { accountId: config.payeTaxAccountId, debit: 0, credit: paye, description: `PAYE tax payable - ${employeeName}` },
+          money(socialSecurityTax) > 0 && { accountId: config.socialSecurityAccountId, debit: 0, credit: socialSecurityTax, description: `Social security payable - ${employeeName}` },
+          money(salaryAdvanceRecovery) > 0 && { accountId: config.salaryAdvanceAccountId, debit: 0, credit: salaryAdvanceRecovery, description: `Salary advance recovery - ${employeeName}` },
+        ].filter(Boolean),
+      });
+    });
+  }
+
+  async createSalaryPaymentJournal(params) {
+    const { tx = null, tenantId, branchId, paymentId, amount, paymentAccountId, paymentMethod = "cash", employeeName, userId, date } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryPayable"]);
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "salary payment", userId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Salary payment - ${employeeName}`,
+        reference: `PAYMENT-${paymentId}`,
+        sourceType: "PAYROLL_PAYMENT",
+        sourceId: paymentId,
+        userId,
+        lines: [
+          { accountId: config.salaryPayableAccountId, debit: amount, credit: 0, description: `Salary payment - ${employeeName}` },
+          { accountId: paymentAccountId, debit: 0, credit: amount, description: `Payment for ${employeeName} salary` },
+        ],
+      });
+    });
+  }
+
+  async createSalaryAdvanceRepaymentJournal(params) {
+    const { tx = null, tenantId, branchId, recoveryId, amount, paymentAccountId, paymentMethod = "cash", employeeName, userId, date } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const { config } = await this.requireConfiguredAccounts(db, tenantId, ["salaryAdvance"]);
+      await this.requirePaymentAccountForMethod(db, tenantId, paymentAccountId, paymentMethod, "advance repayment", userId);
+
+      return this.createJournal({
+        tx: db,
+        tenantId,
+        branchId,
+        date,
+        description: `Advance/loan repayment - ${employeeName}`,
+        reference: `ADV-REPAY-${recoveryId}`,
+        sourceType: "SALARY_ADVANCE_REPAYMENT",
+        sourceId: recoveryId,
+        userId,
+        lines: [
+          { accountId: paymentAccountId, debit: amount, credit: 0, description: `Direct repayment from ${employeeName}` },
+          { accountId: config.salaryAdvanceAccountId, debit: 0, credit: amount, description: `Reduce employee advance/loan - ${employeeName}` },
+        ],
+      });
+    });
+  }
+
+  async reverseJournalEntry(params) {
+    const { tx = null, tenantId, originalEntryId, reason, userId, date = new Date() } = params;
+
+    return this.withTransaction(tx, async (db) => {
+      const originalEntry = await db.journalEntry.findFirst({
+        where: { id: originalEntryId, tenantId },
+        include: { lines: true },
+      });
+
+      if (!originalEntry) throw new Error("Original journal entry not found");
+      if (originalEntry.status === "reversed" && originalEntry.reversalJournalId) {
+        const reversalEntry = await db.journalEntry.findUnique({
+          where: { id: originalEntry.reversalJournalId },
+          include: { lines: true },
+        });
+        return { success: true, reversalEntry, alreadyReversed: true };
+      }
+
+      const reversal = await this.createJournal({
+        tx: db,
+        tenantId,
+        branchId: originalEntry.branchId,
+        date,
+        description: `Reversal of ${originalEntry.description}`,
+        reference: originalEntry.reference,
+        sourceType: "HR_JOURNAL_REVERSAL",
+        sourceId: originalEntryId,
+        userId,
+        lines: originalEntry.lines.map((line) => ({
+          accountId: line.accountId,
+          debit: line.credit,
+          credit: line.debit,
+          description: `Reversal - ${line.description || originalEntry.description || "HR journal"}`,
+        })),
+      });
+
+      await db.journalEntry.update({
+        where: { id: originalEntryId },
+        data: {
+          status: "reversed",
+          reversalJournalId: reversal.journalEntry.id,
+          reversalReason: reason,
+          reversedBy: userId,
+          reversedAt: new Date(date),
+        },
+      });
+
+      return { success: true, reversalEntry: reversal.journalEntry };
+    });
+  }
+
+  async getExistingJournalEntry(tenantId, sourceType, sourceId, tx = null) {
+    return this.client(tx).journalEntry.findFirst({
+      where: { tenantId, sourceType, sourceId },
+      include: { lines: true },
+    });
+  }
+
+  generateEntryNumber(lastEntryNo) {
+    const today = new Date();
+    const dateStr = today.toISOString().split("T")[0].replace(/-/g, "");
+    if (!lastEntryNo) return `JE-${dateStr}-001`;
+
+    const parts = lastEntryNo.split("-");
+    const lastDate = parts[1];
+    const lastSequence = parseInt(parts[2], 10) || 0;
+    return lastDate === dateStr
+      ? `JE-${dateStr}-${String(lastSequence + 1).padStart(3, "0")}`
+      : `JE-${dateStr}-001`;
+  }
+
+  async createAuditLog(params) {
+    const {
+      tx = null,
+      tenantId,
+      recordType,
+      recordId,
+      employeeId,
+      action,
+      description,
+      amount,
+      userId,
+      branchId,
+      journalEntryId,
+      metadata,
+    } = params;
+
+    return this.client(tx).hRAuditLog.create({
+      data: {
+        tenantId,
+        recordType,
+        recordId,
+        employeeId,
+        action,
+        description,
+        amount,
+        userId,
+        branchId,
+        journalEntryId,
+        metadata,
+      },
+    });
+  }
+
+  async getAuditTrail(tenantId, recordType, recordId, tx = null) {
+    return this.client(tx).hRAuditLog.findMany({
+      where: { tenantId, recordType, recordId },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+}
+
+export { setupMessage };
+export default new HRAccountingService();

@@ -1,6 +1,5 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from '../db.js';
 import { moveToTrash, assertOutsideTrash } from './trashService.js';
-const prisma = new PrismaClient();
 
 /**
  * DepartmentService - Manages organizational departments

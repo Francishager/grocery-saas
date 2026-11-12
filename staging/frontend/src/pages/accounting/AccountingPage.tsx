@@ -1,0 +1,2192 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
+import { useToast } from '@/hooks/use-toast'
+import { apiFetch } from '@/lib/api'
+import { Calculator, Plus, BookOpen, TrendingUp, Scale, Search, Filter, Trash2, DollarSign, Wallet, Landmark, Smartphone, Shield, ChevronDown, Download, Printer, MoreVertical, RotateCcw, Eye, Edit } from 'lucide-react'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalAccounts, getLocalJournalEntries, getLocalBranches } from '@/db/hybrid'
+import { usePagination } from '@/hooks/usePagination'
+import { Pagination } from '@/components/Pagination'
+import { cacheTenantFormattingSettings, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
+import { TransactionCurrencyControl } from '@/components/TransactionCurrencyControl'
+import { useFeatureAccess } from '@/services/featureAccessService'
+
+interface Account {
+  id: string
+  code: string
+  name: string
+  type: string
+  subType?: string
+  balance: number
+  isActive: boolean
+  isSystemManaged?: boolean
+  parentId?: string
+  children?: Account[]
+  description?: string
+  branchId?: string
+  branch?: { id: string; name: string } | null
+  isHrProtected?: boolean
+}
+
+interface JournalLine {
+  id: string
+  accountId: string
+  account?: { id: string; code: string; name: string; type: string }
+  debit: number
+  credit: number
+  description?: string
+}
+
+interface JournalEntry {
+  id: string
+  entryNo: string
+  date: string
+  description?: string
+  reference?: string
+  status: string
+  branchId?: string
+  branch?: { id: string; name: string }
+  user?: { fname: string; lname: string }
+  lines: JournalLine[]
+  paymentMethod?: string
+  voucherNo?: string
+  currency?: string
+  foreignTotal?: number | null
+  exchangeRateToBase?: number | null
+  exchangeRateAsOf?: string | null
+  action?: string
+  createdAt?: string
+  sourceType?: string
+  sourceId?: string
+  reversalOfId?: string | null
+  reversalJournalId?: string | null
+  reversalReason?: string | null
+  reversedAt?: string | null
+}
+
+interface Branch {
+  id: string
+  name: string
+}
+
+const ACCOUNT_TYPES = [
+  { value: 'asset', label: 'Assets' },
+  { value: 'equity', label: 'Equity' },
+  { value: 'liability', label: 'Liability' },
+  { value: 'income', label: 'Income' },
+  { value: 'expenses', label: 'Expenses' },
+]
+
+const PAYMENT_METHODS = ['cash', 'bank', 'mobile_money', 'cheque', 'safe']
+const CURRENCIES = ['USD', 'KES', 'UGX', 'TZS', 'RWF', 'NGN', 'GHS', 'ZAR']
+const JOURNAL_ACTIONS = [
+  { value: 'register_income', label: 'Register Income' },
+  { value: 'register_expense', label: 'Register Expense' },
+  { value: 'register_capital', label: 'Register Capital' },
+  { value: 'register_liability', label: 'Register Liability' },
+  { value: 'register_asset', label: 'Register Asset' },
+  { value: 'clear_payable', label: 'Clear Payable' },
+  { value: 'collect_receivable', label: 'Collect Receivable' },
+]
+const DEFAULT_JOURNAL_ACTION = JOURNAL_ACTIONS[0].value
+const JOURNAL_ACTION_ACCOUNT_TYPES: Record<string, string[]> = {
+  register_income: ['income', 'revenue'],
+  register_expense: ['expense', 'expenses'],
+  register_capital: ['equity'],
+  register_liability: ['liability'],
+  register_asset: ['asset'],
+  clear_payable: ['liability'],
+  collect_receivable: ['asset'],
+}
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cash: 'Cash Account',
+  bank: 'Bank Account',
+  mobile_money: 'Mobile Money Account',
+  cheque: 'Bank Account (Cheque)',
+  safe: 'Safe Account',
+}
+
+const PAYMENT_METHOD_PERMISSION_KEYS: Record<string, string> = {
+  cash: 'canUseCash',
+  safe: 'canUseCash',
+  mobile_money: 'canUseMobileMoney',
+  bank: 'canUseBank',
+  bank_transfer: 'canUseBank',
+  cheque: 'canUseBank',
+  card: 'canUseCard',
+}
+
+const ACCOUNT_CATEGORIES: Record<string, { code: string; name: string }[]> = {
+  asset: [
+    { code: '1100', name: 'Current Assets' },
+    { code: '1200', name: 'Fixed Assets' },
+    { code: '1300', name: 'Other Assets' },
+  ],
+  liability: [
+    { code: '2100', name: 'Current Liabilities' },
+    { code: '2200', name: 'Long-term Liabilities' },
+  ],
+  equity: [
+    { code: '3100', name: "Owner's Equity" },
+    { code: '3200', name: 'Retained Earnings' },
+  ],
+  income: [
+    { code: '4100', name: 'Sales Revenue' },
+    { code: '4200', name: 'Other Income' },
+  ],
+  expenses: [
+    { code: '5100', name: 'Cost of Goods Sold' },
+    { code: '5200', name: 'Operating Expenses' },
+    { code: '5300', name: 'Administrative Expenses' },
+  ],
+}
+
+const accountTypeColor: Record<string, string> = {
+  asset: 'bg-blue-100 text-blue-800',
+  liability: 'bg-red-100 text-red-800',
+  equity: 'bg-purple-100 text-purple-800',
+  income: 'bg-green-100 text-green-800',
+  revenue: 'bg-green-100 text-green-800',
+  expenses: 'bg-orange-100 text-orange-800',
+  expense: 'bg-orange-100 text-orange-800',
+}
+
+type AccountOption = { value: string; label: string; account: Account }
+type AccountHistoryRow = {
+  entry: JournalEntry
+  line: JournalLine
+  account: Account | null
+  debit: number
+  credit: number
+  delta: number
+  runningBalance: number
+  counterpartAccounts: string
+}
+
+const normalizeValue = (value?: string) => String(value || '').trim().toLowerCase()
+const toAccountUiType = (type?: string) => {
+  if (type === 'expense') return 'expenses'
+  if (type === 'revenue') return 'income'
+  return type || 'asset'
+}
+const toPersistedAccountType = (type?: string) => {
+  if (type === 'expenses') return 'expense'
+  if (type === 'income') return 'revenue'
+  return type || 'asset'
+}
+const DEBIT_NORMAL_ACCOUNT_TYPES = new Set(['asset', 'expense', 'expenses'])
+
+const isDebitNormalAccount = (account?: Pick<Account, 'type'> | null) => (
+  DEBIT_NORMAL_ACCOUNT_TYPES.has(normalizeValue(account?.type))
+)
+
+const accountBalanceDelta = (account: Pick<Account, 'type'> | null | undefined, debit: number, credit: number) => (
+  isDebitNormalAccount(account) ? debit - credit : credit - debit
+)
+
+const getTransactionAccountType = (account: Account) => {
+  const subType = normalizeValue(account.subType)
+  if (subType.startsWith('transaction_')) return subType.replace('transaction_', '')
+  if (String(account.description || '').includes('cashAccount:')) return 'cash'
+  return null
+}
+
+const isTransactionAccount = (account: Account) => Boolean(getTransactionAccountType(account))
+
+const linkedCashAccountId = (account: Account) => {
+  const match = String(account.description || '').match(/cashAccount:([^\s]+)/)
+  return match?.[1] || null
+}
+
+const paymentPermissionKey = (paymentMethod?: string | null) => PAYMENT_METHOD_PERMISSION_KEYS[normalizeValue(paymentMethod || '')]
+
+const accountBalanceLabel = (account: Account) => `Balance: ${Number(account.balance || 0).toFixed(2)}`
+
+const transactionAccountMatchesMethod = (account: Account, paymentMethod?: string | null) => {
+  const type = getTransactionAccountType(account)
+  if (!type) return false
+  if (!paymentMethod) return true
+  if (paymentMethod === 'cash') return type === 'cash'
+  if (paymentMethod === 'safe') return type === 'safe' || type === 'cash'
+  if (paymentMethod === 'bank' || paymentMethod === 'bank_transfer' || paymentMethod === 'cheque') return type === 'bank'
+  if (paymentMethod === 'mobile_money') return type === 'mobile_money'
+  if (paymentMethod === 'card') return type === 'card'
+  return type === paymentMethod
+}
+
+const canSelectPaymentTransactionAccount = (
+  account: Account,
+  assignedCashAccountId: string | null,
+  hasPermission: (permission: string) => boolean,
+) => {
+  const transactionType = getTransactionAccountType(account)
+  const linkedAccountId = linkedCashAccountId(account)
+  const isOwnCashAccount = transactionType === 'cash' && linkedAccountId && assignedCashAccountId && linkedAccountId === assignedCashAccountId
+  const hasLegacyAnyAccount = hasPermission('canUseAnyTransactionAccount')
+  const hasLegacyOtherCash = hasPermission('canUseOtherCashAccount')
+  if (isOwnCashAccount) return hasPermission('canUseOwnCashAccount') || hasPermission('canUseCash') || hasLegacyAnyAccount
+  if (transactionType === 'cash') return hasPermission('canUseOtherStaffCashAccount') || hasLegacyOtherCash || hasLegacyAnyAccount
+  if (transactionType === 'safe') return hasPermission('canUseSafeAccount') || hasLegacyOtherCash || hasLegacyAnyAccount
+  if (transactionType === 'bank') return hasPermission('canUseBankAccount') || hasLegacyAnyAccount
+  if (transactionType === 'mobile_money') return hasPermission('canUseMobileMoneyAccount') || hasLegacyAnyAccount
+  if (transactionType === 'card') return hasPermission('canUseCardAccount') || hasLegacyAnyAccount
+  return false
+}
+
+const accountMatchesTypeFilter = (account: Account, typeFilter?: string) => {
+  if (!typeFilter) return true
+  if (typeFilter === 'income') return account.type === 'income' || account.type === 'revenue'
+  if (typeFilter === 'expenses') return account.type === 'expenses' || account.type === 'expense'
+  return account.type === typeFilter
+}
+
+const accountMatchesJournalAction = (account: Account, action: string) => {
+  if (isTransactionAccount(account)) return false
+  const allowedTypes = JOURNAL_ACTION_ACCOUNT_TYPES[action] || []
+  if (allowedTypes.length === 0) return true
+  return allowedTypes.includes(normalizeValue(account.type))
+}
+
+const buildAccountOptions = (
+  accounts: Account[],
+  typeFilter?: string,
+  predicate: (account: Account) => boolean = () => true
+): AccountOption[] => {
+  const matchesType = (account: Account) => {
+    return accountMatchesTypeFilter(account, typeFilter)
+  }
+
+  const flatten = (account: Account, depth = 0): AccountOption[] => {
+    const childItems = (account.children || []).flatMap(child => flatten(child, depth + 1))
+    const isParentAccount = (account.children || []).length > 0 || normalizeValue(account.subType) === 'category'
+    if (isParentAccount || !matchesType(account) || !predicate(account)) return childItems
+    const prefix = '-- '.repeat(depth)
+    const label = isTransactionAccount(account)
+      ? `${prefix}${account.name} - ${accountBalanceLabel(account)}`
+      : `${prefix}${account.code} - ${account.name}`
+    const items = [{ value: account.id, label, account }]
+    return [...items, ...childItems]
+  }
+
+  const rootAccounts = accounts.filter(a => !a.parentId)
+  if (rootAccounts.length > 0) {
+    return rootAccounts.flatMap((account) => flatten(account))
+  }
+  return accounts.flatMap((account) => flatten(account))
+}
+
+const accountDisplayBalance = (account: Account) => (
+  flattenAccountTree([account]).reduce((sum, item) => sum + Number(item.balance || 0), 0)
+)
+
+const flattenAccountTree = (accountList: Account[]): Account[] => {
+  const flattened: Account[] = []
+  const seen = new Set<string>()
+
+  const visit = (account: Account) => {
+    if (!account?.id || seen.has(account.id)) return
+    seen.add(account.id)
+    flattened.push(account)
+    for (const child of account.children || []) visit(child)
+  }
+
+  accountList.forEach(visit)
+  return flattened
+}
+
+const collectAccountIds = (account: Account | null): Set<string> => {
+  const ids = new Set<string>()
+  const visit = (current?: Account | null) => {
+    if (!current?.id || ids.has(current.id)) return
+    ids.add(current.id)
+    for (const child of current.children || []) visit(child)
+  }
+  visit(account)
+  return ids
+}
+
+const escapeHtml = (value: unknown) => (
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+)
+
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
+
+export default function AccountingPage() {
+  const { toast } = useToast()
+  const online = useOnlineStatus()
+  const { user, hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id || null
+  const canViewAccountingEntries = hasPermission('canViewAccounting')
+  const canCreateAccountingEntries = hasPermission('canCreateAccounting')
+  const canEditAccountingEntries = hasPermission('canEditAccounting')
+  const canReverseAccountingEntries = hasPermission('canReverseAccountingEntry')
+  const canPostToProtectedAccounts = hasPermission('canPostToProtectedAccounts')
+  const canViewChartOfAccounts = hasPermission('canViewChartOfAccounts')
+  const canCreateChartOfAccounts = hasPermission('canCreateChartOfAccounts')
+  const canEditChartOfAccounts = hasPermission('canEditChartOfAccounts')
+  const canSwitchBranches = user?.role === 'owner' || hasPermission('canViewBranch')
+  const tenantCurrency = getTenantCurrency()
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [entries, setEntries] = useState<JournalEntry[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState(() => canViewChartOfAccounts ? 'chart-of-accounts' : canCreateAccountingEntries ? 'journal-entry' : 'journal-ledger')
+
+  // Account modal
+  const [showAccountModal, setShowAccountModal] = useState(false)
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false)
+  const dropdownBtnRef = useRef<HTMLButtonElement>(null)
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  const [openAccountActionsId, setOpenAccountActionsId] = useState<string | null>(null)
+  const [accCode, setAccCode] = useState('')
+  const [accName, setAccName] = useState('')
+  const [accType, setAccType] = useState('asset')
+  const [accSubType, setAccSubType] = useState('')
+  const [accDescription, setAccDescription] = useState('')
+  const [accCategory, setAccCategory] = useState('')
+  const [accBranch, setAccBranch] = useState('')
+  const [accCurrency, setAccCurrency] = useState(tenantCurrency)
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set())
+  const [selectedHistoryAccount, setSelectedHistoryAccount] = useState<Account | null>(null)
+  const [branchSearch, setBranchSearch] = useState('')
+
+  // Journal entry form
+  const [jeBranch, setJeBranch] = useState('')
+  const [jeAction, setJeAction] = useState(DEFAULT_JOURNAL_ACTION)
+  const [jeDate, setJeDate] = useState(new Date().toISOString().split('T')[0])
+  const [jeAccount, setJeAccount] = useState('')
+  const [jeDescription, setJeDescription] = useState('')
+  const [jeAmount, setJeAmount] = useState('')
+  const [jeCurrency, setJeCurrency] = useState(tenantCurrency)
+  const [jeRateToBase, setJeRateToBase] = useState<number | null>(1)
+  const [jeUnitsPerBase, setJeUnitsPerBase] = useState<number | null>(1)
+  const [jeVoucher, setJeVoucher] = useState('')
+  const [jePaymentMethod, setJePaymentMethod] = useState('')
+  const [jePaymentAccount, setJePaymentAccount] = useState('')
+  const [jeComment, setJeComment] = useState('')
+  const [jeSubForm, setJeSubForm] = useState<'single' | 'multiple'>('single')
+
+  // Multiple General Journal form
+  const [mjLines, setMjLines] = useState<{ debitAccount: string; creditAccount: string; amount: string; date: string; description: string; reference: string }[]>([
+    { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '', reference: '' },
+  ])
+
+  // Journal Ledger
+  const [searchTerm, setSearchTerm] = useState('')
+  const [pageSize, setPageSize] = useState(10)
+  const [showFilters, setShowFilters] = useState(false)
+  const [openEntryActionsId, setOpenEntryActionsId] = useState<string | null>(null)
+  const [reversingEntryId, setReversingEntryId] = useState<string | null>(null)
+  const [reverseDialogEntry, setReverseDialogEntry] = useState<JournalEntry | null>(null)
+  const [reversalReason, setReversalReason] = useState('Expense reversal')
+  const [filters, setFilters] = useState({
+    branch: '',
+    account: '',
+    startDate: '',
+    endDate: '',
+    category: '',
+    currency: '',
+  })
+  const { paginatedItems: paginatedEntries, currentPage, totalPages, totalItems, goToPage } = usePagination(entries, pageSize)
+
+  // Tax Management
+  const [taxPayments, setTaxPayments] = useState<any[]>([])
+  const [showTaxModal, setShowTaxModal] = useState(false)
+  const [taxForm, setTaxForm] = useState({
+    branch: '',
+    amount: '',
+    currency: tenantCurrency,
+    from: '',
+    to: '',
+    prn: '',
+    paymentMethod: 'cash',
+    dateOfPayment: new Date().toISOString().split('T')[0],
+  })
+
+  const fetchAccounts = async () => {
+    try {
+      if (online) {
+        const res = await apiFetch('/api/accounting/accounts')
+        if (res.ok) {
+          setAccounts(await res.json())
+        } else {
+          try { setAccounts(await getLocalAccounts()) } catch {}
+        }
+      } else {
+        setAccounts(await getLocalAccounts())
+      }
+    } catch {
+      try { setAccounts(await getLocalAccounts()) } catch {}
+    }
+  }
+
+  const fetchEntries = async () => {
+    try {
+      if (online) {
+        const res = await apiFetch('/api/accounting/journal')
+        if (res.ok) setEntries(await res.json())
+      } else {
+        setEntries(await getLocalJournalEntries() as any)
+      }
+    } catch {
+      try { setEntries(await getLocalJournalEntries() as any) } catch {}
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchBranches = async () => {
+    try {
+      if (online) {
+        const res = await apiFetch('/api/branches/options')
+        if (res.ok) {
+          const data = await res.json()
+          setBranches(data.branches || data || [])
+        }
+      } else {
+        setBranches(await getLocalBranches())
+      }
+    } catch {
+      try { setBranches(await getLocalBranches()) } catch {}
+    }
+  }
+
+  const fetchTaxPayments = async () => {
+    try {
+      const res = await apiFetch('/api/accounting/tax-payments')
+      if (res.ok) setTaxPayments(await res.json())
+    } catch {
+      setTaxPayments([])
+    }
+  }
+
+  const canUsePaymentMethod = (paymentMethod: string) => {
+    const permissionKey = paymentPermissionKey(paymentMethod)
+    return !permissionKey || hasPermission(permissionKey)
+  }
+
+
+  const visibleAccounts = useMemo(() => (
+    accounts.filter(account => {
+      if (!account.isActive) return false
+      const transactionType = getTransactionAccountType(account)
+      if (!transactionType) return true
+      return canUsePaymentMethod(transactionType) && canSelectPaymentTransactionAccount(account, assignedCashAccountId, hasPermission)
+    })
+  ), [accounts, hasPermission])
+
+  const accountOptions = useMemo(() => buildAccountOptions(visibleAccounts), [visibleAccounts])
+  const transactionAccounts = useMemo(() => (
+    visibleAccounts.filter(account => isTransactionAccount(account))
+  ), [visibleAccounts])
+  const isProtectedPostingAccount = (account?: Account) => Boolean(account && (account.isSystemManaged || account.isHrProtected))
+  const postingAccounts = useMemo(() => (
+    visibleAccounts.filter(account => !isProtectedPostingAccount(account) || canPostToProtectedAccounts)
+  ), [visibleAccounts, canPostToProtectedAccounts])
+  const postingAccountOptions = useMemo(() => buildAccountOptions(postingAccounts).map(option => (
+    isProtectedPostingAccount(option.account) ? { ...option, label: `Protected: ${option.label}` } : option
+  )), [postingAccounts])
+  const journalActionAccountOptions = useMemo(() => (
+    buildAccountOptions(
+      postingAccounts,
+      undefined,
+      (account) => accountMatchesJournalAction(account, jeAction)
+    ).filter(option => option.value !== jePaymentAccount)
+  ), [postingAccounts, jeAction, jePaymentAccount])
+  const allowedPaymentMethods = useMemo(() => (
+    PAYMENT_METHODS.filter(method => canUsePaymentMethod(method))
+  ), [hasPermission])
+  const paymentAccountOptions = useMemo(() => (
+    transactionAccounts
+      .filter(account => account.id !== jeAccount)
+      .filter(account => transactionAccountMatchesMethod(account, jePaymentMethod))
+      .filter(account => canSelectPaymentTransactionAccount(account, assignedCashAccountId, hasPermission))
+      .map(account => ({ value: account.id, label: `${account.name} - ${accountBalanceLabel(account)}`, account }))
+  ), [transactionAccounts, jeAccount, jePaymentMethod, assignedCashAccountId, hasPermission])
+  const flatAccounts = useMemo(() => flattenAccountTree(accounts), [accounts])
+  const accountById = useMemo(() => new Map(flatAccounts.map(account => [account.id, account])), [flatAccounts])
+  const selectedSingleProtectedAccount = isProtectedPostingAccount(accountById.get(jeAccount))
+  const hasMultipleProtectedSelection = mjLines.some(line =>
+    [line.debitAccount, line.creditAccount].some(id => isProtectedPostingAccount(accountById.get(id))),
+  )
+  const selectedHistoryAccountIds = useMemo(() => collectAccountIds(selectedHistoryAccount), [selectedHistoryAccount])
+  const accountHistoryRows = useMemo<AccountHistoryRow[]>(() => {
+    if (!selectedHistoryAccount || selectedHistoryAccountIds.size === 0) return []
+
+    const rows = entries
+      .flatMap((entry) => (
+        (entry.lines || [])
+          .filter((line) => selectedHistoryAccountIds.has(line.accountId))
+          .map((line) => {
+            const account = accountById.get(line.accountId) || null
+            const debit = Number(line.debit || 0)
+            const credit = Number(line.credit || 0)
+            const counterpartAccounts = (entry.lines || [])
+              .filter((otherLine) => otherLine.accountId !== line.accountId)
+              .map((otherLine) => (
+                otherLine.account
+                  ? `${otherLine.account.code} - ${otherLine.account.name}`
+                  : accountById.get(otherLine.accountId)
+                    ? `${accountById.get(otherLine.accountId)?.code} - ${accountById.get(otherLine.accountId)?.name}`
+                    : 'Unknown account'
+              ))
+              .filter(Boolean)
+              .join(', ')
+
+            return {
+              entry,
+              line,
+              account,
+              debit,
+              credit,
+              delta: accountBalanceDelta(account || line.account || selectedHistoryAccount, debit, credit),
+              runningBalance: 0,
+              counterpartAccounts: counterpartAccounts || '—',
+            }
+          })
+      ))
+      .sort((a, b) => {
+        const dateDiff = new Date(a.entry.date).getTime() - new Date(b.entry.date).getTime()
+        if (dateDiff !== 0) return dateDiff
+        return String(a.entry.createdAt || a.entry.id).localeCompare(String(b.entry.createdAt || b.entry.id))
+      })
+
+    let runningBalance = 0
+    return rows.map((row) => {
+      runningBalance += row.delta
+      return { ...row, runningBalance }
+    })
+  }, [accountById, entries, selectedHistoryAccount, selectedHistoryAccountIds])
+  const accountHistoryCurrentBalance = useMemo(() => (
+    selectedHistoryAccount
+      ? flattenAccountTree([selectedHistoryAccount]).reduce((sum, account) => sum + Number(account.balance || 0), 0)
+      : 0
+  ), [selectedHistoryAccount])
+  const accountHistoryTotalDebit = useMemo(() => accountHistoryRows.reduce((sum, row) => sum + row.debit, 0), [accountHistoryRows])
+  const accountHistoryTotalCredit = useMemo(() => accountHistoryRows.reduce((sum, row) => sum + row.credit, 0), [accountHistoryRows])
+
+  const selectedMultipleJournalAccountIds = (currentIndex: number, currentField: 'debitAccount' | 'creditAccount') => new Set(
+    mjLines.flatMap((line, lineIndex) => [
+      lineIndex === currentIndex && currentField === 'debitAccount' ? '' : line.debitAccount,
+      lineIndex === currentIndex && currentField === 'creditAccount' ? '' : line.creditAccount,
+    ]).filter(Boolean)
+  )
+
+  useEffect(() => {
+    apiFetch('/api/settings/tax-config').then(async (res) => {
+      if (res.ok) {
+        const data = await res.json()
+        if (data.currency) {
+          cacheTenantFormattingSettings(data)
+          setAccCurrency(data.currency)
+          setJeCurrency(data.currency)
+          setTaxForm((current) => ({ ...current, currency: data.currency }))
+        }
+      }
+    }).catch(() => {})
+  }, [user, hasPermission])
+
+  useEffect(() => {
+    const branch = defaultBranchId(user, branches)
+    if (!editingAccount) setAccBranch(current => canSwitchBranches ? (current || branch) : branch)
+    setJeBranch(current => canSwitchBranches ? (current || branch) : branch)
+    setTaxForm(current => ({ ...current, branch: canSwitchBranches ? (current.branch || branch) : branch }))
+    setFilters(current => ({ ...current, branch: canSwitchBranches ? current.branch : branch }))
+  }, [user?.branchId, branches, editingAccount, canSwitchBranches])
+
+  useEffect(() => {
+    fetchAccounts()
+    fetchEntries()
+    fetchBranches()
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'tax-management') fetchTaxPayments()
+  }, [activeTab])
+
+  useEffect(() => {
+    if (allowedPaymentMethods.length > 0 && !allowedPaymentMethods.includes(jePaymentMethod)) {
+      setJePaymentMethod(allowedPaymentMethods[0])
+      setJePaymentAccount('')
+    }
+    if (allowedPaymentMethods.length === 0 && jePaymentMethod) {
+      setJePaymentMethod('')
+      setJePaymentAccount('')
+    }
+  }, [allowedPaymentMethods, jePaymentMethod])
+
+  useEffect(() => {
+    if (jeAccount && !journalActionAccountOptions.some(option => option.value === jeAccount)) {
+      setJeAccount('')
+    }
+  }, [jeAccount, journalActionAccountOptions])
+
+  useEffect(() => {
+    if (!jePaymentMethod || paymentAccountOptions.length === 0) {
+      if (jePaymentAccount) setJePaymentAccount('')
+      return
+    }
+
+    if (jePaymentAccount && paymentAccountOptions.some(option => option.value === jePaymentAccount)) {
+      return
+    }
+
+    const preferredOwnAccount = paymentAccountOptions.find(option => linkedCashAccountId(option.account) === assignedCashAccountId)
+    const fallbackAccount = paymentAccountOptions[0]
+    const nextAccount = preferredOwnAccount || fallbackAccount
+    if (nextAccount?.value && nextAccount.value !== jePaymentAccount) {
+      setJePaymentAccount(nextAccount.value)
+    } else if (!nextAccount && jePaymentAccount) {
+      setJePaymentAccount('')
+    }
+  }, [assignedCashAccountId, jePaymentAccount, jePaymentMethod, paymentAccountOptions])
+
+  const resetAccountForm = () => {
+    setAccCode('')
+    setAccName('')
+    setAccSubType('')
+    setAccDescription('')
+    setAccCategory('')
+    setAccBranch(defaultBranchId(user, branches))
+    setBranchSearch('')
+    setEditingAccount(null)
+  }
+
+  const openEditAccount = (account: Account) => {
+    const uiType = toAccountUiType(account.type)
+    setEditingAccount(account)
+    setAccType(uiType)
+    setAccName(account.name || '')
+    setAccSubType(account.subType || '')
+    setAccDescription(account.description || '')
+    setAccBranch(account.branchId || '')
+    const categories = ACCOUNT_CATEGORIES[uiType] || []
+    const parent = account.parentId ? accounts.find(item => item.id === account.parentId) : null
+    setAccCategory(parent?.code || categories.find(cat => Number(account.code) >= Number(cat.code))?.code || '')
+    setOpenAccountActionsId(null)
+    setShowAccountModal(true)
+  }
+
+  const handleCreateAccount = async () => {
+    if (editingAccount && !canEditChartOfAccounts) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to edit accounting accounts',
+        description: 'Required permission: canEditChartOfAccounts',
+      })
+    }
+    if (!editingAccount && !canCreateChartOfAccounts) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to create accounting accounts',
+        description: 'Required permission: canCreateChartOfAccounts',
+      })
+    }
+    if (!accName) return toast({ variant: 'destructive', title: 'Account name required' })
+    if (!editingAccount && !accCategory) return toast({ variant: 'destructive', title: 'Account category required' })
+
+    const categories = ACCOUNT_CATEGORIES[accType] || []
+    const selectedCategory = categories.find(c => c.code === accCategory)
+    const baseCode = selectedCategory ? parseInt(selectedCategory.code) : 1100
+    let generatedCode = String(baseCode + 1)
+    const persistedType = toPersistedAccountType(accType)
+    while (!editingAccount && accounts.some(account => account.code === generatedCode)) {
+      generatedCode = String(Number(generatedCode) + 1)
+    }
+
+    try {
+      const res = await apiFetch(editingAccount ? '/api/accounting/accounts/' + editingAccount.id : '/api/accounting/accounts', {
+        method: editingAccount ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingAccount ? {
+          name: accName,
+          type: persistedType,
+          subType: accSubType || undefined,
+          description: accDescription || undefined,
+          branchId: accBranch || null,
+        } : {
+          code: generatedCode,
+          name: accName,
+          type: persistedType,
+          subType: accSubType || undefined,
+          description: accDescription || undefined,
+          parentCode: accCategory || undefined,
+          parentName: selectedCategory?.name || undefined,
+          branchId: accBranch || undefined,
+          currency: accCurrency,
+        }),
+      })
+      if (res.ok) {
+        const savedAccount = await res.json().catch(() => null)
+        toast({ title: editingAccount ? 'Account updated' : 'Account created' })
+        setShowAccountModal(false)
+        resetAccountForm()
+        if (savedAccount?.id) {
+          setAccounts(prev => [savedAccount, ...prev.filter(account => account.id !== savedAccount.id)])
+        }
+        await fetchAccounts()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({
+          variant: 'destructive',
+          title: data.error || data.message || (editingAccount ? 'Failed to update account' : 'Failed to create account'),
+          description: data.required ? 'Required permission: ' + data.required : undefined,
+        })
+      }
+    } catch {
+      toast({ variant: 'destructive', title: editingAccount ? 'Failed to update account' : 'Failed to create account' })
+    }
+  }
+
+  const renderAccountActionMenu = (account: Account) => (
+    <div className="relative inline-block text-left" onClick={(event) => event.stopPropagation()}>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-8 w-8 p-0"
+        onClick={() => setOpenAccountActionsId(openAccountActionsId === account.id ? null : account.id)}
+        aria-label="Open account actions"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </Button>
+      {openAccountActionsId === account.id && (
+        <div className="absolute right-0 z-30 mt-2 w-52 rounded-md border bg-white p-1 shadow-lg">
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+            onClick={() => { setOpenAccountActionsId(null); setSelectedHistoryAccount(account) }}
+          >
+            <Eye className="h-4 w-4" /> History
+          </button>
+          {canEditChartOfAccounts && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+              onClick={() => openEditAccount(account)}
+            >
+              <Edit className="h-4 w-4" /> Edit account
+            </button>
+          )}
+
+        </div>
+      )}
+    </div>
+  )
+
+  // Filtered entries for Journal Ledger
+  const filteredEntries = useMemo(() => {
+    let result = entries
+    if (searchTerm) {
+      const lower = searchTerm.toLowerCase()
+      result = result.filter(e =>
+        e.entryNo?.toLowerCase().includes(lower) ||
+        e.description?.toLowerCase().includes(lower) ||
+        e.reference?.toLowerCase().includes(lower) ||
+        e.lines?.some(l => l.account?.name?.toLowerCase().includes(lower))
+      )
+    }
+    if (filters.branch) result = result.filter(e => e.branchId === filters.branch)
+    if (filters.account) result = result.filter(e => e.lines?.some(l => l.accountId === filters.account))
+    if (filters.startDate) result = result.filter(e => new Date(e.date) >= new Date(filters.startDate))
+    if (filters.endDate) result = result.filter(e => new Date(e.date) <= new Date(filters.endDate))
+    if (filters.category) result = result.filter(e => e.lines?.some(l => l.account?.type === filters.category))
+    if (filters.currency) result = result.filter(e => e.currency === filters.currency)
+    return result
+  }, [entries, searchTerm, filters])
+
+  const paginatedFiltered = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredEntries.slice(start, start + pageSize)
+  }, [filteredEntries, currentPage, pageSize])
+
+  const resetFilters = () => {
+    setFilters({ branch: canSwitchBranches ? '' : defaultBranchId(user, branches), account: '', startDate: '', endDate: '', category: '', currency: '' })
+  }
+
+  const isExpenseJournalEntry = (entry: JournalEntry) => (
+    (entry.lines || []).some((line) => ['expense', 'expenses'].includes(normalizeValue(line.account?.type)))
+  )
+
+  const canReverseJournalEntry = (entry: JournalEntry) => (
+    canReverseAccountingEntries &&
+    online &&
+    entry.status !== 'reversed' &&
+    !entry.reversalOfId &&
+    !entry.reversalJournalId &&
+    isExpenseJournalEntry(entry)
+  )
+
+  const getJournalEntryDebitTotal = (entry: JournalEntry | null) => (
+    (entry?.lines || []).reduce((sum, line) => sum + Number(line.debit || 0), 0)
+  )
+
+  const handleReverseJournalEntry = (entry: JournalEntry) => {
+    if (!canReverseAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to reverse accounting entries',
+        description: 'Required permission: canReverseAccountingEntry',
+      })
+    }
+    if (!canReverseJournalEntry(entry)) {
+      return toast({ variant: 'destructive', title: 'This entry cannot be reversed from here' })
+    }
+
+    setReversalReason('Expense reversal')
+    setReverseDialogEntry(entry)
+    setOpenEntryActionsId(null)
+  }
+
+  const closeReverseDialog = () => {
+    if (reversingEntryId) return
+    setReverseDialogEntry(null)
+    setReversalReason('Expense reversal')
+  }
+
+  const submitReverseJournalEntry = async () => {
+    const entry = reverseDialogEntry
+    if (!entry) return
+    if (!canReverseJournalEntry(entry)) {
+      closeReverseDialog()
+      return toast({ variant: 'destructive', title: 'This entry cannot be reversed from here' })
+    }
+
+    const reason = reversalReason.trim() || 'Expense reversal'
+    setReversingEntryId(entry.id)
+    setOpenEntryActionsId(null)
+    try {
+      const res = await apiFetch('/api/accounting/journal/' + entry.id + '/reverse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || data.message || 'Failed to reverse journal entry')
+      toast({ title: 'Expense transaction reversed', description: data.message || 'A reversal journal entry was posted.' })
+      setReverseDialogEntry(null)
+      setReversalReason('Expense reversal')
+      await Promise.all([fetchEntries(), fetchAccounts()])
+    } catch (err) {
+      toast({ variant: 'destructive', title: err instanceof Error ? err.message : 'Failed to reverse journal entry' })
+    } finally {
+      setReversingEntryId(null)
+    }
+  }
+
+  // Submit single journal entry
+  const handleSingleJournalSubmit = async () => {
+    if (!canCreateAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to post accounting entries',
+        description: 'Required permission: canCreateChartOfAccounts',
+      })
+    }
+    if (!jeAccount || !jePaymentAccount || !jeAmount) return toast({ variant: 'destructive', title: 'Account, transaction account, and amount required' })
+    if (jeCurrency !== tenantCurrency && (!jeRateToBase || !jeUnitsPerBase)) return toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+    if (jeAccount === jePaymentAccount) return toast({ variant: 'destructive', title: 'Choose different debit and credit accounts' })
+    if (!journalActionAccountOptions.some(option => option.value === jeAccount)) return toast({ variant: 'destructive', title: 'Choose an account that matches the selected action' })
+    if (!jePaymentMethod || !canUsePaymentMethod(jePaymentMethod)) return toast({ variant: 'destructive', title: 'You do not have permission to use this payment method' })
+    if (!paymentAccountOptions.some(option => option.value === jePaymentAccount)) return toast({ variant: 'destructive', title: 'Choose a permitted transaction account' })
+    if (selectedSingleProtectedAccount && (!jeDescription.trim() || !jeVoucher.trim())) {
+      return toast({ variant: 'destructive', title: 'Protected-account correction needs a reason and reference' })
+    }
+    try {
+      const amount = Number(jeAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return toast({ variant: 'destructive', title: 'Enter a valid amount' })
+      }
+      const moneyInActions = ['register_income', 'register_capital', 'register_liability', 'collect_receivable']
+      const lines = moneyInActions.includes(jeAction)
+        ? [
+            { accountId: jePaymentAccount, debit: amount, credit: 0, description: jeDescription },
+            { accountId: jeAccount, debit: 0, credit: amount, description: jeDescription },
+          ]
+        : [
+            { accountId: jeAccount, debit: amount, credit: 0, description: jeDescription },
+            { accountId: jePaymentAccount, debit: 0, credit: amount, description: jeDescription },
+          ]
+      const res = await apiFetch('/api/accounting/journal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: jeDate,
+          description: jeDescription,
+          reference: jeVoucher,
+          branchId: jeBranch || undefined,
+          paymentMethod: jePaymentMethod,
+          paymentAccountId: jePaymentAccount || undefined,
+          currency: jeCurrency,
+          unitsPerBase: jeUnitsPerBase,
+          action: jeAction,
+          voucherNo: jeVoucher,
+          comment: jeComment,
+          lines,
+        }),
+      })
+      if (res.ok) {
+        toast({ title: 'Journal entry posted' })
+        setJeDescription(''); setJeAmount(''); setJeVoucher(''); setJeComment(''); setJePaymentAccount('')
+        fetchEntries(); fetchAccounts()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast({
+          variant: 'destructive',
+          title: data.error || data.message || 'Failed to post journal entry',
+          description: data.required ? `Required permission: ${data.required}` : undefined,
+        })
+      }
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to post journal entry' })
+    }
+  }
+
+  // Submit multiple general journal
+  const handleMultipleJournalSubmit = async () => {
+    if (!canCreateAccountingEntries) {
+      return toast({
+        variant: 'destructive',
+        title: 'You do not have permission to post accounting entries',
+        description: 'Required permission: canCreateChartOfAccounts',
+      })
+    }
+    const validLines = mjLines.filter(l => l.debitAccount && l.creditAccount && l.amount)
+    if (jeCurrency !== tenantCurrency && (!jeRateToBase || !jeUnitsPerBase)) return toast({ variant: 'destructive', title: 'A fresh exchange rate is required before posting' })
+    if (!validLines.length) return toast({ variant: 'destructive', title: 'Add at least one valid line' })
+    const selectedAccountIds = validLines.flatMap(line => [line.debitAccount, line.creditAccount])
+    if (new Set(selectedAccountIds).size !== selectedAccountIds.length) {
+      return toast({ variant: 'destructive', title: 'Each account can only be selected once in the same multiple journal form' })
+    }
+    const missingProtectedEvidence = validLines.some(line =>
+      [line.debitAccount, line.creditAccount].some(id => isProtectedPostingAccount(accountById.get(id))) && (!line.description.trim() || !line.reference.trim()),
+    )
+    if (missingProtectedEvidence) return toast({ variant: 'destructive', title: 'Protected-account corrections need a reason and reference on each affected line' })
+
+    try {
+      for (const line of validLines) {
+        const amount = Number(line.amount)
+        if (!Number.isFinite(amount) || amount <= 0) {
+          return toast({ variant: 'destructive', title: 'Enter a valid amount for every journal row' })
+        }
+        if (line.debitAccount === line.creditAccount) {
+          return toast({ variant: 'destructive', title: 'Debit and credit accounts must be different' })
+        }
+        const res = await apiFetch('/api/accounting/journal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: line.date,
+            branchId: jeBranch || undefined,
+            description: line.description,
+            reference: line.reference,
+            currency: jeCurrency,
+            unitsPerBase: jeUnitsPerBase,
+            lines: [
+              { accountId: line.debitAccount, debit: amount, credit: 0 },
+              { accountId: line.creditAccount, debit: 0, credit: amount },
+            ],
+          }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.error || data.message || (data.required ? `Required permission: ${data.required}` : 'Failed to post journal entry'))
+        }
+      }
+      toast({ title: `${validLines.length} journal entries posted` })
+      setMjLines([{ debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '', reference: '' }])
+      fetchEntries(); fetchAccounts()
+    } catch (err) {
+      toast({ variant: 'destructive', title: err instanceof Error ? err.message : 'Failed to post journal entries' })
+    }
+  }
+
+  // Tax payment
+  const handleSaveTaxPayment = async () => {
+    if (!taxForm.amount) return toast({ variant: 'destructive', title: 'Amount required' })
+    try {
+      const res = await apiFetch('/api/accounting/tax-payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(taxForm),
+      })
+      if (res.ok) {
+        toast({ title: 'Tax payment saved' })
+        setShowTaxModal(false)
+        setTaxForm({ branch: defaultBranchId(user, branches), amount: '', currency: getTenantCurrency(), from: '', to: '', prn: '', paymentMethod: 'cash', dateOfPayment: new Date().toISOString().split('T')[0] })
+        fetchTaxPayments()
+      } else {
+        const data = await res.json()
+        toast({ variant: 'destructive', title: data.error || 'Failed to save' })
+      }
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to save tax payment' })
+    }
+  }
+
+  const formatCurrency = (val: number) => Number(val || 0).toFixed(2)
+  const formatHistoryDate = (value?: string) => (value ? formatDisplayDate(value) : '—')
+  const selectedHistoryAccountLabel = selectedHistoryAccount ? `${selectedHistoryAccount.code} - ${selectedHistoryAccount.name}` : 'Account History'
+  const accountHistoryFileName = selectedHistoryAccountLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '') || 'account-history'
+
+  const downloadAccountHistory = () => {
+    if (!selectedHistoryAccount) return
+
+    const header = [
+      'Date',
+      'Description',
+      'Source / Other Account',
+      'Reference',
+      'Payment Method',
+      'Debit',
+      'Credit',
+      'Running Balance',
+      'Posted By',
+    ]
+    const rows = accountHistoryRows.map((row) => [
+      formatHistoryDate(row.entry.date),
+      row.line.description || row.entry.description || '—',
+      row.counterpartAccounts,
+      row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—',
+      row.entry.paymentMethod || '—',
+      row.debit > 0 ? formatCurrency(row.debit) : '',
+      row.credit > 0 ? formatCurrency(row.credit) : '',
+      formatCurrency(row.runningBalance),
+      row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—',
+    ])
+
+    const summaryRows = [
+      ['Account', selectedHistoryAccountLabel],
+      ['Current Balance', formatCurrency(accountHistoryCurrentBalance)],
+      ['Total Debit', formatCurrency(accountHistoryTotalDebit)],
+      ['Total Credit', formatCurrency(accountHistoryTotalCredit)],
+      ['Entries', String(accountHistoryRows.length)],
+      [],
+    ]
+    const csv = [
+      ...summaryRows.map((row) => row.map(csvCell).join(',')),
+      header.map(csvCell).join(','),
+      ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${accountHistoryFileName}.csv`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const printAccountHistory = () => {
+    if (!selectedHistoryAccount) return
+
+    const rowsHtml = accountHistoryRows.length > 0
+      ? accountHistoryRows.map((row) => `
+          <tr>
+            <td>${escapeHtml(formatHistoryDate(row.entry.date))}</td>
+            <td>${escapeHtml(row.line.description || row.entry.description || '—')}</td>
+            <td>${escapeHtml(row.counterpartAccounts)}</td>
+            <td>${escapeHtml(row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—')}</td>
+            <td>${escapeHtml(row.entry.paymentMethod || '—')}</td>
+            <td class="amount">${escapeHtml(row.debit > 0 ? formatCurrency(row.debit) : '—')}</td>
+            <td class="amount">${escapeHtml(row.credit > 0 ? formatCurrency(row.credit) : '—')}</td>
+            <td class="amount">${escapeHtml(formatCurrency(row.runningBalance))}</td>
+            <td>${escapeHtml(row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—')}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="9" class="empty">No journal transactions were found for this account yet.</td></tr>'
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800')
+    if (!printWindow) {
+      toast({ variant: 'destructive', title: 'Unable to open print window' })
+      return
+    }
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(selectedHistoryAccountLabel)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #111827; margin: 24px; }
+            h1 { font-size: 20px; margin: 0 0 4px; }
+            .subtitle { color: #4b5563; margin-bottom: 18px; }
+            .summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px; }
+            .summary div { border: 1px solid #d1d5db; padding: 10px; border-radius: 6px; }
+            .label { color: #6b7280; font-size: 11px; text-transform: uppercase; }
+            .value { font-family: Consolas, monospace; font-size: 16px; font-weight: 700; white-space: nowrap; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 7px 6px; vertical-align: top; text-align: left; }
+            th { background: #f3f4f6; font-weight: 700; }
+            .amount { text-align: right; font-family: Consolas, monospace; white-space: nowrap; }
+            .empty { text-align: center; color: #6b7280; padding: 24px; }
+            @media print {
+              body { margin: 12mm; }
+              .summary { break-inside: avoid; }
+              table { page-break-inside: auto; }
+              tr { page-break-inside: avoid; page-break-after: auto; }
+            }
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(selectedHistoryAccountLabel)}</h1>
+          <div class="subtitle">Transaction history behind this account balance${selectedHistoryAccount.children?.length ? ' including sub-accounts.' : '.'}</div>
+          <div class="summary">
+            <div><div class="label">Current Balance</div><div class="value">${escapeHtml(formatCurrency(accountHistoryCurrentBalance))}</div></div>
+            <div><div class="label">Total Debit</div><div class="value">${escapeHtml(formatCurrency(accountHistoryTotalDebit))}</div></div>
+            <div><div class="label">Total Credit</div><div class="value">${escapeHtml(formatCurrency(accountHistoryTotalCredit))}</div></div>
+            <div><div class="label">Entries</div><div class="value">${escapeHtml(accountHistoryRows.length)}</div></div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Source / Other Account</th>
+                <th>Reference</th>
+                <th>Method</th>
+                <th class="amount">Debit</th>
+                <th class="amount">Credit</th>
+                <th class="amount">Running Balance</th>
+                <th>Posted By</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Accounting</h1>
+        <p className="text-muted-foreground">Chart of accounts, journal entries, ledger, and tax management</p>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid grid-cols-3 sm:grid-cols-5 h-auto w-full">
+          {canViewChartOfAccounts && <TabsTrigger value="chart-of-accounts" className="text-xs sm:text-base font-medium"><Calculator className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Chart of Accounts</span><span className="sm:hidden">Accounts</span></TabsTrigger>}
+          {canViewChartOfAccounts && <TabsTrigger value="account-categories" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Categories</span><span className="sm:hidden">Cats</span></TabsTrigger>}
+          {canCreateAccountingEntries && (
+            <TabsTrigger value="journal-entry" className="text-xs sm:text-base font-medium"><BookOpen className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Register Entries</span><span className="sm:hidden">Entry</span></TabsTrigger>
+          )}
+          {canViewAccountingEntries && <TabsTrigger value="journal-ledger" className="text-xs sm:text-base font-medium"><Scale className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Journal Ledger</span><span className="sm:hidden">Ledger</span></TabsTrigger>}
+          {canViewAccountingEntries && <TabsTrigger value="tax-management" className="text-xs sm:text-base font-medium"><DollarSign className="h-4 w-4 sm:h-5 sm:w-5 sm:mr-2" /><span className="hidden sm:inline">Tax Management</span><span className="sm:hidden">Tax</span></TabsTrigger>}
+        </TabsList>
+
+        {/* ─── Chart of Accounts Tab ─── */}
+        <TabsContent value="chart-of-accounts" className="space-y-4">
+          {canCreateChartOfAccounts && (
+            <div className="flex justify-end">
+              <span ref={dropdownBtnRef} className="inline-block">
+                <Button onClick={() => setShowAccountDropdown(!showAccountDropdown)}>
+                  <Plus className="h-4 w-4 mr-2" /> Add New Account
+                  <ChevronDown className={`h-4 w-4 ml-2 transition-transform ${showAccountDropdown ? 'rotate-180' : ''}`} />
+                </Button>
+              </span>
+            </div>
+          )}
+
+          {canCreateChartOfAccounts && showAccountDropdown && dropdownBtnRef.current && createPortal(
+            <>
+              <div className="fixed inset-0 z-[100]" onClick={() => setShowAccountDropdown(false)} />
+              <div
+                className="fixed z-[101] w-48 rounded-md border bg-popover p-1 shadow-lg"
+                style={{
+                  top: dropdownBtnRef.current.getBoundingClientRect().bottom + 8,
+                  right: window.innerWidth - dropdownBtnRef.current.getBoundingClientRect().right
+                }}
+              >
+                {ACCOUNT_TYPES.map(t => (
+                  <button
+                    key={t.value}
+                    onClick={() => {
+                      resetAccountForm()
+                      setAccType(t.value)
+                      setShowAccountDropdown(false)
+                      setShowAccountModal(true)
+                    }}
+                    className="flex items-center w-full px-3 py-2.5 text-sm rounded-md hover:bg-muted transition-colors text-left"
+                  >
+                    <Badge className={`${accountTypeColor[t.value] || 'bg-gray-100'} mr-2`}>{t.label}</Badge>
+                  </button>
+                ))}
+              </div>
+            </>,
+            document.body
+          )}
+
+          <Dialog open={showAccountModal} onOpenChange={(open) => { setShowAccountModal(open); if (!open) resetAccountForm() }}>
+            <DialogContent className="max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>{editingAccount ? 'Edit Account' : 'Create SubAccount'} {ACCOUNT_TYPES.find(t => t.value === accType)?.label || ''}</DialogTitle>
+                <DialogDescription>{editingAccount ? 'Update this account details.' : `Create a new sub-account under ${ACCOUNT_TYPES.find(t => t.value === accType)?.label.toLowerCase() || 'the selected type'}.`}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Account Name</Label>
+                    <Input value={accName} onChange={(e) => setAccName(e.target.value)} placeholder="e.g. Office Supplies" />
+                  </div>
+                  <div>
+                    <Label>Branch</Label>
+                    {canSwitchBranches && branches.length > 1 ? (
+                      <Select value={accBranch} onValueChange={setAccBranch}>
+                        <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                        <SelectContent>
+                          <div className="p-2">
+                            <Input
+                              value={branchSearch}
+                              onChange={(e) => setBranchSearch(e.target.value)}
+                              placeholder="Search branch..."
+                              className="h-8"
+                            />
+                          </div>
+                          {branches.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase())).map(b => (
+                            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="flex items-center h-9 rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                        {branches.find(b => b.id === accBranch)?.name || 'No branch assigned'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label>Account Category</Label>
+                    <Select value={accCategory} onValueChange={setAccCategory} disabled={Boolean(editingAccount)}>
+                      <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                      <SelectContent>
+                        {(ACCOUNT_CATEGORIES[accType] || []).map(cat => (
+                          <SelectItem key={cat.code} value={cat.code}>{cat.code} - {cat.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Currency</Label>
+                    <Select value={accCurrency} onValueChange={setAccCurrency}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div>
+                  <Label>Description</Label>
+                  <textarea
+                    value={accDescription}
+                    onChange={(e) => setAccDescription(e.target.value)}
+                    placeholder="Optional description"
+                    rows={3}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowAccountModal(false)}>Close</Button>
+                <Button onClick={handleCreateAccount}>{editingAccount ? 'Update Account' : 'Save'}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={Boolean(selectedHistoryAccount)} onOpenChange={(open) => { if (!open) setSelectedHistoryAccount(null) }}>
+            <DialogContent className="flex max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] flex-col overflow-hidden p-3 sm:max-h-[90vh] sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[96vw] lg:max-w-[96vw] lg:p-6 xl:max-w-[1700px] 2xl:max-w-[1800px]">
+              <DialogHeader className="gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <DialogTitle className="break-words text-lg sm:text-xl">{selectedHistoryAccount?.code} - {selectedHistoryAccount?.name}</DialogTitle>
+                    <DialogDescription className="mt-1">
+                      Transaction history behind this account balance
+                      {selectedHistoryAccount?.children?.length ? ' including sub-accounts.' : '.'}
+                    </DialogDescription>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                    <Button type="button" variant="outline" onClick={printAccountHistory} disabled={!selectedHistoryAccount}>
+                      <Printer className="mr-2 h-4 w-4" /> Print
+                    </Button>
+                    <Button type="button" variant="outline" onClick={downloadAccountHistory} disabled={!selectedHistoryAccount}>
+                      <Download className="mr-2 h-4 w-4" /> Download
+                    </Button>
+                  </div>
+                </div>
+              </DialogHeader>
+              {selectedHistoryAccount && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="min-w-0 rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Current Balance</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{formatCurrency(accountHistoryCurrentBalance)}</div>
+                  </div>
+                  <div className="min-w-0 rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Total Debit</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{formatCurrency(accountHistoryTotalDebit)}</div>
+                  </div>
+                  <div className="min-w-0 rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Total Credit</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{formatCurrency(accountHistoryTotalCredit)}</div>
+                  </div>
+                  <div className="min-w-0 rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Entries</div>
+                    <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold leading-tight sm:text-lg">{accountHistoryRows.length}</div>
+                  </div>
+                </div>
+              )}
+              <div className="min-h-0 space-y-3 overflow-y-auto pr-1 lg:hidden">
+                {accountHistoryRows.map((row, index) => (
+                  <div key={`${row.entry.id}-${row.line.id || index}-mobile`} className="rounded-md border p-3 text-sm">
+                    <div className="mb-3 flex flex-col gap-1 border-b pb-3">
+                      <div className="font-medium">{formatHistoryDate(row.entry.date)}</div>
+                      <div className="break-words text-muted-foreground">{row.line.description || row.entry.description || '—'}</div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Source / Other Account</div>
+                        <div className="break-words">{row.counterpartAccounts}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Reference</div>
+                        <div className="break-words">{row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Payment Method</div>
+                        <div className="break-words">{row.entry.paymentMethod || '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Posted By</div>
+                        <div className="break-words">{row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Debit</div>
+                        <div className="overflow-x-auto whitespace-nowrap font-mono font-semibold">{row.debit > 0 ? formatCurrency(row.debit) : '—'}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Credit</div>
+                        <div className="overflow-x-auto whitespace-nowrap font-mono font-semibold">{row.credit > 0 ? formatCurrency(row.credit) : '—'}</div>
+                      </div>
+                      <div className="min-w-0 sm:col-span-2">
+                        <div className="text-xs text-muted-foreground">Running Balance</div>
+                        <div className="overflow-x-auto whitespace-nowrap font-mono text-base font-semibold">{formatCurrency(row.runningBalance)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {accountHistoryRows.length === 0 && (
+                  <div className="rounded-md border py-8 text-center text-muted-foreground">
+                    No journal transactions were found for this account yet.
+                  </div>
+                )}
+              </div>
+              <div className="hidden min-h-0 overflow-auto rounded-lg border lg:block">
+                <table className="min-w-[1200px] w-full text-sm xl:min-w-[1400px]">
+                  <thead className="sticky top-0 bg-background">
+                    <tr className="border-b">
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Date</th>
+                      <th className="min-w-48 px-3 py-2 text-left font-medium">Description</th>
+                      <th className="min-w-48 px-3 py-2 text-left font-medium">Source / Other Account</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Reference</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Method</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Debit</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Credit</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Running Balance</th>
+                      <th className="whitespace-nowrap px-3 py-2 text-left font-medium">Posted By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountHistoryRows.map((row, index) => (
+                      <tr key={`${row.entry.id}-${row.line.id || index}`} className="border-b hover:bg-muted/50">
+                        <td className="whitespace-nowrap px-3 py-2">{new Date(row.entry.date).toLocaleDateString()}</td>
+                        <td className="px-3 py-2">{row.line.description || row.entry.description || '—'}</td>
+                        <td className="px-3 py-2">{row.counterpartAccounts}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{row.entry.reference || row.entry.voucherNo || row.entry.entryNo || '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{row.entry.paymentMethod || '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{row.debit > 0 ? formatCurrency(row.debit) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-mono">{row.credit > 0 ? formatCurrency(row.credit) : '—'}</td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right font-mono font-semibold">{formatCurrency(row.runningBalance)}</td>
+                        <td className="whitespace-nowrap px-3 py-2">{row.entry.user ? `${row.entry.user.fname} ${row.entry.user.lname}` : '—'}</td>
+                      </tr>
+                    ))}
+                    {accountHistoryRows.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="py-8 text-center text-muted-foreground">
+                          No journal transactions were found for this account yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Account type groups with sub-accounts nested under parents */}
+          {ACCOUNT_TYPES.map(typeDef => {
+            const typeAccounts = accounts.filter(a => a.type === typeDef.value || (typeDef.value === 'income' && a.type === 'revenue') || (typeDef.value === 'expenses' && a.type === 'expense'))
+            if (!typeAccounts.length) return null
+            const rootAccounts = typeAccounts.filter(a => !a.parentId)
+            return (
+              <div key={typeDef.value} className="space-y-2">
+                <div className="flex items-center gap-2 py-2">
+                  <Badge className={accountTypeColor[typeDef.value] || 'bg-gray-100'}>{typeDef.label}</Badge>
+                  <span className="text-sm font-normal text-muted-foreground">{rootAccounts.length} parent accounts</span>
+                </div>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left py-2 px-3 font-semibold">Name</th>
+                        <th className="text-left py-2 px-3 font-semibold">Code</th>
+                        <th className="text-left py-2 px-3 font-semibold">Branch</th>
+                        <th className="text-right py-2 px-3 font-semibold">Balance</th>
+                        <th className="text-left py-2 px-3 font-semibold">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rootAccounts
+                        .sort((a, b) => parseInt(a.code) - parseInt(b.code))
+                        .map(acc => {
+                          const childAccounts = (acc.children || []).sort((a, b) => parseInt(a.code) - parseInt(b.code))
+                          const isExpanded = expandedAccounts.has(acc.id)
+                          return (
+                            <React.Fragment key={acc.id}>
+                              <tr
+                                className="cursor-pointer border-b hover:bg-muted/50"
+                                onClick={() => setSelectedHistoryAccount(acc)}
+                              >
+                                <td className="py-2 px-3 font-medium">
+                                  {childAccounts.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        setExpandedAccounts(prev => {
+                                          const next = new Set(prev)
+                                          if (next.has(acc.id)) next.delete(acc.id)
+                                          else next.add(acc.id)
+                                          return next
+                                        })
+                                      }}
+                                      className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full border border-muted/70 text-muted-foreground transition hover:bg-muted"
+                                    >
+                                      <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                    </button>
+                                  ) : <span className="inline-block h-6 w-6" />}
+                                  {acc.name}
+                                  {acc.subType && <Badge variant="outline" className="ml-2">{acc.subType}</Badge>}
+                                  {!acc.isActive && <Badge variant="secondary" className="ml-2">Inactive</Badge>}
+                                </td>
+                                <td className="py-2 px-3 font-mono font-bold">{acc.code}</td>
+                                <td className="py-2 px-3">{acc.branch?.name || '—'}</td>
+                                <td className="py-2 px-3 text-right font-mono">{formatCurrency(accountDisplayBalance(acc))}</td>
+                                <td className="py-2 px-3 whitespace-nowrap">
+                                  {renderAccountActionMenu(acc)}
+                                </td>
+                              </tr>
+                              {isExpanded && childAccounts.map(child => (
+                                <tr
+                                  key={child.id}
+                                  className="cursor-pointer border-b bg-muted/20 hover:bg-muted/50"
+                                  onClick={() => setSelectedHistoryAccount(child)}
+                                >
+                                  <td className="py-2 px-3 pl-12 font-medium text-muted-foreground">
+                                    └ {child.name}
+                                    {child.subType && <Badge variant="outline" className="ml-2">{child.subType}</Badge>}
+                                    {!child.isActive && <Badge variant="secondary" className="ml-2">Inactive</Badge>}
+                                  </td>
+                                  <td className="py-2 px-3 font-mono font-bold">{child.code}</td>
+                                  <td className="py-2 px-3">{child.branch?.name || '—'}</td>
+                                  <td className="py-2 px-3 text-right font-mono">{formatCurrency(accountDisplayBalance(child))}</td>
+                                  <td className="py-2 px-3 whitespace-nowrap">
+                                    {renderAccountActionMenu(child)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          )
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+          {accounts.length === 0 && !loading && (
+            <div className="text-center py-8 text-muted-foreground">No accounts yet. Create your first account.</div>
+          )}
+        </TabsContent>
+
+        {/* ─── Account Categories Tab ─── */}
+        <TabsContent value="account-categories" className="space-y-4">
+          {ACCOUNT_TYPES.map(typeDef => {
+            const categories = ACCOUNT_CATEGORIES[typeDef.value] || []
+            if (!categories.length) return null
+            return (
+              <div key={typeDef.value} className="space-y-2">
+                <div className="flex items-center gap-2 py-2">
+                  <Badge className={accountTypeColor[typeDef.value] || 'bg-gray-100'}>{typeDef.label}</Badge>
+                  <span className="text-sm font-normal text-muted-foreground">{categories.length} categories</span>
+                </div>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/30">
+                        <th className="text-left py-2 px-3 font-semibold">Name</th>
+                        <th className="text-left py-2 px-3 font-semibold">Code</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {categories.map(cat => (
+                        <tr key={cat.code} className="border-b hover:bg-muted/50">
+                          <td className="py-2 px-3 font-medium">{cat.name}</td>
+                          <td className="py-2 px-3 font-mono font-bold">{cat.code}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+        </TabsContent>
+
+        {/* ─── Register Journal Ledger Entries Tab ─── */}
+        <TabsContent value="journal-entry" className="space-y-4">
+          {/* Sub-tabs to toggle between single and multiple journal */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 border-b pb-2">
+            <button
+              onClick={() => setJeSubForm('single')}
+              className={`px-4 py-3 text-sm sm:text-base font-medium rounded-md transition-colors ${jeSubForm === 'single' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+            >
+              Journal Ledger Entry
+            </button>
+            <button
+              onClick={() => setJeSubForm('multiple')}
+              className={`px-4 py-3 text-sm sm:text-base font-medium rounded-md transition-colors ${jeSubForm === 'multiple' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+            >
+              Multiple General Journal
+            </button>
+          </div>
+
+          {/* Single Journal Ledger Entry Form */}
+          {jeSubForm === 'single' && (
+            <div className="space-y-4">
+              {selectedSingleProtectedAccount && canPostToProtectedAccounts && (
+                <div role="alert" className="rounded-md border border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                  <strong>Protected account correction.</strong> This account is normally posted only by its linked system workflow. Confirm the correction carefully and provide a specific reason and supporting voucher/reference.
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label>Branch</Label>
+                  {canSwitchBranches && branches.length > 1 ? (
+                    <Select value={jeBranch} onValueChange={setJeBranch}>
+                      <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                      <SelectContent>
+                        {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                      {branches.find(b => b.id === jeBranch)?.name || 'No branch assigned'}
+                    </div>
+                  )}
+                </div>
+                {jeBranch && (
+                  <div>
+                    <Label>Action</Label>
+                    <Select value={jeAction} onValueChange={setJeAction}>
+                      <SelectTrigger><SelectValue placeholder="Select action" /></SelectTrigger>
+                      <SelectContent>
+                        {JOURNAL_ACTIONS.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {jeBranch && (
+                  <>
+                    <div>
+                      <Label>Record Date</Label>
+                      <Input type="date" value={jeDate} onChange={(e) => setJeDate(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label>Entry Description</Label>
+                      <Input value={jeDescription} onChange={(e) => setJeDescription(e.target.value)} placeholder="Description" />
+                    </div>
+                    <div>
+                      <TransactionCurrencyControl baseCurrency={tenantCurrency} currency={jeCurrency} enabled={hasFeature('settings.currencies')} amount={Number(jeAmount || 0)} onCurrencyChange={setJeCurrency} onRateChange={(rate, units) => { setJeRateToBase(rate); setJeUnitsPerBase(units) }} />
+                    </div>
+                  </>
+                )}
+                {jeAction && (
+                  <div>
+                    <Label>Account</Label>
+                    <Select value={jeAccount} onValueChange={(value) => {
+                      setJeAccount(value)
+                      if (value === jePaymentAccount) setJePaymentAccount('')
+                    }}>
+                      <SelectTrigger><SelectValue placeholder="Select account for this action" /></SelectTrigger>
+                      <SelectContent>
+                        {journalActionAccountOptions.length > 0
+                          ? journalActionAccountOptions.map(option => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))
+                          : <SelectItem value="no-action-accounts" disabled>No matching accounts for this action</SelectItem>}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {jeAction && (
+                  <div>
+                    <Label>Entry Amount</Label>
+                    <Input type="number" value={jeAmount} onChange={(e) => setJeAmount(e.target.value)} placeholder="0.00" />
+                    {jeCurrency !== tenantCurrency && jeRateToBase && <p className="mt-1 text-xs text-muted-foreground">Base-currency posting: {(Number(jeAmount || 0) * jeRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {tenantCurrency}</p>}
+                  </div>
+                )}
+                {jeAction && (
+                  <div>
+                    <Label>Voucher Number</Label>
+                    <Input value={jeVoucher} onChange={(e) => setJeVoucher(e.target.value)} placeholder="Voucher #" />
+                  </div>
+                )}
+                {jeAction && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Payment Method</Label>
+                      <Select value={jePaymentMethod} onValueChange={(v) => { setJePaymentMethod(v); setJePaymentAccount('') }}>
+                        <SelectTrigger><SelectValue placeholder="Select payment method" /></SelectTrigger>
+                        <SelectContent>
+                          {allowedPaymentMethods.length > 0
+                            ? allowedPaymentMethods.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)
+                            : <SelectItem value="no-payment-methods" disabled>No permitted payment methods</SelectItem>}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {jePaymentMethod && (
+                      <div>
+                        <Label>{PAYMENT_METHOD_LABELS[jePaymentMethod] || 'Select Account'}</Label>
+                        <Select value={jePaymentAccount} onValueChange={setJePaymentAccount} disabled={paymentAccountOptions.length <= 1}>
+                          <SelectTrigger><SelectValue placeholder={`Select ${PAYMENT_METHOD_LABELS[jePaymentMethod] || 'account'}`} /></SelectTrigger>
+                          <SelectContent>
+                            {paymentAccountOptions.length > 0
+                              ? paymentAccountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)
+                              : <SelectItem value="no-transaction-accounts" disabled>No permitted transaction accounts</SelectItem>}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div>
+                <Label>Comment</Label>
+                <textarea
+                  value={jeComment}
+                  onChange={(e) => setJeComment(e.target.value)}
+                  placeholder="Additional comments"
+                  rows={3}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={handleSingleJournalSubmit}>Save</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Multiple General Journal Form */}
+          {jeSubForm === 'multiple' && (
+            <div className="space-y-3">
+              {hasMultipleProtectedSelection && canPostToProtectedAccounts && (
+                <div role="alert" className="rounded-md border border-amber-500 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+                  <strong>Protected account correction.</strong> System workflows normally control these accounts. Every affected line requires a specific reason and supporting reference.
+                </div>
+              )}
+              <TransactionCurrencyControl baseCurrency={tenantCurrency} currency={jeCurrency} enabled={hasFeature('settings.currencies')} amount={mjLines.reduce((total, line) => total + Number(line.amount || 0), 0)} onCurrencyChange={setJeCurrency} onRateChange={(rate, units) => { setJeRateToBase(rate); setJeUnitsPerBase(units) }} />
+              {jeCurrency !== tenantCurrency && jeRateToBase && <p className="text-xs text-muted-foreground">Total base-currency posting: {(mjLines.reduce((total, line) => total + Number(line.amount || 0), 0) * jeRateToBase).toLocaleString(undefined, { maximumFractionDigits: 2 })} {tenantCurrency}</p>}
+              <div className="max-w-sm space-y-2">
+                <Label>Branch</Label>
+                {canSwitchBranches && branches.length > 1 ? (
+                  <Select value={jeBranch} onValueChange={setJeBranch}>
+                    <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                    <SelectContent>{branches.map(branch => <SelectItem key={branch.id} value={branch.id}>{branch.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                    {branches.find(branch => branch.id === jeBranch)?.name || 'No branch assigned'}
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" onClick={() => setMjLines([...mjLines, { debitAccount: '', creditAccount: '', amount: '', date: new Date().toISOString().split('T')[0], description: '', reference: '' }])}>
+                  <Plus className="h-3 w-3 mr-1" /> Add Line
+                </Button>
+              </div>
+              {/* Heading row */}
+              <div className="hidden md:grid grid-cols-1 md:grid-cols-6 gap-3 px-3 pb-2 border-b font-semibold text-sm">
+                <div>Debit Account (DR)</div>
+                <div>Credit Account (CR)</div>
+                <div>Amount</div>
+                <div>Date</div>
+                <div>Description</div>
+                <div>Reference</div>
+              </div>
+              {/* Field rows */}
+              {mjLines.map((line, idx) => (
+                <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-3 items-center rounded-lg border p-3">
+                  <div>
+                    <Select value={line.debitAccount} onValueChange={(v) => {
+                      const updated = [...mjLines]
+                      updated[idx].debitAccount = v
+                      if (updated[idx].creditAccount === v) updated[idx].creditAccount = ''
+                      setMjLines(updated)
+                    }}>
+                      <SelectTrigger><SelectValue placeholder="Select DR account" /></SelectTrigger>
+                      <SelectContent>
+                        {postingAccountOptions
+                          .filter(option => option.value === line.debitAccount || !selectedMultipleJournalAccountIds(idx, 'debitAccount').has(option.value))
+                          .map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Select value={line.creditAccount} onValueChange={(v) => {
+                      const updated = [...mjLines]
+                      updated[idx].creditAccount = v
+                      if (updated[idx].debitAccount === v) updated[idx].debitAccount = ''
+                      setMjLines(updated)
+                    }}>
+                      <SelectTrigger><SelectValue placeholder="Select CR account" /></SelectTrigger>
+                      <SelectContent>
+                        {postingAccountOptions
+                          .filter(option => option.value === line.creditAccount || !selectedMultipleJournalAccountIds(idx, 'creditAccount').has(option.value))
+                          .map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Input type="number" value={line.amount} onChange={(e) => {
+                      const updated = [...mjLines]; updated[idx].amount = e.target.value; setMjLines(updated)
+                    }} placeholder="0.00" />
+                  </div>
+                  <div>
+                    <Input type="date" value={line.date} onChange={(e) => {
+                      const updated = [...mjLines]; updated[idx].date = e.target.value; setMjLines(updated)
+                    }} />
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Input className="flex-1" value={line.description} onChange={(e) => {
+                      const updated = [...mjLines]; updated[idx].description = e.target.value; setMjLines(updated)
+                    }} placeholder="Description" />
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <Input className="flex-1" value={line.reference} onChange={(e) => {
+                      const updated = [...mjLines]; updated[idx].reference = e.target.value; setMjLines(updated)
+                    }} placeholder="Voucher / reference" />
+                    {mjLines.length > 1 && (
+                      <Button size="sm" variant="ghost" onClick={() => setMjLines(mjLines.filter((_, i) => i !== idx))}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div className="flex justify-end pt-2">
+                <Button onClick={handleMultipleJournalSubmit}>Submit</Button>
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ─── Journal Ledger Tab ─── */}
+        <TabsContent value="journal-ledger" className="space-y-4">
+          <Card>
+            <CardContent className="p-4">
+              {/* Toolbar: search left, page size, filters button */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+                <div className="relative w-full sm:max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search entries..."
+                    className="pl-9"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                    <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button variant="outline" onClick={() => setShowFilters(!showFilters)}>
+                    <Filter className="h-4 w-4 mr-2" /> Filters
+                  </Button>
+                </div>
+              </div>
+
+              {/* Filters panel */}
+              {showFilters && (
+                <div className="rounded-lg border p-4 mb-4 space-y-4 bg-muted/30">
+                  <h3 className="font-medium">Filters</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <Label>Branch</Label>
+                      {canSwitchBranches && branches.length > 1 ? (
+                        <Select value={filters.branch} onValueChange={(v) => setFilters({ ...filters, branch: v })}>
+                          <SelectTrigger><SelectValue placeholder="All branches" /></SelectTrigger>
+                          <SelectContent>
+                            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                          {branches.find(b => b.id === filters.branch)?.name || branches.find(b => b.id === jeBranch)?.name || 'No branch assigned'}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <Label>Affected Account</Label>
+                      <Select value={filters.account} onValueChange={(v) => setFilters({ ...filters, account: v })}>
+                        <SelectTrigger><SelectValue placeholder="All accounts" /></SelectTrigger>
+                        <SelectContent>
+                          {accountOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Start Date</Label>
+                      <Input type="date" value={filters.startDate} onChange={(e) => setFilters({ ...filters, startDate: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>End Date</Label>
+                      <Input type="date" value={filters.endDate} onChange={(e) => setFilters({ ...filters, endDate: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Category</Label>
+                      <Select value={filters.category} onValueChange={(v) => setFilters({ ...filters, category: v })}>
+                        <SelectTrigger><SelectValue placeholder="All categories" /></SelectTrigger>
+                        <SelectContent>
+                          {ACCOUNT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Currency</Label>
+                      <Select value={filters.currency} onValueChange={(v) => setFilters({ ...filters, currency: v })}>
+                        <SelectTrigger><SelectValue placeholder="All currencies" /></SelectTrigger>
+                        <SelectContent>
+                          {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={resetFilters}>Reset All</Button>
+                    <Button onClick={() => setShowFilters(false)}>Apply</Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Journal Ledger Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-2 font-medium">Date</th>
+                      <th className="text-left py-2 px-2 font-medium">Description</th>
+                      <th className="text-left py-2 px-2 font-medium">Branch</th>
+                      <th className="text-left py-2 px-2 font-medium">Affected Account</th>
+                      <th className="text-left py-2 px-2 font-medium">Reference</th>
+                      <th className="text-left py-2 px-2 font-medium">Payment Method</th>
+                      <th className="text-right py-2 px-2 font-medium">Debit</th>
+                      <th className="text-right py-2 px-2 font-medium">Credit</th>
+                      <th className="text-left py-2 px-2 font-medium">Authorised By</th>
+                      <th className="text-left py-2 px-2 font-medium">System Date</th>
+                      <th className="text-left py-2 px-2 font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedFiltered.map((entry) => (
+                      entry.lines?.map((line, lineIdx) => (
+                        <tr key={`${entry.id}-${lineIdx}`} className="border-b hover:bg-muted/50">
+                          <td className="py-2 px-2 whitespace-nowrap">{new Date(entry.date).toLocaleDateString()}</td>
+                          <td className="py-2 px-2">
+                            <div className="flex flex-col gap-1">
+                              <span>{line.description || entry.description || '—'}</span>
+                              {entry.currency && entry.currency !== tenantCurrency && entry.foreignTotal != null && <span className="text-xs text-muted-foreground">Journal total: {entry.foreignTotal.toLocaleString()} {entry.currency} → {formatCurrency(entry.foreignTotal * (entry.exchangeRateToBase || 0), tenantCurrency)}</span>}
+                              <div className="flex flex-wrap gap-1">
+                                {entry.status === 'reversed' && <Badge variant="destructive" className="w-fit">Reversed</Badge>}
+                                {entry.reversalOfId && <Badge variant="outline" className="w-fit">Reversal</Badge>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-2 px-2">{entry.branch?.name || '—'}</td>
+                          <td className="py-2 px-2">{line.account ? `${line.account.code} - ${line.account.name}` : '—'}</td>
+                          <td className="py-2 px-2">{entry.reference || entry.voucherNo || '—'}</td>
+                          <td className="py-2 px-2">{entry.paymentMethod || '—'}</td>
+                          <td className="py-2 px-2 text-right font-mono">{line.debit > 0 ? formatCurrency(line.debit) : ''}</td>
+                          <td className="py-2 px-2 text-right font-mono">{line.credit > 0 ? formatCurrency(line.credit) : ''}</td>
+                          <td className="py-2 px-2">{entry.user ? `${entry.user.fname} ${entry.user.lname}` : '—'}</td>
+                          <td className="py-2 px-2 whitespace-nowrap">{entry.createdAt ? new Date(entry.createdAt).toLocaleDateString() : '—'}</td>
+                          <td className="py-2 px-2">
+                            <div className="relative inline-block text-left">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                                onClick={() => setOpenEntryActionsId(openEntryActionsId === entry.id + '-' + lineIdx ? null : entry.id + '-' + lineIdx)}
+                                aria-label="Open journal entry actions"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                              {openEntryActionsId === entry.id + '-' + lineIdx && (
+                                <div className="absolute right-0 z-30 mt-2 w-56 rounded-md border bg-white p-1 shadow-lg">
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-muted"
+                                    onClick={() => {
+                                      setOpenEntryActionsId(null)
+                                      toast({ title: 'Entry ' + entry.entryNo, description: entry.description })
+                                    }}
+                                  >
+                                    <Eye className="h-4 w-4" /> View details
+                                  </button>
+                                  {canReverseAccountingEntries && (
+                                    <button
+                                      type="button"
+                                      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      disabled={!canReverseJournalEntry(entry) || reversingEntryId === entry.id}
+                                      onClick={() => handleReverseJournalEntry(entry)}
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                      {reversingEntryId === entry.id ? 'Reversing...' : 'Reverse expense'}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ))}
+                    {filteredEntries.length === 0 && !loading && (
+                      <tr><td colSpan={11} className="text-center py-8 text-muted-foreground">No journal entries found</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <Pagination
+                currentPage={currentPage}
+                totalPages={Math.ceil(filteredEntries.length / pageSize) || 1}
+                totalItems={filteredEntries.length}
+                pageSize={pageSize}
+                onPageChange={goToPage}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ─── Tax Management Tab ─── */}
+        <TabsContent value="tax-management" className="space-y-4">
+          <div className="flex justify-end">
+            <Dialog open={showTaxModal} onOpenChange={setShowTaxModal}>
+              <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Add New Tax Payment</Button></DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Tax Payment</DialogTitle><DialogDescription>Record a new tax payment for this branch.</DialogDescription></DialogHeader>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label>Branch</Label>
+                      {canSwitchBranches && branches.length > 1 ? (
+                        <Select value={taxForm.branch} onValueChange={(v) => setTaxForm({ ...taxForm, branch: v })}>
+                          <SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger>
+                          <SelectContent>
+                            {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm font-medium">
+                          {branches.find(b => b.id === taxForm.branch)?.name || 'No branch assigned'}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <Label>Amount</Label>
+                      <Input type="number" value={taxForm.amount} onChange={(e) => setTaxForm({ ...taxForm, amount: e.target.value })} placeholder="0.00" />
+                    </div>
+                    <div>
+                      <Label>Currency</Label>
+                      <Select value={taxForm.currency} onValueChange={(v) => setTaxForm({ ...taxForm, currency: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {CURRENCIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>From</Label>
+                      <Input type="date" value={taxForm.from} onChange={(e) => setTaxForm({ ...taxForm, from: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>To</Label>
+                      <Input type="date" value={taxForm.to} onChange={(e) => setTaxForm({ ...taxForm, to: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>PRN</Label>
+                      <Input value={taxForm.prn} onChange={(e) => setTaxForm({ ...taxForm, prn: e.target.value })} placeholder="PRN number" />
+                    </div>
+                    <div>
+                      <Label>Payment Method</Label>
+                      <Select value={taxForm.paymentMethod} onValueChange={(v) => setTaxForm({ ...taxForm, paymentMethod: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {PAYMENT_METHODS.map(m => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Date of Payment</Label>
+                      <Input type="date" value={taxForm.dateOfPayment} onChange={(e) => setTaxForm({ ...taxForm, dateOfPayment: e.target.value })} />
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowTaxModal(false)}>Close</Button>
+                  <Button onClick={handleSaveTaxPayment}>Save</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <Card>
+            <CardHeader><CardTitle>Tax Payments</CardTitle></CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-2 px-2 font-medium">Date</th>
+                      <th className="text-left py-2 px-2 font-medium">Branch</th>
+                      <th className="text-right py-2 px-2 font-medium">Amount</th>
+                      <th className="text-left py-2 px-2 font-medium">Currency</th>
+                      <th className="text-left py-2 px-2 font-medium">Period</th>
+                      <th className="text-left py-2 px-2 font-medium">PRN</th>
+                      <th className="text-left py-2 px-2 font-medium">Payment Method</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taxPayments.map((tp, i) => (
+                      <tr key={tp.id || i} className="border-b hover:bg-muted/50">
+                        <td className="py-2 px-2">{new Date(tp.dateOfPayment || tp.date).toLocaleDateString()}</td>
+                        <td className="py-2 px-2">{tp.branch?.name || '—'}</td>
+                        <td className="py-2 px-2 text-right font-mono">{formatCurrency(tp.amount)}</td>
+                        <td className="py-2 px-2">{tp.currency || '—'}</td>
+                        <td className="py-2 px-2">{tp.from ? new Date(tp.from).toLocaleDateString() : '—'} - {tp.to ? new Date(tp.to).toLocaleDateString() : '—'}</td>
+                        <td className="py-2 px-2">{tp.prn || '—'}</td>
+                        <td className="py-2 px-2">{tp.paymentMethod || '—'}</td>
+                      </tr>
+                    ))}
+                    {taxPayments.length === 0 && (
+                      <tr><td colSpan={7} className="text-center py-8 text-muted-foreground">No tax payments recorded</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+      </Tabs>
+
+      <Dialog open={Boolean(reverseDialogEntry)} onOpenChange={(open) => { if (!open) closeReverseDialog() }}>
+        <DialogContent className="max-w-lg overflow-hidden border-0 p-0 shadow-2xl">
+          <DialogHeader className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-900 px-6 py-5 text-white">
+            <div className="flex items-start gap-4">
+              <div className="rounded-full bg-white/15 p-3 ring-1 ring-white/20">
+                <RotateCcw className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <DialogTitle className="text-xl font-semibold text-white">Reverse expense transaction</DialogTitle>
+                <DialogDescription className="text-sm text-white/80">
+                  This will keep the original entry in the audit trail and post an opposite journal entry.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="space-y-5 px-6 py-5">
+            <div className="grid grid-cols-1 gap-3 rounded-lg border bg-muted/30 p-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Entry</p>
+                <p className="mt-1 font-semibold">{reverseDialogEntry?.entryNo || 'Journal entry'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Amount</p>
+                <p className="mt-1 font-semibold">{formatCurrency(getJournalEntryDebitTotal(reverseDialogEntry))}</p>
+              </div>
+              <div className="sm:col-span-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Description</p>
+                <p className="mt-1 text-sm text-foreground">{reverseDialogEntry?.description || reverseDialogEntry?.lines?.[0]?.description || 'Expense transaction'}</p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Reversal is permanent for accounting history. Use it only when this expense was posted by mistake or needs an auditable correction.
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reversal-reason">Reason for reversal</Label>
+              <Textarea
+                id="reversal-reason"
+                value={reversalReason}
+                onChange={(event) => setReversalReason(event.target.value)}
+                rows={4}
+                className="resize-none"
+                placeholder="Example: Expense was posted to the wrong account"
+              />
+            </div>
+          </div>
+          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={closeReverseDialog} disabled={Boolean(reversingEntryId)}>Cancel</Button>
+            <Button onClick={submitReverseJournalEntry} disabled={Boolean(reversingEntryId)} className="bg-emerald-700 hover:bg-emerald-800">
+              <RotateCcw className="mr-2 h-4 w-4" />
+              {reversingEntryId ? 'Reversing...' : 'Reverse transaction'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

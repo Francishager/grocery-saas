@@ -1,0 +1,181 @@
+import prisma from '../db.js';
+
+const PLATFORM_ROLES = new Set(['saas_admin', 'platform_admin', 'super_admin']);
+
+const HR_PERMISSION_DEFINITIONS = [
+  ['HR_DASHBOARD_VIEW', 'canViewHR', 'View HR dashboard'],
+  ['HR_EMPLOYEE_VIEW', 'canViewHR', 'View HR employees'],
+  ['HR_EMPLOYEE_ATTENDANCE_LOOKUP', 'canViewHREmployeesForAttendance', 'View employee names for attendance only', ['canRecordHRAttendance']],
+  ['HR_EMPLOYEE_CREATE', 'canCreateHREmployee', 'Create HR employees'],
+  ['HR_EMPLOYEE_UPDATE', 'canEditHREmployee', 'Edit HR employees'],
+  ['HR_EMPLOYEE_TRANSFER', 'canEditHREmployee', 'Transfer HR employees'],
+  ['HR_EMPLOYEE_PROMOTE', 'canEditHREmployee', 'Promote HR employees'],
+  ['HR_EMPLOYEE_STATUS_CHANGE', 'canEditHREmployee', 'Change HR employee status'],
+  ['HR_EMPLOYEE_DELETE', 'canDeleteHREmployee', 'Deactivate HR employees'],
+  ['HR_DEPARTMENT_VIEW', 'canViewHR', 'View HR departments'],
+  ['HR_DEPARTMENT_CREATE', 'canCreateHRStructure', 'Create HR departments', ['canManageHRStructure']],
+  ['HR_DEPARTMENT_UPDATE', 'canEditHRStructure', 'Edit HR departments', ['canManageHRStructure']],
+  ['HR_DEPARTMENT_DELETE', 'canDeleteHRStructure', 'Deactivate HR departments', ['canManageHRStructure']],
+  ['HR_POSITION_VIEW', 'canViewHR', 'View HR positions'],
+  ['HR_POSITION_CREATE', 'canCreateHRStructure', 'Create HR positions', ['canManageHRStructure']],
+  ['HR_POSITION_UPDATE', 'canEditHRStructure', 'Edit HR positions', ['canManageHRStructure']],
+  ['HR_POSITION_DELETE', 'canDeleteHRStructure', 'Deactivate HR positions', ['canManageHRStructure']],
+  ['HR_UNIT_VIEW', 'canViewHR', 'View HR units'],
+  ['HR_UNIT_CREATE', 'canCreateHRStructure', 'Create HR units', ['canManageHRStructure']],
+  ['HR_UNIT_UPDATE', 'canEditHRStructure', 'Edit HR units', ['canManageHRStructure']],
+  ['HR_UNIT_DELETE', 'canDeleteHRStructure', 'Deactivate HR units', ['canManageHRStructure']],
+  ['HR_TEAM_VIEW', 'canViewHR', 'View HR teams'],
+  ['HR_TEAM_CREATE', 'canCreateHRStructure', 'Create HR teams', ['canManageHRStructure']],
+  ['HR_TEAM_UPDATE', 'canEditHRStructure', 'Edit HR teams', ['canManageHRStructure']],
+  ['HR_TEAM_DELETE', 'canDeleteHRStructure', 'Deactivate HR teams', ['canManageHRStructure']],
+  ['HR_CONTRACT_VIEW', 'canViewHRContracts', 'View HR contracts'],
+  ['HR_CONTRACT_CREATE', 'canCreateHRContracts', 'Create HR contracts', ['canManageHRContracts']],
+  ['HR_CONTRACT_UPDATE', 'canEditHRContracts', 'Edit HR contracts', ['canManageHRContracts']],
+  ['HR_CONTRACT_TERMINATE', 'canTerminateHRContracts', 'Terminate HR contracts', ['canManageHRContracts']],
+  ['HR_DOCUMENT_VIEW', 'canViewHRDocuments', 'View HR documents'],
+  ['HR_DOCUMENT_CREATE', 'canUploadHRDocuments', 'Upload HR documents', ['canManageHRDocuments']],
+  ['HR_DOCUMENT_UPDATE', 'canEditHRDocuments', 'Edit HR documents', ['canManageHRDocuments']],
+  ['HR_DOCUMENT_DELETE', 'canDeleteHRDocuments', 'Delete HR documents', ['canManageHRDocuments']],
+  ['HR_SALARY_VIEW', 'canViewHRSalaries', 'View HR salaries'],
+  ['HR_SALARY_RECORD', 'canManageHRSalaries', 'Record HR salary changes'],
+  ['ATTENDANCE_VIEW', 'canViewHRAttendance', 'View HR attendance'],
+  ['ATTENDANCE_RECORD', 'canRecordHRAttendance', 'Record employee check-in/check-out', ['canManageHRAttendance']],
+  ['ATTENDANCE_RECORD_OWN', 'canRecordOwnHRAttendance', 'Record own employee check-in/check-out'],
+  ['ATTENDANCE_EDIT', 'canEditHRAttendance', 'Edit HR attendance', ['canManageHRAttendance']],
+  ['ATTENDANCE_DELETE', 'canDeleteHRAttendance', 'Delete HR attendance records', ['canManageHRAttendance']],
+  ['ATTENDANCE_IMPORT', 'canImportHRAttendance', 'Import HR attendance', ['canManageHRAttendance']],
+  ['ATTENDANCE_CONFIG', 'canConfigureHRAttendance', 'Configure HR attendance', ['canManageHRAttendance']],
+  ['ATTENDANCE_APPROVE', 'canApproveHRAttendance', 'Approve HR attendance'],
+  ['SHIFT_VIEW', 'canViewHRShifts', 'View HR shifts'],
+  ['SHIFT_CREATE', 'canCreateHRShifts', 'Create shift templates', ['canManageHRShifts']],
+  ['SHIFT_MANAGE', 'canEditHRShifts', 'Edit shift templates', ['canManageHRShifts']],
+  ['SHIFT_DELETE', 'canDeleteHRShifts', 'Delete shift templates', ['canManageHRShifts']],
+  ['SHIFT_ASSIGN', 'canAssignHRShifts', 'Assign HR shifts'],
+  ['SHIFT_APPROVE', 'canApproveHRShifts', 'Approve HR shift changes'],
+  ['LEAVE_VIEW', 'canViewHRLeave', 'View HR leave'],
+  ['LEAVE_REQUEST', 'canRequestHRLeave', 'Request HR leave'],
+  ['LEAVE_TYPE_CREATE', 'canCreateHRLeaveTypes', 'Create HR leave types', ['canManageHRLeaveTypes']],
+  ['LEAVE_TYPE_UPDATE', 'canEditHRLeaveTypes', 'Edit HR leave types', ['canManageHRLeaveTypes']],
+  ['LEAVE_TYPE_DELETE', 'canDeleteHRLeaveTypes', 'Delete HR leave types', ['canManageHRLeaveTypes']],
+  ['LEAVE_ALLOCATE', 'canAllocateHRLeave', 'Allocate HR leave', ['canManageHRLeaveTypes']],
+  ['LEAVE_APPROVE_L1', 'canApproveHRLeave', 'Approve HR leave'],
+  ['LEAVE_APPROVE_L2', 'canApproveHRLeave', 'Final approve HR leave'],
+  ['HR_PAYROLL_VIEW', 'canViewHRPayroll', 'View HR payroll'],
+  ['HR_PAYROLL_CREATE', 'canCreateHRPayroll', 'Create HR payroll drafts', ['canManageHRPayroll']],
+  ['HR_PAYROLL_APPROVE', 'canApproveHRPayroll', 'Approve HR payroll', ['canManageHRPayroll']],
+  ['HR_PAYROLL_POST', 'canPostHRPayroll', 'Post HR payroll to accounting', ['canManageHRPayroll']],
+  ['HR_PAYROLL_PAY', 'canPayHRPayroll', 'Pay HR salaries', ['canManageHRPayroll']],
+  ['HR_PAYROLL_SETTINGS', 'canManageHRPayrollSettings', 'Manage HR payroll accounting setup', ['canManageHRPayroll']],
+  ['HR_OPENING_BALANCES', 'canManageHROpeningBalances', 'Record employee opening balances', ['canManageHRPayroll']],
+  ['HR_PAYROLL_MANAGE', 'canManageHRPayroll', 'Manage HR payroll'],
+];
+
+const permissionFieldsForDefinition = ([, field, , fallbackFields = []]) => [field, ...fallbackFields].filter(Boolean);
+const CODE_TO_PERMISSIONS = new Map(HR_PERMISSION_DEFINITIONS.map((definition) => [definition[0], permissionFieldsForDefinition(definition)]));
+const DEFINITION_BY_CODE = new Map(HR_PERMISSION_DEFINITIONS.map(([code, field, description, fallbackFields = []]) => [code, { code, field, fields: [field, ...fallbackFields], description }]));
+
+function normalizeCode(code = '') {
+  return String(code).replace(/\./g, '_').toUpperCase();
+}
+
+class HRPermissionService {
+  async getUserWithPermissions(tenantId, userId) {
+    return prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: {
+        id: true,
+        role: true,
+        permissions: true,
+      },
+    });
+  }
+
+  async hasPermission(tenantId, userId, permissionCode) {
+    if (!tenantId || !userId) return false;
+    const user = await this.getUserWithPermissions(tenantId, userId);
+    if (!user) return false;
+    if (PLATFORM_ROLES.has(user.role) || user.role === 'owner') return true;
+
+    const normalized = normalizeCode(permissionCode);
+    const permissionFields = CODE_TO_PERMISSIONS.get(normalized) || ['canViewHR'];
+    const permissionRecord = Array.isArray(user.permissions) ? user.permissions[0] : null;
+    return permissionFields.some((permissionField) => Boolean(permissionRecord?.[permissionField]));
+  }
+
+  async getPermissionsByUser(tenantId, userId) {
+    const user = await this.getUserWithPermissions(tenantId, userId);
+    if (!user) return [];
+    const permissionRecord = Array.isArray(user.permissions) ? user.permissions[0] : null;
+    return this.permissionsFromRecord(permissionRecord, user.role);
+  }
+
+  async getPermissionsByRole(tenantId, roleId) {
+    const user = await prisma.user.findFirst({
+      where: { tenantId, role: roleId },
+      select: { permissions: true, role: true },
+    });
+    const permissionRecord = Array.isArray(user?.permissions) ? user.permissions[0] : null;
+    return this.permissionsFromRecord(permissionRecord, roleId);
+  }
+
+  async getAllPermissions() {
+    return HR_PERMISSION_DEFINITIONS.map(([permissionCode, field, description, fallbackFields = []]) => ({
+      id: permissionCode,
+      permissionCode,
+      code: permissionCode,
+      field,
+      fields: [field, ...fallbackFields],
+      permissionName: permissionCode,
+      name: permissionCode,
+      description,
+      status: 'active',
+    }));
+  }
+
+  async grantPermission() {
+    throw new Error('HR permissions are managed on the main Roles & Permissions page.');
+  }
+
+  async revokePermission() {
+    throw new Error('HR permissions are managed on the main Roles & Permissions page.');
+  }
+
+  async updateUserPermissions() {
+    throw new Error('HR permissions are managed on the main Roles & Permissions page.');
+  }
+
+  async getPermissionById(_tenantId, permissionId) {
+    const normalized = normalizeCode(permissionId);
+    const definition = DEFINITION_BY_CODE.get(normalized);
+    if (!definition) throw new Error('Permission not found');
+    return {
+      id: definition.code,
+      permissionCode: definition.code,
+      code: definition.code,
+      field: definition.field,
+      fields: definition.fields,
+      name: definition.code,
+      description: definition.description,
+      status: 'active',
+    };
+  }
+
+  permissionsFromRecord(permissionRecord, role = '') {
+    const ownerLike = role === 'owner' || PLATFORM_ROLES.has(role);
+    return HR_PERMISSION_DEFINITIONS
+      .filter((definition) => ownerLike || permissionFieldsForDefinition(definition).some((field) => Boolean(permissionRecord?.[field])))
+      .map(([permissionCode, field, description, fallbackFields = []]) => ({
+        id: permissionCode,
+        permissionCode,
+        code: permissionCode,
+        field,
+        fields: [field, ...fallbackFields],
+        permissionName: permissionCode,
+        name: permissionCode,
+        description,
+        status: 'active',
+      }));
+  }
+}
+
+export default new HRPermissionService();

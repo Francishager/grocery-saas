@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import prisma from "./db.js";
+import { startBackgroundJobs } from "./backgroundJobs.js";
 import { verifyMailTransport } from "../mailer.js";
 
 import authRoutes from "./routes/auth.js";
@@ -10,8 +11,6 @@ import purchaseRoutes from "./routes/purchases.js";
 import salesRoutes from "./routes/sales.js";
 import inventoryRoutes from "./routes/inventory.js";
 import trashRoutes from "./routes/trash.js";
-import { expireTrash } from "./services/trashService.js";
-import { deliverDuePlannerReminders } from "./services/plannerReminders.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import businessAdvisorRoutes from "./routes/businessAdvisor.js";
 import aiWritingAssistRoutes from "./routes/aiWritingAssist.js";
@@ -31,7 +30,7 @@ import payablesRouter from "../routes/payables.js";
 import expensesRouter from "../routes/expenses.js";
 import platformNewRouter from "../routes/platform-new.js";
 import rentalsRouter from "../routes/rentals.js";
-import propertyManagementRouter, { runPropertyRentAutomation } from "./routes/propertyManagement.js";
+import propertyManagementRouter from "./routes/propertyManagement.js";
 import returnsRouter from "../routes/returns.js";
 import accountingRouter from "../routes/accounting.js";
 import hrRouter from "../routes/hr.js";
@@ -223,18 +222,9 @@ app.use("/api/purchases", purchaseRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/trash", trashRoutes);
-const trashExpiryTimer = setInterval(() => { expireTrash().catch(error => console.error('Trash expiry failed:', error.code || error.message)); }, 60 * 60 * 1000);
-trashExpiryTimer.unref();
-const propertyRentAutomationTimer = setInterval(() => {
-  runPropertyRentAutomation().catch(error => console.error('Property rent automation failed:', error.code || error.message));
-}, 6 * 60 * 60 * 1000);
-propertyRentAutomationTimer.unref();
-setTimeout(() => runPropertyRentAutomation().catch(error => console.error('Initial property rent automation failed:', error.code || error.message)), 30_000).unref();
-const plannerReminderTimer = setInterval(() => {
-  deliverDuePlannerReminders().catch(error => console.error('Planner reminder check failed:', error.code || error.message));
-}, 60_000);
-plannerReminderTimer.unref();
-setTimeout(() => deliverDuePlannerReminders().catch(error => console.error('Initial planner reminder check failed:', error.code || error.message)), 20_000).unref();
+const stopBackgroundJobs = process.env.RUN_BACKGROUND_JOBS === "false"
+  ? () => {}
+  : startBackgroundJobs();
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/ai", businessAdvisorRoutes);
 app.use("/api/ai-writing", aiWritingAssistRoutes);
@@ -325,11 +315,17 @@ process.on('uncaughtException', (err) => {
 });
 
 // Graceful shutdown
-process.on("SIGINT", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
-process.on("SIGTERM", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Backend received ${signal}; closing server.`);
+  stopBackgroundJobs();
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
