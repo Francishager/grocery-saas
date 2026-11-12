@@ -1,0 +1,15 @@
+{
+  "$id": "OwnerStep.schema.json",
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "fname": { "type": "string", "minLength": 1 },
+    "mname": { "type": "string" },
+    "lname": { "type": "string", "minLength": 1 },
+    "email": { "type": "string", "format": "email" },
+    "business_name": { "type": "string" },
+    "phone_number": { "type": "string" }
+  },
+  "required": ["fname", "lname", "email"]
+}

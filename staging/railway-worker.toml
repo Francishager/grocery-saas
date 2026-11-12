@@ -1,0 +1,9 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+rootDirectory = "staging/backend"
+
+[deploy]
+startCommand = "npm run start:worker"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

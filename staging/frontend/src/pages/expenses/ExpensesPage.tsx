@@ -1,0 +1,500 @@
+import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useToast } from '@/hooks/use-toast'
+import { apiFetch } from '@/lib/api'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalExpenses, getLocalCashAccounts, getLocalCashTransactions } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { db } from '@/db/index'
+import TransactionReceiptButton from '@/components/TransactionReceiptButton'
+import { getTenantCurrency } from '@/lib/utils'
+import { 
+  Wallet, 
+  TrendingUp, 
+  TrendingDown,
+  DollarSign,
+  CreditCard,
+  Building2,
+  Users,
+  Calendar,
+  Filter,
+  Download,
+  Eye,
+  Plus
+} from 'lucide-react'
+
+interface Expense {
+  id: string
+  category: string
+  description: string
+  amount: number
+  currency?: string | null
+  foreignAmount?: number | null
+  exchangeRateToBase?: number | null
+  paymentMethod: string
+  cashAccountId?: string | null
+  cashAccount?: { id: string; name: string; type: string } | null
+  reference?: string
+  notes?: string
+  date: string
+  user: {
+    id: string
+    fname: string
+    lname: string
+  }
+}
+
+interface CashAccount {
+  id: string
+  name: string
+  type: string
+  balance: number
+  currency: string
+  isActive: boolean
+  accountNumber?: string | null
+  bankName?: string | null
+  accountHolder?: string | null
+  branchName?: string | null
+}
+
+interface CashTransaction {
+  id: string
+  amount: number
+  type: string
+  balanceAfter: number
+  reference?: string
+  description?: string
+  createdAt: string
+  user: {
+    id: string
+    fname: string
+    lname: string
+  }
+  account: {
+    id: string
+    name: string
+    type: string
+  }
+}
+
+export default function ExpensesPage() {
+  const { hasPermission } = useJWTAuth()
+  const { toast } = useToast()
+  const navigate = useNavigate()
+  
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([])
+  const [transactions, setTransactions] = useState<CashTransaction[]>([])
+  const [summary, setSummary] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [activeTab, setActiveTab] = useState<'expenses' | 'accounts' | 'transactions' | 'summary'>('expenses')
+  const expensesEnabled = hasPermission('canViewExpense')
+  const canCreateExpense = hasPermission('canCreateExpense')
+  const online = useOnlineStatus()
+
+  useEffect(() => {
+    if (!expensesEnabled) {
+      setLoading(false)
+      return
+    }
+
+    if (activeTab === 'expenses') loadExpenses()
+    if (activeTab === 'accounts') loadCashAccounts()
+    if (activeTab === 'transactions') loadTransactions()
+    loadCashFlowSummary()
+  }, [expensesEnabled, activeTab, searchTerm, categoryFilter, startDate, endDate])
+
+  const loadExpenses = async () => {
+    try {
+      setLoading(true)
+      if (online) {
+        const params = new URLSearchParams({
+          ...(searchTerm && { search: searchTerm }),
+          ...(categoryFilter && { category: categoryFilter }),
+          ...(startDate && { startDate }),
+          ...(endDate && { endDate })
+        })
+        const response = await apiFetch(`/api/expenses/expenses?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setExpenses(data.expenses)
+        }
+      } else {
+        const local = await getLocalExpenses(searchTerm, categoryFilter)
+        setExpenses(local)
+      }
+    } catch (error) {
+      try {
+        const local = await getLocalExpenses(searchTerm, categoryFilter)
+        setExpenses(local)
+      } catch {
+        toast({ title: 'Error', description: 'Failed to load expenses', variant: 'destructive' })
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadCashAccounts = async () => {
+    try {
+      if (online) {
+        const response = await apiFetch('/api/expenses/cash-accounts')
+        if (response.ok) {
+          const data = await response.json()
+          setCashAccounts(data)
+        }
+      } else {
+        const local = await getLocalCashAccounts()
+        setCashAccounts(local)
+      }
+    } catch (error) {
+      try { setCashAccounts(await getLocalCashAccounts()) } catch {}
+    }
+  }
+
+  const loadTransactions = async () => {
+    try {
+      if (online) {
+        const params = new URLSearchParams({
+          ...(searchTerm && { search: searchTerm }),
+          ...(startDate && { startDate }),
+          ...(endDate && { endDate })
+        })
+        const response = await apiFetch(`/api/expenses/cash-transactions?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setTransactions(data.transactions)
+        }
+      } else {
+        const local = await getLocalCashTransactions()
+        setTransactions(local)
+      }
+    } catch (error) {
+      try { setTransactions(await getLocalCashTransactions()) } catch {}
+    }
+  }
+
+  const loadCashFlowSummary = async () => {
+    try {
+      if (online) {
+        const params = new URLSearchParams({
+          ...(startDate && { startDate }),
+          ...(endDate && { endDate })
+        })
+        
+        const response = await apiFetch(`/api/expenses/cash-flow/summary?${params}`)
+        if (response.ok) {
+          const data = await response.json()
+          setSummary(data)
+        }
+      } else {
+        // Compute summary from local data
+        const localExpenses = await getLocalExpenses()
+        const localAccounts = await getLocalCashAccounts()
+        const totalExpenses = localExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
+        const totalBalance = localAccounts.reduce((sum, a) => sum + (a.balance || 0), 0)
+        setSummary({
+          totalExpenses,
+          totalIncome: 0,
+          netCashFlow: -totalExpenses,
+          accountBalance: totalBalance,
+          expenseCount: localExpenses.length,
+        })
+      }
+    } catch (error) {
+      console.error('Failed to load summary:', error)
+    }
+  }
+
+  const getCategoryIcon = (category: string) => {
+    const icons: Record<string, string> = {
+      rent: '🏢',
+      transport: '🚗',
+      salaries: '💰',
+      utilities: '💡',
+      airtime: '📱',
+      marketing: '📢',
+      maintenance: '🔧',
+      supplies: '📎',
+      insurance: '🛡️',
+      taxes: '📋',
+      cleaning: '🧹',
+      security: '👮',
+      waste_disposal: '🗑️',
+      purchases: '📦',
+      raw_materials: '🏭',
+      packaging: '🎁',
+      freight_in: '🚛',
+      staff_meals: '🍽️',
+      staff_training: '🎓',
+      medical: '🏥',
+      pensions: '🏦',
+      travel: '✈️',
+      accommodation: '🏨',
+      meals: '🍴',
+      fuel: '⛽',
+      promotions: '🏷️',
+      samples: '🎁',
+      legal: '⚖️',
+      accounting: '�',
+      consulting: '🧠',
+      software_licenses: '💻',
+      internet: '🌐',
+      hosting: '☁️',
+      bank_charges: '🏦',
+      loan_interest: '📉',
+      fx_losses: '💱',
+      fines: '⚠️',
+      licenses: '📜',
+      inspection_fees: '🔍',
+      equipment_purchase: '🛠️',
+      equipment_rental: '🔁',
+      depreciation: '📉',
+      donations: '🤝',
+      refunds: '↩️',
+      write_offs: '❌',
+      miscellaneous: '📝',
+      other: '�📝'
+    }
+    return icons[category] || '📝'
+  }
+
+  const getTransactionTypeIcon = (type: string) => {
+    return type === 'income' ? 
+      <TrendingUp className="h-4 w-4 text-green-600" /> : 
+      <TrendingDown className="h-4 w-4 text-red-600" />
+  }
+
+  if (!hasPermission('canViewExpense')) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <h2 className="text-lg font-semibold">Access Denied</h2>
+          <p className="text-muted-foreground">You don't have permission to access expense management.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Expenses & Cash Flow</h1>
+          <p className="text-muted-foreground">Track business expenses and manage cash accounts</p>
+        </div>
+        {canCreateExpense && (
+          <Button onClick={() => navigate('/tenant/accounting/expenses?new=true')}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Expense
+          </Button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex space-x-1 border-b">
+        {['expenses', 'accounts', 'transactions', 'summary'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab as any)}
+            className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+              activeTab === tab
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-4 py-4">
+        <div className="flex items-center gap-2 flex-1">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search expenses..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="max-w-sm"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="max-w-xs"
+          />
+          <span className="text-sm text-muted-foreground">to</span>
+          <Input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="max-w-xs"
+          />
+        </div>
+      </div>
+
+      {/* Content */}
+      {activeTab === 'expenses' && (
+        <div className="grid gap-4">
+          {loading ? (
+            <div className="col-span-full text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            expenses.map((expense) => (
+              <Card key={expense.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="text-2xl">
+                        {getCategoryIcon(expense.category)}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{expense.description}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {expense.category} • {expense.paymentMethod}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          By {expense.user?.fname || ''} {expense.user?.lname || ''} • {new Date(expense.date).toLocaleDateString()}
+                        </p>
+                        {expense.cashAccount && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            <span className="inline-flex items-center gap-1">
+                              <Wallet className="h-3 w-3" />
+                              Paid from: <span className="font-medium">{expense.cashAccount.name}</span>
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-red-600">
+                        -{expense.amount.toFixed(2)}
+                      </div>
+                      {expense.currency && expense.currency !== getTenantCurrency() && expense.foreignAmount != null && <p className="text-xs text-muted-foreground">{expense.foreignAmount.toLocaleString()} {expense.currency} → {expense.amount.toLocaleString()} {getTenantCurrency()}</p>}
+                      {expense.reference && (
+                        <p className="text-sm text-muted-foreground">
+                          Ref: {expense.reference}
+                        </p>
+                      )}
+                      <div className="mt-2"><TransactionReceiptButton data={{
+                        title: 'Expense payment voucher', reference: expense.reference || `EXP-${expense.id.slice(-8)}`,
+                        date: expense.date, amount: expense.amount, partyLabel: 'Payee / description', partyName: expense.description,
+                        fields: [{ label: 'Category', value: expense.category }, { label: 'Payment method', value: expense.paymentMethod }, { label: 'Paid from', value: expense.cashAccount?.name }, { label: 'Recorded by', value: `${expense.user?.fname || ''} ${expense.user?.lname || ''}`.trim() }, { label: 'Notes', value: expense.notes }],
+                      }} /></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === 'accounts' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Cash Accounts ({cashAccounts.length})</h3>
+            <Button size="sm" variant="outline" onClick={() => navigate('/tenant/accounting/transactions')}>
+              <Wallet className="h-4 w-4 mr-2" />Manage Accounts
+            </Button>
+          </div>
+
+          <div className="grid gap-4">
+            {cashAccounts.map((account) => (
+              <Card key={account.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                        {account.type === 'bank' ? <Building2 className="h-5 w-5 text-primary" /> :
+                         account.type === 'mobile_money' ? <CreditCard className="h-5 w-5 text-primary" /> :
+                         <Wallet className="h-5 w-5 text-primary" />}
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">{account.name}</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {account.type.replace(/_/g, ' ')} • {account.currency}
+                          {account.accountNumber && ` • ${account.accountNumber}`}
+                          {account.bankName && ` • ${account.bankName}`}
+                        </p>
+                        {account.accountHolder && (
+                          <p className="text-xs text-muted-foreground">Holder: {account.accountHolder}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold">
+                        {account.balance.toFixed(2)}
+                      </div>
+                      <Badge variant={account.isActive ? 'default' : 'secondary'}>
+                        {account.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'transactions' && (
+        <div className="grid gap-4">
+          {transactions.map((transaction) => (
+            <Card key={transaction.id}>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div>
+                      {getTransactionTypeIcon(transaction.type)}
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">{transaction.description || 'Cash Transaction'}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {transaction.account?.name || '—'} • {transaction.type}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        By {transaction.user?.fname || ''} {transaction.user?.lname || ''} • {new Date(transaction.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-2xl font-bold ${transaction.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                      {transaction.type === 'income' ? '+' : '-'}{transaction.amount.toFixed(2)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Balance: {transaction.balanceAfter.toFixed(2)}
+                    </div>
+                    <div className="mt-2"><TransactionReceiptButton data={{
+                      title: transaction.type === 'transfer' ? 'Cash account transfer record' : `Cash ${transaction.type} receipt`,
+                      reference: transaction.reference || `TXN-${transaction.id.slice(-8)}`, date: transaction.createdAt,
+                      amount: transaction.amount, partyLabel: 'Account', partyName: transaction.account?.name,
+                      fields: [{ label: 'Movement', value: transaction.type }, { label: 'Description', value: transaction.description }, { label: 'Balance after', value: transaction.balanceAfter }, { label: 'Recorded by', value: `${transaction.user?.fname || ''} ${transaction.user?.lname || ''}`.trim() }],
+                    }} /></div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,1686 @@
+// =====================================================
+// SINGLE SOURCE OF TRUTH for all permission keys
+// =====================================================
+import { SERVICE_PERMISSION_DEFINITIONS, SERVICE_PERMISSION_KEYS, SERVICE_PERMISSION_CATEGORIES, LEGACY_SERVICE_PERMISSION_KEYS } from './servicePermissions.js';
+import { sanitizePlatformPermissions } from './platformPermissions.js';
+export const SALES_REPORT_PERMISSION_ITEMS = [
+  ['salesSummary', 'Sales Summary'],
+  ['salesDaily', 'Daily Sales Report'],
+  ['salesWeekly', 'Weekly Sales Report'],
+  ['salesMonthly', 'Monthly Sales Report'],
+  ['salesByProduct', 'Sales by Product'],
+  ['salesByCategory', 'Sales by Category'],
+  ['salesByCustomer', 'Sales by Customer'],
+  ['salesByUser', 'Sales by User/Cashier'],
+  ['salesServiceJobs', 'Product & Service Jobs'],
+  ['salesByBranch', 'Sales by Branch'],
+  ['salesDiscounts', 'Discount Report'],
+  ['salesReturns', 'Returns & Refunds Report'],
+];
+export const SALES_REPORT_PERMISSION_KEYS = SALES_REPORT_PERMISSION_ITEMS.map(([id]) =>
+  `canViewReport${id[0].toUpperCase()}${id.slice(1)}`
+);
+export const LEGACY_REPORT_GROUP_PERMISSION_KEYS = [
+  'canViewSalesReport', 'canViewInventoryReport', 'canViewFinancialReport', 'canViewCustomerReport',
+  'canViewSupplierReport', 'canViewReceivablesReport', 'canViewPayablesReport', 'canViewPerformanceReport',
+  'canViewServiceReport', 'canViewRentalReport', 'canViewFuelStationReport', 'canViewManufacturingReport',
+  'canViewAgricultureReport', 'canViewRestaurantReport', 'canViewServiceBusinessReport',
+];
+const REPORT_GROUPS = [
+  ['reports_inventory', 'reports.inventory', [['inventoryStock','Current Stock Report'],['inventoryValuation','Stock Valuation Report'],['inventoryLowStock','Low Stock Report'],['inventoryOutOfStock','Out of Stock Report'],['inventoryStockMovement','Stock Movement Report'],['inventoryAdjustments','Inventory Adjustment Report'],['inventoryExpiry','Expiry Report'],['inventoryDamaged','Damaged/Lost Stock Report'],['inventoryFastMoving','Fast Moving Products'],['inventorySlowMoving','Slow Selling Products'],['inventoryProductLedger','Product Ledger']]],
+  ['reports_financial', 'reports.financial', [['financialProfitLoss','Profit & Loss Report'],['financialIncome','Income Report'],['financialExpense','Expense Report'],['financialCashFlow','Cash Flow Report'],['financialTrialBalance','Trial Balance'],['financialBalanceSheet','Balance Sheet'],['financialGeneralLedger','General Ledger'],['financialBankTransactions','Bank Transactions Report'],['financialTax','Tax Report']]],
+  ['reports_customers', 'reports.customers', [['customersList','Customer List Report'],['customersSales','Customer Sales Report'],['customersBalance','Customer Balance Report'],['customersReceivables','Customer Receivables Report'],['customersTop','Top Customers Report'],['customersLedger','Customer Ledger'],['customersStatement','Customer Statement'],['customersCreditNotes','Customer Credit Notes Report']]],
+  ['reports_suppliers', 'reports.suppliers', [['suppliersList','Supplier List Report'],['suppliersPurchases','Supplier Purchases Report'],['suppliersPayables','Supplier Payables Report'],['suppliersBalance','Supplier Balance Report'],['suppliersStatement','Supplier Statement'],['suppliersDebitNotes','Supplier Debit Notes Report'],['suppliersLedger','Supplier Ledger']]],
+  ['reports_receivables', 'reports.customers', [['receivablesOutstanding','Outstanding Invoices'],['receivablesAging','Customer Aging Report'],['receivablesCollection','Collection Report'],['receivablesOverdue','Overdue Accounts Report'],['receivablesCreditNotes','Receivables Credit Notes Report']]],
+  ['reports_payables', 'reports.financial', [['payablesOutstanding','Outstanding Bills Report'],['payablesAging','Supplier Aging Report'],['payablesPaymentHistory','Payment History Report'],['payablesOverdue','Overdue Supplier Balances'],['payablesDebitNotes','Payables Debit Notes Report']]],
+  ['reports_performance', 'reports.performance', [['performanceBranch','Branch Performance Report'],['performanceProduct','Product Performance Report'],['performanceCategory','Category Performance Report'],['performanceUserActivity','User Activity Report'],['performanceTopProducts','Top Selling Products'],['performanceLeastProducts','Least Selling Products']]],
+  ['reports_services', 'reports.services', [['servicesSummary','Service Summary'],['servicesList','Service List'],['servicesSales','Service Sales Report'],['servicesByCategory','Service Sales by Category'],['servicesByBranch','Service Sales by Branch'],['servicesTop','Top Services']]],
+  ['reports_rentals', 'reports.rentals', [['rentalsSummary','Rental Summary'],['rentalsList','Rental List Report'],['rentalsByItem','Rental by Item'],['rentalsByCustomer','Rental by Customer'],['rentalsByBranch','Rental by Branch'],['rentalsActive','Active Rentals'],['rentalsOverdue','Overdue Rentals'],['rentalsReturns','Rental Returns Report'],['rentalsDaily','Daily Rental Report'],['rentalsMonthly','Monthly Rental Report']]],
+  ['reports_fuel', 'fuel_station.reports', [['fuelSalesSummary','Fuel Sales Summary'],['fuelByPump','Sales by Pump'],['fuelByTank','Tank Stock Report'],['fuelDeliveries','Fuel Deliveries Report'],['fuelShiftSummary','Shift Summary Report'],['fuelLubricantSales','Lubricant Sales Report'],['fuelCarWash','Car Wash Income Report'],['fuelMeterReadings','Meter Readings Report']]],
+  ['reports_manufacturing', 'manufacturing.reports', [['mfgProductionSummary','Production Summary'],['mfgByProduct','Production by Product'],['mfgWasteReport','Waste Report'],['mfgCostAnalysis','Production Cost Analysis'],['mfgBOMReport','BOM / Recipe Report']]],
+  ['reports_analysis', 'reports', [['executiveSummary','Executive Summary & Insights']]],
+];
+export const OTHER_REPORT_PERMISSION_ITEMS = REPORT_GROUPS.flatMap(([category, feature, items]) => items.map(([id, name]) => [id, name, category, feature]));
+export const REPORT_PERMISSION_ITEMS = [
+  ...SALES_REPORT_PERMISSION_ITEMS.map(([id, name]) => [id, name, 'reports_sales', 'reports.sales']),
+  ...OTHER_REPORT_PERMISSION_ITEMS,
+];
+export const REPORT_PERMISSION_KEYS = REPORT_PERMISSION_ITEMS.map(([id]) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`);
+export const reportPermissionKey = (id) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`;
+export function userHasReportAccess(id, permissions = [], record = null) {
+  const key = reportPermissionKey(id);
+  const grants = Array.isArray(permissions) ? permissions : [];
+  return grants.includes('*') || grants.includes(key) || record?.[key] === true;
+}
+export const salesReportPermissionKey = (id) => `canViewReport${id[0].toUpperCase()}${id.slice(1)}`;
+export function userHasSalesReportAccess(id, userPermissions = [], permissionRecord = null) {
+  const permissions = Array.isArray(userPermissions) ? userPermissions : [];
+  if (permissions.includes('*')) return true;
+  const granularKey = salesReportPermissionKey(id);
+  return permissions.includes(granularKey) || permissionRecord?.[granularKey] === true;
+}
+const reportPermissionMetadata = Object.fromEntries(REPORT_PERMISSION_ITEMS.map(([id, name]) => [reportPermissionKey(id), {
+  name: `View ${name}`, description: `Open only the ${name.toLowerCase()} report.`,
+}]));
+const PERMISSION_TO_FEATURES = {
+  ...Object.fromEntries(REPORT_PERMISSION_ITEMS.map(([id, , , feature]) => [reportPermissionKey(id), [feature]])),
+  ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, [p.feature, 'service']])),
+  canViewDashboard: [],
+  canUseBusinessAI: ['dashboard'],
+  canCreateSale: ['sales', 'sales.pos', 'sales.orders'],
+  canViewSale: ['sales', 'sales.pos', 'sales.orders'],
+  canEditSale: ['sales', 'sales.pos', 'sales.orders'],
+  canDeleteSale: ['sales', 'sales.pos', 'sales.orders'],
+  canRefundSale: ['sales.returns', 'sales'],
+  canGiveDiscount: ['sales.discounts', 'sales'],
+  canViewReceipt: ['receipts', 'sales.receipts', 'sales.pos', 'sales'],
+  canCreateReceipt: ['receipts', 'sales.receipts', 'sales.pos', 'sales'],
+  canCreateProduct: ['inventory.products', 'inventory'],
+  canViewProduct: ['inventory.products', 'inventory'],
+  canViewPriceHistory: ['inventory.products', 'inventory'],
+  canEditProduct: ['inventory.products', 'inventory'],
+  canDeleteProduct: ['inventory.products', 'inventory'],
+  canAdjustStock: ['inventory.stock', 'inventory.adjustments', 'inventory'],
+  canRecordStockIn: ['inventory.stock', 'inventory'],
+  canTransferStock: ['inventory.transfers', 'multi_branch.transfers', 'inventory'],
+  canImportInventory: ['inventory.import', 'developer.data_importer', 'inventory'],
+  canCreatePurchase: ['purchases', 'suppliers.purchase_orders', 'suppliers'],
+  canViewPurchase: ['purchases', 'suppliers.purchase_orders', 'suppliers'],
+  canEditPurchase: ['purchases', 'suppliers.purchase_orders', 'suppliers'],
+  canDeletePurchase: ['purchases', 'suppliers.purchase_orders', 'suppliers'],
+  canCreatePayable: ['payables', 'payables.payments'],
+  canViewPayable: ['payables', 'payables.aging', 'payables.payments'],
+  canEditPayable: ['payables', 'payables.payments'],
+  canDeletePayable: ['payables', 'payables.payments'],
+  canCreateExpense: ['expenses'],
+  canViewExpense: ['expenses'],
+  canEditExpense: ['expenses'],
+  canDeleteExpense: ['expenses'],
+  canViewStaffTillSheet: ['accounting', 'expenses'],
+  canCreateCustomer: ['customers', 'crm'],
+  canViewCustomer: ['customers', 'crm'],
+  canViewCustomerPhone: ['customers', 'crm'],
+  canViewCustomerEmail: ['customers', 'crm'],
+  canViewCustomerIdentity: ['customers', 'crm'],
+  canViewCustomerAddress: ['customers', 'crm'],
+  canViewCustomerBalance: ['customers', 'crm'],
+  canViewCustomerCreditLimit: ['customers', 'crm'],
+  canManageCustomerCreditLimit: ['customers', 'crm'],
+  canCreateCustomerCreditLimit: ['customers', 'crm'],
+  canEditCustomerCreditLimit: ['customers', 'crm'],
+  canViewCustomerSalesHistory: ['customers', 'crm'],
+  canViewCustomerPaymentsHistory: ['customers', 'crm'],
+  canViewCustomerReturnsHistory: ['customers', 'crm'],
+  canViewCustomerCreditNotesHistory: ['customers', 'crm'],
+  canViewCustomerWithdrawalsHistory: ['customers', 'crm'],
+  canViewCustomerBusinessActivity: ['customers', 'crm'],
+  canViewCustomerNotes: ['customers', 'crm'],
+  canRecordCustomerPayment: ['customers', 'crm', 'receivables.payments'],
+  canPrintCustomerReceipts: ['customers', 'crm'],
+  canEditCustomer: ['customers', 'crm'],
+  canDeleteCustomer: ['customers', 'crm'],
+  canCreateReceivable: ['receivables', 'receivables.payments'],
+  canViewReceivable: ['receivables', 'receivables.aging', 'receivables.payments', 'customers', 'crm'],
+  canEditReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
+  canDeleteReceivable: ['receivables', 'receivables.payments', 'customers', 'crm'],
+  canViewReceivableReconciliation: ['receivables'],
+  canReviewReceivableReconciliation: ['receivables'],
+  canApplyReceivableReconciliation: ['receivables'],
+  canCreateSupplier: ['suppliers'],
+  canViewSupplier: ['suppliers'],
+  canEditSupplier: ['suppliers'],
+  canDeleteSupplier: ['suppliers'],
+  canViewProcurement: ['procurement.buyer', 'procurement.seller'],
+  canFollowMarketplaceSellers: ['procurement.buyer'],
+  canManageSupplierNetwork: ['procurement.buyer', 'procurement.seller'],
+  canManageMarketplaceCatalogue: ['procurement.seller'],
+  canCreateMarketplaceListing: ['procurement.seller'],
+  canChangeMarketplacePrice: ['procurement.seller'],
+  canCreateMarketplacePromotion: ['procurement.seller'],
+  canRunMarketplaceAds: ['procurement.seller'],
+  canManageMarketplacePromotions: ['procurement.seller'],
+  canCreateProcurementRFQ: ['procurement.buyer'],
+  canRespondToProcurementRFQ: ['procurement.seller'],
+  canManageProcurementQuotes: ['procurement.buyer', 'procurement.seller'],
+  canCreateProcurementOrder: ['procurement.buyer'],
+  canApproveProcurementOrder: ['procurement.buyer'],
+  canAcknowledgeProcurementOrder: ['procurement.seller'],
+  canReceiveProcurementGoods: ['procurement.buyer'],
+  canSubmitProcurementInvoice: ['procurement.seller'],
+  canReviewProcurementInvoice: ['procurement.buyer'],
+  canApproveProcurementPayment: ['procurement.seller'],
+  canRecordProcurementPayment: ['procurement.seller'],
+  canCreateStaff: [],
+  canViewStaff: [],
+  canEditStaff: [],
+  canDeleteStaff: [],
+  canViewHR: ['hr'],
+  canViewHREmployeesForAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canCreateHREmployee: ['hr'],
+  canEditHREmployee: ['hr'],
+  canDeleteHREmployee: ['hr'],
+  canManageHRStructure: ['hr'],
+  canViewHRContracts: ['hr'],
+  canManageHRContracts: ['hr'],
+  canViewHRDocuments: ['hr'],
+  canManageHRDocuments: ['hr'],
+  canViewHRSalaries: ['hr'],
+  canManageHRSalaries: ['hr'],
+  canViewHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canRecordHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canRecordOwnHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canManageHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canEditHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canDeleteHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canImportHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canConfigureHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canApproveHRAttendance: ['hr', 'hr.attendance', 'attendance_tracking'],
+  canViewHRShifts: ['hr', 'hr.attendance', 'shift_management'],
+  canManageHRShifts: ['hr', 'hr.attendance', 'shift_management'],
+  canAssignHRShifts: ['hr', 'hr.attendance', 'shift_management'],
+  canApproveHRShifts: ['hr', 'hr.attendance', 'shift_management'],
+  canViewHRLeave: ['hr', 'hr.leave', 'leave_management'],
+  canRequestHRLeave: ['hr', 'hr.leave', 'leave_management'],
+  canManageHRLeaveTypes: ['hr', 'hr.leave', 'leave_management'],
+  canApproveHRLeave: ['hr', 'hr.leave', 'leave_management'],
+  canViewHRPayroll: ['hr', 'hr.payroll', 'payroll_processing'],
+  canCreateHRPayroll: ['hr', 'hr.payroll', 'payroll_processing'],
+  canApproveHRPayroll: ['hr', 'hr.payroll', 'payroll_processing'],
+  canPostHRPayroll: ['hr', 'hr.payroll', 'payroll_processing'],
+  canPayHRPayroll: ['hr', 'hr.payroll', 'payroll_processing'],
+  canManageHRPayrollSettings: ['hr', 'hr.payroll', 'payroll_processing'],
+  canManageHRPayroll: ['hr', 'hr.payroll', 'payroll_processing'],
+  canCreateBranch: [],
+  canViewBranch: [],
+  canEditBranch: [],
+  canDeleteBranch: [],
+  canViewAuditReport: ['reports', 'reports.audit', 'audit'],
+  canExportReport: ['reports'],
+  canViewSettings: [],
+  canEditSettings: [],
+  canPaySubscriptionInvoice: [],
+  canViewTax: ['tax', 'settings.taxes', 'settings'],
+  canManageTax: ['tax', 'settings.taxes', 'settings'],
+  canViewService: ['services', 'inventory.services'],
+  canCreateService: ['services', 'inventory.services'],
+  canEditService: ['services', 'inventory.services'],
+  canDeleteService: ['services', 'inventory.services'],
+  canManageServiceCategory: ['services', 'inventory.services', 'inventory.categories'],
+  canViewRental: ['rentals', 'inventory.rentals'],
+  canCreateRental: ['rentals', 'inventory.rentals'],
+  canEditRental: ['rentals', 'inventory.rentals'],
+  canDeleteRental: ['rentals', 'inventory.rentals'],
+  canProcessRentalReturn: ['rentals', 'inventory.rentals'],
+  canCancelRental: ['rentals', 'inventory.rentals'],
+  canRecordRentalPayment: ['rentals', 'inventory.rentals'],
+  canRefundRentalDeposit: ['rentals', 'inventory.rentals'],
+  canRefundRentalAdvance: ['rentals', 'inventory.rentals'],
+  canViewRentalCreditNotes: ['rentals', 'inventory.rentals'],
+  canCreateRentalCreditNote: ['rentals', 'inventory.rentals'],
+  canEditRentalCreditNote: ['rentals', 'inventory.rentals'],
+  canRefundRentalCreditNote: ['rentals', 'inventory.rentals'],
+  canForfeitRentalDeposit: ['rentals', 'inventory.rentals'],
+  canGenerateRentalContract: ['rentals', 'inventory.rentals'],
+  canViewPlanner: ['planner', 'rentals'],
+  canManagePlanner: ['planner', 'rentals'],
+  canViewCRM: ['crm', 'rentals'],
+  canCreateCRM: ['crm', 'rentals'],
+  canEditCRM: ['crm', 'rentals'],
+  canDeleteCRM: ['crm', 'rentals'],
+  canViewPropertyManagement: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyPortfolio: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyCollections: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyStatements: ['property_management.landlord', 'property_management.agent'],
+  canViewTenantPersonalDetails: ['property_management.landlord', 'property_management.agent'],
+  canManageTenantPersonalDetails: ['property_management.landlord', 'property_management.agent'],
+  canManagePropertyOwners: ['property_management.landlord', 'property_management.agent'],
+  canManageProperties: ['property_management.landlord', 'property_management.agent'],
+  canManagePropertyUnits: ['property_management.landlord', 'property_management.agent'],
+  canCreateTenancies: ['property_management.landlord', 'property_management.agent'],
+  canEditTenancies: ['property_management.landlord', 'property_management.agent'],
+  canEndTenancies: ['property_management.landlord', 'property_management.agent'],
+  canReactivateTenancies: ['property_management.landlord', 'property_management.agent'],
+  canManageTenancies: ['property_management.landlord', 'property_management.agent'],
+  canEditRentPeriods: ['property_management.landlord', 'property_management.agent'],
+  canRecordRentPayment: ['property_management.landlord', 'property_management.agent'],
+  canRecordTenantDeposit: ['property_management.landlord', 'property_management.agent'],
+  canRefundTenantDeposit: ['property_management.landlord', 'property_management.agent'],
+  canApplyTenantDepositToRent: ['property_management.landlord', 'property_management.agent'],
+  canVoidRentPayment: ['property_management.landlord', 'property_management.agent'],
+  canManageRentPayment: ['property_management.landlord', 'property_management.agent'],
+  canViewRentPaymentPlans: ['property_management.landlord', 'property_management.agent'],
+  canManageRentPaymentPlans: ['property_management.landlord', 'property_management.agent'],
+  canViewRentPromises: ['property_management.landlord', 'property_management.agent'],
+  canManageRentPromises: ['property_management.landlord', 'property_management.agent'],
+  canViewTenantNotes: ['property_management.landlord', 'property_management.agent'],
+  canManageTenantNotes: ['property_management.landlord', 'property_management.agent'],
+  canEditTenantNotes: ['property_management.landlord', 'property_management.agent'],
+  canCompleteTenantNotes: ['property_management.landlord', 'property_management.agent'],
+  canAddTenantNoteFollowUps: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertyReports: ['property_management.landlord', 'property_management.agent'],
+  canRecordOwnerPayout: ['property_management.landlord', 'property_management.agent'],
+  canViewPropertySales: ['property_management.agent'],
+  canCreatePropertySale: ['property_management.agent'],
+  canRecordPropertySalePayment: ['property_management.agent'],
+  canVoidPropertySalePayment: ['property_management.agent'],
+  canCancelPropertySale: ['property_management.agent'],
+  canManagePropertyLandInventory: ['property_management.agent'],
+  canViewPropertyLandPurchases: ['property_management.agent'],
+  canCreatePropertyLandPurchase: ['property_management.agent'],
+  canRecordPropertyLandPurchasePayment: ['property_management.agent'],
+  canViewRestaurant: ['restaurant', 'restaurant.orders'],
+  canViewClinic: ['clinic_management'],
+  canViewClinicPatients: ['clinic_management'],
+  canCreateClinicPatients: ['clinic_management'],
+  canEditClinicPatients: ['clinic_management'],
+  canViewClinicAppointments: ['clinic_management'],
+  canCreateClinicAppointments: ['clinic_management'],
+  canEditClinicAppointments: ['clinic_management'],
+  canViewClinicEncounters: ['clinic_management'],
+  canCreateClinicEncounters: ['clinic_management'],
+  canViewClinicPrescriptions: ['clinic_management'],
+  canCreateClinicPrescriptions: ['clinic_management'],
+  canManageClinicPatients: ['clinic_management'],
+  canManageClinicAppointments: ['clinic_management'],
+  canManageClinicEncounters: ['clinic_management'],
+  canManageClinicPrescriptions: ['clinic_management'],
+  canViewClinicReports: ['clinic_management'],
+  canViewPharmacy: ['pharmacy_management'],
+  canViewPharmacyCatalogue: ['pharmacy_management'],
+  canCreatePharmacyCatalogue: ['pharmacy_management'],
+  canEditPharmacyCatalogue: ['pharmacy_management'],
+  canViewPharmacyBatches: ['pharmacy_management'],
+  canCreatePharmacyBatches: ['pharmacy_management'],
+  canViewPharmacyPrescriptions: ['pharmacy_management'],
+  canViewPharmacyDispenses: ['pharmacy_management'],
+  canManagePharmacyCatalogue: ['pharmacy_management'],
+  canManagePharmacyBatches: ['pharmacy_management'],
+  canDispensePharmacyPrescriptions: ['pharmacy_management'],
+  canViewPharmacyReports: ['pharmacy_management'],
+  canViewBarMenu: ['bar', 'restaurant.bar'],
+  canCreateBarMenu: ['bar', 'restaurant.bar'],
+  canEditBarMenu: ['bar', 'restaurant.bar'],
+  canDeleteBarMenu: ['bar', 'restaurant.bar'],
+  canViewBarOrders: ['bar', 'restaurant.orders'],
+  canCreateBarOrders: ['bar', 'restaurant.orders'],
+  canEditBarOrders: ['bar', 'restaurant.orders'],
+  canCancelBarOrders: ['bar', 'restaurant.orders'],
+  canCreateRestaurant: ['restaurant', 'restaurant.orders'],
+  canEditRestaurant: ['restaurant', 'restaurant.orders'],
+  canDeleteRestaurant: ['restaurant', 'restaurant.orders'],
+  canViewBarQueue: ['bar', 'restaurant.bar'],
+  canUpdateBarQueue: ['bar', 'restaurant.bar'],
+  canViewManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canCreateManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canEditManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canDeleteManufacturing: ['manufacturing', 'manufacturing.production_orders'],
+  canViewAgriculture: ['agriculture', 'agriculture.fields'],
+  canCreateAgriculture: ['agriculture', 'agriculture.fields'],
+  canEditAgriculture: ['agriculture', 'agriculture.fields'],
+  canDeleteAgriculture: ['agriculture', 'agriculture.fields'],
+  canViewFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canCreateFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canEditFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canDeleteFuelStation: ['fuel_station', 'fuel_station.pumps'],
+  canViewServiceBusiness: ['service_business', 'service', 'service.appointments'],
+  canCreateServiceBusiness: ['service_business', 'service', 'service.appointments'],
+  canEditServiceBusiness: ['service_business', 'service', 'service.appointments'],
+  canDeleteServiceBusiness: ['service_business', 'service', 'service.appointments'],
+  canViewTeamMessaging: ['communication.team_messaging'],
+  canSendTeamMessages: ['communication.team_messaging'],
+  canEditCommunication: ['communication'],
+  canDeleteCommunication: ['communication'],
+  canViewAccounting: ['accounting'],
+  canCreateAccounting: ['accounting'],
+  canEditAccounting: ['accounting'],
+  canManageFinancialYearClose: ['accounting'],
+  canSignOffFinancialYearClose: ['accounting'],
+  canReopenFinancialYearClose: ['accounting'],
+  canDeleteAccounting: ['accounting'],
+  canReverseAccountingEntry: ['accounting'],
+  canPostToProtectedAccounts: ['accounting'],
+  canViewChartOfAccounts: ['accounting'],
+  canCreateChartOfAccounts: ['accounting'],
+  canEditChartOfAccounts: ['accounting'],
+  canViewTransactionAccount: ['accounting', 'expenses'],
+  canUseAnyTransactionAccount: ['accounting', 'expenses'],
+  canUseOtherCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canUseOwnCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseOtherStaffCashAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canUseSafeAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments'],
+  canUseBankAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseMobileMoneyAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseCardAccount: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canCreateTransactionAccount: ['accounting', 'expenses'],
+  canEditTransactionAccount: ['accounting', 'expenses'],
+  canDeleteTransactionAccount: ['accounting', 'expenses'],
+  canCreateWithdrawal: ['receivables', 'receivables.payments'],
+  canUseCash: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseMobileMoney: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseBank: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+  canUseCard: ['sales', 'sales.pos', 'receivables', 'receivables.payments', 'accounting', 'expenses', 'payables', 'payables.payments', 'hr'],
+};
+
+const OWNER_CORE_PERMISSIONS = new Set([
+  'canViewDashboard',
+  'canViewBranch',
+  'canCreateBranch',
+  'canEditBranch',
+  'canDeleteBranch',
+  'canViewStaff',
+  'canCreateStaff',
+  'canEditStaff',
+  'canDeleteStaff',
+  'canViewSettings',
+  'canEditSettings',
+]);
+
+// Old grants remain stored for upgrade compatibility, but expand to granular
+// actions and are hidden from the permission editor.
+export const LEGACY_COMBINED_PERMISSION_GRANTS = {
+  canManageClinicPatients: ['canCreateClinicPatients', 'canEditClinicPatients'],
+  canManageClinicAppointments: ['canCreateClinicAppointments', 'canEditClinicAppointments'],
+  canManageClinicEncounters: ['canCreateClinicEncounters'],
+  canManageClinicPrescriptions: ['canCreateClinicPrescriptions'],
+  canManagePharmacyCatalogue: ['canCreatePharmacyCatalogue', 'canEditPharmacyCatalogue'],
+  canManagePharmacyBatches: ['canCreatePharmacyBatches'],
+  canCreateRestaurant: ['canCreateBarMenu', 'canCreateBarOrders'],
+  canEditRestaurant: ['canEditBarMenu', 'canEditBarOrders'],
+  canDeleteRestaurant: ['canDeleteBarMenu', 'canCancelBarOrders'],
+  canViewRestaurant: ['canViewBarMenu', 'canViewBarOrders'],
+  canManageCustomerCreditLimit: ['canCreateCustomerCreditLimit', 'canEditCustomerCreditLimit'],
+  canEditStaff: ['canEditStaffDetails', 'canManageStaffPermissions', 'canManageWorkingHours'],
+  canManageHRStructure: ['canCreateHRStructure', 'canEditHRStructure', 'canDeleteHRStructure'],
+  canManageHRContracts: ['canCreateHRContracts', 'canEditHRContracts', 'canTerminateHRContracts'],
+  canManageHRDocuments: ['canUploadHRDocuments', 'canEditHRDocuments', 'canDeleteHRDocuments'],
+  canManageHRAttendance: ['canRecordHRAttendance', 'canEditHRAttendance', 'canDeleteHRAttendance', 'canImportHRAttendance', 'canConfigureHRAttendance', 'canApproveHRAttendance'],
+  canManageHRShifts: ['canCreateHRShifts', 'canEditHRShifts', 'canDeleteHRShifts', 'canAssignHRShifts', 'canApproveHRShifts'],
+  canManageHRLeaveTypes: ['canCreateHRLeaveTypes', 'canEditHRLeaveTypes', 'canDeleteHRLeaveTypes', 'canAllocateHRLeave'],
+  canManageHRPayroll: ['canCreateHRPayroll', 'canApproveHRPayroll', 'canPostHRPayroll', 'canPayHRPayroll', 'canManageHRPayrollSettings', 'canManageHROpeningBalances'],
+  canManagePropertyOwners: ['canCreatePropertyOwners', 'canEditPropertyOwners'],
+  canManageProperties: ['canCreateProperties', 'canEditProperties'],
+  canManagePropertyUnits: ['canCreatePropertyUnits', 'canEditPropertyUnits'],
+  canManageTenancies: ['canCreateTenancies', 'canEditTenancies', 'canEndTenancies', 'canReactivateTenancies'],
+  canManageTenantPersonalDetails: ['canViewTenantPersonalDetails', 'canCreateTenantPersonalDetails', 'canEditTenantPersonalDetails'],
+  canManageRentPayment: ['canVoidRentPayment', 'canRefundTenantDeposit'],
+  canManageRentPaymentPlans: ['canCreateRentPaymentPlans', 'canCancelRentPaymentPlans'],
+  canManageSupplierNetwork: ['canEditMarketplaceSellerProfile', 'canRequestSupplierRelationship', 'canManageSupplierRelationships'],
+  canManageMarketplacePromotions: ['canPauseMarketplaceCampaign', 'canResumeMarketplaceCampaign', 'canCancelMarketplaceCampaign'],
+  canManageProcurementQuotes: ['canSelectProcurementQuote'],
+  canReviewProcurementInvoice: ['canViewProcurementInvoice', 'canApproveProcurementInvoice', 'canRejectProcurementInvoice'],
+  canUseAnyTransactionAccount: ['canUseOwnCashAccount', 'canUseSafeAccount', 'canUseBankAccount', 'canUseMobileMoneyAccount', 'canUseCardAccount'],
+  canUseOtherCashAccount: ['canUseOtherStaffCashAccount'],
+};
+export const LEGACY_COMBINED_PERMISSION_KEYS = Object.keys(LEGACY_COMBINED_PERMISSION_GRANTS);
+for (const [legacyKey, granularKeys] of Object.entries(LEGACY_COMBINED_PERMISSION_GRANTS)) {
+  const features = PERMISSION_TO_FEATURES[legacyKey];
+  if (features) for (const key of granularKeys) PERMISSION_TO_FEATURES[key] ||= features;
+}
+
+export const ALL_PERMISSION_KEYS = [
+  "canViewDashboard",
+  "canUseBusinessAI",
+  // Sales
+  "canCreateSale", "canViewSale", "canEditSale", "canDeleteSale", "canRefundSale",
+  // Inventory
+  "canCreateProduct", "canViewProduct", "canViewPriceHistory", "canEditProduct", "canDeleteProduct", "canAdjustStock", "canRecordStockIn", "canTransferStock",
+  // Purchases / Payables
+  "canCreatePurchase", "canViewPurchase", "canEditPurchase", "canDeletePurchase",
+  "canCreatePayable", "canViewPayable", "canEditPayable", "canDeletePayable",
+  // Expenses
+  "canCreateExpense", "canViewExpense", "canEditExpense", "canDeleteExpense", "canViewStaffTillSheet",
+  // Customers / Receivables
+  "canCreateCustomer", "canViewCustomer", "canEditCustomer", "canDeleteCustomer",
+  "canViewCustomerPhone", "canViewCustomerEmail", "canViewCustomerIdentity", "canViewCustomerAddress", "canViewCustomerBalance",
+  "canViewCustomerCreditLimit", "canManageCustomerCreditLimit", "canCreateCustomerCreditLimit", "canEditCustomerCreditLimit",
+  "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
+  "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
+  "canViewCustomerNotes", "canRecordCustomerPayment", "canPrintCustomerReceipts",
+  "canCreateReceivable", "canViewReceivable", "canEditReceivable", "canDeleteReceivable",
+  "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
+  // Suppliers
+  "canCreateSupplier", "canViewSupplier", "canEditSupplier", "canDeleteSupplier",
+  "canViewProcurement", "canFollowMarketplaceSellers", "canManageSupplierNetwork", "canEditMarketplaceSellerProfile", "canRequestSupplierRelationship", "canManageSupplierRelationships", "canManageMarketplaceCatalogue",
+  "canCreateMarketplaceListing", "canChangeMarketplacePrice",
+  "canCreateMarketplacePromotion", "canRunMarketplaceAds", "canManageMarketplacePromotions", "canPauseMarketplaceCampaign", "canResumeMarketplaceCampaign", "canCancelMarketplaceCampaign",
+  "canCreateProcurementRFQ", "canRespondToProcurementRFQ", "canManageProcurementQuotes", "canSelectProcurementQuote",
+  "canCreateProcurementOrder", "canApproveProcurementOrder", "canAcknowledgeProcurementOrder",
+  "canReceiveProcurementGoods", "canSubmitProcurementInvoice", "canReviewProcurementInvoice", "canViewProcurementInvoice", "canApproveProcurementInvoice", "canRejectProcurementInvoice", "canApproveProcurementPayment", "canRecordProcurementPayment",
+  // Staff
+  "canCreateStaff", "canViewStaff", "canEditStaff", "canDeleteStaff", "canEditStaffDetails", "canManageStaffPermissions", "canManageWorkingHours",
+  // HR Management
+  "canViewHR", "canViewHREmployeesForAttendance", "canCreateHREmployee", "canEditHREmployee", "canDeleteHREmployee",
+  "canManageHRStructure", "canCreateHRStructure", "canEditHRStructure", "canDeleteHRStructure", "canViewHRContracts", "canManageHRContracts", "canCreateHRContracts", "canEditHRContracts", "canTerminateHRContracts",
+  "canViewHRDocuments", "canManageHRDocuments", "canUploadHRDocuments", "canEditHRDocuments", "canDeleteHRDocuments", "canViewHRSalaries", "canManageHRSalaries",
+  "canViewHRAttendance", "canRecordHRAttendance", "canRecordOwnHRAttendance", "canManageHRAttendance",
+  "canEditHRAttendance", "canDeleteHRAttendance", "canImportHRAttendance",
+  "canConfigureHRAttendance", "canApproveHRAttendance",
+  "canViewHRShifts", "canManageHRShifts", "canCreateHRShifts", "canEditHRShifts", "canDeleteHRShifts", "canAssignHRShifts", "canApproveHRShifts",
+  "canViewHRLeave", "canRequestHRLeave", "canManageHRLeaveTypes", "canCreateHRLeaveTypes", "canEditHRLeaveTypes", "canDeleteHRLeaveTypes", "canAllocateHRLeave", "canApproveHRLeave",
+  "canViewHRPayroll", "canCreateHRPayroll", "canApproveHRPayroll",
+  "canPostHRPayroll", "canPayHRPayroll", "canManageHRPayrollSettings",
+  "canManageHRPayroll", "canManageHROpeningBalances",
+  // Branches
+  "canCreateBranch", "canViewBranch", "canEditBranch", "canDeleteBranch",
+  // Reports
+  "canViewAuditReport", "canExportReport",
+  ...REPORT_PERMISSION_KEYS,
+  // Settings
+  "canViewSettings", "canEditSettings",
+  "canPaySubscriptionInvoice",
+  // Receipts
+  "canViewReceipt", "canCreateReceipt",
+  // Discounts
+  "canGiveDiscount",
+  // Tax
+  "canViewTax", "canManageTax",
+  // Services (inventory service items)
+  "canViewService", "canCreateService", "canEditService", "canDeleteService",
+  "canManageServiceCategory",
+  // Rentals
+  "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
+  "canProcessRentalReturn", "canCancelRental", "canRecordRentalPayment", "canRefundRentalDeposit", "canRefundRentalAdvance", "canViewRentalCreditNotes", "canCreateRentalCreditNote", "canEditRentalCreditNote", "canRefundRentalCreditNote", "canForfeitRentalDeposit", "canGenerateRentalContract",
+  "canViewPlanner", "canManagePlanner", "canViewCRM", "canCreateCRM", "canEditCRM", "canDeleteCRM",
+  "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails", "canCreateTenantPersonalDetails", "canEditTenantPersonalDetails",
+  "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits", "canCreatePropertyOwners", "canEditPropertyOwners", "canCreateProperties", "canEditProperties", "canCreatePropertyUnits", "canEditPropertyUnits",
+  "canCreateTenancies", "canEditTenancies", "canEndTenancies", "canReactivateTenancies", "canManageTenancies", "canEditRentPeriods", "canRecordRentPayment", "canRecordTenantDeposit",
+  "canRefundTenantDeposit", "canApplyTenantDepositToRent", "canVoidRentPayment", "canManageRentPayment", "canViewRentPaymentPlans", "canManageRentPaymentPlans", "canCreateRentPaymentPlans", "canCancelRentPaymentPlans", "canViewRentPromises", "canManageRentPromises", "canViewTenantNotes", "canManageTenantNotes", "canEditTenantNotes", "canCompleteTenantNotes", "canAddTenantNoteFollowUps",
+  "canViewPropertyReports", "canRecordOwnerPayout", "canViewPropertySales", "canCreatePropertySale",
+  "canRecordPropertySalePayment", "canVoidPropertySalePayment", "canCancelPropertySale", "canManagePropertyLandInventory",
+  "canViewPropertyLandPurchases", "canCreatePropertyLandPurchase", "canRecordPropertyLandPurchasePayment",
+  // Restaurant & Bar
+  "canViewRestaurant", "canCreateRestaurant", "canEditRestaurant", "canDeleteRestaurant", "canViewBarMenu", "canCreateBarMenu", "canEditBarMenu", "canDeleteBarMenu", "canViewBarOrders", "canCreateBarOrders", "canEditBarOrders", "canCancelBarOrders", "canViewBarQueue", "canUpdateBarQueue",
+  // Clinic Management
+  "canViewClinic", "canViewClinicPatients", "canCreateClinicPatients", "canEditClinicPatients", "canViewClinicAppointments", "canCreateClinicAppointments", "canEditClinicAppointments", "canViewClinicEncounters", "canCreateClinicEncounters", "canViewClinicPrescriptions", "canCreateClinicPrescriptions", "canManageClinicPatients", "canManageClinicAppointments", "canManageClinicEncounters", "canManageClinicPrescriptions", "canViewClinicReports",
+  // Pharmacy Management
+  "canViewPharmacy", "canViewPharmacyCatalogue", "canCreatePharmacyCatalogue", "canEditPharmacyCatalogue", "canViewPharmacyBatches", "canCreatePharmacyBatches", "canViewPharmacyPrescriptions", "canViewPharmacyDispenses", "canManagePharmacyCatalogue", "canManagePharmacyBatches", "canDispensePharmacyPrescriptions", "canViewPharmacyReports",
+  // Fuel Station
+  "canViewFuelStation", "canCreateFuelStation", "canEditFuelStation", "canDeleteFuelStation",
+  // Manufacturing
+  "canViewManufacturing", "canCreateManufacturing", "canEditManufacturing", "canDeleteManufacturing",
+  // Agriculture
+  "canViewAgriculture", "canCreateAgriculture", "canEditAgriculture", "canDeleteAgriculture",
+  // Service Business (appointments, work orders, contracts)
+  ...SERVICE_PERMISSION_KEYS,
+  // Communication and team messaging
+  "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
+  "canViewTeamMessaging", "canSendTeamMessages",
+  // Accounting
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose", "canDeleteAccounting", "canReverseAccountingEntry", "canPostToProtectedAccounts", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
+  // Transaction Accounts & Cash Movements
+  "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
+  "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
+  "canCreateTransactionAccount", "canEditTransactionAccount", "canDeleteTransactionAccount", "canCreateWithdrawal",
+  // Payment Methods (for spending — expenses, payables)
+  "canUseCash", "canUseMobileMoney", "canUseBank", "canUseCard",
+  // Data Import
+  "canImportInventory",
+].filter((key) => !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(key));
+
+export const PERMISSION_CATEGORIES = [
+  { id: 'dashboard', name: 'Dashboard' },
+  { id: 'sales', name: 'Sales' },
+  { id: 'inventory', name: 'Inventory' },
+  { id: 'purchases', name: 'Purchases' },
+  { id: 'payables', name: 'Payables' },
+  { id: 'expenses', name: 'Expenses' },
+  { id: 'customers', name: 'Customers & Receivables' },
+  { id: 'suppliers', name: 'Suppliers' },
+  { id: 'procurement', name: 'Procurement Network' },
+  { id: 'staff', name: 'Staff Access' },
+  { id: 'hr', name: 'HR Dashboard' },
+  { id: 'hr_employees', name: 'HR Employees' },
+  { id: 'hr_structure', name: 'HR Departments & Positions' },
+  { id: 'hr_contracts', name: 'HR Contracts' },
+  { id: 'hr_documents', name: 'HR Documents' },
+  { id: 'hr_salaries', name: 'HR Salaries & Wages' },
+  { id: 'hr_attendance', name: 'HR Attendance' },
+  { id: 'hr_shifts', name: 'HR Shifts' },
+  { id: 'hr_leave', name: 'HR Leave' },
+  { id: 'hr_payroll', name: 'HR Payroll & Accounting' },
+  { id: 'branches', name: 'Branches' },
+  { id: 'reports', name: 'Reports' },
+  { id: 'reports_sales', name: 'Sales Report Access' },
+  { id: 'bar_menu', name: 'Bar Menu' },
+  { id: 'bar_orders', name: 'Bar Orders' },
+  { id: 'clinic_patients', name: 'Clinic Patients' },
+  { id: 'clinic_appointments', name: 'Clinic Appointments' },
+  { id: 'clinic_encounters', name: 'Clinic Encounters' },
+  { id: 'clinic_prescriptions', name: 'Clinic Prescriptions' },
+  { id: 'pharmacy_catalogue', name: 'Pharmacy Catalogue' },
+  { id: 'pharmacy_batches', name: 'Pharmacy Batches & Expiry' },
+  ...REPORT_GROUPS.map(([id]) => ({ id, name: id.replace('reports_', '').replace(/^./, c => c.toUpperCase()) + ' Report Access' })),
+  { id: 'settings', name: 'Settings' },
+  { id: 'subscription_billing', name: 'Subscription & Billing' },
+  { id: 'receipts', name: 'Receipts' },
+  { id: 'tax', name: 'Tax' },
+  { id: 'services', name: 'Services' },
+  { id: 'rentals', name: 'Rentals' },
+  { id: 'restaurant', name: 'Restaurant & Bar' },
+  { id: 'clinic_management', name: 'Clinic Management' },
+  { id: 'pharmacy_management', name: 'Pharmacy Management' },
+  { id: 'bar_operations', name: 'Bar Operations' },
+  { id: 'fuel_station', name: 'Fuel Station' },
+  { id: 'manufacturing', name: 'Manufacturing' },
+  { id: 'agriculture', name: 'Agriculture' },
+  ...SERVICE_PERMISSION_CATEGORIES,
+  { id: 'communication', name: 'Communication' },
+  { id: 'team_messaging', name: 'Team Messaging' },
+  { id: 'accounting', name: 'Accounting' },
+  { id: 'transactions', name: 'Transaction Accounts & Cash Movements' },
+  { id: 'payment_methods', name: 'Payment Methods' },
+];
+
+const PERMISSION_DETAIL_OVERRIDES = {
+  ...reportPermissionMetadata,
+  ...Object.fromEntries(SERVICE_PERMISSION_DEFINITIONS.map(p => [p.id, p])),
+  ...Object.fromEntries(Object.entries({
+    canEditStaffDetails: 'Edit staff profiles and assignments', canManageStaffPermissions: 'Assign staff permissions', canManageWorkingHours: 'Manage business working hours',
+    canCreateHRStructure: 'Create HR departments, positions, units, and teams', canEditHRStructure: 'Edit HR departments, positions, units, and teams', canDeleteHRStructure: 'Deactivate HR departments, positions, units, and teams',
+    canCreateHRContracts: 'Create employee contracts', canEditHRContracts: 'Edit employee contracts', canTerminateHRContracts: 'Terminate employee contracts',
+    canUploadHRDocuments: 'Upload employee documents', canEditHRDocuments: 'Replace or edit employee documents', canDeleteHRDocuments: 'Delete employee documents',
+    canCreateHRShifts: 'Create shift templates', canEditHRShifts: 'Edit shift templates', canDeleteHRShifts: 'Delete shift templates', canAllocateHRLeave: 'Allocate employee leave balances', canManageHROpeningBalances: 'Record employee opening balances', canRecordStockIn: 'Record stock received into inventory',
+    canCreatePropertyOwners: 'Create property owners', canEditPropertyOwners: 'Edit property owners', canCreateProperties: 'Create properties', canEditProperties: 'Edit properties', canCreatePropertyUnits: 'Create rental units', canEditPropertyUnits: 'Edit rental units',
+    canCreateTenantPersonalDetails: 'Record tenant household details', canEditTenantPersonalDetails: 'Edit tenant household details', canCreateRentPaymentPlans: 'Create rent payment plans', canCancelRentPaymentPlans: 'Cancel rent payment plans',
+    canEditMarketplaceSellerProfile: 'Edit marketplace seller profile', canRequestSupplierRelationship: 'Request supplier relationships', canManageSupplierRelationships: 'Approve, reject, and suspend supplier relationships',
+    canPauseMarketplaceCampaign: 'Pause marketplace campaigns', canResumeMarketplaceCampaign: 'Resume marketplace campaigns', canCancelMarketplaceCampaign: 'Cancel marketplace campaigns', canSelectProcurementQuote: 'Select a supplier quote',
+    canViewProcurementInvoice: 'View supplier invoices for matching', canApproveProcurementInvoice: 'Approve supplier invoices and create payables', canRejectProcurementInvoice: 'Reject supplier invoices',
+    canViewClinicPatients: 'View clinic patient demographics and medical record numbers', canCreateClinicPatients: 'Register new clinic patients', canEditClinicPatients: 'Edit clinic patient profiles',
+    canViewClinicAppointments: 'View clinic appointments', canCreateClinicAppointments: 'Schedule clinic appointments', canEditClinicAppointments: 'Update appointment status and details',
+    canViewClinicEncounters: 'View clinical encounters and notes', canCreateClinicEncounters: 'Record clinical encounters and treatment notes',
+    canViewClinicPrescriptions: 'View clinic prescriptions', canCreateClinicPrescriptions: 'Create clinic prescriptions',
+    canManageClinicPatients: 'Register and update clinic patient profiles (legacy permission)', canManageClinicAppointments: 'Schedule and update clinic appointments (legacy permission)',
+    canManageClinicEncounters: 'Create clinical encounters and treatment notes (legacy permission)', canManageClinicPrescriptions: 'Create clinic prescriptions (legacy permission)',
+    canViewClinicReports: 'View clinic operational reports',
+    canViewPharmacyCatalogue: 'View medicines in the shared inventory catalogue', canCreatePharmacyCatalogue: 'Link an inventory product as a pharmacy medicine', canEditPharmacyCatalogue: 'Edit pharmacy medicine details', canManagePharmacyCatalogue: 'Maintain pharmacy catalogue links to inventory products (legacy permission)',
+    canViewPharmacyBatches: 'View medicine batch and expiry details', canCreatePharmacyBatches: 'Allocate received inventory to a medicine batch', canManagePharmacyBatches: 'Allocate existing inventory quantities to medicine batches (legacy permission)',
+    canViewPharmacyPrescriptions: 'View prescriptions in the pharmacy queue', canViewPharmacyDispenses: 'View completed pharmacy dispensing records',
+    canDispensePharmacyPrescriptions: 'Verify and dispense a prescription against a completed sale', canViewPharmacyReports: 'View pharmacy operational reports',
+    canViewBarMenu: 'View bar menu items', canCreateBarMenu: 'Add items to the bar menu', canEditBarMenu: 'Edit bar menu items and availability', canDeleteBarMenu: 'Remove items from the bar menu',
+    canViewBarOrders: 'View bar orders and order details', canCreateBarOrders: 'Create bar orders', canEditBarOrders: 'Update bar orders and service status', canCancelBarOrders: 'Cancel open bar orders',
+  }).map(([key, name]) => [key, { name, description: `Allow the user to ${String(name).toLowerCase()}.` }])),
+  canUseBusinessAI: {
+    name: 'Use AI business advisor',
+    description: 'Chat about marketing and sales growth using only business data this user is already permitted to view.',
+  },
+  canViewDashboard: {
+    name: 'View business dashboard',
+    description: 'Open the main dashboard and see business summary cards, charts, and alerts.',
+  },
+  canCreateSale: {
+    name: 'Record sales',
+    description: 'Create cash, mobile money, card, bank, or credit sales from the sales page.',
+  },
+  canViewSale: {
+    name: 'View sales',
+    description: 'Open sales lists, recent sales, receipts, and sale details.',
+  },
+  canEditSale: {
+    name: 'Edit sales',
+    description: 'Correct sale details where the system allows edits.',
+  },
+  canDeleteSale: {
+    name: 'Delete or cancel sales',
+    description: 'Remove or cancel sale records. Use carefully because it affects stock, cash, and reports.',
+  },
+  canRefundSale: {
+    name: 'Process returns and refunds',
+    description: 'Record returned goods and customer refunds.',
+  },
+  canGiveDiscount: {
+    name: 'Apply discounts',
+    description: 'Give item or invoice discounts during sales.',
+  },
+  canViewReceipt: {
+    name: 'View and print receipts',
+    description: 'Open, preview, print, and reprint sales receipts.',
+  },
+  canCreateReceipt: {
+    name: 'Create receipts',
+    description: 'Generate receipts for eligible sales and payment transactions.',
+  },
+  canCreateProduct: {
+    name: 'Create products and services',
+    description: 'Add new inventory products or service items.',
+  },
+  canViewProduct: {
+    name: 'View inventory',
+    description: 'See products, services, prices, cost, stock quantities, and inventory history.',
+  },
+  canViewPriceHistory: {
+    name: 'View price history',
+    description: 'See historical product price and cost changes.',
+  },
+  canEditProduct: {
+    name: 'Edit product details',
+    description: 'Change product names, categories, units, and other non-stock details.',
+  },
+  canDeleteProduct: {
+    name: 'Delete products',
+    description: 'Remove products or services that should no longer be used.',
+  },
+  canAdjustStock: {
+    name: 'Adjust or restock inventory',
+    description: 'Record stock increases, reductions, corrections, and restocking entries.',
+  },
+  canTransferStock: {
+    name: 'Transfer stock',
+    description: 'Move inventory between branches or stock locations.',
+  },
+  canImportInventory: {
+    name: 'Import inventory',
+    description: 'Upload product, service, or stock data in bulk.',
+  },
+  canCreatePurchase: {
+    name: 'Record purchases',
+    description: 'Create supplier purchase entries and received goods records.',
+  },
+  canViewPurchase: {
+    name: 'View purchases',
+    description: 'See purchase lists, purchase details, and supplier purchase history.',
+  },
+  canEditPurchase: {
+    name: 'Edit purchases',
+    description: 'Correct purchase entries where editing is allowed.',
+  },
+  canDeletePurchase: {
+    name: 'Delete purchases',
+    description: 'Remove purchase entries. Use carefully because it can affect stock and payables.',
+  },
+  canCreatePayable: {
+    name: 'Record supplier bills',
+    description: 'Create bills or payable balances owed to suppliers.',
+  },
+  canViewPayable: {
+    name: 'View supplier payables',
+    description: 'See unpaid supplier balances, bills, and payment history.',
+  },
+  canEditPayable: {
+    name: 'Edit supplier payables',
+    description: 'Correct supplier payable records before settlement.',
+  },
+  canDeletePayable: {
+    name: 'Delete supplier payables',
+    description: 'Remove supplier payable records where allowed.',
+  },
+  canCreateExpense: {
+    name: 'Record expenses',
+    description: 'Create business expense transactions using permitted payment methods.',
+  },
+  canViewExpense: {
+    name: 'View expenses',
+    description: 'See expense lists, details, categories, and payment status.',
+  },
+  canEditExpense: {
+    name: 'Edit expenses',
+    description: 'Correct expense records where editing is allowed.',
+  },
+  canDeleteExpense: {
+    name: 'Delete expenses',
+    description: 'Remove expense records where allowed.',
+  },
+  canViewStaffTillSheet: {
+    name: 'View staff till sheet',
+    description: 'See staff cash movements, debit/credit activity, and till balancing details.',
+  },
+  canCreateCustomer: {
+    name: 'Create customers',
+    description: 'Add new customers and customer contact details.',
+  },
+  canViewCustomer: {
+    name: 'View customers',
+    description: 'See customer names and open profiles. Contact, balance, and history access are controlled separately.',
+  },
+  canViewCustomerPhone: {
+    name: 'View customer phone numbers',
+    description: 'See full customer phone numbers in customer lists and profiles.',
+  },
+  canViewCustomerEmail: {
+    name: 'View customer email addresses',
+    description: 'See customer email addresses in customer lists and profiles.',
+  },
+  canViewCustomerIdentity: {
+    name: 'View customer identity documents',
+    description: 'View customer profile photos and National ID images on authorized profiles.',
+  },
+  canViewCustomerAddress: {
+    name: 'View customer addresses',
+    description: 'See customer physical addresses in profiles.',
+  },
+  canViewCustomerBalance: {
+    name: 'View customer balances',
+    description: 'See customer opening/current balances, trust scores, and balance summaries. Credit limits have separate access.',
+  },
+  canViewCustomerCreditLimit: {
+    name: 'View customer credit limits',
+    description: 'See a customer’s authorized credit limit and remaining limit.',
+  },
+  canManageCustomerCreditLimit: {
+    name: 'Legacy customer credit-limit management',
+    description: 'Compatibility permission from older assignments; replaced by separate create and edit permissions.',
+  },
+  canCreateCustomerCreditLimit: {
+    name: 'Create customer credit limits',
+    description: 'Set the initial credit limit when creating a customer. This also grants access to view the limit.',
+  },
+  canEditCustomerCreditLimit: {
+    name: 'Edit customer credit limits',
+    description: 'Change an existing customer credit limit or credit account. This also grants access to view the limit.',
+  },
+  canViewCustomerSalesHistory: {
+    name: 'View customer sales history',
+    description: 'See cash and credit sales, sale items, amounts, and sale receipts in customer profiles.',
+  },
+  canViewCustomerPaymentsHistory: {
+    name: 'View customer payment history',
+    description: 'See customer payment transactions, methods, amounts, and payment receipts.',
+  },
+  canViewCustomerReturnsHistory: {
+    name: 'View customer returns history',
+    description: 'See returned sales, returned items, and refund details.',
+  },
+  canViewCustomerCreditNotesHistory: {
+    name: 'View customer credit note history',
+    description: 'See credit notes and related customer balance adjustments.',
+  },
+  canViewCustomerWithdrawalsHistory: {
+    name: 'View customer withdrawal history',
+    description: 'See customer withdrawals, amounts, payment methods, and receipts.',
+  },
+  canViewCustomerBusinessActivity: {
+    name: 'View customer service and order activity',
+    description: 'See customer rentals, restaurant orders, reservations, deliveries, appointments, work orders, and service contracts.',
+  },
+  canViewCustomerNotes: {
+    name: 'View customer notes',
+    description: 'See private customer profile notes.',
+  },
+  canRecordCustomerPayment: {
+    name: 'Record customer payments',
+    description: 'Record payments against customer balances and unapplied customer funds.',
+  },
+  canPrintCustomerReceipts: {
+    name: 'Print and download customer receipts',
+    description: 'Reprint or download receipts from customer transaction history.',
+  },
+  canEditCustomer: {
+    name: 'Edit customers',
+    description: 'Update customer profile details and credit settings.',
+  },
+  canDeleteCustomer: {
+    name: 'Delete customers',
+    description: 'Remove customers where the system allows it.',
+  },
+  canCreateReceivable: {
+    name: 'Record credit sales and receivables',
+    description: 'Create customer credit balances and customer receivable records.',
+  },
+  canViewReceivable: {
+    name: 'View receivables',
+    description: 'See customer credit balances, aging, statements, and payment status.',
+  },
+  canEditReceivable: {
+    name: 'Edit receivables',
+    description: 'Correct receivable records where editing is allowed.',
+  },
+  canDeleteReceivable: {
+    name: 'Delete receivables',
+    description: 'Remove receivable records where allowed.',
+  },
+  canCreateSupplier: {
+    name: 'Create suppliers',
+    description: 'Add new suppliers and supplier contact details.',
+  },
+  canViewSupplier: {
+    name: 'View suppliers',
+    description: 'See supplier profiles, balances, and purchase history.',
+  },
+  canEditSupplier: {
+    name: 'Edit suppliers',
+    description: 'Update supplier profile and account details.',
+  },
+  canDeleteSupplier: {
+    name: 'Delete suppliers',
+    description: 'Remove suppliers where the system allows it.',
+  },
+  canViewProcurement: { name: 'View procurement marketplace', description: 'Discover opted-in suppliers, public product offers, and open RFQs.' },
+  canFollowMarketplaceSellers: { name: 'Follow marketplace sellers', description: 'Follow visible sellers and receive marketplace notifications for their new listings, price changes, and campaigns.' },
+  canManageSupplierNetwork: { name: 'Manage supplier relationships', description: 'Request, approve, suspend, and manage private supplier relationships.' },
+  canManageMarketplaceCatalogue: { name: 'Manage marketplace catalogue', description: 'Publish and update product offers and prices visible to permitted buyers.' },
+  canCreateMarketplaceListing: { name: 'Publish marketplace listings', description: 'Create and publish product or service offers to the selected marketplace audience.' },
+  canChangeMarketplacePrice: { name: 'Publish marketplace price changes', description: 'Change an offer price and record the reason in its price history.' },
+  canCreateMarketplacePromotion: { name: 'Publish marketplace promotions', description: 'Create time-limited promotions tied to the business’s marketplace listings.' },
+  canRunMarketplaceAds: { name: 'Run marketplace sponsored offers', description: 'Publish a sponsored marketplace placement tied to an active listing. This does not authorize paid advertising spend.' },
+  canManageMarketplacePromotions: { name: 'Manage marketplace campaigns', description: 'Pause, resume, or cancel promotions and sponsored offers published by this business.' },
+  canCreateProcurementRFQ: { name: 'Create procurement RFQs', description: 'Create private or open requests for quotation.' },
+  canRespondToProcurementRFQ: { name: 'Respond to procurement RFQs', description: 'Submit and revise offers for RFQs the business is authorised to access.' },
+  canManageProcurementQuotes: { name: 'Review procurement quotes', description: 'Review, compare, negotiate, and select quotes addressed to this business.' },
+  canCreateProcurementOrder: { name: 'Create purchase orders', description: 'Create purchase orders from selected supplier quotes.' },
+  canApproveProcurementOrder: { name: 'Approve purchase orders', description: 'Approve purchase orders before they are sent to suppliers.' },
+  canAcknowledgeProcurementOrder: { name: 'Acknowledge purchase orders', description: 'Accept or reject purchase orders addressed to this supplier business.' },
+  canReceiveProcurementGoods: { name: 'Receive procurement goods', description: 'Record verified partial or complete deliveries into the selected branch inventory.' },
+  canSubmitProcurementInvoice: { name: 'Submit supplier invoices', description: 'Submit invoices against goods or services covered by acknowledged procurement orders.' },
+  canReviewProcurementInvoice: { name: 'Review supplier invoices', description: 'Match, approve, or reject invoices against purchase orders and accepted receipts.' },
+  canApproveProcurementPayment: { name: 'Confirm buyer-submitted marketplace repayments', description: 'Confirm repayments reported by a buyer before they reduce seller receivables.' },
+  canRecordProcurementPayment: { name: 'Record seller-received marketplace repayments', description: 'Record funds received by the seller into a permitted transaction account and post the linked marketplace settlement.' },
+  canCreateStaff: {
+    name: 'Create staff users',
+    description: 'Invite or create staff logins for this business.',
+  },
+  canViewStaff: {
+    name: 'View staff and roles',
+    description: 'Open staff lists and the Roles & Permissions page.',
+  },
+  canEditStaff: {
+    name: 'Edit staff users and permissions',
+    description: 'Update staff profiles, assign branches, assign cash accounts, and change permissions.',
+  },
+  canDeleteStaff: {
+    name: 'Suspend or deactivate staff',
+    description: 'Deactivate staff access to the business tenant.',
+  },
+  canViewHR: {
+    name: 'View HR dashboard',
+    description: 'Open HR and see workforce, attendance, leave, and payroll summaries.',
+  },
+  canCreateHREmployee: {
+    name: 'Create employee profiles',
+    description: 'Add employees, identity details, contacts, and employment information.',
+  },
+  canEditHREmployee: {
+    name: 'Edit employee profiles',
+    description: 'Update employee details, status, branch, supervisor, department, or position.',
+  },
+  canDeleteHREmployee: {
+    name: 'Deactivate employee profiles',
+    description: 'Archive or deactivate employees who should no longer appear as active staff.',
+  },  canViewHREmployeesForAttendance: {
+    name: 'View employees for attendance',
+    description: 'See only employee names and staff numbers in Check In/Out; does not grant Employee Management access.',
+  },
+  canManageHRStructure: {
+    name: 'Manage departments, positions, units, and teams',
+    description: 'Create and update HR organization structure used by employee forms.',
+  },
+  canViewHRContracts: {
+    name: 'View employee contracts',
+    description: 'Open employee contracts and contract history.',
+  },
+  canManageHRContracts: {
+    name: 'Create and update employee contracts',
+    description: 'Add, amend, terminate, or renew employee contracts.',
+  },
+  canViewHRDocuments: {
+    name: 'View employee documents',
+    description: 'Open employee uploaded documents such as CVs, IDs, agreements, and certificates.',
+  },
+  canManageHRDocuments: {
+    name: 'Upload and manage employee documents',
+    description: 'Upload, replace, categorize, and remove employee documents.',
+  },
+  canViewHRSalaries: {
+    name: 'View salary records',
+    description: 'See employee salary history, wages, advances, and loan balances.',
+  },
+  canManageHRSalaries: {
+    name: 'Record salary changes',
+    description: 'Create or update employee salary and wage records before payroll processing.',
+  },
+  canViewHRAttendance: {
+    name: 'View attendance records',
+    description: 'See employee attendance, check-in/check-out times, status, summaries, and audit history.',
+  },
+  canRecordHRAttendance: {
+    name: 'Record employee check-in/check-out',
+    description: 'Allow a receptionist or supervisor to check employees in and out without payroll access.',
+  },
+  canRecordOwnHRAttendance: {
+    name: 'Record own check-in/check-out',
+    description: 'Allow a staff member to record attendance only for their linked employee profile.',
+  },
+  canManageHRAttendance: {
+    name: 'Full attendance management',
+    description: 'Legacy broad attendance access. Prefer the separate check-in, edit, import, approve, and config permissions.',
+  },
+  canEditHRAttendance: {
+    name: 'Edit attendance records',
+    description: 'Correct attendance dates, times, method, or status after check-in/check-out.',
+  },
+  canDeleteHRAttendance: {
+    name: 'Delete attendance records',
+    description: 'Remove incorrect attendance records where deletion is allowed.',
+  },
+  canImportHRAttendance: {
+    name: 'Import attendance records',
+    description: 'Upload attendance records in bulk from manual sheets or devices.',
+  },
+  canConfigureHRAttendance: {
+    name: 'Configure attendance rules',
+    description: 'Change attendance settings such as QR, biometric, branch rules, grace periods, and overtime rules.',
+  },
+  canApproveHRAttendance: {
+    name: 'Approve attendance',
+    description: 'Approve attendance records before payroll or management reporting.',
+  },
+  canViewHRShifts: {
+    name: 'View shifts',
+    description: 'See shift templates, assignments, swaps, and schedules.',
+  },
+  canManageHRShifts: {
+    name: 'Create and edit shift templates',
+    description: 'Manage shift definitions, hours, and shift rules.',
+  },
+  canAssignHRShifts: {
+    name: 'Assign shifts',
+    description: 'Assign employees to shifts and remove assignments.',
+  },
+  canApproveHRShifts: {
+    name: 'Approve shift changes',
+    description: 'Approve shift swaps, changes, and shift execution actions.',
+  },
+  canViewHRLeave: {
+    name: 'View leave requests',
+    description: 'See employee leave requests, balances, and leave history.',
+  },
+  canRequestHRLeave: {
+    name: 'Request leave',
+    description: 'Submit leave requests for self or assigned employees where allowed.',
+  },
+  canManageHRLeaveTypes: {
+    name: 'Manage leave types and allocations',
+    description: 'Create leave types, allocate leave balances, and carry over balances.',
+  },
+  canApproveHRLeave: {
+    name: 'Approve leave',
+    description: 'Approve or reject employee leave requests.',
+  },
+  canViewHRPayroll: {
+    name: 'View payroll',
+    description: 'See payroll records, payroll summaries, salary payable amounts, and payroll history.',
+  },
+  canCreateHRPayroll: {
+    name: 'Create payroll drafts',
+    description: 'Prepare payroll records and calculate earnings, deductions, PAYE, and social security amounts.',
+  },
+  canApproveHRPayroll: {
+    name: 'Approve payroll',
+    description: 'Approve payroll drafts before posting to accounting.',
+  },
+  canPostHRPayroll: {
+    name: 'Post payroll to accounting',
+    description: 'Create accounting journal entries for payroll, deductions, payables, and advance recoveries.',
+  },
+  canPayHRPayroll: {
+    name: 'Pay salaries',
+    description: 'Record salary payments from permitted cash, bank, or mobile money accounts.',
+  },
+  canManageHRPayrollSettings: {
+    name: 'Manage HR accounting setup',
+    description: 'Configure HR payroll account mappings, salary payable accounts, PAYE accounts, and social security accounts.',
+  },
+  canManageHRPayroll: {
+    name: 'Full payroll management',
+    description: 'Legacy broad payroll access. Prefer create, approve, post, pay, and setup permissions for tighter control.',
+  },
+  canCreateBranch: {
+    name: 'Create branches',
+    description: 'Add business branches, shops, warehouses, or operating locations.',
+  },
+  canViewBranch: {
+    name: 'View branches',
+    description: 'See branch lists, branch details, and branch assignment options.',
+  },
+  canEditBranch: {
+    name: 'Edit branches',
+    description: 'Update branch names, contact details, status, and operating settings.',
+  },
+  canDeleteBranch: {
+    name: 'Delete or deactivate branches',
+    description: 'Remove or deactivate branch records where the system allows it.',
+  },
+  canViewReceivableReconciliation: {
+    name: 'View receivable reconciliation',
+    description: 'View customer receipt allocation mismatches and reconciliation history without changing financial records.',
+  },
+  canReviewReceivableReconciliation: {
+    name: 'Review receivable reconciliation',
+    description: 'Record an auditable review decision and note for a customer receipt mismatch. This does not post or change balances.',
+  },
+  canApplyReceivableReconciliation: {
+    name: 'Apply receivable reconciliation',
+    description: 'Convert verified legacy customer receipts into explicit invoice allocations while preserving customer and cash balances.',
+  },
+  canViewAuditReport: {
+    name: 'View audit log',
+    description: 'Review system activity, user actions, permission changes, and sensitive transaction history.',
+  },
+  canExportReport: {
+    name: 'Export and download reports',
+    description: 'Print, download, or export reports and statements from permitted report pages.',
+  },
+  canViewSettings: {
+    name: 'View business settings',
+    description: 'Open business configuration, receipt settings, currency, dates, and setup pages.',
+  },
+  canEditSettings: {
+    name: 'Edit business settings',
+    description: 'Change business profile, receipt settings, currency, dates, tax setup, and system configuration.',
+  },
+  canPaySubscriptionInvoice: {
+    name: 'Pay subscription invoices',
+    description: 'Open secure checkout and pay the business subscription invoice, including service fees and future billing periods.',
+  },
+  canViewTax: {
+    name: 'View tax settings',
+    description: 'See configured taxes, tax rates, and tax reporting setup.',
+  },
+  canManageTax: {
+    name: 'Manage tax settings',
+    description: 'Create, edit, activate, or deactivate taxes and tax rates used by transactions.',
+  },
+  canViewService: {
+    name: 'View service items',
+    description: 'See service catalog items, prices, categories, and service history.',
+  },
+  canCreateService: {
+    name: 'Create service items',
+    description: 'Add new services that can be sold or invoiced.',
+  },
+  canEditService: {
+    name: 'Edit service items',
+    description: 'Update service names, categories, prices, and active status.',
+  },
+  canDeleteService: {
+    name: 'Delete service items',
+    description: 'Remove service items that should no longer be sold.',
+  },
+  canManageServiceCategory: {
+    name: 'Manage service categories',
+    description: 'Create and organize categories used for service items.',
+  },
+  canViewRental: {
+    name: 'View rentals',
+    description: 'See rental items, rental orders, availability, and rental history.',
+  },
+  canCreateRental: {
+    name: 'Create rental orders',
+    description: 'Record new rental transactions and reserve rental items.',
+  },
+  canEditRental: {
+    name: 'Edit rental orders',
+    description: 'Update rental dates, items, customer details, and rental status.',
+  },
+  canDeleteRental: {
+    name: 'Cancel rental orders',
+    description: 'Cancel or remove rental records where allowed.',
+  },
+  canProcessRentalReturn: {
+    name: 'Process rental returns',
+    description: 'Receive returned rental items, update availability, and record charges or balances.',
+  },
+  canCancelRental: {
+    name: 'Cancel rental reservations',
+    description: 'Cancel an eligible reservation after any collected advances or deposits have been refunded with an auditable receipt.',
+  },
+  canRecordRentalPayment: {
+    name: 'Record rental payments',
+    description: 'Collect rental balances and post the cash movement, receipt, and general-ledger settlement.',
+  },
+  canRefundRentalDeposit: {
+    name: 'Refund rental security deposits',
+    description: 'Refund only security deposits actually collected and still held, through a permitted transaction account.',
+  },
+  canRefundRentalAdvance: {
+    name: 'Refund rental reservation advances',
+    description: 'Refund an unearned reservation advance with a cash movement, receipt, and ledger reversal.',
+  },
+  canViewRentalCreditNotes: {
+    name: 'View rental credit notes',
+    description: 'View booking-linked rental credit notes and refund balances.',
+  },
+  canCreateRentalCreditNote: {
+    name: 'Issue rental credit notes',
+    description: 'Issue a booking-linked adjustment that reduces rental charges and posts the accounting impact.',
+  },
+  canEditRentalCreditNote: {
+    name: 'Cancel rental credit notes',
+    description: 'Cancel an unrefunded rental credit note and reverse its accounting entry.',
+  },
+  canRefundRentalCreditNote: {
+    name: 'Refund rental credit notes',
+    description: 'Pay an outstanding rental credit refund from a permitted transaction account.',
+  },
+  canForfeitRentalDeposit: {
+    name: 'Forfeit rental security deposits',
+    description: 'Forfeit a held deposit after return with a required reason and balanced journal entry.',
+  },
+  canGenerateRentalContract: {
+    name: 'Generate rental contract drafts',
+    description: 'Create and save AI-assisted rental contract drafts for human review.',
+  },
+  canViewPlanner: { name: 'View Planner', description: 'View your tasks, appointments, notes, goals, and reminders.' },
+  canManagePlanner: { name: 'Manage Planner', description: 'Create and manage your planner entries, share them with teammates, and edit items shared with you.' },
+  canViewCRM: { name: 'View CRM', description: 'View CRM contacts and customer relationship records.' },
+  canCreateCRM: { name: 'Create CRM records', description: 'Create prospects, interactions, support cases, and campaign drafts.' },
+  canEditCRM: { name: 'Edit CRM records', description: 'Update CRM records and share records you own with selected teammates.' },
+  canDeleteCRM: { name: 'Delete CRM records', description: 'Delete CRM workspace records.' },
+  canViewPropertyManagement: { name: 'Property Management (Legacy)', description: 'Legacy access to property portfolio pages. Payment collections and tenancy statements require their dedicated permissions.' },
+  canViewPropertyPortfolio: { name: 'View property portfolio', description: 'View landlords, properties, units, tenancy details, occupancy, and portfolio summaries.' },
+  canViewPropertyCollections: { name: 'View property collections', description: 'View rent and deposit payment history and reprint payment receipts.' },
+  canViewPropertyStatements: { name: 'View tenancy statements', description: 'Open and print tenant rent statements.' },
+  canViewTenantPersonalDetails: { name: 'View tenant household details', description: 'View tenant marital status, spouse names, children, household size, and place of origin.' },
+  canManageTenantPersonalDetails: { name: 'Manage tenant household details', description: 'Record and update optional tenant household details on a tenancy.' },
+  canManagePropertyOwners: { name: 'Manage property owners', description: 'Create and update landlord or portfolio-owner records.' },
+  canManageProperties: { name: 'Manage properties', description: 'Create and update property records and addresses.' },
+  canManagePropertyUnits: { name: 'Manage rental units', description: 'Create and update units, rent terms, and availability.' },
+  canCreateTenancies: { name: 'Create tenancies', description: 'Create tenancy agreements and assign tenants to vacant units.' },
+  canEditTenancies: { name: 'Edit tenancy details', description: 'Edit tenant contact and identity details, tenancy terms, rent schedule, and agreement information.' },
+  canEndTenancies: { name: 'End tenancies', description: 'End an active tenancy after reviewing any outstanding rent.' },
+  canReactivateTenancies: { name: 'Reactivate tenancies', description: 'Reopen a tenancy and resume monthly rent charging when the tenant continues occupying the unit.' },
+  canManageTenancies: { name: 'Manage tenancies (legacy)', description: 'Legacy combined permission for creating and ending tenancy agreements.' },
+  canEditRentPeriods: { name: 'Correct rent periods', description: 'Correct an existing rent charge period and its accounting date while preserving receipts and payment allocations.' },
+  canRecordRentPayment: { name: 'Record rent payments', description: 'Record tenant rent receipts and allocate them against outstanding rent periods.' },
+  canRecordTenantDeposit: { name: 'Record tenant deposits', description: 'Collect security deposits and post them to the tenant-deposit liability account.' },
+  canRefundTenantDeposit: { name: 'Refund tenant deposits', description: 'Refund held security deposits with permission-checked cash movements and a reason.' },
+  canApplyTenantDepositToRent: { name: 'Apply tenant deposit to rent arrears', description: 'Apply a held security deposit to at least two distinct unpaid prior rent months, oldest first, with no cash movement and a balanced ledger entry.' },
+  canVoidRentPayment: { name: 'Void rent payments', description: 'Reverse a rent receipt with a required reason and matched cash/ledger reversal.' },
+  canManageRentPayment: { name: 'Manage rent payments (legacy)', description: 'Legacy combined permission for voiding rent receipts and refunding tenant deposits.' },
+  canViewRentPaymentPlans: { name: 'View rent payment plans', description: 'View tenant arrears repayment schedules, balances, installment status, and payment history.' },
+  canManageRentPaymentPlans: { name: 'Manage rent payment plans', description: 'Create and cancel arrears repayment plans and reclassify open rent receivables using the system-managed plan receivable account.' },
+  canViewRentPromises: { name: 'View tenant payment promises', description: 'View a tenant’s promises to pay, fulfillment history, and kept, partial, upcoming, or missed counts.' },
+  canManageRentPromises: { name: 'Record tenant payment promises', description: 'Record promises against unpaid rent and follow their outcomes from posted rent receipts; promises do not create accounting entries.' },
+  canViewTenantNotes: { name: 'View tenant communication notes', description: 'View tenant communication history and follow-up status in the tenant profile.' },
+  canManageTenantNotes: { name: 'Record tenant communication notes', description: 'Add new tenant communication notes.' },
+  canEditTenantNotes: { name: 'Edit tenant communication notes', description: 'Correct the interaction details, note text, related tenancy, priority, and follow-up date of an existing tenant note.' },
+  canCompleteTenantNotes: { name: 'Complete tenant follow-ups', description: 'Mark an open tenant follow-up as completed.' },
+  canAddTenantNoteFollowUps: { name: 'Add tenant note follow-ups', description: 'Append a dated follow-up entry to an existing tenant communication note.' },
+  canViewPropertyReports: { name: 'View property reports', description: 'View collections, outstanding rent, arrears aging, statements, and persistent arrears.' },
+  canViewPropertySales: { name: 'View plot sales', description: 'View plot sale contracts, installment schedules, receipts, and balances.' },
+  canCreatePropertySale: { name: 'Create plot sale', description: 'Create a full-payment or installment sale for an owned or landlord-owned plot.' },
+  canRecordPropertySalePayment: { name: 'Record plot sale payment', description: 'Record and print receipts for buyer installment payments.' },
+  canVoidPropertySalePayment: { name: 'Reverse plot sale payment', description: 'Void a plot payment, reverse its cash and receivable posting, and restore the installment balance.' },
+  canCancelPropertySale: { name: 'Cancel plot sale', description: 'Cancel a plot sale with a balanced accounting reversal when no conflicting settlement exists.' },
+  canManagePropertyLandInventory: { name: 'Manage plot inventory cost', description: 'Record the cost basis of plots owned by the property business.' },
+  canViewPropertyLandPurchases: { name: 'View plot purchases', description: 'View land acquisition invoices, supplier balances, payment history, and receipts.' },
+  canCreatePropertyLandPurchase: { name: 'Record plot purchases', description: 'Record an owned plot bought from a supplier and post its inventory cost and payable.' },
+  canRecordPropertyLandPurchasePayment: { name: 'Pay plot suppliers', description: 'Record and receipt payments against outstanding plot acquisition invoices.' },
+  canRecordOwnerPayout: { name: 'Record landlord payouts', description: 'Pay collected rent to property owners and record the corresponding payable and cash movement.' },
+  canViewRestaurant: {
+    name: 'View restaurant operations',
+    description: 'Open restaurant orders, tables, kitchen activity, and restaurant summaries.',
+  },
+  canViewBarQueue: { name: 'View bar queue', description: 'View and print bar-station tickets without access to restaurant management pages.' },
+  canUpdateBarQueue: { name: 'Update bar ticket status', description: 'Advance bar items through preparation and serving.' },
+  canManageClinicPatients: { name: 'Manage clinic patient profiles (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use separate register and edit permissions.' },
+  canManageClinicAppointments: { name: 'Manage clinic appointments (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use separate schedule and update permissions.' },
+  canManageClinicEncounters: { name: 'Manage clinic encounters (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use the record-encounter permission.' },
+  canManageClinicPrescriptions: { name: 'Manage clinic prescriptions (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use the create-prescription permission.' },
+  canManagePharmacyCatalogue: { name: 'Manage pharmacy catalogue (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use separate add and edit permissions.' },
+  canManagePharmacyBatches: { name: 'Manage pharmacy batches (legacy)', description: 'Legacy grant retained for existing assignments; new roles should use the allocate-batch permission.' },
+  canCreateRestaurant: {
+    name: 'Create restaurant or bar orders',
+    description: 'Create orders in enabled restaurant or standalone bar workflows.',
+  },
+  canEditRestaurant: {
+    name: 'Edit restaurant or bar orders',
+    description: 'Update orders in enabled restaurant or standalone bar workflows.',
+  },
+  canDeleteRestaurant: {
+    name: 'Cancel restaurant or bar orders',
+    description: 'Cancel orders in enabled restaurant or standalone bar workflows.',
+  },
+  canViewFuelStation: {
+    name: 'View fuel station operations',
+    description: 'Open fuel station pumps, fuel sales, meter readings, and fuel inventory summaries.',
+  },
+  canCreateFuelStation: {
+    name: 'Record fuel station transactions',
+    description: 'Create fuel sales, meter readings, deliveries, or pump transactions.',
+  },
+  canEditFuelStation: {
+    name: 'Edit fuel station transactions',
+    description: 'Correct fuel station records, readings, and transaction details where allowed.',
+  },
+  canDeleteFuelStation: {
+    name: 'Delete fuel station transactions',
+    description: 'Remove fuel station records where allowed.',
+  },
+  canViewManufacturing: {
+    name: 'View manufacturing',
+    description: 'Open production orders, raw materials, finished goods, and manufacturing summaries.',
+  },
+  canCreateManufacturing: {
+    name: 'Create manufacturing records',
+    description: 'Create production orders, material usage records, and finished goods entries.',
+  },
+  canEditManufacturing: {
+    name: 'Edit manufacturing records',
+    description: 'Update production orders, batches, quantities, and material usage where allowed.',
+  },
+  canDeleteManufacturing: {
+    name: 'Delete manufacturing records',
+    description: 'Remove production or manufacturing records where allowed.',
+  },
+  canViewAgriculture: {
+    name: 'View agriculture operations',
+    description: 'Open farm activities, fields, produce, inputs, and agriculture summaries.',
+  },
+  canCreateAgriculture: {
+    name: 'Create agriculture records',
+    description: 'Record farm activities, input usage, harvests, produce, or field operations.',
+  },
+  canEditAgriculture: {
+    name: 'Edit agriculture records',
+    description: 'Update agriculture records, field activity, produce details, and input usage where allowed.',
+  },
+  canDeleteAgriculture: {
+    name: 'Delete agriculture records',
+    description: 'Remove agriculture records where allowed.',
+  },
+  canViewServiceBusiness: {
+    name: 'View service business operations',
+    description: 'Open appointments, work orders, contracts, service customers, and service delivery summaries.',
+  },
+  canCreateServiceBusiness: {
+    name: 'Create service business records',
+    description: 'Create appointments, work orders, contracts, or service delivery records.',
+  },
+  canEditServiceBusiness: {
+    name: 'Edit service business records',
+    description: 'Update appointments, work orders, contract status, and service details where allowed.',
+  },
+  canDeleteServiceBusiness: {
+    name: 'Delete service business records',
+    description: 'Remove service business records where allowed.',
+  },
+  canViewCommunication: {
+    name: 'View communication records',
+    description: 'View business communication and notification records.',
+  },
+  canCreateCommunication: {
+    name: 'Create communication records',
+    description: 'Create business communication and notification records.',
+  },
+  canEditCommunication: {
+    name: 'Edit communication',
+    description: 'Update communication records, templates, or message details where allowed.',
+  },
+  canDeleteCommunication: {
+    name: 'Delete communication',
+    description: 'Remove communication records where allowed.',
+  },
+  canViewTeamMessaging: {
+    name: 'View Team Messaging',
+    description: 'Open team chats, view conversations, and see active business-user contacts.',
+  },
+  canSendTeamMessages: {
+    name: 'Send Team Messages',
+    description: 'Start a private chat with an active user in this business and send messages.',
+  },
+  canViewAccounting: {
+    name: 'View accounting',
+    description: 'Open accounting pages, ledgers, chart of accounts, and accounting summaries.',
+  },
+  canCreateAccounting: {
+    name: 'Create accounting entries',
+    description: 'Create manual journal entries and accounting transactions.',
+  },
+  canEditAccounting: {
+    name: 'Edit accounting entries',
+    description: 'Correct accounting records where editing is allowed.',
+  },
+  canManageFinancialYearClose: {
+    name: 'Prepare financial-year close',
+    description: 'Review close checks, prepare the year-end statement snapshot, and maintain draft close packs.',
+  },
+  canSignOffFinancialYearClose: {
+    name: 'Sign off and close financial year',
+    description: 'Approve the reviewed close pack and lock its dates against new or changed ledger postings.',
+  },
+  canReopenFinancialYearClose: {
+    name: 'Reopen financial year',
+    description: 'Reopen a closed period with a documented reason when an authorized correction is required.',
+  },
+  canDeleteAccounting: {
+    name: 'Delete accounting entries',
+    description: 'Remove accounting records where allowed.',
+  },
+  canReverseAccountingEntry: {
+    name: 'Reverse accounting entries',
+    description: 'Reverse posted expense journal entries using auditable opposite entries.',
+  },
+  canPostToProtectedAccounts: {
+    name: 'Post to protected system accounts',
+    description: 'Post an exceptional manual correction to a system-managed or HR-controlled account. A reason and reference are required and recorded in the journal.',
+  },
+  canViewChartOfAccounts: {
+    name: 'View chart of accounts',
+    description: 'View account categories, ledger accounts, balances, and account history.',
+  },
+  canCreateChartOfAccounts: {
+    name: 'Create chart of accounts',
+    description: 'Create ledger accounts and account categories.',
+  },
+  canEditChartOfAccounts: {
+    name: 'Edit chart of accounts',
+    description: 'Edit or deactivate ledger accounts and account categories.',
+  },
+  canViewTransactionAccount: {
+    name: 'View transaction accounts',
+    description: 'Open cash, safe, bank, mobile money, and card transaction account balances.',
+  },
+  canUseOwnCashAccount: {
+    name: 'Use own assigned cash till',
+    description: 'Use only the cash till assigned to this staff member for cash collections, expenses, payables, withdrawals, and cash journal movements.',
+  },
+  canUseOtherStaffCashAccount: {
+    name: 'Use other staff cash tills',
+    description: 'Use a cash till assigned to another staff member. This does not allow safe, bank, mobile money, or card accounts.',
+  },
+  canUseSafeAccount: {
+    name: 'Use safe accounts',
+    description: 'Use safe or vault transaction accounts for payments, collections, withdrawals, and journal movements.',
+  },
+  canUseBankAccount: {
+    name: 'Use bank accounts',
+    description: 'Use bank transaction accounts for bank or cheque payments, collections, and journal movements.',
+  },
+  canUseMobileMoneyAccount: {
+    name: 'Use mobile money accounts',
+    description: 'Use mobile money transaction accounts for mobile money collections, payments, and journal movements.',
+  },
+  canUseCardAccount: {
+    name: 'Use card accounts',
+    description: 'Use card or POS clearing transaction accounts for card payments and journal movements.',
+  },
+  canCreateTransactionAccount: {
+    name: 'Create transaction accounts',
+    description: 'Create cash tills, safe accounts, bank accounts, mobile money accounts, and card accounts.',
+  },
+  canEditTransactionAccount: {
+    name: 'Edit transaction accounts',
+    description: 'Update transaction account details, status, assignment, and balances where allowed.',
+  },
+  canDeleteTransactionAccount: {
+    name: 'Deactivate transaction accounts',
+    description: 'Deactivate transaction accounts that should no longer be used.',
+  },
+  canCreateWithdrawal: {
+    name: 'Record customer withdrawals',
+    description: 'Record money withdrawn by customers from receivables and update the linked transaction account.',
+  },
+  canUseCash: {
+    name: 'Use own cash payment method',
+    description: 'Select cash when recording sales, expenses, payables, receivables, or salary payments through the user assigned cash till.',
+  },
+  canUseMobileMoney: {
+    name: 'Use mobile money payment method',
+    description: 'Select mobile money when recording sales, expenses, payables, receivables, or salary payments.',
+  },
+  canUseBank: {
+    name: 'Use bank payment method',
+    description: 'Select bank or bank transfer when recording sales, expenses, payables, receivables, or salary payments.',
+  },
+  canUseCard: {
+    name: 'Use card payment method',
+    description: 'Select card payments in supported payment screens.',
+  },
+};
+
+function permissionCategoryForKey(key) {
+  const report = REPORT_PERMISSION_ITEMS.find(([id]) => reportPermissionKey(id) === key);
+  if (report) return report[2];
+  if (key === 'canPaySubscriptionInvoice') return 'subscription_billing';
+  if (key === 'canViewTeamMessaging' || key === 'canSendTeamMessages') return 'team_messaging';
+  if (key.includes('Procurement') || key.includes('SupplierNetwork') || key.includes('Marketplace')) return 'procurement';
+  if (key.startsWith('canViewBar') || key.startsWith('canCreateBar') || key.startsWith('canEditBar') || key.startsWith('canDeleteBar') || key.startsWith('canCancelBar')) {
+    if (key.includes('Queue')) return 'bar_operations';
+    return key.includes('Menu') ? 'bar_menu' : 'bar_orders';
+  }
+  if (key.includes('Clinic')) {
+    if (key.includes('Patient')) return 'clinic_patients';
+    if (key.includes('Appointment')) return 'clinic_appointments';
+    if (key.includes('Encounter')) return 'clinic_encounters';
+    if (key.includes('Prescription')) return 'clinic_prescriptions';
+    return 'clinic_management';
+  }
+  if (key.includes('Pharmacy')) {
+    if (key.includes('Catalogue')) return 'pharmacy_catalogue';
+    if (key.includes('Batch')) return 'pharmacy_batches';
+    return 'pharmacy_management';
+  }
+  const servicePermission = SERVICE_PERMISSION_DEFINITIONS.find(p => p.id === key);
+  if (servicePermission) return servicePermission.category;
+  if (key === 'canViewDashboard' || key === 'canUseBusinessAI') return 'dashboard';
+  if (key.includes('TransactionAccount') || [
+    'canUseOwnCashAccount',
+    'canUseOtherStaffCashAccount',
+    'canUseSafeAccount',
+    'canUseBankAccount',
+    'canUseMobileMoneyAccount',
+    'canUseCardAccount',
+    'canUseOtherCashAccount',
+    'canCreateWithdrawal',
+  ].includes(key)) return 'transactions';
+  if (key.startsWith('canUse')) return 'payment_methods';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('TenantPersonalDetails') || key.includes('TenantNotes') || key.includes('TenantNote') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('Report') || key === 'canExportReport') return 'reports';
+  if (key.includes('Receipt')) return 'receipts';
+  if (key.includes('Sale') || key === 'canGiveDiscount') return 'sales';
+  if (key.includes('Product') || key.includes('Stock') || key.includes('PriceHistory') || key === 'canImportInventory') return 'inventory';
+  if (key.includes('Purchase')) return 'purchases';
+  if (key.includes('Payable')) return 'payables';
+  if (key.includes('Expense') || key === 'canViewStaffTillSheet') return 'expenses';
+  if (key.includes('Customer') || key.includes('Receivable')) return 'customers';
+  if (key.includes('Supplier')) return 'suppliers';
+  if (key.includes('Staff')) return 'staff';
+  if (key === 'canViewHR') return 'hr';
+  if (key.includes('HREmployee')) return 'hr_employees';
+  if (key.includes('HRStructure')) return 'hr_structure';
+  if (key.includes('HRContracts')) return 'hr_contracts';
+  if (key.includes('HRDocuments')) return 'hr_documents';
+  if (key.includes('HRSalaries')) return 'hr_salaries';
+  if (key.includes('HRAttendance')) return 'hr_attendance';
+  if (key.includes('HRShifts')) return 'hr_shifts';
+  if (key.includes('HRLeave')) return 'hr_leave';
+  if (key.includes('HRPayroll')) return 'hr_payroll';
+  if (key.includes('HR')) return 'hr';
+  if (key.includes('Branch')) return 'branches';
+  if (key.includes('Settings')) return 'settings';
+  if (key.includes('Tax')) return 'tax';
+  if (key.includes('ServiceBusiness')) return 'service_business';
+  if (key.includes('Service')) return 'services';
+  if (key.includes('Rental')) return 'rentals';
+  if (key.includes('Planner')) return 'planner';
+  if (key.includes('CRM')) return 'crm';
+  if (key.includes('Property') || key.includes('Properties') || key.includes('Tenanc') || key.includes('RentPayment') || key.includes('RentPeriod') || key.includes('TenantDeposit') || key.includes('OwnerPayout')) return 'property_management';
+  if (key.includes('BarQueue')) return 'bar_operations';
+  if (key.includes('SalonStylist')) return 'salon_stylists';
+  if (key.includes('SalonChair')) return 'salon_chairs';
+  if (key.includes('SalonCommission')) return 'salon_commissions';
+  if (key.includes('Restaurant')) return 'restaurant';
+  if (key.includes('FuelStation')) return 'fuel_station';
+  if (key.includes('Manufacturing')) return 'manufacturing';
+  if (key.includes('Agriculture')) return 'agriculture';
+  if (key.includes('Communication')) return 'communication';
+  if (key.includes('TransactionAccount') || key === 'canUseOtherCashAccount') return 'transactions';
+  if (key.includes('FinancialYearClose')) return 'accounting';
+  if (key.includes('Accounting') || key.includes('ChartOfAccounts') || key === 'canPostToProtectedAccounts') return 'accounting';
+  return 'settings';
+}
+
+function permissionNameForKey(key) {
+  if (PERMISSION_DETAIL_OVERRIDES[key]?.name) return PERMISSION_DETAIL_OVERRIDES[key].name;
+  return String(key)
+    .replace(/^can/, '')
+    .replace(/([A-Z])/g, ' $1')
+    .trim()
+    .replace(/\bH R\b/g, 'HR')
+    .replace(/\bI D\b/g, 'ID')
+    .replace(/\bC O G S\b/g, 'COGS');
+}
+
+export const PERMISSION_METADATA = Object.fromEntries(
+  ALL_PERMISSION_KEYS.map((key) => [
+    key,
+    {
+      id: key,
+      name: permissionNameForKey(key),
+      description: PERMISSION_DETAIL_OVERRIDES[key]?.description || `Allow this user to ${permissionNameForKey(key).toLowerCase()}.`,
+      category: permissionCategoryForKey(key),
+    },
+  ])
+);
+
+// =====================================================
+// Role defaults — ALL false for every role.
+// No role gets auto-permissions. The business owner must
+// explicitly assign permissions to every user including
+// themselves via the Roles & Permissions page.
+// Only saas_admin bypasses all checks (platform-level).
+// =====================================================
+export const ROLE_DEFAULTS = {
+  owner: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, true])),
+  manager: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
+  accountant: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
+  attendant: Object.fromEntries(ALL_PERMISSION_KEYS.map(k => [k, false])),
+};
+
+// =====================================================
+// Normalize a permission record to the canonical permission-key shape.
+// =====================================================
+export function normalizePermissionRecord(permissionRecord = {}) {
+  const normalized = {};
+  for (const key of ALL_PERMISSION_KEYS) {
+    normalized[key] = Boolean(permissionRecord?.[key] ?? false);
+  }
+  for (const [legacyKey, granularKeys] of Object.entries(LEGACY_COMBINED_PERMISSION_GRANTS)) {
+    if (!normalized[legacyKey]) continue;
+    for (const key of granularKeys) normalized[key] = true;
+  }
+  return normalized;
+}
+
+function hasFeatureAccessForTenant(tenantFeatures, featureNames = []) {
+  if (!tenantFeatures || !Array.isArray(featureNames) || featureNames.length === 0) {
+    return true;
+  }
+
+  const features = tenantFeatures instanceof Set ? tenantFeatures : new Set(tenantFeatures || []);
+  const names = featureNames.filter(Boolean);
+
+  const aliasesFor = (featureName) => {
+    const value = String(featureName);
+    const aliases = new Set([
+      value,
+      value.replace(/_/g, '-'),
+      value.replace(/-/g, '_'),
+    ]);
+
+    const equivalentFeatures = {
+      'fuel_station.tanks': ['fuel_station.pumps'],
+      'fuel_station.pumps': ['fuel_station.tanks'],
+      'service.car_wash': ['fuel_station.car_wash'],
+      'fuel_station.car_wash': ['service.car_wash'],
+      'service.garage': ['fuel_station.garage'],
+      'fuel_station.garage': ['service.garage'],
+      'service': ['service_business'],
+      'service_business': ['service'],
+    };
+
+    for (const equivalent of equivalentFeatures[value] || []) {
+      aliases.add(equivalent);
+      aliases.add(equivalent.replace(/_/g, '-'));
+      aliases.add(equivalent.replace(/-/g, '_'));
+    }
+
+    return aliases;
+  };
+
+  return names.some((featureName) => {
+    if (!featureName) return true;
+    return [...aliasesFor(featureName)].some((alias) => features.has(alias));
+  });
+}
+
+export function permissionAllowedForTenant(permissionKey, tenantFeatures) {
+  if (OWNER_CORE_PERMISSIONS.has(permissionKey)) return true;
+  const mappedFeatures = PERMISSION_TO_FEATURES[permissionKey];
+  return hasFeatureAccessForTenant(tenantFeatures, mappedFeatures);
+}
+
+// =====================================================
+// Resolve the effective permissions for a user.
+// The effective set is the union of any inherited/base permissions
+// (for example from a plan template or a future override layer) plus
+// the explicit user-permission record.
+// =====================================================
+export function resolveEffectivePermissions(user, permissionRecord = null, inheritedPermissions = [], tenantFeatures = null) {
+  if (!user) return [];
+  if (user.role === "saas_admin") return ["*"];
+  if (user.role === "platform_staff") {
+    return sanitizePlatformPermissions(permissionRecord?.platformPermissions);
+  }
+  if (user.role === "owner") {
+    const granted = new Set();
+    for (const permissionKey of ALL_PERMISSION_KEYS) {
+      if (OWNER_CORE_PERMISSIONS.has(permissionKey)) {
+        granted.add(permissionKey);
+        continue;
+      }
+
+      if (permissionAllowedForTenant(permissionKey, tenantFeatures)) {
+        granted.add(permissionKey);
+      }
+    }
+    return [...granted];
+  }
+
+  const granted = new Set();
+
+  if (Array.isArray(inheritedPermissions)) {
+    inheritedPermissions
+      .filter((permission) => permission && !LEGACY_COMBINED_PERMISSION_KEYS.includes(permission) && !LEGACY_SERVICE_PERMISSION_KEYS.includes(permission) && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(permission) && permissionAllowedForTenant(permission, tenantFeatures))
+      .forEach((permission) => granted.add(permission));
+    for (const permission of inheritedPermissions) {
+      if (!LEGACY_COMBINED_PERMISSION_GRANTS[permission]) continue;
+      for (const key of LEGACY_COMBINED_PERMISSION_GRANTS[permission]) {
+        if (permissionAllowedForTenant(key, tenantFeatures)) granted.add(key);
+      }
+    }
+  }
+
+  const normalized = normalizePermissionRecord(permissionRecord || {});
+  for (const [key, enabled] of Object.entries(normalized)) {
+    if (enabled && key.startsWith("can") && !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && !LEGACY_REPORT_GROUP_PERMISSION_KEYS.includes(key) && permissionAllowedForTenant(key, tenantFeatures)) {
+      granted.add(key);
+    }
+  }
+
+  // Preserve the old module-view grant as portfolio access; it does not imply
+  // the newer collections, statement, or financial-action permissions.
+  if (normalized.canViewPropertyManagement) granted.add('canViewPropertyPortfolio');
+
+  for (const [legacyKey, granularKeys] of Object.entries(LEGACY_COMBINED_PERMISSION_GRANTS)) {
+    const legacyGranted = normalized[legacyKey] || (Array.isArray(inheritedPermissions) && inheritedPermissions.includes(legacyKey));
+    if (legacyGranted) for (const key of granularKeys) if (permissionAllowedForTenant(key, tenantFeatures)) granted.add(key);
+  }
+  if (normalized.canManageCustomerCreditLimit || normalized.canCreateCustomerCreditLimit || normalized.canEditCustomerCreditLimit) {
+    granted.add('canViewCustomerCreditLimit');
+  }
+
+  return [...granted];
+}
+
+// =====================================================
+// Resolve permissions for a user.
+// - saas_admin: wildcard "*" (platform-level, bypasses all checks)
+// - owner: ALL permissions (business owner has full access)
+// - Other roles: permissions come ONLY from the UserPermission table
+// =====================================================
+export function permissionsForUser(user, tenantFeatures = null) {
+  if (user.role === "saas_admin") return ["*"];
+  if (user.role === "owner") return resolveEffectivePermissions(user, null, [], tenantFeatures);
+  // No role gets hardcoded permissions — must be explicitly assigned
+  return [];
+}

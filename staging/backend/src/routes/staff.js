@@ -1,0 +1,413 @@
+import { Router } from "express";
+import { moveToTrash, trashedRecordIds, assertOutsideTrash } from '../services/trashService.js';
+import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
+import prisma from "../db.js";
+import { authenticateToken, requirePermission } from "../../middleware/auth.js";
+import { tenantIdFromUser } from "../utils/branchAccess.js";
+import { checkUsageLimit } from "../utils/usageLimits.js";
+import { validateWorkingHours, workingHoursAdmin } from "../utils/workingHours.js";
+import { auditLog } from "../utils/audit.js";
+import {
+  ALL_PERMISSION_KEYS as PERM_KEYS,
+  PERMISSION_CATEGORIES,
+  PERMISSION_METADATA,
+  ROLE_DEFAULTS,
+  normalizePermissionRecord,
+  permissionAllowedForTenant,
+  LEGACY_COMBINED_PERMISSION_KEYS,
+} from "../utils/permissions.js";
+
+const router = Router();
+
+const staffRoles = new Set(["manager", "accountant", "attendant"]);
+
+// Get permission keys and role defaults
+router.get("/permissions/schema", authenticateToken, requirePermission("canViewStaff"), (req, res) => {
+  res.json({
+    keys: PERM_KEYS,
+    defaults: ROLE_DEFAULTS,
+    categories: PERMISSION_CATEGORIES,
+    permissions: PERM_KEYS.map((key) => PERMISSION_METADATA[key] || { id: key, name: key, category: "settings" }),
+  });
+});
+
+function splitName(name = "") {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  return {
+    fname: parts[0] || "",
+    lname: parts.slice(1).join(" "),
+  };
+}
+
+function staffResponse(user) {
+  const primaryBranch = user.branches?.find((item) => item.isPrimary) || user.branches?.[0] || null;
+  const { password: _, branches, ...safe } = user;
+  return {
+    ...safe,
+    name: `${user.fname || ""} ${user.lname || ""}`.trim() || user.email,
+    branchId: primaryBranch?.branchId || null,
+    branch: primaryBranch?.branch || null,
+    branches: branches?.map((item) => ({
+      id: item.branchId,
+      name: item.branch?.name || "",
+      isPrimary: item.isPrimary,
+    })) || [],
+    cashAccountId: user.cashAccountId || null,
+    cashAccount: user.cashAccount ? { id: user.cashAccount.id, name: user.cashAccount.name, type: user.cashAccount.type } : null,
+  };
+}
+
+async function requireTenantBranch(tenantId, branchId) {
+  if (!branchId) return null;
+
+  const branch = await prisma.branch.findFirst({
+    where: { id: branchId, tenantId, isActive: true },
+  });
+
+  if (!branch) {
+    const error = new Error("Branch not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return branch;
+}
+
+async function replacePrimaryBranch(userId, branchId) {
+  if (!branchId) return;
+
+  await prisma.userBranch.deleteMany({ where: { userId } });
+  await prisma.userBranch.create({
+    data: { userId, branchId, isPrimary: true },
+  });
+}
+
+router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const staff = await prisma.user.findMany({
+      where: { tenantId, id: { notIn: await trashedRecordIds('user', tenantId) }, role: { in: [...Array.from(staffRoles), "owner"] } },
+      include: {
+        branches: {
+          include: { branch: { select: { id: true, name: true, isActive: true } } },
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+        },
+        cashAccount: { select: { id: true, name: true, type: true } },
+      },
+      orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
+    });
+
+    res.json({ staff: staff.map(staffResponse) });
+  } catch (err) {
+    console.error("List staff error:", err);
+    res.status(500).json({ error: "Failed to load staff" });
+  }
+});
+
+router.post("/", authenticateToken, requirePermission("canCreateStaff"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const { name, email, password, fname, lname, phone, role = "attendant", branchId, permissions, cashAccountId } = req.body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+    if (!normalizedEmail) return res.status(400).json({ error: "Email is required" });
+    if (!password || String(password).length < 12) {
+      return res.status(400).json({ error: "Password must be at least 12 characters" });
+    }
+    if (!staffRoles.has(role)) return res.status(400).json({ error: "Invalid staff role" });
+    if (!branchId) return res.status(400).json({ error: "Branch is required" });
+
+    await requireTenantBranch(tenantId, branchId);
+
+    await checkUsageLimit(tenantId, 'users');
+
+    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) return res.status(409).json({ error: "User already exists" });
+
+    const parsed = splitName(name);
+    const hashed = await bcrypt.hash(String(password), 12);
+
+    // Build permission data from request or role defaults
+    const permData = {};
+    for (const key of PERM_KEYS) {
+      if (LEGACY_COMBINED_PERMISSION_KEYS.includes(key)) {
+        permData[key] = false;
+      } else if (!permissionAllowedForTenant(key, req.tenantFeatures)) {
+        permData[key] = false;
+      } else if (permissions && permissions[key] !== undefined) {
+        permData[key] = Boolean(permissions[key]);
+      } else {
+        permData[key] = ROLE_DEFAULTS[role]?.[key] ?? ROLE_DEFAULTS.attendant[key];
+      }
+    }
+
+    // Validate cash account if provided
+    let resolvedCashAccountId = null;
+    if (cashAccountId) {
+      const account = await prisma.cashAccount.findFirst({
+        where: { id: cashAccountId, tenantId, isActive: true },
+      });
+      if (!account) return res.status(400).json({ error: "Invalid or inactive cash account" });
+      resolvedCashAccountId = account.id;
+    }
+
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email: normalizedEmail,
+          password: hashed,
+          fname: fname || parsed.fname || normalizedEmail.split("@")[0],
+          lname: lname || parsed.lname || "",
+          phone,
+          role,
+          tenantId,
+          isActive: true,
+          cashAccountId: resolvedCashAccountId,
+        },
+      });
+
+      await tx.userBranch.create({
+        data: { userId: created.id, branchId, isPrimary: true },
+      });
+
+      await tx.userPermission.create({
+        data: { userId: created.id, ...permData },
+      });
+
+      return tx.user.findUnique({
+        where: { id: created.id },
+        include: {
+          branches: {
+            include: { branch: { select: { id: true, name: true, isActive: true } } },
+          },
+          cashAccount: { select: { id: true, name: true, type: true } },
+        },
+      });
+    });
+
+    const assignedBranch = user.branches?.find((item) => item.isPrimary)?.branch || user.branches?.[0]?.branch;
+    await auditLog({
+      tenantId,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      subjectUserId: user.id,
+      subjectEmail: user.email,
+      branchId,
+      branchName: assignedBranch?.name || null,
+      action: "staff_account_created",
+      model: "User",
+      recordId: user.id,
+      changes: { role: user.role, branchId, branchName: assignedBranch?.name || null },
+      ip: req.ip || req.connection?.remoteAddress,
+    });
+
+    res.status(201).json({ message: "Staff created", staff: staffResponse(user), password: String(password) });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err?.code === "P2002") return res.status(409).json({ error: "User already exists" });
+    console.error("Create staff error:", err);
+    res.status(500).json({ error: "Failed to create staff" });
+  }
+});
+
+router.patch("/:id", authenticateToken, requirePermission("canEditStaffDetails"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const existing = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
+    });
+
+    if (!existing) return res.status(404).json({ error: "Staff not found" });
+
+    const data = {};
+    await assertOutsideTrash('user', tenantId, existing.id);
+    const { name, fname, lname, phone, role, isActive, branchId, password, cashAccountId, workingHours } = req.body;
+    if (workingHours !== undefined) {
+      if (existing.id === req.user.id && !workingHoursAdmin(req.user)) {
+        return res.status(403).json({ error: 'Only the business owner can change your own working hours.' });
+      }
+      if (existing.role === 'owner') return res.status(400).json({ error: 'Business owners always have access and do not need a working-hours restriction.' });
+      data.workingHours = validateWorkingHours(workingHours, { custom: true }) ?? Prisma.DbNull;
+    }
+
+    if (role !== undefined) {
+      if ((role === 'owner' || existing.role === 'owner') && !workingHoursAdmin(req.user)) return res.status(403).json({ error: 'Only the business owner can change owner access.' });
+      if (!staffRoles.has(role) && role !== "owner") return res.status(400).json({ error: "Invalid staff role" });
+      data.role = role;
+    }
+
+    if (name !== undefined) {
+      const parsed = splitName(name);
+      data.fname = parsed.fname;
+      data.lname = parsed.lname;
+    }
+    if (fname !== undefined) data.fname = fname;
+    if (lname !== undefined) data.lname = lname;
+    if (phone !== undefined) data.phone = phone || null;
+    if (isActive !== undefined) data.isActive = Boolean(isActive);
+    if (password !== undefined) {
+      if (!password || String(password).length < 12) {
+        return res.status(400).json({ error: "Password must be at least 12 characters" });
+      }
+      data.password = await bcrypt.hash(String(password), 12);
+    }
+
+    if (branchId) await requireTenantBranch(tenantId, branchId);
+
+    // Validate and set cash account if provided
+    if (cashAccountId !== undefined) {
+      if (cashAccountId) {
+        const account = await prisma.cashAccount.findFirst({
+          where: { id: cashAccountId, tenantId, isActive: true },
+        });
+        if (!account) return res.status(400).json({ error: "Invalid or inactive cash account" });
+        data.cashAccountId = account.id;
+      } else {
+        data.cashAccountId = null;
+      }
+    }
+
+    const user = await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: existing.id }, data });
+      if (branchId) {
+        await tx.userBranch.deleteMany({ where: { userId: existing.id } });
+        await tx.userBranch.create({
+          data: { userId: existing.id, branchId, isPrimary: true },
+        });
+      }
+
+      return tx.user.findUnique({
+        where: { id: existing.id },
+        include: {
+          branches: {
+            include: { branch: { select: { id: true, name: true, isActive: true } } },
+            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+          },
+          cashAccount: { select: { id: true, name: true, type: true } },
+        },
+      });
+    });
+
+    res.json({ message: "Staff updated", staff: staffResponse(user) });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err instanceof RangeError) return res.status(400).json({ error: err.message });
+    console.error("Update staff error:", err);
+    res.status(500).json({ error: "Failed to update staff" });
+  }
+});
+
+router.delete("/:id", authenticateToken, requirePermission("canDeleteStaff"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const existing = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
+    });
+    if (!existing) return res.status(404).json({ error: "Staff not found" });
+
+    await moveToTrash('user', { id: existing.id, tenantId }, req.user);
+    const user = await prisma.user.findUnique({
+      where: { id: existing.id },
+      include: {
+        branches: {
+          include: { branch: { select: { id: true, name: true, isActive: true } } },
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+        },
+      },
+    });
+
+    res.json({ message: "Staff moved to Trash for 30 days", staff: staffResponse(user) });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    console.error("Deactivate staff error:", err);
+    res.status(500).json({ error: "Failed to deactivate staff" });
+  }
+});
+
+// Get permissions for a staff member
+router.get("/:id/permissions", authenticateToken, requirePermission("canViewStaff"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
+    });
+    if (!user) return res.status(404).json({ error: "Staff not found" });
+
+    let perms = await prisma.userPermission.findUnique({ where: { userId: user.id } });
+    if (!perms) {
+      // ALL roles start with empty permissions — no auto-grants
+      const defaults = ROLE_DEFAULTS[user.role] || ROLE_DEFAULTS.attendant;
+      const permData = {};
+      for (const key of PERM_KEYS) permData[key] = defaults[key] ?? false;
+      perms = await prisma.userPermission.create({ data: { userId: user.id, ...permData } });
+    }
+    res.json(normalizePermissionRecord(perms));
+  } catch (err) {
+    console.error("Get permissions error:", err);
+    res.status(500).json({ error: "Failed to load permissions" });
+  }
+});
+
+// Update permissions for a staff member
+router.put("/:id/permissions", authenticateToken, requirePermission("canManageStaffPermissions"), async (req, res) => {
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (!tenantId) return res.status(403).json({ error: "Tenant access required" });
+
+    const user = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: [...Array.from(staffRoles), "owner"] } },
+    });
+    if (!user) return res.status(404).json({ error: "Staff not found" });
+
+    const requestPermissions = req.body?.permissions && typeof req.body.permissions === 'object'
+      ? req.body.permissions
+      : req.body;
+    if (!requestPermissions || typeof requestPermissions !== 'object' || Array.isArray(requestPermissions)) {
+      return res.status(400).json({ error: 'A permissions object is required.' });
+    }
+    const unavailablePermissions = PERM_KEYS.filter((key) =>
+      Object.prototype.hasOwnProperty.call(requestPermissions, key) &&
+      Boolean(requestPermissions[key]) &&
+      !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) &&
+      !permissionAllowedForTenant(key, req.tenantFeatures),
+    );
+    if (unavailablePermissions.length) {
+      return res.status(403).json({
+        error: 'Some selected permissions are not included in this business subscription or feature override.',
+        unavailablePermissions,
+      });
+    }
+    const data = {};
+    for (const key of PERM_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(requestPermissions, key)) continue;
+      data[key] = !LEGACY_COMBINED_PERMISSION_KEYS.includes(key) && Boolean(requestPermissions[key]);
+    }
+    if (!Object.keys(data).length) return res.status(400).json({ error: 'No recognized permissions were provided.' });
+
+    const createData = Object.fromEntries(PERM_KEYS.map((key) => [key, false]));
+    Object.assign(createData, data);
+
+    const perms = await prisma.userPermission.upsert({
+      where: { userId: user.id },
+      update: data,
+      create: { userId: user.id, ...createData },
+    });
+    res.json({ message: "Permissions updated", permissions: normalizePermissionRecord(perms) });
+  } catch (err) {
+    console.error("Update permissions error:", err?.stack || err);
+    res.status(500).json({ error: "Failed to update permissions", code: err?.code || "PERMISSION_UPDATE_FAILED" });
+  }
+});
+
+export default router;

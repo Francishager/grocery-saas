@@ -1,0 +1,801 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Bell, BellRing, BellOff, Check, CheckCheck, AlertTriangle, Package, Clock, TrendingDown, FileText, X, ArrowUpRight, ShoppingCart, CreditCard, Users, UserRound, Wallet, Wrench, Receipt, ArrowLeftRight, UserCheck, CircleDollarSign, Truck, BriefcaseBusiness, Settings2, Sparkles, Lightbulb, Store } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { createPortal } from 'react-dom'
+import { apiFetch } from '@/lib/api'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalNotifications } from '@/db/hybrid'
+import { db } from '@/db/index'
+import { useNavigate } from 'react-router-dom'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import { usePushNotifications } from '@/lib/usePushNotifications'
+import { notificationActionLink, notificationKey, notificationLink, sanitizeNotificationText } from '@/lib/notificationDisplay'
+import { getNotificationVisual } from '@/lib/notificationVisuals'
+import { toast } from '@/hooks/use-toast'
+import { ToastAction } from '@/components/ui/toast'
+
+interface NotificationItem {
+  id: string
+  title: string
+  message: string
+  type: string
+  isRead: boolean
+  createdAt: string
+  channel?: string
+  link?: string
+  source?: 'api' | 'local' | 'immediate'
+  metadata?: Record<string, any>
+}
+
+const TYPE_ICONS: Record<string, typeof Bell> = {
+  info: Bell, success: Check, warning: AlertTriangle, error: AlertTriangle,
+  sale: ShoppingCart, purchase: Truck, payment: CreditCard, expense: Wallet,
+  payroll: BriefcaseBusiness, inventory: Package, low_stock: Package, out_of_stock: Package,
+  overdue_rental: Clock, overdue_payable: TrendingDown, leave_request: FileText,
+  hr: Users, service: Wrench, job_card: Receipt, receivable: CircleDollarSign,
+  payable: CircleDollarSign, refund: ArrowLeftRight, transfer: ArrowLeftRight,
+  account: Settings2, customer: UserRound, supplier: Truck, user: UserRound,
+  approval: UserCheck, system: Settings2, communication: Bell, advisor_tip: Lightbulb, procurement: Store,
+}
+
+const TYPE_COLORS: Record<string, string> = {
+  info: 'bg-blue-100 text-blue-600',
+  success: 'bg-green-100 text-green-600',
+  warning: 'bg-yellow-100 text-yellow-600',
+  error: 'bg-red-100 text-red-600',
+  low_stock: 'bg-orange-100 text-orange-600',
+  out_of_stock: 'bg-red-100 text-red-600',
+  overdue_rental: 'bg-purple-100 text-purple-600',
+  overdue_payable: 'bg-amber-100 text-amber-600',
+  leave_request: 'bg-indigo-100 text-indigo-600',
+  advisor_tip: 'bg-emerald-100 text-emerald-700',
+  procurement: 'bg-teal-100 text-teal-700',
+}
+
+function timeAgo(date: string | Date): string {
+  const d = new Date(date)
+  const diff = Date.now() - d.getTime()
+  const min = Math.floor(diff / 60000)
+  const hr = Math.floor(diff / 3600000)
+  const day = Math.floor(diff / 86400000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  if (hr < 24) return `${hr}h ago`
+  if (day < 7) return `${day}d ago`
+  return d.toLocaleDateString()
+}
+
+export function NotificationBell() {
+  const [open, setOpen] = useState(false)
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [advisorTips, setAdvisorTips] = useState<NotificationItem[]>([])
+  const [advisorTipQueue, setAdvisorTipQueue] = useState<NotificationItem[]>([])
+  const unreadCount = notifications.filter(n => !n.isRead).length
+  const [loading, setLoading] = useState(false)
+  const online = useOnlineStatus()
+  const navigate = useNavigate()
+  const { user, hasPermission } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const bellRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const announcedRef = useRef(new Set<string>())
+  const readKeysRef = useRef(new Set<string>())
+  const immediateRef = useRef(new Map<string, NotificationItem>())
+  const startedAtRef = useRef(Date.now())
+  const loadedRef = useRef(false)
+  const userIdRef = useRef(user?.id)
+  const loadInFlightRef = useRef(false)
+  const dailyTipsDoneRef = useRef('')
+  const dailyTipsAttemptRef = useRef<{ key: string; at: number } | null>(null)
+
+  // Browser push notifications
+  const { permission: pushPermission, registered: pushRegistered, registerToken, unregisterToken, isDisabledOnDevice } = usePushNotifications()
+
+  useEffect(() => {
+    userIdRef.current = user?.id
+    announcedRef.current.clear()
+    readKeysRef.current.clear()
+    immediateRef.current.clear()
+    loadedRef.current = false
+    dailyTipsDoneRef.current = ''
+    dailyTipsAttemptRef.current = null
+    startedAtRef.current = Date.now()
+    setNotifications([])
+    setAdvisorTips([])
+    setAdvisorTipQueue([])
+  }, [user?.id])
+
+  const announce = useCallback((item: NotificationItem) => {
+    const key = notificationKey(item)
+    if (announcedRef.current.has(key)) return
+    announcedRef.current.add(key)
+    if (item.type === 'advisor_tip') {
+      setAdvisorTipQueue(previous => previous.some(tip => tip.id === item.id) ? previous : [...previous, item])
+      return
+    }
+    const link = notificationActionLink(item.link, hasPermission('canAdjustStock'))
+    toast({
+      title: sanitizeNotificationText(item.title, 'Notification'),
+      description: sanitizeNotificationText(item.message),
+      notificationType: item.type,
+      variant: ['sale', 'success', 'payment'].includes(item.type) ? 'success' : item.type === 'error' ? 'destructive' : 'default',
+      action: link ? <ToastAction altText="Open notification details" onClick={() => navigate(link)}>Open details</ToastAction> : undefined,
+    })
+  }, [hasPermission, navigate])
+
+  // Refresh the signed-in user's existing Web Push subscription without prompting.
+  useEffect(() => {
+    if (user && pushPermission === 'granted' && !isDisabledOnDevice()) {
+      registerToken()
+    }
+  }, [user, pushPermission, registerToken, isDisabledOnDevice])
+
+  // Fetch API notifications
+  const fetchApiNotifications = useCallback(async (): Promise<NotificationItem[]> => {
+    try {
+      const res = await apiFetch('/api/notifications')
+      if (!res.ok) return []
+      const data = await res.json()
+      const arr = Array.isArray(data) ? data : (data.notifications || [])
+      return arr.filter((n: any) => n.type !== 'advisor_tip').map((n: any) => ({
+        id: n.id,
+        metadata: n.metadata,
+        title: sanitizeNotificationText(n.title, 'Notification'),
+        message: sanitizeNotificationText(n.message),
+        type: (n.type || 'info') as any,
+        isRead: n.isRead ?? false,
+        createdAt: n.createdAt || new Date().toISOString(),
+        channel: n.channel,
+        source: 'api' as const,
+        link: notificationLink(n.metadata?.link),
+      }))
+    } catch {
+      return []
+    }
+  }, [])
+
+  const fetchApiAdvisorTips = useCallback(async (): Promise<NotificationItem[]> => {
+    try {
+      const res = await apiFetch('/api/notifications/advisor-tips')
+      if (!res.ok) return []
+      const data = await res.json()
+      const arr = Array.isArray(data) ? data : (data.notifications || [])
+      return arr.map((n: any) => ({
+        id: n.id,
+        metadata: n.metadata,
+        title: sanitizeNotificationText(n.title, 'Advisor tip'),
+        message: sanitizeNotificationText(n.message),
+        type: 'advisor_tip',
+        isRead: n.isRead ?? false,
+        createdAt: n.createdAt || new Date().toISOString(),
+        channel: n.channel,
+        source: 'api' as const,
+        link: notificationLink(n.metadata?.link),
+      }))
+    } catch {
+      return []
+    }
+  }, [])
+
+  // Fetch local IndexedDB notifications
+  const fetchLocalNotifications = useCallback(async (): Promise<NotificationItem[]> => {
+    try {
+      const local = await getLocalNotifications()
+      return local.map((n: any) => ({
+        id: n.id,
+        metadata: n.metadata,
+        title: sanitizeNotificationText(n.title, 'Notification'),
+        message: sanitizeNotificationText(n.message),
+        type: (n.type || 'info') as any,
+        isRead: n.isRead ?? false,
+        createdAt: n.createdAt || new Date().toISOString(),
+        channel: n.channel,
+        source: 'local' as const,
+      }))
+    } catch {
+      return []
+    }
+  }, [])
+
+  // Generate job-based notifications from local data (low-stock, overdue rentals, etc.)
+  const generateJobNotifications = useCallback(async (): Promise<NotificationItem[]> => {
+    const jobs: NotificationItem[] = []
+    try {
+      const canUseInventory = hasFeature('inventory')
+      const canUseRentals = hasFeature('rentals')
+      const canUseHR = hasFeature('hr')
+      const canUsePayables = hasFeature('payables')
+      const [products, rentals, leaveRequests, purchases] = await Promise.all([
+        canUseInventory ? db.products.toArray() : Promise.resolve([]),
+        canUseRentals ? db.rentals.toArray() : Promise.resolve([]),
+        canUseHR ? db.leaveRequests.toArray() : Promise.resolve([]),
+        canUsePayables ? db.purchases.toArray() : Promise.resolve([]),
+      ])
+
+      // Low-stock products
+      for (const p of products) {
+        const minStock = (p as any).minStock || 10
+        if (p.quantity > 0 && p.quantity <= minStock) {
+          jobs.push({
+            id: `job_low_${p.id}`,
+            title: 'Low Stock Alert',
+            message: `${p.name} has only ${p.quantity} units left (min: ${minStock})`,
+            type: 'low_stock',
+            isRead: false,
+            createdAt: new Date().toISOString(),
+            link: `/tenant/inventory/products?productId=${encodeURIComponent(String(p.id))}&stockAction=stock_in`,
+            source: 'local',
+          })
+        }
+      }
+
+      // Out-of-stock products
+      for (const p of products) {
+        if (p.quantity <= 0) {
+          jobs.push({
+            id: `job_out_${p.id}`,
+            title: 'Out of Stock',
+            message: `${p.name} is completely out of stock`,
+            type: 'out_of_stock',
+            isRead: false,
+            createdAt: new Date().toISOString(),
+            link: `/tenant/inventory/products?productId=${encodeURIComponent(String(p.id))}&stockAction=stock_in`,
+            source: 'local',
+          })
+        }
+      }
+
+      // Overdue rentals
+      const now = new Date()
+      for (const r of rentals) {
+        if (r.status === 'active' || r.status === 'rented') {
+          const returnDate = (r as any).expectedReturnDate || (r as any).returnDate
+          if (returnDate && new Date(returnDate) < now) {
+            jobs.push({
+              id: `job_rental_${r.id}`,
+              title: 'Overdue Rental',
+              message: `Rental ${(r as any).rentalNo || r.id} is overdue for return`,
+              type: 'overdue_rental',
+              isRead: false,
+              createdAt: new Date().toISOString(),
+              link: '/tenant/rentals/returns',
+              source: 'local',
+            })
+          }
+        }
+      }
+
+      // Pending leave requests
+      for (const lr of leaveRequests) {
+        if ((lr as any).status === 'pending') {
+          jobs.push({
+            id: `job_leave_${lr.id}`,
+            title: 'Pending Leave Request',
+            message: `Leave request from ${(lr as any).employeeName || 'an employee'} awaiting approval`,
+            type: 'leave_request',
+            isRead: false,
+            createdAt: (lr as any).createdAt || new Date().toISOString(),
+            link: '/tenant/hr',
+            source: 'local',
+          })
+        }
+      }
+
+      // Overdue payables
+      for (const p of purchases) {
+        if ((p as any).paymentStatus === 'unpaid' || ((p as any).balance > 0 && (p as any).dueDate)) {
+          const dueDate = (p as any).dueDate
+          if (dueDate && new Date(dueDate) < now) {
+            jobs.push({
+              id: `job_payable_${p.id}`,
+              title: 'Overdue Payable',
+              message: `Purchase ${(p as any).refNo || p.id} from ${(p as any).supplier?.name || 'supplier'} is overdue`,
+              type: 'overdue_payable',
+              isRead: false,
+              createdAt: new Date().toISOString(),
+              link: '/tenant/payables',
+              source: 'local',
+            })
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return jobs
+  }, [hasFeature])
+
+  const addDailyReminderIfNeeded = useCallback(async (base: NotificationItem[]) => {
+    if (typeof window === 'undefined') return base
+
+    const now = new Date()
+    const isReminderWindow = now.getHours() === 23 && now.getMinutes() >= 55
+    if (!isReminderWindow) return base
+
+    const storageKey = user?.id ? `jibu_daily_reminder_${user.id}` : 'jibu_daily_reminder_guest'
+    const todayKey = now.toISOString().slice(0, 10)
+    const lastShown = window.localStorage.getItem(storageKey)
+    if (lastShown === todayKey) return base
+
+    window.localStorage.setItem(storageKey, todayKey)
+
+    if (online) {
+      try {
+        const res = await apiFetch('/api/notifications/daily-sales-summary', { method: 'POST' })
+        if (res.ok) {
+          return base
+        }
+      } catch {}
+    }
+
+    const reminder: NotificationItem = {
+      id: `daily_reminder_${todayKey}`,
+      title: 'Daily Summary',
+      message: `End-of-day wrap-up: review stock, pending work, and today’s operations before midnight.`,
+      type: 'info',
+      isRead: false,
+      createdAt: now.toISOString(),
+      link: '/tenant/dashboard',
+      source: 'local',
+    }
+
+    return [reminder, ...base.filter((n) => n.id !== reminder.id)]
+  }, [online, user?.id])
+
+  // Load all notifications
+  const loadNotifications = useCallback(async () => {
+    const loadingForUser = user?.id
+    if (!loadingForUser || document.visibilityState !== 'visible' || loadInFlightRef.current) return
+    loadInFlightRef.current = true
+    setLoading(true)
+    try {
+      let apiNotifs: NotificationItem[] = []
+      let apiTips: NotificationItem[] = []
+      let localNotifs: NotificationItem[] = []
+
+      if (online) {
+        if (hasPermission('canUseBusinessAI') && document.visibilityState === 'visible') {
+          const tipDayKey = `${loadingForUser}:${new Date().toISOString().slice(0, 10)}`
+          const previousAttempt = dailyTipsAttemptRef.current
+          const retryAllowed = !previousAttempt || previousAttempt.key !== tipDayKey || Date.now() - previousAttempt.at >= 5 * 60 * 1000
+          if (dailyTipsDoneRef.current !== tipDayKey && retryAllowed) {
+            dailyTipsAttemptRef.current = { key: tipDayKey, at: Date.now() }
+            const response = await apiFetch('/api/ai/daily-tips', { method: 'POST' }).catch(() => null)
+            if (response?.ok) dailyTipsDoneRef.current = tipDayKey
+          }
+        }
+        const [api, tips, local] = await Promise.all([
+          fetchApiNotifications(),
+          hasPermission('canUseBusinessAI') ? fetchApiAdvisorTips() : Promise.resolve([]),
+          fetchLocalNotifications(),
+        ])
+        apiNotifs = api
+        apiTips = tips
+        localNotifs = local
+      } else {
+        localNotifs = await fetchLocalNotifications()
+      }
+
+      // Generate job notifications from local data
+      const jobNotifs = await generateJobNotifications()
+
+      // Merge: API notifications + job notifications, dedup by id
+      // Job notifications override local stored ones with same id pattern
+      const mergedMap = new Map<string, NotificationItem>()
+
+      // Add API notifications first
+      for (const n of apiNotifs) {
+        mergedMap.set(notificationKey(n), n)
+      }
+
+      // Add job notifications (these are always fresh)
+      for (const n of jobNotifs) {
+        if (!mergedMap.has(notificationKey(n))) {
+          mergedMap.set(notificationKey(n), n)
+        }
+      }
+
+      // Add remaining local notifications
+      for (const n of localNotifs) {
+        if (!mergedMap.has(notificationKey(n))) {
+          mergedMap.set(notificationKey(n), n)
+        }
+      }
+
+      if (userIdRef.current !== loadingForUser) return
+      for (const [key, item] of immediateRef.current) {
+        if (mergedMap.has(key)) immediateRef.current.delete(key)
+        else mergedMap.set(key, item)
+      }
+      const merged = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+      const withReminder = await addDailyReminderIfNeeded(merged)
+      if (userIdRef.current !== loadingForUser) return
+
+      const advisorMap = new Map<string, NotificationItem>()
+      for (const item of apiTips) advisorMap.set(notificationKey(item), item)
+      for (const item of localNotifs.filter(item => item.type === 'advisor_tip')) {
+        if (!advisorMap.has(notificationKey(item))) advisorMap.set(notificationKey(item), item)
+      }
+      for (const [key, item] of immediateRef.current) {
+        if (item.type === 'advisor_tip') advisorMap.set(key, item)
+      }
+      const loadedTips = Array.from(advisorMap.values())
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .map(item => ({ ...item, isRead: item.isRead || readKeysRef.current.has(notificationKey(item)) }))
+
+      for (const item of withReminder) {
+        const key = notificationKey(item)
+        if (!item.isRead && (loadedRef.current || new Date(item.createdAt).getTime() >= startedAtRef.current)) announce(item)
+        else announcedRef.current.add(key)
+      }
+      for (const item of loadedTips) {
+        if (!item.isRead && !announcedRef.current.has(notificationKey(item))) announce(item)
+      }
+      loadedRef.current = true
+      setNotifications(withReminder
+        .filter(item => item.type !== 'advisor_tip')
+        .map(item => ({ ...item, isRead: item.isRead || readKeysRef.current.has(notificationKey(item)) })))
+      setAdvisorTips(loadedTips)
+    } catch {
+      // ignore
+    } finally {
+      loadInFlightRef.current = false
+      setLoading(false)
+    }
+  }, [online, user?.id, hasPermission, announce, fetchApiNotifications, fetchApiAdvisorTips, fetchLocalNotifications, generateJobNotifications, addDailyReminderIfNeeded])
+
+  // Initial load + polling plus immediate events emitted by completed workflows.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadNotifications()
+    }
+    refreshIfVisible()
+    const interval = window.setInterval(refreshIfVisible, 30000)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+    window.addEventListener('focus', refreshIfVisible)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+      window.removeEventListener('focus', refreshIfVisible)
+    }
+  }, [loadNotifications])
+
+  useEffect(() => {
+    const handleImmediateNotification = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {}
+      if (!user?.id) return
+      const item: NotificationItem = {
+        id: String(detail.id || ('local:' + Date.now())),
+        title: sanitizeNotificationText(detail.title, 'Notification'),
+        message: sanitizeNotificationText(detail.message),
+        type: String(detail.type || 'info'),
+        isRead: false,
+        createdAt: detail.createdAt || new Date().toISOString(),
+        source: 'immediate',
+        metadata: detail.metadata,
+        link: notificationActionLink(detail.link, hasPermission('canAdjustStock')),
+      }
+      const key = notificationKey(item)
+      announce(item)
+      immediateRef.current.set(key, item)
+      if (item.type === 'advisor_tip') {
+        setAdvisorTips(prev => prev.some(existing => notificationKey(existing) === key) ? prev : [item, ...prev])
+      } else {
+        setNotifications(prev => prev.some(existing => notificationKey(existing) === key) ? prev : [item, ...prev])
+      }
+    }
+    window.addEventListener('jibusales:notification', handleImmediateNotification)
+    return () => window.removeEventListener('jibusales:notification', handleImmediateNotification)
+  }, [announce, hasPermission, user?.id])
+
+  const playNotificationSound = useCallback(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const AudioContextImpl = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (!AudioContextImpl) return
+      const context = new AudioContextImpl()
+      const oscillator = context.createOscillator()
+      const gainNode = context.createGain()
+      oscillator.type = 'sine'
+      oscillator.frequency.setValueAtTime(880, context.currentTime)
+      oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.12)
+      gainNode.gain.setValueAtTime(0.08, context.currentTime)
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18)
+      oscillator.connect(gainNode)
+      gainNode.connect(context.destination)
+      oscillator.start()
+      oscillator.stop(context.currentTime + 0.2)
+      setTimeout(() => context.close().catch(() => {}), 250)
+    } catch {}
+  }, [])
+
+  const togglePushDelivery = useCallback(async () => {
+    if (pushRegistered) {
+      await unregisterToken()
+      toast({ title: 'Push notifications turned off', description: 'This device will no longer receive JibuSales push alerts.' })
+      return
+    }
+    const success = await registerToken(true)
+    if (success) {
+      toast({ title: 'Push notifications enabled', description: 'This device can receive JibuSales alerts when you are signed out.' })
+      return
+    }
+    const description = pushPermission === 'denied'
+      ? 'Notifications are blocked by your browser. Allow them in site settings, then try again.'
+      : pushPermission === 'unsupported'
+        ? 'This browser or device does not support background notifications.'
+        : pushPermission === 'not-configured'
+          ? 'Push delivery is not configured for this deployment yet.'
+          : 'Could not enable push on this device. Check browser permission and try again.'
+    toast({ title: 'Push notifications not enabled', description, variant: 'destructive' })
+  }, [pushPermission, pushRegistered, registerToken, unregisterToken])
+
+  // Close on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (
+        panelRef.current?.contains(e.target as Node) ||
+        bellRef.current?.contains(e.target as Node)
+      ) return
+      setOpen(false)
+    }
+    if (open) document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  // Mark single as read
+  const handleMarkRead = async (id: string) => {
+    const item = [...notifications, ...advisorTips].find(n => n.id === id)
+    if (!item || item.isRead) return
+    readKeysRef.current.add(notificationKey(item))
+    if (item.type === 'advisor_tip') {
+      setAdvisorTips(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+    } else {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n))
+    }
+    setAdvisorTipQueue(previous => previous.filter(tip => tip.id !== id))
+
+    // Update local DB
+    try { await db.notifications.update(id, { isRead: true }) } catch {}
+
+    // Push to API if online and it's an API notification
+    if (online && item.source === 'api') {
+      try { await apiFetch(`/api/notifications/${id}/read`, { method: 'PUT' }) } catch {}
+    }
+  }
+
+  const dismissAdvisorTip = () => setAdvisorTipQueue(previous => previous.slice(1))
+
+  const openAdvisorTip = (item: NotificationItem) => {
+    if (!item.isRead) void handleMarkRead(item.id)
+    else setAdvisorTipQueue(previous => previous.filter(tip => tip.id !== item.id))
+    setOpen(false)
+    navigate(item.link || '/tenant/ai-advisor')
+  }
+
+  // Mark all as read
+  const handleMarkAllRead = async () => {
+    notifications.forEach(item => readKeysRef.current.add(notificationKey(item)))
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })))
+
+    // Update local DB
+    try {
+      const unread = notifications.filter(n => !n.isRead)
+      for (const n of unread) {
+        await db.notifications.update(n.id, { isRead: true }).catch(() => {})
+      }
+    } catch {}
+
+    // Push to API if online
+    if (online) {
+      try { await apiFetch('/api/notifications/read-all', { method: 'PUT' }) } catch {}
+    }
+  }
+
+  // Handle notification click — navigate if link
+  const handleNotificationClick = (n: NotificationItem) => {
+    if (n.type === 'advisor_tip') {
+      setAdvisorTipQueue(previous => previous.some(tip => tip.id === n.id) ? previous : [...previous, n])
+      setOpen(false)
+      return
+    }
+    if (!n.isRead) handleMarkRead(n.id)
+    const link = notificationActionLink(n.link, hasPermission('canAdjustStock'))
+    if (link) {
+      navigate(link)
+      setOpen(false)
+    }
+  }
+
+  const openAdvisorTips = () => {
+    const tip = advisorTips.find(item => !item.isRead) || advisorTips[0]
+    setOpen(false)
+    if (tip) {
+      setAdvisorTipQueue(previous => previous.some(item => item.id === tip.id) ? previous : [tip, ...previous])
+      return
+    }
+    navigate('/tenant/ai-advisor')
+  }
+
+  const allNotifications = notifications
+  const unreadAdvisorCount = advisorTips.filter(item => !item.isRead).length
+
+  return (
+    <>
+    <div ref={bellRef} className="relative">
+      {hasPermission('canUseBusinessAI') && (
+        <button
+          type="button"
+          onClick={openAdvisorTips}
+          className={cn(
+            'relative mr-1 inline-flex h-9 w-9 items-center justify-center rounded-xl border transition-all',
+            unreadAdvisorCount > 0
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 shadow-sm hover:border-emerald-400 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/70'
+              : 'border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground'
+          )}
+          aria-label={unreadAdvisorCount > 0 ? `Advisor tips, ${unreadAdvisorCount} unread` : 'Open Business Advisor'}
+          title={unreadAdvisorCount > 0 ? `${unreadAdvisorCount} unread Advisor tip${unreadAdvisorCount === 1 ? '' : 's'}` : 'Business Advisor'}
+        >
+          <Lightbulb className="h-[19px] w-[19px]" strokeWidth={2.1} />
+          {unreadAdvisorCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background">
+              {unreadAdvisorCount > 9 ? '9+' : unreadAdvisorCount}
+            </span>
+          )}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(!open)
+        }}
+        className="relative p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+        aria-label="Notifications"
+      >
+        <Bell className="h-5 w-5" />
+        {unreadCount > 0 && (
+          <span className="absolute top-0.5 right-0.5 flex items-center justify-center min-w-[18px] h-[18px] text-[10px] font-bold text-white bg-red-500 rounded-full ring-2 ring-card">
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed right-2 top-14 z-[60] w-[420px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl sm:right-4"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <div><h3 className="text-sm font-semibold">Notifications</h3><p className="mt-0.5 text-[11px] text-muted-foreground">Your latest business updates</p></div>
+              {unreadCount > 0 && (
+                <span className="text-xs font-medium text-white bg-red-500 rounded-full px-2 py-0.5">
+                  {unreadCount} new
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {user && pushPermission !== 'unsupported' && pushPermission !== 'not-configured' && (
+                <button type="button" onClick={() => void togglePushDelivery()} className="inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-medium text-foreground hover:bg-muted" title={pushRegistered ? 'Turn off push on this device' : 'Enable notifications on this device'}>
+                  {pushRegistered ? <BellOff className="h-3.5 w-3.5" /> : <BellRing className="h-3.5 w-3.5" />}
+                  <span>{pushRegistered ? 'Push on' : 'Enable push'}</span>
+                </button>
+              )}
+              {user && pushPermission === 'not-configured' && <span className="px-2 text-[11px] text-muted-foreground" title="Push delivery needs Web Push VAPID keys on the app and server">Push unavailable</span>}
+              {user && pushPermission === 'unsupported' && <span className="px-2 text-[11px] text-muted-foreground">Push unsupported</span>}
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleMarkAllRead}
+                  className="flex items-center gap-1 text-xs text-primary hover:underline"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" />
+                  Mark all read
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="p-1 text-muted-foreground hover:text-foreground rounded"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* List */}
+          <div className="max-h-[min(60vh,520px)] overflow-y-auto">
+            {loading && notifications.length === 0 ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+              </div>
+            ) : allNotifications.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <Bell className="h-10 w-10 mb-2 opacity-40" />
+                <p className="text-sm">No notifications</p>
+                <p className="text-xs mt-1">You're all caught up!</p>
+              </div>
+            ) : (
+              allNotifications.map((n) => {
+                const Icon = TYPE_ICONS[n.type] || Bell
+                const colorClass = getNotificationVisual(n.type).color
+                const actionLink = notificationActionLink(n.link, hasPermission('canAdjustStock'))
+                return (
+                  <div
+                    key={n.id}
+                    className={cn(
+                      'group flex items-start gap-3 border-b border-border/50 p-4 transition-colors hover:bg-muted/50',
+                      !n.isRead && 'bg-primary/[0.06]'
+                    )}
+                    onClick={() => handleNotificationClick(n)}
+                  >
+                    {/* Icon */}
+                    <div className={cn('mt-0.5 rounded-xl p-2.5 shrink-0', colorClass)}>
+                      <Icon className="h-3.5 w-3.5" />
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="break-words text-sm font-semibold">{sanitizeNotificationText(n.title, 'Notification')}</p>
+                        {!n.isRead && (
+                          <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />
+                        )}
+                      </div>
+                      <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{sanitizeNotificationText(n.message)}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[11px] text-muted-foreground/70">{timeAgo(n.createdAt)}</p><span className="text-[10px] font-medium text-muted-foreground/70">{getNotificationVisual(n.type).label}</span>
+                        {n.source === 'local' && !n.id.startsWith('job_') && (
+                          <span className="text-[10px] text-muted-foreground/50 bg-muted px-1.5 rounded">offline</span>
+                        )}
+                        {n.id.startsWith('job_') && (
+                          <span className="text-[10px] text-muted-foreground/50 bg-muted px-1.5 rounded">auto</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1">
+                        {actionLink && <button type="button" onClick={event => { event.stopPropagation(); handleNotificationClick(n) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open details" aria-label="Open notification details"><ArrowUpRight className="h-4 w-4" /></button>}
+                      {!n.isRead && <button type="button" onClick={event => { event.stopPropagation(); handleMarkRead(n.id) }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-green-600" title="Mark as read" aria-label="Mark notification as read"><Check className="h-4 w-4" /></button>}
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border bg-muted/20 px-4 py-3">
+            <span className="text-[11px] text-muted-foreground">Notifications refresh automatically</span>
+            <button type="button" onClick={() => { navigate('/tenant/communication'); setOpen(false) }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">Open notification center <ArrowUpRight className="h-3.5 w-3.5" /></button>
+          </div>
+
+        </div>,
+        document.body
+      )}
+    </div>
+    {advisorTipQueue[0] && createPortal(
+      <aside role="dialog" aria-label="New Advisor tip" aria-live="assertive"
+        className="fixed right-3 top-20 z-[80] w-[min(26rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-emerald-300 bg-card text-card-foreground shadow-2xl sm:right-5">
+        <div className="flex items-start gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/50">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200"><Sparkles className="h-5 w-5" /></div>
+          <div className="min-w-0 flex-1"><p className="text-[11px] font-semibold uppercase text-emerald-800 dark:text-emerald-200">New Advisor tip</p><h2 className="mt-0.5 break-words text-base font-semibold leading-5">{sanitizeNotificationText(advisorTipQueue[0].title.replace(/^Advisor tip:\s*/i, ''), 'Business insight')}</h2></div>
+          <button type="button" onClick={dismissAdvisorTip} className="rounded-md p-1 text-muted-foreground hover:bg-emerald-100 hover:text-foreground" aria-label="Dismiss Advisor tip"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="max-h-[45vh] overflow-y-auto px-4 py-4"><p className="whitespace-pre-line break-words text-sm leading-6">{sanitizeNotificationText(advisorTipQueue[0].message)}</p>
+          {advisorTipQueue.length > 1 && <p className="mt-3 text-xs text-muted-foreground">{advisorTipQueue.length - 1} more tip{advisorTipQueue.length > 2 ? 's' : ''} waiting</p>}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t bg-muted/20 px-4 py-3">
+          <button type="button" onClick={() => { void handleMarkRead(advisorTipQueue[0].id) }} className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Mark read</button>
+          <button type="button" onClick={() => openAdvisorTip(advisorTipQueue[0])} className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">Open Advisor</button>
+        </div>
+      </aside>,
+      document.body
+    )}
+    </>
+  )
+}
+
+export default NotificationBell

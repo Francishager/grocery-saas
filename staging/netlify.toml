@@ -1,0 +1,28 @@
+[build]
+  # Base directory (root of the repository)
+  base = "."
+  
+  # Directory that contains the deploy-ready HTML files and assets
+  publish = "public"
+  
+  # No build command needed since files are already built
+  command = ""
+
+# Specific build environment
+[build.environment]
+  NODE_VERSION = "18"
+  NPM_VERSION = "9"
+  NODE_ENV = "production"
+
+# Ensure the admin page (no extension) is served as HTML
+[[headers]]
+  for = "/admin"
+  [headers.values]
+    Content-Type = "text/html; charset=UTF-8"
+    X-Content-Type-Options = "nosniff"
+
+# Redirects configuration for SPA
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

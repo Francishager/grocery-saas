@@ -1,0 +1,1633 @@
+import { Router } from "express";
+import bcrypt from "bcryptjs";
+import { randomBytes, randomInt } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import prisma from "../db.js";
+import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
+import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js";
+import { sendMail } from "../../mailer.js";
+import { auditLog } from "../utils/audit.js";
+import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
+import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
+import { cancelManualSubscriptionPayment, extendSettledSubscriptionTerm, getRefundableSubscriptionPaymentAmount, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, recordSubscriptionPaymentRefund, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
+import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
+import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
+
+const router = Router();
+const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
+
+router.post("/email/test", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  const recipient = String(req.user?.email || "").trim();
+  if (!recipient) return res.status(400).json({ error: "The signed-in SaaS admin account has no email address." });
+  try {
+    await sendMail(
+      recipient,
+      "JibuSales email delivery test",
+      "<p>Your configured JibuSales email transport successfully delivered this test message.</p>"
+    );
+    return res.json({ message: `Test email accepted for delivery to ${recipient}.` });
+  } catch (error) {
+    const detail = [error?.code, error?.responseCode, error?.message].filter(Boolean).join(" | ");
+    console.error("SaaS admin email test failed:", detail || "Unknown email transport error");
+    return res.status(502).json({ error: "Email test failed.", detail: detail || "Check backend mail transport logs." });
+  }
+});
+
+router.post("/email/password-reset", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const admin = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, email: true, fname: true } });
+    if (!admin?.email) return res.status(400).json({ error: "Your SaaS admin account has no email address." });
+
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await prisma.user.update({ where: { id: admin.id }, data: { otpCode: otp, otpExpires } });
+    try {
+      await sendMail(
+        admin.email,
+        "JibuSales admin password reset code",
+        `<p>Hello ${admin.fname || "Admin"},</p><p>Your password reset code is <b>${otp}</b>.</p><p>This code expires in 15 minutes.</p>`
+      );
+    } catch (error) {
+      await prisma.user.update({ where: { id: admin.id }, data: { otpCode: null, otpExpires: null } }).catch(() => {});
+      throw error;
+    }
+
+    return res.json({ message: `Reset code sent to ${admin.email}.` });
+  } catch (error) {
+    const detail = [error?.code, error?.responseCode, error?.message].filter(Boolean).join(" | ");
+    console.error("SaaS admin password reset email failed:", detail || "Unknown email transport error");
+    return res.status(502).json({ error: "Password reset email could not be sent.", detail: detail || "Check the backend mail transport logs." });
+  }
+});
+
+
+// Helper: generate 6-digit OTP
+function generateOTP() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+// Helper: generate temp password
+function generateTempPassword(len = 12) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+  let out = "";
+  for (let i = 0; i < len; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  return out;
+}
+
+function splitName(name = "") {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  return {
+    fname: parts[0] || "",
+    lname: parts.slice(1).join(" "),
+  };
+}
+
+function frontendOrigin() {
+  return process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
+}
+
+function subscriptionPayload(tenant) {
+  const effectiveCharge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+
+  return {
+    id: tenant.id,
+    status: tenant.status || "active",
+    startDate: tenant.subscriptionStart || tenant.createdAt,
+    endDate: tenant.subscriptionEnd || null,
+    trialEndsAt: tenant.trialEndsAt || null,
+    tenant: { id: tenant.id, name: tenant.name, status: tenant.status },
+    customPrice: tenant.customPrice ?? null,
+    customCurrency: tenant.customCurrency || null,
+    customBillingCycle: tenant.customBillingCycle || null,
+    monthlyServiceFee: tenant.monthlyServiceFee ?? 0,
+    annualServiceFee: tenant.annualServiceFee ?? 0,
+    staticIpFee: tenant.staticIpFee ?? 0,
+    billingChargeMode: effectiveCharge.chargeMode,
+    billingPaymentMethod: tenant.billingPaymentMethod || null,
+    billingPaymentReference: tenant.billingPaymentReference || null,
+    billingNotes: tenant.billingNotes || null,
+    gracePeriodDays: tenant.gracePeriodDays ?? 0,
+    reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
+    price: effectiveCharge.price,
+    currency: effectiveCharge.currency,
+    billingCycle: effectiveCharge.billingCycle,
+    plan: tenant.plan ? {
+      id: tenant.plan.id,
+      name: tenant.plan.name,
+      price: tenant.plan.price,
+      currency: tenant.plan.currency || "UGX",
+      billingCycle: tenant.plan.billingCycle || "monthly",
+      maxUsers: tenant.plan.maxUsers || 0,
+      maxProducts: tenant.plan.maxProducts || 0,
+    } : null,
+  };
+}
+
+function normalizeTenantStatus(status) {
+  if (status === undefined || status === null || status === "") return null;
+  return String(status).trim().toLowerCase();
+}
+
+async function changeTenantStatus(req, res, forcedStatus = null) {
+  try {
+    const status = forcedStatus || normalizeTenantStatus(req.body?.status);
+    if (!VALID_TENANT_STATUSES.has(status)) {
+      return res.status(400).json({ error: "Invalid tenant status" });
+    }
+
+    if (status === 'trial') {
+      const existing = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { trialEndsAt: true } });
+      if (!existing) return res.status(404).json({ error: "Tenant not found" });
+      if (!existing.trialEndsAt || existing.trialEndsAt <= new Date()) {
+        return res.status(400).json({ error: "Set a future trial end date in subscription settings before enabling trial status" });
+      }
+    }
+
+    const tenant = await prisma.tenant.update({
+      where: { id: req.params.id },
+      data: { status, paymentReminderStatus: status === 'suspended' ? 'admin_suspended' : null },
+      include: { plan: true },
+    });
+    const blockPayload = tenantAccountAccessPayload(tenant, { role: "owner" });
+
+    res.json({
+      message: blockPayload?.message || `Tenant status changed to ${status}`,
+      code: blockPayload?.code,
+      tenant,
+      subscription: subscriptionPayload(tenant),
+    });
+  } catch (err) {
+    if (err?.code === "P2025") return res.status(404).json({ error: "Tenant not found" });
+    console.error("Change tenant status error:", err);
+    res.status(500).json({ error: "Failed to update tenant status" });
+  }
+}
+
+async function updateSubscription(req, res) {
+  try {
+    const {
+      planId,
+      status,
+      subscriptionStart,
+      subscriptionEnd,
+      trialEndsAt,
+      trialDays,
+      price,
+      billingCycle,
+      customPrice,
+      customBillingCycle,
+      customCurrency,
+      monthlyServiceFee,
+      annualServiceFee,
+      staticIpFee,
+      billingChargeMode,
+      billingPaymentMethod,
+      billingPaymentReference,
+      billingNotes,
+      gracePeriodDays,
+      reminderDaysBeforeDue,
+      maxUsers,
+      maxProducts,
+      autoEnd,
+    } = req.body;
+
+    if (!planId && !status && subscriptionStart === undefined && subscriptionEnd === undefined && trialEndsAt === undefined && trialDays === undefined && price === undefined && billingCycle === undefined && customPrice === undefined && customBillingCycle === undefined && customCurrency === undefined && monthlyServiceFee === undefined && annualServiceFee === undefined && staticIpFee === undefined && billingChargeMode === undefined && billingPaymentMethod === undefined && billingPaymentReference === undefined && billingNotes === undefined && gracePeriodDays === undefined && reminderDaysBeforeDue === undefined && maxUsers === undefined && maxProducts === undefined && autoEnd === undefined) {
+      return res.status(400).json({ error: "At least one subscription field is required" });
+    }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true } });
+    if (!tenant) return res.status(404).json({ error: "Subscription not found" });
+
+    const targetPlanId = planId || tenant.planId;
+    let plan;
+    if (targetPlanId) {
+      plan = await prisma.plan.findUnique({ where: { id: targetPlanId } });
+      if (!plan) return res.status(404).json({ error: "Plan not found" });
+    }
+
+    const normalizedStatus = normalizeTenantStatus(status);
+    if (normalizedStatus && !VALID_TENANT_STATUSES.has(normalizedStatus)) {
+      return res.status(400).json({ error: "Invalid subscription status" });
+    }
+
+    const data = {};
+    const planUpdateData = {};
+
+    if (targetPlanId) data.planId = targetPlanId;
+    if (normalizedStatus) {
+      data.status = normalizedStatus;
+      data.paymentReminderStatus = normalizedStatus === 'suspended' ? 'admin_suspended' : null;
+    }
+    if (subscriptionStart !== undefined) data.subscriptionStart = subscriptionStart ? new Date(subscriptionStart) : null;
+    if (subscriptionEnd !== undefined) data.subscriptionEnd = subscriptionEnd ? new Date(subscriptionEnd) : null;
+    if (trialEndsAt !== undefined) data.trialEndsAt = trialEndsAt ? new Date(trialEndsAt) : null;
+
+    if (trialDays !== undefined) {
+      const days = Number(trialDays);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) {
+        return res.status(400).json({ error: "Trial duration must be between 1 and 3650 days" });
+      }
+      const trialStart = new Date();
+      data.status = "trial";
+      data.trialEndsAt = new Date(trialStart.getTime() + days * 24 * 60 * 60 * 1000);
+    }
+    if (data.status === 'trial') {
+      const configuredTrialEnd = data.trialEndsAt ?? tenant.trialEndsAt;
+      const parsedTrialEnd = configuredTrialEnd ? new Date(configuredTrialEnd) : null;
+      if (!parsedTrialEnd || Number.isNaN(parsedTrialEnd.getTime()) || parsedTrialEnd <= new Date()) {
+        return res.status(400).json({ error: "Set a future trial duration or trial end date before enabling trial status" });
+      }
+      if (data.trialEndsAt !== undefined) data.trialEndsAt = parsedTrialEnd;
+    }
+
+    if (price !== undefined) {
+      const parsedPrice = price === '' || price === null ? null : Number(price);
+      if (parsedPrice !== null && (!Number.isFinite(parsedPrice) || parsedPrice < 0)) {
+        return res.status(400).json({ error: "Price must be a non-negative number" });
+      }
+      data.customPrice = parsedPrice;
+    }
+
+    if (billingCycle !== undefined) {
+      if (billingCycle && !['monthly', 'yearly'].includes(String(billingCycle).toLowerCase())) {
+        return res.status(400).json({ error: "Billing cycle must be monthly or yearly" });
+      }
+      planUpdateData.billingCycle = billingCycle ? String(billingCycle).toLowerCase() : undefined;
+    }
+
+    if (customPrice !== undefined) {
+      const parsedCustomPrice = customPrice === '' || customPrice === null ? null : Number(customPrice);
+      if (parsedCustomPrice !== null && (!Number.isFinite(parsedCustomPrice) || parsedCustomPrice < 0)) {
+        return res.status(400).json({ error: "Custom price must be a non-negative number" });
+      }
+      data.customPrice = parsedCustomPrice;
+    }
+
+    if (customBillingCycle !== undefined) {
+      if (customBillingCycle === '' || customBillingCycle === null) {
+        data.customBillingCycle = null;
+      } else if (!['monthly', 'yearly'].includes(String(customBillingCycle).toLowerCase())) {
+        return res.status(400).json({ error: "Custom billing cycle must be monthly or yearly" });
+      } else {
+        data.customBillingCycle = String(customBillingCycle).toLowerCase();
+      }
+    }
+
+    if (customCurrency !== undefined) {
+      data.customCurrency = customCurrency ? String(customCurrency).toUpperCase() : null;
+    }
+
+    if (monthlyServiceFee !== undefined) {
+      const parsedMonthlyServiceFee = monthlyServiceFee === '' || monthlyServiceFee === null ? 0 : Number(monthlyServiceFee);
+      if (!Number.isFinite(parsedMonthlyServiceFee) || parsedMonthlyServiceFee < 0) {
+        return res.status(400).json({ error: "Monthly service fee must be a non-negative number" });
+      }
+      data.monthlyServiceFee = parsedMonthlyServiceFee;
+    }
+
+    if (annualServiceFee !== undefined) {
+      const parsedAnnualServiceFee = annualServiceFee === '' || annualServiceFee === null ? 0 : Number(annualServiceFee);
+      if (!Number.isFinite(parsedAnnualServiceFee) || parsedAnnualServiceFee < 0) {
+        return res.status(400).json({ error: "Annual service fee must be a non-negative number" });
+      }
+      data.annualServiceFee = parsedAnnualServiceFee;
+    }
+
+    if (staticIpFee !== undefined) {
+      const parsedStaticIpFee = staticIpFee === '' || staticIpFee === null ? 0 : Number(staticIpFee);
+      if (!Number.isFinite(parsedStaticIpFee) || parsedStaticIpFee < 0) {
+        return res.status(400).json({ error: "Static IP fee must be a non-negative number" });
+      }
+      data.staticIpFee = parsedStaticIpFee;
+    }
+
+    if (billingChargeMode !== undefined) {
+      const mode = String(billingChargeMode).trim().toLowerCase();
+      if (!['plan', 'service', 'both'].includes(mode)) {
+        return res.status(400).json({ error: 'Choose plan, services, or both for subscription billing' });
+      }
+      data.billingChargeMode = mode;
+    }
+
+    if (billingPaymentMethod !== undefined) {
+      data.billingPaymentMethod = billingPaymentMethod ? String(billingPaymentMethod) : null;
+    }
+
+    if (billingPaymentReference !== undefined) {
+      data.billingPaymentReference = billingPaymentReference ? String(billingPaymentReference) : null;
+    }
+
+    if (billingNotes !== undefined) {
+      data.billingNotes = billingNotes ? String(billingNotes) : null;
+    }
+
+    if (gracePeriodDays !== undefined) {
+      const parsedGracePeriodDays = gracePeriodDays === '' || gracePeriodDays === null ? 0 : Number(gracePeriodDays);
+      if (!Number.isFinite(parsedGracePeriodDays) || parsedGracePeriodDays < 0) {
+        return res.status(400).json({ error: "Grace period must be a non-negative number" });
+      }
+      data.gracePeriodDays = Math.floor(parsedGracePeriodDays);
+    }
+
+    if (reminderDaysBeforeDue !== undefined) {
+      const parsedReminderDays = reminderDaysBeforeDue === '' || reminderDaysBeforeDue === null ? 10 : Number(reminderDaysBeforeDue);
+      if (!Number.isFinite(parsedReminderDays) || parsedReminderDays < 0) {
+        return res.status(400).json({ error: "Reminder days must be a non-negative number" });
+      }
+      data.reminderDaysBeforeDue = Math.floor(parsedReminderDays);
+    }
+
+    if (maxUsers !== undefined) {
+      const parsedMaxUsers = Number(maxUsers);
+      if (maxUsers === '' || maxUsers === null || Number.isNaN(parsedMaxUsers)) {
+        return res.status(400).json({ error: "Max users must be a positive integer" });
+      }
+      if (!Number.isInteger(parsedMaxUsers) || parsedMaxUsers < 1) {
+        return res.status(400).json({ error: "Max users must be a positive integer" });
+      }
+      planUpdateData.maxUsers = parsedMaxUsers;
+    }
+
+    if (maxProducts !== undefined) {
+      const parsedMaxProducts = Number(maxProducts);
+      if (maxProducts === '' || maxProducts === null || Number.isNaN(parsedMaxProducts)) {
+        return res.status(400).json({ error: "Max products must be a positive integer" });
+      }
+      if (!Number.isInteger(parsedMaxProducts) || parsedMaxProducts < 1) {
+        return res.status(400).json({ error: "Max products must be a positive integer" });
+      }
+      planUpdateData.maxProducts = parsedMaxProducts;
+    }
+
+    if (Object.keys(planUpdateData).length > 0 && targetPlanId) {
+      await prisma.plan.update({ where: { id: targetPlanId }, data: planUpdateData });
+    }
+
+    const shouldAutoCalculateEndDate = (autoEnd === true || autoEnd === 'true') && subscriptionEnd === undefined;
+    if (targetPlanId && plan && shouldAutoCalculateEndDate) {
+      const startDate = data.subscriptionStart || tenant.subscriptionStart || new Date();
+      const autoEndDate = calculateDefaultSubscriptionEndDate({
+        subscriptionStart: startDate,
+        billingCycle: plan.billingCycle || tenant.plan?.billingCycle || 'monthly',
+      });
+      if (autoEndDate) data.subscriptionEnd = autoEndDate;
+    } else if (targetPlanId && subscriptionStart !== undefined && subscriptionEnd === undefined && tenant.subscriptionEnd === null && plan) {
+      const startDate = data.subscriptionStart || tenant.subscriptionStart || new Date();
+      const autoEndDate = calculateDefaultSubscriptionEndDate({
+        subscriptionStart: startDate,
+        billingCycle: plan.billingCycle || tenant.plan?.billingCycle || 'monthly',
+      });
+      if (autoEndDate) data.subscriptionEnd = autoEndDate;
+    }
+
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: req.params.id },
+      data,
+      include: { plan: true },
+    });
+
+    const blockPayload = tenantAccountAccessPayload(updatedTenant, { role: "owner" });
+
+    res.json({
+      message: blockPayload?.message || "Subscription updated",
+      code: blockPayload?.code,
+      subscription: subscriptionPayload(updatedTenant),
+    });
+  } catch (err) {
+    if (err?.code === "P2025") return res.status(404).json({ error: "Subscription not found" });
+    console.error("Update subscription error:", err);
+    res.status(500).json({ error: "Failed to update subscription" });
+  }
+}
+
+router.get("/subscriptions/:id/reminder", authenticateToken, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: req.params.id },
+      include: { plan: true },
+    });
+
+    if (!tenant) return res.status(404).json({ error: "Tenant not found" });
+
+    const reminder = calculateBillingReminder({
+      status: tenant.status,
+      subscriptionEnd: tenant.subscriptionEnd,
+      trialEndsAt: tenant.trialEndsAt,
+      gracePeriodDays: tenant.gracePeriodDays,
+      reminderDaysBeforeDue: tenant.reminderDaysBeforeDue,
+    });
+
+    res.json({
+      tenantId: tenant.id,
+      status: tenant.status,
+      subscriptionEnd: tenant.subscriptionEnd,
+      trialEndsAt: tenant.trialEndsAt,
+      gracePeriodDays: tenant.gracePeriodDays ?? 0,
+      reminderDaysBeforeDue: tenant.reminderDaysBeforeDue ?? 10,
+      ...reminder,
+    });
+  } catch (err) {
+    console.error("Subscription reminder check error:", err);
+    res.status(500).json({ error: "Failed to load subscription reminder" });
+  }
+});
+
+// Helper: email content
+function getEmailContent(locale, { ownerFname, businessName, businessId, tempPassword, otp, loginUrl }) {
+  const subject = `Your business account is ready - ${businessName}`;
+  const html = `
+    <p>Hello ${ownerFname},</p>
+    <p>Your business <b>${businessName}</b> has been provisioned.</p>
+    <p><b>Business ID:</b> ${businessId}</p>
+    <p><b>Temporary Password:</b> ${tempPassword}</p>
+    <p>Use this OTP to set your password before first login: <b>${otp}</b> (expires in 24 hours).</p>
+    <p>Account link: <a href="${loginUrl}">${loginUrl}</a></p>
+    <p>Regards,<br/>JibuSales Admin</p>`;
+  return { subject, html };
+}
+
+// List businesses
+router.get("/businesses", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenants = await prisma.tenant.findMany({ orderBy: { createdAt: "desc" } });
+    res.json(tenants);
+  } catch (err) {
+    console.error("List businesses error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Create business
+router.post("/businesses", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { name, slug: requestedSlug, email, phone, address, planId } = req.body;
+    if (!name) return res.status(400).json({ error: "Business name required" });
+
+    const slug = (requestedSlug || name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const tenant = await prisma.$transaction(async (tx) => {
+      const createdTenant = await tx.tenant.create({ data: { name, slug, email: email || `${slug}@placeholder.com`, phone, address, planId, status: "active", dateFormat: "DD/MM/YY" } });
+      await ensureTenantAccountingSetup(tx, { tenantId: createdTenant.id, userId: req.user?.id, enableNewSetups: true });
+      return createdTenant;
+    });
+    res.status(201).json({ message: "Business created", tenant, id: tenant.id, tenantId: tenant.id });
+  } catch (err) {
+    console.error("Create business error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// List owners
+router.get("/owners", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { search } = req.query;
+    const where = { role: "owner" };
+    if (search) {
+      where.OR = [
+        { fname: { contains: search, mode: "insensitive" } },
+        { lname: { contains: search, mode: "insensitive" } },
+        { email: { contains: search, mode: "insensitive" } },
+      ];
+    }
+    const users = await prisma.user.findMany({
+      where,
+      include: { tenant: { select: { id: true, name: true, status: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    const owners = users.map(u => ({
+      id: u.id,
+      name: `${u.fname || ""} ${u.lname || ""}`.trim() || u.email,
+      email: u.email,
+      role: u.role,
+      isActive: true,
+      lastLogin: null,
+      createdAt: u.createdAt,
+      tenant: u.tenant,
+    }));
+    res.json({ owners });
+  } catch (err) {
+    console.error("List owners error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Reset owner password
+router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, email: true, fname: true, tenantId: true } });
+    if (!user) return res.status(404).json({ error: "Business owner not found." });
+    if (!user.email) return res.status(400).json({ error: "This business owner has no email address." });
+
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await prisma.user.update({ where: { id }, data: { otpCode: otp, otpExpires } });
+    try {
+      const resetUrl = `${frontendOrigin()}/forgot-password?email=${encodeURIComponent(user.email)}`;
+      await sendMail(
+        user.email,
+        "Password reset code",
+        `<p>Hello ${user.fname || ""},</p><p>A JibuSales administrator requested a password reset for your account.</p><p>Your one-time reset code is <b>${otp}</b>. It expires in 15 minutes.</p><p>Open <a href="${resetUrl}">the password reset page</a> and enter this code. If you did not expect this, contact your business administrator.</p>`
+      );
+    } catch (mailError) {
+      await prisma.user.update({ where: { id }, data: { otpCode: null, otpExpires: null } }).catch(() => {});
+      throw mailError;
+    }
+
+    // Audit log: password reset - track which tenant's owner was reset
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: user?.tenantId || null,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "reset_sensitive",
+      model: "User",
+      recordId: id,
+      changes: { data: { action: "password_reset_code_sent", targetTenant: user.tenantId } },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "critical",
+    }).catch(() => {});
+
+    res.json({ message: `Password reset code sent to ${user.email}.` });
+  } catch (err) {
+    const detail = [err?.code, err?.responseCode, err?.message].filter(Boolean).join(" | ");
+    console.error("Business owner password reset email failed:", detail || "Unknown email transport error");
+    res.status(502).json({ error: "Password reset email could not be sent.", detail: detail || "Check the backend mail transport logs." });
+  }
+});
+
+router.get("/platform-staff/permission-schema", authenticateToken, requirePlatformAdmin, async (_req, res) => {
+  res.json({ permissions: PLATFORM_PERMISSION_DEFINITIONS, jobPresets: PLATFORM_JOB_PRESETS });
+});
+
+router.get("/platform-staff", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  const rows = await prisma.user.findMany({ where: { role: "platform_staff" }, orderBy: { createdAt: "desc" }, select: { id: true, email: true, fname: true, lname: true, phone: true, role: true, isActive: true, createdAt: true, permissions: { select: { platformPermissions: true } } } });
+  const staff = rows.map(({ permissions, ...member }) => ({ ...member, platformPermissions: permissions[0]?.platformPermissions || [] }));
+  res.json({ staff });
+});
+
+router.put("/platform-staff/:id/permissions", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  const platformPermissions = sanitizePlatformPermissions(req.body?.platformPermissions);
+  if (!platformPermissions.length) return res.status(400).json({ error: "Assign at least one SaaS platform task" });
+  if (req.user.role === "platform_staff" && (req.params.id === req.user.id || !canDelegatePlatformPermissions(req.user.permissions, platformPermissions))) {
+    return res.status(403).json({ error: "You can only assign your own SaaS permissions to another staff member, and cannot edit your own access." });
+  }
+  const user = await prisma.user.findFirst({ where: { id: req.params.id, role: "platform_staff" }, select: { id: true } });
+  if (!user) return res.status(404).json({ error: "Platform staff member not found" });
+  await prisma.userPermission.upsert({ where: { userId: user.id }, create: { userId: user.id, platformPermissions }, update: { platformPermissions } });
+  res.json({ message: "Platform staff assignment updated", platformPermissions });
+});
+
+router.post("/platform-staff", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+    const platformPermissions = sanitizePlatformPermissions(req.body?.platformPermissions);
+    if (req.user.role === "platform_staff" && !canDelegatePlatformPermissions(req.user.permissions, platformPermissions)) {
+      return res.status(403).json({ error: "You can only assign SaaS tasks already granted to your own role." });
+    }
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!name?.trim() || !normalizedEmail || !password) return res.status(400).json({ error: "Name, email, and password are required" });
+    if (String(password).length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
+    if (!platformPermissions.length) return res.status(400).json({ error: "Assign at least one SaaS platform task" });
+    if (await prisma.user.findUnique({ where: { email: normalizedEmail } })) return res.status(409).json({ error: "User already exists" });
+    const parsed = splitName(name);
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({ data: { email: normalizedEmail, password: await bcrypt.hash(String(password), 12), fname: parsed.fname || normalizedEmail.split("@")[0], lname: parsed.lname, phone, role: "platform_staff", tenantId: null, isActive: true } });
+      await tx.userPermission.create({ data: { userId: created.id, platformPermissions } });
+      return created;
+    });
+    res.status(201).json({ message: "Platform staff created", staff: { id: user.id, email: user.email, name: `${user.fname} ${user.lname}`.trim(), role: user.role } });
+  } catch (err) {
+    if (err?.code === "P2002") return res.status(409).json({ error: "User already exists" });
+    console.error("Create platform staff error:", err);
+    res.status(500).json({ error: "Failed to create platform staff" });
+  }
+});
+
+// Create owner
+router.post("/owners", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { email, password, name, fname, lname, phone, tenantId, locale } = req.body;
+    if (!email || !tenantId) {
+      return res.status(400).json({ error: "email and tenantId required" });
+    }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+
+    const existingOwner = await prisma.user.findFirst({ where: { tenantId, role: "owner" } });
+    if (existingOwner) return res.status(409).json({ error: "Business already has an owner" });
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(409).json({ error: "User already exists" });
+
+    const parsedName = splitName(name);
+    const ownerFname = fname || parsedName.fname || email.split("@")[0];
+    const ownerLname = lname || parsedName.lname || "";
+    const tempPassword = password || generateTempPassword(12);
+    const otp = generateOTP();
+    const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const hashed = await bcrypt.hash(tempPassword, 12);
+    const user = await prisma.user.create({
+      data: { email, password: hashed, fname: ownerFname, lname: ownerLname, phone, tenantId, role: "owner", otpCode: otp, otpExpires },
+    });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
+
+    let emailSent = false;
+    let emailError = null;
+    try {
+      const { subject, html } = getEmailContent(locale, {
+        ownerFname,
+        businessName: tenant.name,
+        businessId: tenantId,
+        tempPassword,
+        otp,
+        loginUrl: `${frontendOrigin()}/login`,
+      });
+      await sendMail(email, subject, html);
+      emailSent = true;
+    } catch (e) {
+      emailError = e?.message || "Email failed";
+      console.warn("Create owner: email send failed:", emailError);
+    }
+
+    res.status(201).json({
+      message: emailSent ? "Owner created and email sent" : "Owner created, but email failed",
+      userId: user.id,
+      email,
+      tenantId,
+      emailSent,
+      emailError,
+      tempPassword,
+      otp,
+    });
+  } catch (err) {
+    console.error("Create owner error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin metrics
+router.get("/metrics", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const [totalBusinesses, recentBusinesses, activeTenants] = await Promise.all([
+      prisma.tenant.count(),
+      prisma.tenant.count({ where: { createdAt: { gte: new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()) } } }),
+      prisma.tenant.count({ where: { status: "active" } }),
+    ]);
+
+    const plans = await prisma.plan.findMany({ include: { tenants: true } });
+    const planCounts = {};
+    plans.forEach((p) => { planCounts[p.name] = p.tenants.length; });
+
+    const months = [];
+    const revenueByMonth = [];
+    for (let i = 11; i >= 0; i--) {
+      const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}`);
+      revenueByMonth.push(0); // TODO: calculate from subscription payments
+    }
+
+    const recent = await prisma.tenant.findMany({ orderBy: { createdAt: "desc" }, take: 5, select: { name: true, slug: true, status: true, createdAt: true } });
+    const uptimeHours = +(process.uptime() / 3600).toFixed(2);
+
+    res.json({
+      cards: { totalBusinesses, totalRegistered: recentBusinesses, activeSubscriptions: activeTenants, monthlyRevenue: 0 },
+      charts: { revenue: { labels: months, data: revenueByMonth }, plans: { labels: Object.keys(planCounts), data: Object.values(planCounts) } },
+      recent,
+      uptimeHours,
+    });
+  } catch (err) {
+    console.error("Admin metrics error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Subscription upgrade
+router.post("/subscription/upgrade", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId, planId } = req.body;
+    if (!tenantId || !planId) return res.status(400).json({ error: "tenantId and planId required" });
+    
+    const oldTenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { planId, status: "active" } });
+
+    // Audit log: subscription upgrade - track which tenant was upgraded
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: tenantId,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "upgrade_sensitive",
+      model: "Subscription",
+      recordId: tenantId,
+      changes: { data: { planId, status: "active" }, oldPlanId: oldTenant?.planId },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "critical",
+    }).catch(() => {});
+
+    res.json({ message: "Subscription upgraded" });
+  } catch (err) {
+    console.error("Upgrade error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Subscription downgrade
+router.post("/subscription/downgrade", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId, planId } = req.body;
+    if (!tenantId || !planId) return res.status(400).json({ error: "tenantId and planId required" });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { planId } });
+    res.json({ message: "Subscription downgraded" });
+  } catch (err) {
+    console.error("Downgrade error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Subscription edit
+router.post("/subscription/edit", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId, planId, status } = req.body;
+    if (!tenantId) return res.status(400).json({ error: "tenantId required" });
+    const data = {};
+    if (planId) data.planId = planId;
+    const normalizedStatus = normalizeTenantStatus(status);
+    if (normalizedStatus) {
+      if (!VALID_TENANT_STATUSES.has(normalizedStatus)) {
+        return res.status(400).json({ error: "Invalid subscription status" });
+      }
+      data.status = normalizedStatus;
+    }
+    await prisma.tenant.update({ where: { id: tenantId }, data });
+    res.json({ message: "Subscription updated" });
+  } catch (err) {
+    console.error("Edit subscription error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// List subscriptions
+router.get("/subscriptions", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenants = await prisma.tenant.findMany({
+      include: { plan: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const subscriptions = tenants.map(subscriptionPayload);
+
+    res.json({ subscriptions });
+  } catch (err) {
+    console.error("List subscriptions error:", err);
+    res.status(500).json({ error: "Failed to load subscriptions" });
+  }
+});
+
+const SUBSCRIPTION_PAYMENT_METHODS = new Set(["cash", "mobile_money", "bank_transfer", "card", "other"]);
+
+router.get("/subscription-payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, Number.parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "20"), 10) || 20));
+    const status = String(req.query.status || "all").trim().toLowerCase();
+    const method = String(req.query.method || "all").trim().toLowerCase();
+    const search = String(req.query.search || "").trim().slice(0, 100);
+    const where = {};
+    if (status !== "all") {
+      if (!["pending", "completed", "failed", "reversed", "cancelled"].includes(status)) return res.status(400).json({ error: "Invalid payment status filter" });
+      where.status = status;
+    }
+    if (method !== "all") {
+      if (!SUBSCRIPTION_PAYMENT_METHODS.has(method)) return res.status(400).json({ error: "Invalid payment method filter" });
+      where.paymentMethod = method;
+    }
+    if (search) {
+      where.OR = [
+        { merchantReference: { contains: search, mode: "insensitive" } },
+        { reference: { contains: search, mode: "insensitive" } },
+        { payerName: { contains: search, mode: "insensitive" } },
+        { payerEmail: { contains: search, mode: "insensitive" } },
+        { payerPhone: { contains: search } },
+        { recordedByEmail: { contains: search, mode: "insensitive" } },
+        { tenant: { is: { OR: [
+          { name: { contains: search, mode: "insensitive" } },
+          { slug: { contains: search, mode: "insensitive" } },
+        ] } } },
+      ];
+    }
+    const pageRows = await prisma.subscriptionPayment.findMany({
+      where,
+      select: { id: true, provider: true, gatewayTrackingId: true, status: true },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    for (const payment of pageRows) {
+      if (payment.provider === "pesapal" && payment.gatewayTrackingId && payment.status === "pending") {
+        try {
+          const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+          const fullPayment = await prisma.subscriptionPayment.findUnique({ where: { id: payment.id } });
+          if (fullPayment) await syncPesapalSubscriptionPayment(prisma, fullPayment, gatewayStatus);
+        } catch (error) {
+          console.warn("Pesapal ledger refresh failed:", error.message);
+        }
+      }
+    }
+    const [payments, total] = await Promise.all([
+      prisma.subscriptionPayment.findMany({
+        where,
+        include: { tenant: { select: { id: true, name: true, slug: true, status: true } }, refunds: true },
+        orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.subscriptionPayment.count({ where }),
+    ]);
+    res.json({
+      payments: payments.map(payment => ({ ...payment, amount: payment.amount.toString() })),
+      total,
+      page,
+      limit,
+      pages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (err) {
+    console.error("All subscription payments list error:", err);
+    res.status(500).json({ error: "Failed to load subscription payments" });
+  }
+});
+
+router.get("/subscription-payments/:paymentId/refundable", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const result = await getRefundableSubscriptionPaymentAmount(prisma, req.params.paymentId);
+    if (result.error === "not_refundable") return res.status(409).json({ error: "Only completed payments can be refunded" });
+    if (result.error === "invoice_unavailable") return res.status(409).json({ error: "This legacy payment has no invoice allocation, so an excess refund cannot be safely calculated" });
+    res.json({ refundableAmount: result.refundableAmount, currency: result.payment.currency, invoiceTotal: result.billedTotal });
+  } catch (err) {
+    console.error("Subscription payment refund availability error:", err);
+    res.status(500).json({ error: "Failed to calculate refundable overpayment" });
+  }
+});
+
+router.post("/subscription-payments/:paymentId/refund", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    let amount;
+    try { amount = normalizeSubscriptionPaymentAmount(req.body?.amount); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ error: "Enter a reason for the refund" });
+    const result = await recordSubscriptionPaymentRefund(prisma, {
+      paymentId: req.params.paymentId,
+      amount,
+      reason,
+      adminId: req.user?.id,
+      adminEmail: req.user?.email,
+    });
+    if (result.error === "not_refundable") return res.status(409).json({ error: "Only completed payments can be refunded" });
+    if (result.error === "invoice_unavailable") return res.status(409).json({ error: "This legacy payment has no invoice allocation, so an excess refund cannot be safely calculated" });
+    if (result.error === "invalid_amount") return res.status(400).json({ error: "Refund amount must be greater than zero" });
+    if (result.error === "exceeds_overpayment") return res.status(409).json({ error: `Refund exceeds the available invoice overpayment of ${result.refundableAmount.toFixed(2)} ${result.payment.currency}` });
+
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: result.payment.tenantId,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "subscription_payment_refunded",
+      model: "SubscriptionPaymentRefund",
+      recordId: result.refund.id,
+      changes: { paymentId: result.payment.id, amount: result.refund.amount.toString(), currency: result.refund.currency, reason },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "warning",
+    }).catch(() => {});
+    res.status(201).json({ message: "Refund recorded", refund: { ...result.refund, amount: result.refund.amount.toString() }, refundableAmount: result.refundableAmount });
+  } catch (err) {
+    console.error("Subscription payment refund error:", err);
+    res.status(500).json({ error: "Failed to record subscription payment refund" });
+  }
+});
+
+router.post("/subscription-payments/:paymentId/cancel", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ error: "Enter a reason for cancelling this receipt" });
+    const result = await cancelManualSubscriptionPayment(prisma, {
+      paymentId: req.params.paymentId,
+      adminId: req.user?.id,
+      adminEmail: req.user?.email,
+      reason,
+    });
+    if (result.error === "not_found") return res.status(404).json({ error: "Payment record not found" });
+    if (result.error === "not_manual") return res.status(409).json({ error: "Gateway payments cannot be cancelled here. Confirm the provider transaction and use the provider refund process if money was charged." });
+    if (result.error === "has_refunds") return res.status(409).json({ error: "A receipt with recorded refunds cannot be cancelled. Use a separately audited correction." });
+    if (result.error === "not_completed" || result.error === "already_changed") return res.status(409).json({ error: "This payment is no longer an active received receipt" });
+
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: result.payment.tenantId,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "subscription_payment_cancelled",
+      model: "SubscriptionPayment",
+      recordId: result.payment.id,
+      changes: { amount: result.payment.amount.toString(), reference: result.payment.reference, reason },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "warning",
+    }).catch(() => {});
+    res.json({ message: "Payment receipt cancelled", payment: { ...result.payment, amount: result.payment.amount.toString() } });
+  } catch (err) {
+    console.error("Subscription payment cancellation error:", err);
+    res.status(500).json({ error: "Failed to cancel subscription payment" });
+  }
+});
+
+router.get("/subscription-payments/:reference", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const payment = await prisma.subscriptionPayment.findUnique({ where: { merchantReference: req.params.reference }, include: { tenant: { include: { plan: true } } } });
+    if (!payment) return res.status(404).json({ error: "Subscription payment not found" });
+    if (payment.provider === "pesapal" && payment.gatewayTrackingId && payment.status === "pending") {
+      try {
+        const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+        await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
+      } catch (error) {
+        console.warn("Pesapal subscription status refresh failed:", error.message);
+      }
+    }
+    const tenant = await prisma.tenant.findUnique({ where: { id: payment.tenantId }, include: { plan: true } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+    res.json({ subscription: subscriptionPayload({ ...tenant, createdAt: tenant.createdAt }) });
+  } catch (err) {
+    console.error("Subscription payment lookup error:", err);
+    res.status(500).json({ error: "Failed to load subscription payment" });
+  }
+});
+
+router.get("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+    const payments = await prisma.subscriptionPayment.findMany({
+      where: { tenantId: tenant.id },
+      include: { refunds: true },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+    });
+    for (const payment of payments) {
+      if (payment.provider === "pesapal" && payment.gatewayTrackingId && payment.status === "pending") {
+        try {
+          const gatewayStatus = await getPesapalTransactionStatus(payment.gatewayTrackingId);
+          await syncPesapalSubscriptionPayment(prisma, payment, gatewayStatus);
+        } catch (error) {
+          console.warn("Pesapal subscription status refresh failed:", error.message);
+        }
+      }
+    }
+    const refreshedPayments = await prisma.subscriptionPayment.findMany({
+      where: { tenantId: tenant.id },
+      include: { refunds: true },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+    });
+    const progress = await getSubscriptionPaymentProgress(prisma, tenant.id);
+    res.json({ payments: refreshedPayments.map(payment => ({ ...payment, amount: payment.amount.toString() })), progress: progress?.progress || null });
+  } catch (err) {
+    console.error("Subscription payments list error:", err);
+    res.status(500).json({ error: "Failed to load subscription payments" });
+  }
+});
+
+router.post("/subscriptions/:id/payments", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { amount, paymentMethod, reference, notes, paidAt, phone, email, payerName } = req.body || {};
+    let normalizedAmount;
+    try {
+      normalizedAmount = normalizeSubscriptionPaymentAmount(amount);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    const paymentAmount = new Prisma.Decimal(normalizedAmount);
+    const method = String(paymentMethod || "cash").trim().toLowerCase();
+    if (!SUBSCRIPTION_PAYMENT_METHODS.has(method)) {
+      return res.status(400).json({ error: "Choose a supported payment method" });
+    }
+    const paymentMode = String(req.body?.paymentMode || (["mobile_money", "card"].includes(method) ? "checkout" : "record")).trim().toLowerCase();
+    if (!["record", "checkout"].includes(paymentMode)) return res.status(400).json({ error: "Choose whether to record a received payment or start checkout" });
+    if (paymentMode === "checkout" && !["mobile_money", "card"].includes(method)) return res.status(400).json({ error: "Pesapal checkout supports mobile money or card" });
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id }, include: { plan: true, owner: { select: { fname: true, lname: true, email: true, phone: true } } } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+    const charge = resolveSubscriptionCharge(tenant.plan || {}, tenant);
+    const currency = charge.currency;
+    const cleanReference = typeof reference === "string" ? reference.trim().slice(0, 200) || null : null;
+    const cleanNotes = typeof notes === "string" ? notes.trim().slice(0, 2000) || null : null;
+    const cleanPayerName = typeof payerName === "string" ? payerName.trim().slice(0, 160) || null : null;
+
+    if (paymentMode === "checkout") {
+      const payerPhone = String(phone || tenant.owner?.phone || "").trim();
+      const payerEmail = String(email || tenant.owner?.email || tenant.email || "").trim();
+      if (!payerPhone && !payerEmail) return res.status(400).json({ error: "Enter the payer phone number or email for Pesapal checkout" });
+      const progressBeforePayment = await getSubscriptionPaymentProgress(prisma, tenant.id);
+      const continueOutstandingInvoice = Boolean(progressBeforePayment?.hasOutstandingBalance);
+      const invoiceSnapshot = continueOutstandingInvoice ? progressBeforePayment.invoiceSnapshot : null;
+      const invoice = {
+        ...(invoiceSnapshot || {}),
+        planName: invoiceSnapshot?.planName || tenant.plan?.name || "Subscription",
+        currency,
+        invoiceKey: continueOutstandingInvoice
+          ? progressBeforePayment.invoiceKey || `subscription-${tenant.id}-${progressBeforePayment.periodStart.toISOString()}`
+          : `subscription-${tenant.id}-${progressBeforePayment?.periodStart?.toISOString() || new Date().toISOString()}`,
+        billedTotal: continueOutstandingInvoice ? progressBeforePayment.periodTotal : charge.total,
+        priorPaidAmount: continueOutstandingInvoice && !invoiceSnapshot ? progressBeforePayment.progress.paidAmount : Number(invoiceSnapshot?.priorPaidAmount || 0),
+        total: Number(paymentAmount),
+        lineItems: invoiceSnapshot?.lineItems || (continueOutstandingInvoice
+          ? [{ description: "Outstanding subscription balance", quantity: 1, unitAmount: progressBeforePayment.periodTotal, amount: progressBeforePayment.periodTotal }]
+          : [
+          ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || "Subscription"} plan`, quantity: 1, unitAmount: charge.planCharge, amount: charge.planCharge }] : []),
+          ...(charge.serviceFee > 0 ? [{ description: "Service fee", quantity: 1, unitAmount: charge.serviceFee, amount: charge.serviceFee }] : []),
+          ...(charge.includedStaticIpFee > 0 ? [{ description: "Static IP service", quantity: 1, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee }] : []),
+        ]),
+        issuedAt: invoiceSnapshot?.issuedAt || new Date().toISOString(),
+        ...(cleanNotes ? { adminNote: cleanNotes } : {}),
+      };
+      const merchantReference = `JS-${tenant.id.slice(0, 18)}-${Date.now()}-${randomBytes(3).toString("hex")}`;
+      const attempt = await prisma.subscriptionPayment.create({
+        data: {
+          tenantId: tenant.id,
+          amount: paymentAmount,
+          currency,
+          paymentMethod: method,
+          provider: "pesapal",
+          merchantReference,
+          checkoutReturnPath: "/saas/subscriptions",
+          payerPhone: payerPhone || null,
+          payerEmail: payerEmail || null,
+          payerName: cleanPayerName || [tenant.owner?.fname, tenant.owner?.lname].filter(Boolean).join(" ") || tenant.name,
+          reference: cleanReference,
+          notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`,
+          recordedById: req.user?.id || null,
+          recordedByEmail: req.user?.email || null,
+          status: "pending",
+        },
+      });
+      try {
+        const order = await submitPesapalOrder({
+          merchantReference,
+          amount: normalizedAmount,
+          currency,
+          description: `JibuSales subscription for ${tenant.name}`,
+          callbackUrl: getPesapalCallbackUrl(),
+          phone: payerPhone,
+          email: payerEmail,
+          firstName: tenant.owner?.fname || tenant.name,
+          lastName: tenant.owner?.lname || "Business",
+        });
+        const payment = await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { gatewayTrackingId: order.trackingId, checkoutUrl: order.checkoutUrl } });
+        await prisma.tenant.update({ where: { id: tenant.id }, data: { billingPaymentMethod: method, billingPaymentReference: merchantReference, billingNotes: cleanNotes ?? tenant.billingNotes, paymentReminderStatus: tenant.status === 'suspended' && tenant.paymentReminderStatus === 'admin_suspended' ? 'admin_suspended' : 'due_soon', paymentReminderSentAt: new Date() } });
+        return res.status(201).json({ message: "Pesapal checkout is ready", payment: { ...payment, amount: payment.amount.toString() }, checkoutUrl: payment.checkoutUrl, status: "pending" });
+      } catch (error) {
+        await prisma.subscriptionPayment.update({ where: { id: attempt.id }, data: { status: "failed", notes: String(error?.message || "Pesapal order setup failed").slice(0, 2000) } });
+        throw error;
+      }
+    }
+
+    const paymentDate = paidAt ? new Date(paidAt) : new Date();
+    if (Number.isNaN(paymentDate.getTime())) return res.status(400).json({ error: "Enter a valid payment date" });
+
+    const payment = await prisma.$transaction(async tx => {
+      const progressBeforePayment = await getSubscriptionPaymentProgress(tx, tenant.id, paymentDate);
+      const continueOutstandingInvoice = Boolean(progressBeforePayment?.hasOutstandingBalance);
+      const invoiceSnapshot = continueOutstandingInvoice ? progressBeforePayment.invoiceSnapshot : null;
+      const invoice = {
+        ...(invoiceSnapshot || {}),
+        planName: invoiceSnapshot?.planName || tenant.plan?.name || "Subscription",
+        periodCount: invoiceSnapshot?.periodCount || 1,
+        periodUnit: invoiceSnapshot?.periodUnit || charge.billingCycle,
+        currency,
+        invoiceKey: continueOutstandingInvoice
+          ? progressBeforePayment.invoiceKey || `subscription-${tenant.id}-${progressBeforePayment.periodStart.toISOString()}`
+          : `subscription-${tenant.id}-${progressBeforePayment?.periodStart?.toISOString() || paymentDate.toISOString()}`,
+        billedTotal: continueOutstandingInvoice ? progressBeforePayment.periodTotal : charge.total,
+        priorPaidAmount: continueOutstandingInvoice && !invoiceSnapshot ? progressBeforePayment.progress.paidAmount : Number(invoiceSnapshot?.priorPaidAmount || 0),
+        total: Number(paymentAmount),
+        lineItems: invoiceSnapshot?.lineItems || (continueOutstandingInvoice
+          ? [{ description: "Outstanding subscription balance", quantity: 1, unitAmount: progressBeforePayment.periodTotal, amount: progressBeforePayment.periodTotal }]
+          : [
+          ...(charge.planCharge > 0 ? [{ description: `${tenant.plan?.name || "Subscription"} plan`, quantity: 1, unitAmount: charge.planCharge, amount: charge.planCharge }] : []),
+          ...(charge.serviceFee > 0 ? [{ description: "Service fee", quantity: 1, unitAmount: charge.serviceFee, amount: charge.serviceFee }] : []),
+          ...(charge.includedStaticIpFee > 0 ? [{ description: "Static IP service", quantity: 1, unitAmount: charge.includedStaticIpFee, amount: charge.includedStaticIpFee }] : []),
+        ]),
+        issuedAt: invoiceSnapshot?.issuedAt || paymentDate.toISOString(),
+        ...(cleanNotes ? { adminNote: cleanNotes } : {}),
+      };
+      const receipt = await tx.subscriptionPayment.create({
+        data: {
+          tenantId: tenant.id,
+          amount: paymentAmount,
+          currency,
+          paymentMethod: method,
+          payerName: cleanPayerName,
+          reference: cleanReference,
+          notes: `JIBUSALES_INVOICE:${JSON.stringify(invoice)}`,
+          paidAt: paymentDate,
+          status: "completed",
+          provider: "manual",
+          recordedById: req.user?.id || null,
+          recordedByEmail: req.user?.email || null,
+        },
+      });
+      await tx.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          billingPaymentMethod: method,
+          billingPaymentReference: cleanReference,
+          billingNotes: cleanNotes ?? tenant.billingNotes,
+        },
+      });
+      const settledTerm = await extendSettledSubscriptionTerm(tx, tenant.id, new Date());
+      const progress = await refreshSubscriptionPaymentStatus(tx, tenant.id, new Date());
+      return { receipt, progress, subscriptionEnd: settledTerm?.subscriptionEnd || null };
+    });
+
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: tenant.id,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "subscription_payment_recorded",
+      model: "SubscriptionPayment",
+      recordId: payment.receipt.id,
+      changes: { amount: payment.receipt.amount.toString(), currency, paymentMethod: method, reference: cleanReference, paidAt: paymentDate.toISOString(), remainingAmount: payment.progress?.remainingAmount },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "info",
+    }).catch(() => {});
+
+    res.status(201).json({ message: "Subscription payment recorded", payment: { ...payment.receipt, amount: payment.receipt.amount.toString() }, progress: payment.progress, subscriptionEnd: payment.subscriptionEnd });
+  } catch (err) {
+    console.error("Subscription payment record error:", err);
+    res.status(500).json({ error: "Failed to record subscription payment" });
+  }
+});
+
+router.post("/billing/pesapal/register-ipn", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const result = await registerPesapalIpn(getPesapalIpnUrl());
+    if (!result?.ipn_id) return res.status(502).json({ error: result?.message || "Pesapal did not return an IPN ID" });
+    res.json({ message: "Pesapal IPN registered. Add the returned ID to PESAPAL_IPN_ID in the backend environment.", ipnId: result.ipn_id, url: getPesapalIpnUrl(), environment: String(process.env.PESAPAL_ENV || "sandbox") });
+  } catch (err) {
+    console.error("Pesapal IPN registration error:", err);
+    res.status(502).json({ error: err.message || "Failed to register Pesapal IPN" });
+  }
+});
+
+router.get('/tenants/:id/shared-logins', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const [rows, tenant] = await Promise.all([prisma.tenantMembership.findMany({
+      where: { tenantId: req.params.id, role: 'owner' },
+      include: { user: { select: { id: true, email: true, fname: true, lname: true } } },
+      orderBy: { createdAt: 'asc' },
+    }), prisma.tenant.findUnique({ where: { id: req.params.id }, select: { ownerId: true } })]);
+    res.json({ sharedLogins: rows.map(({ id, isActive, createdAt, user }) => ({ id, isActive, createdAt, user, isPrimaryOwner: tenant?.ownerId === user.id })) });
+  } catch (error) {
+    console.error('Tenant shared login list failed:', error.message);
+    res.status(500).json({ error: 'Could not load shared business logins.' });
+  }
+});
+
+router.post('/tenants/:id/shared-logins', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Enter the existing account email.' });
+    const [tenant, user] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id: req.params.id }, select: { id: true, name: true } }),
+      prisma.user.findUnique({ where: { email }, select: { id: true, email: true, fname: true, lname: true, role: true, tenantId: true } }),
+    ]);
+    if (!tenant) return res.status(404).json({ error: 'Business not found.' });
+    if (!user) return res.status(404).json({ error: 'No JibuSales account exists for that email. Create the account first, then grant access.' });
+    if (['saas_admin', 'platform_staff'].includes(user.role)) return res.status(400).json({ error: 'Platform accounts cannot be linked as business owners.' });
+    if (user.role !== 'owner') return res.status(400).json({ error: 'Shared business switching is for owner accounts. Staff access remains assigned within each business.' });
+    const existingOwner = await prisma.tenant.findFirst({ where: { ownerId: user.id }, select: { id: true } });
+    if (!existingOwner && !user.tenantId) return res.status(400).json({ error: 'This login is not yet an active business owner account.' });
+    const membership = await prisma.tenantMembership.upsert({
+      where: { userId_tenantId: { userId: user.id, tenantId: tenant.id } },
+      create: { userId: user.id, tenantId: tenant.id, role: 'owner', isActive: true, grantedById: req.user.id },
+      update: { role: 'owner', isActive: true, grantedById: req.user.id },
+    });
+    await auditLog({ tenantId: 'platform', targetTenantId: tenant.id, userId: req.user.id, userEmail: req.user.email || '', action: 'shared_business_login_granted', model: 'TenantMembership', recordId: membership.id, changes: { linkedUserEmail: user.email }, ip: req.ip, severity: 'warning' }).catch(() => {});
+    res.status(201).json({ message: `Shared login granted to ${user.email}.`, sharedLogin: { id: membership.id, user: { id: user.id, email: user.email, fname: user.fname, lname: user.lname }, isActive: true } });
+  } catch (error) {
+    console.error('Tenant shared login grant failed:', error.message);
+    res.status(500).json({ error: 'Could not grant shared business access.' });
+  }
+});
+
+router.delete('/tenants/:id/shared-logins/:membershipId', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const [membership, tenant] = await Promise.all([
+      prisma.tenantMembership.findFirst({ where: { id: req.params.membershipId, tenantId: req.params.id } }),
+      prisma.tenant.findUnique({ where: { id: req.params.id }, select: { ownerId: true } }),
+    ]);
+    if (!membership) return res.status(404).json({ error: 'Shared login not found.' });
+    if (tenant?.ownerId === membership.userId) return res.status(409).json({ error: 'This login is the business primary owner. Transfer primary ownership before revoking it.' });
+    await prisma.tenantMembership.update({ where: { id: membership.id }, data: { isActive: false } });
+    await auditLog({ tenantId: 'platform', targetTenantId: membership.tenantId, userId: req.user.id, userEmail: req.user.email || '', action: 'shared_business_login_revoked', model: 'TenantMembership', recordId: membership.id, changes: { linkedUserId: membership.userId }, ip: req.ip, severity: 'warning' }).catch(() => {});
+    res.json({ message: 'Shared business access revoked.' });
+  } catch (error) {
+    console.error('Tenant shared login revoke failed:', error.message);
+    res.status(500).json({ error: 'Could not revoke shared business access.' });
+  }
+});
+router.put("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
+router.patch("/tenants/:id/status", authenticateToken, requirePlatformAdmin, changeTenantStatus);
+router.post("/tenants/:id/suspend", authenticateToken, requirePlatformAdmin, (req, res) => changeTenantStatus(req, res, "suspended"));
+router.post("/tenants/:id/activate", authenticateToken, requirePlatformAdmin, (req, res) => changeTenantStatus(req, res, "active"));
+router.put("/subscriptions/:id", authenticateToken, requirePlatformAdmin, updateSubscription);
+router.patch("/subscriptions/:id", authenticateToken, requirePlatformAdmin, updateSubscription);
+
+// My subscription
+router.get("/subscription", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) return res.json({ plan: "free", cycle: "monthly", renews_on: null });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, include: { plan: true } });
+    res.json({ plan: tenant?.plan?.name || "free", cycle: tenant?.plan?.billingCycle || "monthly", renews_on: null });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Renewal status
+router.get("/renewal-status", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    res.json({ state: "active", days_left: 30 });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Payment methods (static)
+router.get("/payment-methods", authenticateToken, requirePlatformAdmin, (req, res) => {
+  res.json([
+    { id: "cash", name: "Cash" },
+    { id: "mobile_money", name: "Mobile Money" },
+    { id: "card", name: "Visa / MasterCard" },
+  ]);
+});
+
+// Invite owner
+router.post("/invite-owner", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId, email, fname, lname, phone, locale } = req.body;
+    if (!tenantId || !email || !fname || !lname) return res.status(400).json({ error: "tenantId, email, fname, lname required" });
+
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) return res.status(404).json({ error: "Business not found" });
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) return res.status(409).json({ error: "User already exists" });
+
+    const tempPassword = generateTempPassword(12);
+    const hashed = await bcrypt.hash(tempPassword, 12);
+    const otp = generateOTP();
+    const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const user = await prisma.user.create({
+      data: { email, password: hashed, fname, lname, phone, tenantId, role: "owner", otpCode: otp, otpExpires },
+    });
+
+    let emailError = null;
+    try {
+      const { subject, html } = getEmailContent(locale, { ownerFname: fname, businessName: tenant.name, businessId: tenantId, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      await sendMail(email, subject, html);
+      await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
+      return res.status(201).json({ message: "Owner invited and email sent", email, tenantId, emailSent: true });
+    } catch (e) {
+      emailError = e?.message || "Email failed";
+      console.warn("invite-owner: email send failed:", emailError);
+    }
+
+    await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
+    res.status(201).json({ message: "Owner invited, but email failed", email, tenantId, emailSent: false, emailError, tempPassword, otp });
+  } catch (err) {
+    console.error("Invite owner error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Re-invite owner
+router.post("/reinvite-owner/:tenantId", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const owner = await prisma.user.findFirst({ where: { tenantId, role: "owner" } });
+    if (!owner) return res.status(404).json({ error: "Owner not found for business" });
+
+    const otp = generateOTP();
+    const otpExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await prisma.user.update({ where: { id: owner.id }, data: { otpCode: otp, otpExpires } });
+
+    let emailSent = false;
+    let emailError = null;
+    try {
+      await sendMail(owner.email, "Password reset code (OTP)", `<p>Hello ${owner.fname || ""},</p><p>Your reset code: <b>${otp}</b></p><p>Expires in 24 hours.</p>`);
+      emailSent = true;
+    } catch (e) {
+      emailError = e?.message || "Email failed";
+      console.warn("reinvite-owner: email send failed:", emailError);
+    }
+
+    res.json({
+      message: emailSent ? "Owner re-invited and email sent" : "Owner re-invited, but email failed",
+      email: owner.email,
+      emailSent,
+      emailError,
+      otp: emailSent ? undefined : otp,
+    });
+  } catch (err) {
+    console.error("Reinvite owner error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Provision tenant (business + owner)
+router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { business, owner } = req.body;
+    if (!business?.name?.trim()) return res.status(400).json({ error: "Business name is required" });
+    if (!business?.businessType) return res.status(400).json({ error: "Business type is required" });
+    if (!business?.planId) return res.status(400).json({ error: "Subscription plan is required" });
+    const ownerEmail = String(owner?.email || '').trim().toLowerCase();
+    const reuseOwnerAccount = owner?.reuseExistingAccount === true;
+    if (!ownerEmail) return res.status(400).json({ error: "Owner email is required" });
+    if (!reuseOwnerAccount && !owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
+    if (!reuseOwnerAccount && owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
+
+    const startTrial = business.startTrial === true;
+    const trialDays = startTrial ? Number(business.trialDays) : null;
+    if (startTrial && (!Number.isInteger(trialDays) || trialDays < 1 || trialDays > 3650)) {
+      return res.status(400).json({ error: "Trial duration must be a whole number between 1 and 3650 days" });
+    }
+    const provisionedAt = new Date();
+    const trialEndsAt = startTrial ? new Date(provisionedAt.getTime() + trialDays * 24 * 60 * 60 * 1000) : null;
+
+    const marketplace = business.marketplaceProfile;
+    const sellerType = String(marketplace?.sellerType || "").trim().toLowerCase();
+    const marketplaceCategory = String(marketplace?.category || "").trim().slice(0, 100);
+    if (marketplace && (!['supplier', 'manufacturer', 'both'].includes(sellerType) || !marketplaceCategory)) {
+      return res.status(400).json({ error: "Choose supplier, manufacturer, or both, and provide a marketplace category." });
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email: ownerEmail } });
+    if (existingUser && !reuseOwnerAccount) return res.status(409).json({ error: "Owner email already exists. Select the existing owner login option to attach this business." });
+    if (reuseOwnerAccount && !existingUser) return res.status(404).json({ error: "No existing JibuSales login was found for that email." });
+    if (reuseOwnerAccount && (existingUser.role !== 'owner' || !existingUser.isActive)) return res.status(400).json({ error: "Only an active business-owner login can be reused." });
+
+    const slug = (business.slug || business.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const parsedName = splitName(owner.name || `${existingUser?.fname || ''} ${existingUser?.lname || ''}`);
+    const ownerFname = existingUser?.fname || owner.fname || parsedName.fname || ownerEmail.split("@")[0];
+    const ownerLname = existingUser?.lname || owner.lname || parsedName.lname || "";
+
+    const tempPassword = reuseOwnerAccount ? null : (owner.password || generateTempPassword(12));
+    const hashed = reuseOwnerAccount ? null : await bcrypt.hash(tempPassword, 12);
+    const otp = reuseOwnerAccount ? null : generateOTP();
+    const otpExpires = reuseOwnerAccount ? null : new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const { tenant } = await prisma.$transaction(async (tx) => {
+      const createdTenant = await tx.tenant.create({
+        data: {
+          name: business.name,
+          slug,
+          email: business.email || ownerEmail,
+          phone: business.phone || null,
+          address: business.address,
+          businessType: business.businessType || null,
+          status: startTrial ? "trial" : "active",
+          planId: business.planId,
+          subscriptionStart: startTrial ? provisionedAt : null,
+          trialEndsAt,
+          dateFormat: "DD/MM/YY",
+        },
+      });
+
+      const user = reuseOwnerAccount ? existingUser : await tx.user.create({
+        data: { email: ownerEmail, password: hashed, fname: ownerFname, lname: ownerLname, phone: owner.phone, tenantId: createdTenant.id, role: "owner", otpCode: otp, otpExpires },
+      });
+
+      await tx.tenant.update({ where: { id: createdTenant.id }, data: { ownerId: user.id } });
+      await tx.tenantMembership.upsert({
+        where: { userId_tenantId: { userId: user.id, tenantId: createdTenant.id } },
+        create: { userId: user.id, tenantId: createdTenant.id, role: 'owner', isActive: true, grantedById: req.user.id },
+        update: { role: 'owner', isActive: true, grantedById: req.user.id },
+      });
+      await ensureTenantAccountingSetup(tx, { tenantId: createdTenant.id, userId: user.id, enableNewSetups: true });
+      if (marketplace) {
+        await tx.procurementProfile.create({ data: {
+          tenantId: createdTenant.id,
+          sellerType,
+          category: marketplaceCategory,
+          description: String(marketplace.description || "").trim().slice(0, 2000),
+          discoverable: true,
+        } });
+        const marketplaceFeature = await tx.feature.findUnique({ where: { name: 'procurement.seller' }, select: { id: true } });
+        if (!marketplaceFeature) throw new Error('Supplier Marketplace · Seller is not installed. Apply the procurement access migration before provisioning a seller.');
+        await tx.tenantFeature.upsert({
+          where: { tenantId_featureId: { tenantId: createdTenant.id, featureId: marketplaceFeature.id } },
+          create: { tenantId: createdTenant.id, featureId: marketplaceFeature.id, enabled: true },
+          update: { enabled: true },
+        });
+      }
+
+      return { tenant: createdTenant, user, reusedOwnerAccount: reuseOwnerAccount };
+    });
+
+    // Audit log: tenant provisioning (critical SaaS admin operation)
+    auditLog({
+      tenantId: "platform",
+      targetTenantId: tenant.id,
+      userId: req.user?.id || "unknown",
+      userEmail: req.user?.email || "",
+      action: "create_sensitive",
+      model: "Tenant",
+      recordId: tenant.id,
+      changes: {
+        data: {
+          businessName: business.name,
+          businessType: business.businessType,
+          marketplaceSellerType: marketplace ? sellerType : null,
+          marketplaceCategory: marketplace ? marketplaceCategory : null,
+          ownerEmail,
+          reusedOwnerAccount: reuseOwnerAccount,
+          planId: business.planId,
+          status: startTrial ? "trial" : "active",
+          trialDays: startTrial ? trialDays : null,
+          trialEndsAt,
+          slug: tenant.slug,
+        }
+      },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: "critical",
+    }).catch(() => {});
+
+    let emailSent = false;
+    let emailMessageId = null;
+    let emailError = null;
+    try {
+      const emailContent = reuseOwnerAccount
+        ? { subject: `${business.name} added to your JibuSales login`, html: `<p>Hello ${ownerFname},</p><p><b>${business.name}</b> has been added to your existing JibuSales owner login.</p><p>Sign in with your existing credentials and use the business switcher to open its separate account.</p><p><a href="${frontendOrigin()}/login">Open JibuSales</a></p>` }
+        : getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      const delivery = await sendMail(ownerEmail, emailContent.subject, emailContent.html);
+      emailSent = true;
+      emailMessageId = delivery?.messageId || null;
+    } catch (error) {
+      emailError = error?.message || "Email delivery failed";
+      console.warn("Provision tenant: owner email send failed:", emailError);
+    }
+
+    res.status(201).json({
+      message: emailSent ? "Tenant provisioned and owner setup email accepted by the email provider." : "Tenant provisioned, but the owner setup email could not be sent.",
+      tenantId: tenant.id,
+      slug: tenant.slug,
+      status: startTrial ? "trial" : "active",
+      trialDays: startTrial ? trialDays : null,
+      trialEndsAt,
+      ownerEmail,
+      reusedOwnerAccount,
+      emailSent,
+      emailMessageId,
+      emailError,
+      marketplaceProfileCreated: Boolean(marketplace),
+      tempPassword,
+      otp,
+    });
+  } catch (err) {
+    if (err?.code === "P2002") {
+      const target = Array.isArray(err.meta?.target) ? err.meta.target.join(", ") : err.meta?.target;
+      return res.status(409).json({ error: `Duplicate value for ${target || "unique field"}` });
+    }
+    console.error("Provision tenant error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Me/features — plan features + tenant overrides
+router.get("/me/features", authenticateToken, async (req, res) => {
+  try {
+    const role = req.user?.role;
+    if (role === "saas_admin") return res.json({ features: [] });
+
+    const tenantId = req.user?.tenantId;
+    const featureMap = {};
+
+    if (tenantId) {
+      // 1. Plan-level features (primary source)
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          planId: true,
+          plan: {
+            select: {
+              features: true,
+            },
+          },
+        },
+      });
+
+      if (tenant?.planId) {
+        const planFeatures = await prisma.planFeature.findMany({
+          where: { planId: tenant.planId, enabled: true, feature: { isActive: true } },
+          include: { feature: true },
+        });
+        planFeatures.forEach((pf) => {
+          if (pf.feature?.name && planFeatureIsAllowedByPlanList(tenant.plan, pf.feature.name)) {
+            featureMap[pf.feature.name] = { enabled: true, source: "plan" };
+          }
+        });
+      }
+
+      // 2. Tenant-level overrides (can enable/disable plan features or add extras)
+      const tenantFeatures = await prisma.tenantFeature.findMany({
+        where: { tenantId, feature: { isActive: true } },
+        include: { feature: true },
+      });
+      tenantFeatures.forEach((tf) => {
+        if (tf.feature?.name) {
+          featureMap[tf.feature.name] = {
+            enabled: tf.enabled,
+            source: "override",
+          };
+        }
+      });
+    }
+
+    res.json({ features: featureMap });
+  } catch (err) {
+    console.error("Me/features error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Me/profile
+router.get("/me/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, include: { tenant: true } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    const { password: _, ...safe } = user;
+    res.json(safe);
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Re-seed default categories for all existing tenants
+router.post("/reseed-categories", authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { getDefaultCategoryDefinitionsForBusinessType } = await import("../utils/categoryDefaults.js");
+
+    const tenants = await prisma.tenant.findMany({
+      select: { id: true, name: true, businessType: true },
+    });
+
+    const results = [];
+    let totalCreated = 0;
+
+    for (const tenant of tenants) {
+      const definitions = getDefaultCategoryDefinitionsForBusinessType(tenant.businessType || "other");
+      let created = 0;
+
+      for (const cat of definitions) {
+        const existing = await prisma.category.findUnique({
+          where: {
+            tenantId_slug: {
+              tenantId: tenant.id,
+              slug: cat.slug,
+            },
+          },
+        });
+        if (!existing) {
+          await prisma.category.create({
+            data: {
+              name: cat.name,
+              slug: cat.slug,
+              categoryType: cat.categoryType || "product",
+              tenantId: tenant.id,
+            },
+          });
+          created++;
+        }
+      }
+
+      results.push({ tenant: tenant.name, businessType: tenant.businessType || "other", added: created });
+      totalCreated += created;
+    }
+
+    res.json({
+      message: `Re-seeded categories for ${tenants.length} tenants. ${totalCreated} new categories added.`,
+      results,
+      totalCreated,
+    });
+  } catch (err) {
+    console.error("Re-seed categories error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;

@@ -1,0 +1,1130 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SaaS Admin Console</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="css/main.css" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="icon" type="image/png" href="img/Kairosups-logo.svg" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    .section { display: none; }
+    .section.active { display: block; }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand d-flex align-items-center gap-2 px-3 pt-3">
+      <img class="brand-logo" src="img/Kairosups-logo.svg" onerror="this.onerror=null;this.src='favicon.svg'" alt="Logo" style="width:36px;height:36px;object-fit:contain;border-radius:6px;" />
+      <div class="d-flex flex-column">
+        <span id="sidebarUserName" class="fw-semibold small">User</span>
+        <span id="sidebarUserRole" class="text-muted xsmall">—</span>
+      </div>
+
+    </div>
+    <nav class="nav flex-column px-3 mt-3" id="sidebarNav">
+      <a class="nav-link py-2 active" data-target="section-dashboard" href="#">Dashboard</a>
+      <a class="nav-link py-2" data-target="section-businesses" href="#">Businesses</a>
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="subsGroup">
+          <span>Subscriptions</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="subsGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-subs-all" href="#">All Subscriptions</a>
+          <a class="nav-link py-1" data-target="section-plans" href="#">Plans & Pricing</a>
+          <a class="nav-link py-1" data-target="section-invoices" href="#">Payments & Invoices</a>
+          <a class="nav-link py-1" data-target="section-renewal" href="#">Renewals & Expirations</a>
+          <a class="nav-link py-1" data-target="section-features" href="#">Business Feature Overrides</a>
+          <a class="nav-link py-1" data-target="section-payment-methods" href="#">Payment Methods</a>
+        </div>
+      </div>
+
+      <!-- Accounting -->
+      <div class="nav-group" data-feature="accounting,payables,receivables,staff_tillsheets,transaction_accounts,bank_accounts,cash_accounts,mobile_accounts">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="acctGroup">
+          <span>Accounting</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="acctGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-accounting-core" href="#" data-feature="accounting">Accounting</a>
+          <a class="nav-link py-1" data-target="section-accounting-transactions" href="#" data-feature="transaction_accounts">Transaction Accounts</a>
+          <a class="nav-link py-1" data-target="section-accounting-payables" href="#" data-feature="payables">Payables</a>
+          <a class="nav-link py-1" data-target="section-accounting-receivables" href="#" data-feature="receivables">Receivables</a>
+          <a class="nav-link py-1" data-target="section-accounting-staff-tillsheets" href="#" data-feature="staff_tillsheets">Staff Till Sheets</a>
+        </div>
+      </div>
+
+      <!-- Stock & Sales -->
+      <div class="nav-group" data-feature="inventory,sales">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="stockGroup">
+          <span>Stock & Sales</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="stockGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-stock" href="#">Stock & Sales</a>
+        </div>
+      </div>
+
+      <!-- Reports -->
+      <div class="nav-group" data-feature="reports">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="reportsGroup">
+          <span>Reports</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="reportsGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-reports-balance-sheet" href="#">Balance Sheet</a>
+          <a class="nav-link py-1" data-target="section-reports-trial-balance" href="#">Trial Balance</a>
+          <a class="nav-link py-1" data-target="section-reports-cash-flow" href="#">Cash Flow</a>
+          <a class="nav-link py-1" data-target="section-reports-sales" href="#">Sales</a>
+          <a class="nav-link py-1" data-target="section-reports-financial" href="#">Financial</a>
+          <a class="nav-link py-1" data-target="section-reports-expenses" href="#">Expenses</a>
+        </div>
+      </div>
+
+      <!-- Role & Permissions -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="rolesGroup">
+          <span>Role & Permissions</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="rolesGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-roles-roles" href="#">Roles</a>
+          <a class="nav-link py-1" data-target="section-roles-permissions" href="#">Permissions Matrix</a>
+          <a class="nav-link py-1" data-target="section-roles-audit" href="#">Audit Logs</a>
+          <a class="nav-link py-1" data-target="section-users" href="#">Users</a>
+        </div>
+      </div>
+
+      <!-- System Settings -->
+      <div class="nav-group">
+        <button class="nav-link py-2 d-flex align-items-center justify-content-between w-100 nav-group-toggle" data-group="sysGroup">
+          <span>System Settings</span>
+          <span class="chev">▼</span>
+        </button>
+        <div id="sysGroup" class="nav-sub d-none">
+          <a class="nav-link py-1" data-target="section-settings-shop" href="#">Shop Settings</a>
+          <a class="nav-link py-1" data-target="section-settings-fiscal" href="#">Fiscal Year Settings</a>
+          <a class="nav-link py-1" data-target="section-settings-currencies" href="#">Currencies</a>
+        </div>
+      </div>
+    </nav>
+  </aside>
+  
+  <!-- Modals: Assign Plan to Business (moved outside sidebar) -->
+  <div class="modal" id="assignPlanModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">Assign Plan</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="ap_business_id" />
+          <div class="mb-2"><span class="small text-muted">Business</span><div id="ap_business_name" class="fw-semibold">—</div></div>
+          <div class="mb-2">
+            <label class="form-label">Plan</label>
+            <select id="ap_planId" class="form-select">
+              <option value="">—</option>
+            </select>
+          </div>
+          <div class="form-text">Assigning a plan links the business to a subscription for feature mapping and billing cycle.</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="ap_save" class="btn btn-primary btn-sm">Save</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals: Edit Business (moved outside sidebar) -->
+  <div class="modal" id="businessEditModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">Edit Business</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="be_id" />
+          <div class="mb-2">
+            <label for="be_name" class="form-label">Name</label>
+            <input id="be_name" class="form-control" placeholder="Business Name" />
+          </div>
+          <div class="mb-2">
+            <label for="be_code" class="form-label">Business ID</label>
+            <input id="be_code" class="form-control" placeholder="Auto-generated" readonly />
+          </div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="be_save" class="btn btn-primary btn-sm">Save</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals: Invite Owner (moved outside sidebar) -->
+  <div class="modal" id="inviteOwnerModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h6 class="modal-title">Invite Owner</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="io_biz_id" />
+          <div class="mb-2"><span class="small text-muted">Business</span><div id="io_biz_name" class="fw-semibold">—</div></div>
+          <form id="inviteOwnerForm" class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">First Name</label>
+              <input id="io_fname" class="form-control" required />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Last Name</label>
+              <input id="io_lname" class="form-control" required />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Email</label>
+              <input id="io_email" type="email" class="form-control" required />
+            </div>
+            <div class="col-12">
+              <label class="form-label">Phone (optional)</label>
+              <input id="io_phone" class="form-control" />
+            </div>
+          </form>
+          <div class="form-text">This will create an Owner user for the business and send a temporary password and OTP to complete setup.</div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="io_save" class="btn btn-primary btn-sm">Send Invite</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="content">
+    <header class="topbar">
+      <div class="d-flex align-items-center gap-2">
+        <button id="sidebarToggle" class="btn btn-outline-secondary btn-sm" title="Toggle menu">Menu</button>
+        <span id="pageTitle" class="fw-semibold d-none d-sm-inline">Dashboard</span>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <div class="dropdown d-none d-md-flex">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="langIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Language">🌐</button>
+          <div class="dropdown-menu dropdown-menu-end" id="langMenuMobile" style="max-height:60vh; overflow:auto"></div>
+        </div>
+        <div class="dropdown d-none d-md-flex">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="currencyIconBtn" data-bs-toggle="dropdown" aria-expanded="false" title="Currency">💰</button>
+          <div class="dropdown-menu dropdown-menu-end" id="currencyMenuMobile" style="max-height:60vh; overflow:auto"></div>
+        </div>
+        <div class="dropdown">
+          <button class="btn btn-outline-secondary btn-sm icon-btn" id="notifBtn" aria-expanded="false" title="Notifications">🔔 <span id="notifDot" class="dot d-none"></span></button>
+          <div class="dropdown-menu dropdown-menu-end" id="notifMenu">
+            <div class="dropdown-header">Notifications</div>
+            <div class="dropdown-body" id="notifList">
+              <div class="text-muted small px-3 py-2">No new notifications</div>
+            </div>
+          </div>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm icon-btn" id="messagesBtn" href="mailto:support@example.com" title="Messages/Support">💬</a>
+        <button class="btn btn-outline-secondary btn-sm icon-btn" id="themeToggle" title="Switch theme">🌙</button>
+        <div class="d-md-none align-items-center gap-2">
+          <select id="langSelect" class="form-select form-select-sm" title="Language">
+            <option value="en-US">English</option>
+            <option value="lg-UG">Luganda</option>
+            <option value="sw-KE">Swahili</option>
+          </select>
+          <select id="currencySelect" class="form-select form-select-sm" title="Currency">
+            <option value="USD">USD — US Dollar</option>
+            <option value="EUR">EUR — Euro</option>
+            <option value="GBP">GBP — British Pound</option>
+            <option value="JPY">JPY — Japanese Yen</option>
+            <option value="CNY">CNY — Chinese Yuan</option>
+            <option value="UGX">UGX — Ugandan Shilling</option>
+            <option value="KES">KES — Kenyan Shilling</option>
+            <option value="TZS">TZS — Tanzanian Shilling</option>
+            <option value="RWF">RWF — Rwandan Franc</option>
+            <option value="BIF">BIF — Burundian Franc</option>
+            <option value="GHS">GHS — Ghanaian Cedi</option>
+            <option value="NGN">NGN — Nigerian Naira</option>
+            <option value="XOF">XOF — CFA Franc (West)</option>
+            <option value="XAF">XAF — CFA Franc (Central)</option>
+            <option value="ZAR">ZAR — South African Rand</option>
+            <option value="ZMW">ZMW — Zambian Kwacha</option>
+            <option value="BWP">BWP — Botswana Pula</option>
+            <option value="NAD">NAD — Namibian Dollar</option>
+            <option value="MUR">MUR — Mauritian Rupee</option>
+            <option value="MAD">MAD — Moroccan Dirham</option>
+            <option value="EGP">EGP — Egyptian Pound</option>
+            <option value="TND">TND — Tunisian Dinar</option>
+            <option value="DZD">DZD — Algerian Dinar</option>
+            <option value="SDG">SDG — Sudanese Pound</option>
+            <option value="ETB">ETB — Ethiopian Birr</option>
+            <option value="SOS">SOS — Somali Shilling</option>
+            <option value="DJF">DJF — Djiboutian Franc</option>
+            <option value="KMF">KMF — Comorian Franc</option>
+            <option value="SCR">SCR — Seychellois Rupee</option>
+            <option value="MZN">MZN — Mozambican Metical</option>
+            <option value="MRU">MRU — Mauritanian Ouguiya</option>
+            <option value="LSL">LSL — Lesotho Loti</option>
+            <option value="SZL">SZL — Eswatini Lilangeni</option>
+            <option value="GMD">GMD — Gambian Dalasi</option>
+            <option value="SLE">SLE — Sierra Leonean Leone</option>
+            <option value="LRD">LRD — Liberian Dollar</option>
+            <option value="GNF">GNF — Guinean Franc</option>
+            <option value="CVE">CVE — Cape Verdean Escudo</option>
+            <option value="CDF">CDF — Congolese Franc</option>
+            <option value="ZWL">ZWL — Zimbabwean Dollar</option>
+            <option value="MWK">MWK — Malawian Kwacha</option>
+            <option value="AOA">AOA — Angolan Kwanza</option>
+            <option value="LYD">LYD — Libyan Dinar</option>
+            <option value="ERN">ERN — Eritrean Nakfa</option>
+          </select>
+        </div>
+        <div class="dropdown">
+          <button class="btn btn-light btn-sm d-flex align-items-center gap-2" id="profileBtn" aria-expanded="false">
+            <span class="avatar" id="profileAvatar">👤</span>
+            <span id="profileName" class="d-none d-md-inline">Admin</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-end" id="profileMenu">
+            <div class="dropdown-header">Account</div>
+            <a class="dropdown-item" href="#" id="myProfile">My Profile</a>
+            <a class="dropdown-item" href="#" id="mySettings">Settings</a>
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item text-danger" id="logoutAction">Logout</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container-fluid py-3">
+      <div id="alertBox" class="alert d-none" role="alert"></div>
+      <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+      <!-- Dashboard Section -->
+      <section id="section-dashboard" class="section active">
+        <!-- KPI cards -->
+        <div class="row g-3 mb-3">
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-primary kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Total Businesses</div>
+              <div class="fs-3 fw-semibold" id="kpiTotalBiz">—</div>
+            </div></div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-success kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Total Registered (30d)</div>
+              <div class="fs-3 fw-semibold" id="kpiRegistered">—</div>
+            </div></div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-warning kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Active Subscriptions</div>
+              <div class="fs-3 fw-semibold" id="kpiActiveSubs">—</div>
+            </div></div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="card kpi-info kpi-card shadow-sm h-100"><div class="card-body">
+              <div class="text-muted small">Monthly Revenue</div>
+              <div class="fs-3 fw-semibold" id="kpiMonthlyRevenue">—</div>
+            </div></div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="row g-3 mb-3">
+          <div class="col-lg-8">
+            <div class="card shadow-sm h-100"><div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Monthly Revenue Growth</h6>
+              </div>
+              <div class="chart-box">
+                <canvas id="chartRevenue"></canvas>
+              </div>
+            </div></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="card shadow-sm h-100"><div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Businesses by Plan</h6>
+              </div>
+              <div class="chart-box">
+                <canvas id="chartPlans"></canvas>
+              </div>
+            </div></div>
+          </div>
+        </div>
+
+        <!-- Recent + small stats -->
+        <div class="row g-3">
+          <div class="col-lg-8">
+            <div class="card shadow-sm h-100"><div class="card-body">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Recent Registrations</h6>
+                <button class="btn btn-sm btn-outline-secondary" id="reloadRecent">Reload</button>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-sm align-middle" id="recentTable">
+                  <thead><tr><th>Name</th><th>Tier</th><th>Created</th></tr></thead>
+                  <tbody><tr><td colspan="3" class="text-muted">Loading...</td></tr></tbody>
+                </table>
+              </div>
+            </div></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="row g-3">
+              <div class="col-12">
+                <div class="card shadow-sm h-100"><div class="card-body">
+                  <div class="text-muted small">Churn Rate</div>
+                  <div class="fs-3 fw-semibold" id="kpiChurn">—</div>
+                </div></div>
+              </div>
+              <div class="col-12">
+                <div class="card shadow-sm h-100"><div class="card-body">
+                  <div class="text-muted small">Server Uptime (hrs)</div>
+                  <div class="fs-3 fw-semibold" id="kpiUptime">—</div>
+                </div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stock & Sales Section -->
+      <section id="section-stock" class="section" data-feature="inventory,sales">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between">
+              <h5 class="mb-0">Stock & Sales</h5>
+              <div class="d-flex align-items-center gap-2">
+                <input id="stockBizId" class="form-control form-control-sm" placeholder="Business ID (optional)" style="max-width:220px" />
+                <button id="stockBizApply" class="btn btn-outline-secondary btn-sm">Apply</button>
+              </div>
+            </div>
+            <ul class="nav nav-tabs mt-3" id="stockTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-products-tab" data-bs-toggle="tab" data-bs-target="#tab-products" type="button" role="tab">Products</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-suppliers-tab" data-bs-toggle="tab" data-bs-target="#tab-suppliers" type="button" role="tab">Suppliers</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-purchases-tab" data-bs-toggle="tab" data-bs-target="#tab-purchases" type="button" role="tab">Purchases</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-sales-tab" data-bs-toggle="tab" data-bs-target="#tab-sales" type="button" role="tab">Sales</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-inventory-tab" data-bs-toggle="tab" data-bs-target="#tab-inventory" type="button" role="tab">Inventory</button>
+              </li>
+            </ul>
+            <div class="tab-content mt-3" id="stockTabsContent">
+              <div class="tab-pane fade show active" id="tab-products" role="tabpanel" aria-labelledby="tab-products-tab">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="d-flex gap-2">
+                    <input id="prodSearch" class="form-control form-control-sm" placeholder="Search name/SKU" />
+                    <select id="prodFilterCategory" class="form-select form-select-sm" style="min-width:180px"><option value="">All Categories</option></select>
+                  </div>
+                  <button class="btn btn-primary btn-sm" id="btnAddProduct">+ Add Product</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Product Name</th><th>SKU/Code</th><th>Category</th><th>Unit</th><th>Selling Price</th><th>Cost Price</th><th>Current Stock</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="productsTable"><tr><td colspan="9" class="text-muted">No products</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-suppliers" role="tabpanel" aria-labelledby="tab-suppliers-tab">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="d-flex gap-2">
+                    <input id="supSearch" class="form-control form-control-sm" placeholder="Search suppliers" />
+                  </div>
+                  <button class="btn btn-primary btn-sm" id="btnAddSupplier">+ Add Supplier</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Name</th><th>Contact Person</th><th>Phone</th><th>Email</th><th>Address</th><th>Outstanding Balance</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="suppliersTable"><tr><td colspan="8" class="text-muted">No suppliers</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-purchases" role="tabpanel" aria-labelledby="tab-purchases-tab">
+                <div class="d-flex justify-content-between mb-2">
+                  <h6 class="mb-0">Purchases</h6>
+                  <button class="btn btn-success btn-sm" id="btnNewPurchase">+ New Purchase</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Date</th><th>Supplier</th><th>Products Bought</th><th>Total</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="purchasesTable"><tr><td colspan="6" class="text-muted">No purchases</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-sales" role="tabpanel" aria-labelledby="tab-sales-tab">
+                <div class="d-flex justify-content-between mb-2">
+                  <h6 class="mb-0">Sales</h6>
+                  <button class="btn btn-success btn-sm" id="btnRecordSale">Record Sale</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Date</th><th>Invoice No</th><th>User</th><th>Products Sold</th><th>Total</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                    <tbody id="salesTable"><tr><td colspan="7" class="text-muted">No sales</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="tab-inventory" role="tabpanel" aria-labelledby="tab-inventory-tab">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                  <div class="d-flex gap-2">
+                    <select id="invFilterCategory" class="form-select form-select-sm" style="min-width:180px"><option value="">All Categories</option></select>
+                    <select id="invFilterStatus" class="form-select form-select-sm" style="min-width:150px"><option value="">All</option><option value="low">Low Stock</option><option value="inactive">Inactive</option></select>
+                  </div>
+                  <button class="btn btn-outline-secondary btn-sm" id="btnAdjustStock">Adjust Stock</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle">
+                    <thead><tr><th>Product Name</th><th>Current Stock</th><th>Last Purchase Cost</th><th>Selling Price</th><th>Reorder Level</th><th>Total Value</th></tr></thead>
+                    <tbody id="inventoryTable"><tr><td colspan="6" class="text-muted">No inventory</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Create Tenant (Multi-step) -->
+      <section id="section-create-tenant" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-3 step-indicator">
+              <div class="step" data-step="1">1</div>
+              <div class="step" data-step="2">2</div>
+              <div class="step" data-step="3">3</div>
+            </div>
+
+            <form id="tenantForm">
+              <!-- Step 1: Business -->
+              <div class="step-pane" data-step-pane="1">
+                <h5 class="mb-3">Business Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Business Name</label>
+                    <input type="text" id="pf_bizName" class="form-control" required />
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Subscription Tier</label>
+                    <select id="pf_bizTier" class="form-select">
+                      <option value="free">Free</option>
+                      <option value="starter">Starter</option>
+                      <option value="pro">Pro</option>
+                    </select>
+                  </div>
+                  <div class="col-md-3">
+                    <label class="form-label">Plan</label>
+                    <select id="pf_planId" class="form-select">
+                      <option value="">—</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between mt-3">
+                  <button class="btn btn-outline-secondary" data-cancel>Cancel</button>
+                  <button class="btn btn-primary" data-next>Next</button>
+                </div>
+              </div>
+
+              <!-- Step 2: Owner -->
+              <div class="step-pane d-none" data-step-pane="2">
+                <h5 class="mb-3">Owner Details</h5>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <label class="form-label">First name</label>
+                    <input type="text" id="pf_ownerFname" class="form-control" required />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Middle name (optional)</label>
+                    <input type="text" id="pf_ownerMname" class="form-control" />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Last name</label>
+                    <input type="text" id="pf_ownerLname" class="form-control" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Owner Email</label>
+                    <input type="email" id="pf_ownerEmail" class="form-control" required />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Phone Number</label>
+                    <input type="text" id="pf_ownerPhone" class="form-control" />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label">Business Name (optional)</label>
+                    <input type="text" id="pf_ownerBizName" class="form-control" />
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between mt-3">
+                  <button class="btn btn-outline-secondary" data-prev>Back</button>
+                  <div>
+                    <button class="btn btn-outline-secondary me-2" data-cancel>Cancel</button>
+                    <button class="btn btn-primary" data-next>Next</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 3: Review & Create -->
+              <div class="step-pane d-none" data-step-pane="3">
+                <h5 class="mb-3">Review</h5>
+                <div id="pf_review" class="border rounded p-3 bg-light mb-3"></div>
+                <div class="border rounded p-3">
+                  <h6 class="mb-3">Optional: First Branch</h6>
+                  <div class="row g-3">
+                    <div class="col-md-4">
+                      <label class="form-label">Branch Name</label>
+                      <input type="text" id="pf_branchName" class="form-control" />
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Location / Address</label>
+                      <input type="text" id="pf_branchLocation" class="form-control" />
+                    </div>
+                    <div class="col-md-4">
+                      <label class="form-label">Opening Date</label>
+                      <input type="date" id="pf_branchOpening" class="form-control" />
+                    </div>
+                  </div>
+                </div>
+                <div class="d-flex justify-content-between mt-3">
+                  <button class="btn btn-outline-secondary" data-prev>Back</button>
+                  <div>
+                    <button class="btn btn-outline-secondary me-2" data-cancel>Cancel</button>
+                    <button type="submit" class="btn btn-success">Create Tenant</button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Subscriptions: All Subscriptions -->
+      <section id="section-subs-all" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+            <div>
+              <label class="form-label small mb-1">Status</label>
+              <select id="subsFilterStatus" class="form-select form-select-sm" style="min-width:150px">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="expired">Expired</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label small mb-1">Owner/Email</label>
+              <input id="subsFilterOwner" class="form-control form-control-sm" placeholder="Search owner/email" />
+            </div>
+            <div>
+              <label class="form-label small mb-1">From</label>
+              <input type="date" id="subsFilterFrom" class="form-control form-control-sm" />
+            </div>
+            <div>
+              <label class="form-label small mb-1">To</label>
+              <input type="date" id="subsFilterTo" class="form-control form-control-sm" />
+            </div>
+            <div class="ms-auto d-flex gap-2">
+              <button class="btn btn-outline-secondary btn-sm" id="subsFilterClear">Clear</button>
+              <button class="btn btn-primary btn-sm" id="subsFilterApply">Apply</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr><th>Business</th><th>Owner</th><th>Plan</th><th>Status</th><th>Start</th><th>Renew</th></tr>
+              </thead>
+              <tbody id="subsTable"><tr><td colspan="6" class="text-muted">No data</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
+
+      
+
+      <!-- Subscriptions: Plans & Pricing -->
+      <section id="section-plans" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+              <h5 class="mb-0">Subscription Plans</h5>
+              <button class="btn btn-primary" id="btnNewPlan">
+                <i class="bi bi-plus-lg"></i> Add New Plan
+              </button>
+            </div>
+
+            <div id="plansTableContainer">
+              <div class="table-responsive">
+                <table class="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Price</th>
+                      <th>Billing Cycle</th>
+                      <th>Max Staff</th>
+                      <th>Max Branches</th>
+                      <th>Status</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="plansTable">
+                    <tr><td colspan="7" class="text-muted text-center py-4">Loading plans...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Subscriptions: Feature Catalog & Business Feature Overrides -->
+      <section id="section-features" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <h5 class="mb-0">Feature Catalog</h5>
+          </div>
+          <div class="card border-0 bg-light">
+            <div class="card-body">
+              <div id="featureCatalogList" class="row g-2"></div>
+              <div class="text-muted small mt-2">These are the business-designed features available in the platform. They can be assigned to subscription plans and overridden per business as needed.</div>
+            </div>
+          </div>
+          <hr class="my-4">
+          <div class="d-flex align-items-center mb-2">
+            <h5 class="mb-0">Business Feature Overrides</h5>
+          </div>
+          <div class="card border-0 bg-light">
+            <div class="card-body">
+              <div class="d-flex flex-wrap align-items-end gap-2">
+                <div style="max-width: 260px;">
+                  <label class="form-label small">Business ID</label>
+                  <input id="bizFeatBizId" class="form-control form-control-sm" placeholder="e.g., DEMO-001" />
+                </div>
+                <button id="btnLoadBizFeatures" class="btn btn-outline-secondary btn-sm">Load</button>
+                <button id="btnSaveBizFeatures" class="btn btn-primary btn-sm">Save</button>
+              </div>
+              <div class="row g-2 mt-3" id="bizFeatList"></div>
+              <div class="text-muted small mt-2">If empty, users inherit role defaults and plan mapping. Use overrides to allow only some features (e.g., accounting, stock &amp; sales, reports).</div>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- Plan Editor Page -->
+      <section id="section-plan-editor" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="mb-0">Plan Editor</h5>
+              <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary btn-sm" id="planBackBtn" type="button">Back</button>
+              </div>
+            </div>
+            <form id="planForm" class="row g-3">
+              <input type="hidden" id="plan_id" />
+              <div class="row">
+                <div class="col-md-6"><label class="form-label">Name</label><input id="plan_name" class="form-control" required /></div>
+                <div class="col-md-6"><label class="form-label">Price</label><input id="plan_price" type="number" step="0.01" class="form-control" required /></div>
+              </div>
+              <div class="col-md-6"><label class="form-label">Billing Cycle</label><select id="plan_cycle" class="form-select"><option value="monthly">Monthly</option><option value="termly">Termly</option><option value="annual">Annual</option></select></div>
+              <div class="col-12">
+                <label class="form-label">Features for this plan</label>
+                <div class="row g-2" id="planFeatureList"><div class="text-muted small">Loading features...</div></div>
+                <div class="form-text">Tick to include features in this plan. Catalog-defined features are synced to plan mappings.</div>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Plan Limits</label>
+                <div class="row g-2">
+                  <div class="col-md-4">
+                    <label class="form-label small">Max Staff</label>
+                    <input id="plan_limit_max_staff" type="number" min="0" class="form-control" placeholder="e.g., 10" />
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Max Branches</label>
+                    <input id="plan_limit_max_branches" type="number" min="0" class="form-control" placeholder="e.g., 3" />
+                  </div>
+                </div>
+                <div class="form-text">Limits are applied to businesses subscribed to this plan.</div>
+              </div>
+              <div class="col-12"><label class="form-label">Description</label><textarea id="plan_desc" class="form-control" rows="2"></textarea></div>
+              <div class="col-12 form-check ms-1"><input id="plan_active" type="checkbox" class="form-check-input" checked /><label class="form-check-label">Active</label></div>
+              <div class="col-12 d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="planCancelBtn">Cancel</button>
+                <button class="btn btn-primary btn-sm" type="button" id="planSaveBtn">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Modals: Feature -->
+      <div class="modal" id="featureModal" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header"><h6 class="modal-title">Feature</h6><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+            <div class="modal-body">
+              <form id="featureForm" class="row g-3">
+                <input type="hidden" id="feature_id" />
+                <div class="col-12"><label class="form-label">Name</label><input id="feature_name" class="form-control" required /></div>
+                <div class="col-12"><label class="form-label">Code</label><input id="feature_code" class="form-control" placeholder="Auto if blank" /></div>
+                <div class="col-12"><label class="form-label">Description</label><textarea id="feature_desc" class="form-control" rows="2"></textarea></div>
+                <div class="col-12 form-check ms-1"><input id="feature_active" type="checkbox" class="form-check-input" checked /><label class="form-check-label">Active</label></div>
+              </form>
+            </div>
+            <div class="modal-footer"><button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button><button id="featureSaveBtn" class="btn btn-primary btn-sm">Save</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Subscriptions: My Subscription -->
+      <section id="section-my-subscription" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>My Subscription</h5>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="p-3 border rounded h-100">
+                <div class="small text-muted">Current Plan</div>
+                <div class="fs-5" id="subPlan">—</div>
+                <div class="small text-muted mt-2">Billing cycle</div>
+                <div id="subCycle">—</div>
+                <div class="small text-muted mt-2">Renews on</div>
+                <div id="subRenew">—</div>
+              </div>
+            </div>
+            <div class="col-md-6 d-flex align-items-end gap-2">
+              <button class="btn btn-outline-secondary" id="editPlan">Edit plan</button>
+              <button class="btn btn-primary" id="upgradePlan">Upgrade</button>
+              <button class="btn btn-outline-primary" id="downgradePlan">Downgrade</button>
+            </div>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: Invoices & Payments -->
+      <section id="section-invoices" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Invoices & Payments</h5>
+            <div class="d-flex gap-2">
+              <button class="btn btn-outline-secondary btn-sm" id="emailInvoice">Send via Email</button>
+            </div>
+          </div>
+          <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle"><thead><tr><th>#</th><th>Date</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+              <tbody id="invoiceTable"><tr><td colspan="5" class="text-muted">No invoices</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: Renewal Status -->
+      <section id="section-renewal" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Trial / Renewal Status</h5>
+          <div id="renewalStatus">—</div>
+        </div></div>
+      </section>
+
+      <!-- Subscriptions: Payment Methods -->
+      <section id="section-payment-methods" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Payment Methods</h5>
+          <div id="paymentMethodsList" class="row g-3"></div>
+        </div></div>
+      </section>
+
+      <!-- Businesses List -->
+      <section id="section-businesses" class="section">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h5 class="mb-0">All Businesses</h5>
+              <button class="btn btn-primary btn-sm" id="createBusinessBtn">Create Tenant</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table table-sm align-middle" id="businessesTable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Business ID</th>
+                    <th>Tier</th>
+                    <th>Active</th>
+                    <th>Created</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td colspan="6" class="text-muted">Loading...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Accounting Sections -->
+      <section id="section-accounting-core" class="section" data-feature="accounting">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5>Accounting</h5>
+            <ul class="nav nav-tabs mt-2" id="acctCoreTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-coa-tab" data-bs-toggle="tab" data-bs-target="#tab-coa" type="button" role="tab">Chart of Accounts</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-categories-tab" data-bs-toggle="tab" data-bs-target="#tab-categories" type="button" role="tab">Account Categories</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-entries-tab" data-bs-toggle="tab" data-bs-target="#tab-entries" type="button" role="tab">Register Journal Entries</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-ledgers-tab" data-bs-toggle="tab" data-bs-target="#tab-ledgers" type="button" role="tab">Journal Ledgers</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-tax-tab" data-bs-toggle="tab" data-bs-target="#tab-tax" type="button" role="tab">Tax Management</button>
+              </li>
+            </ul>
+            <div class="tab-content mt-3" id="acctCoreTabsContent">
+              <div class="tab-pane fade show active" id="tab-coa" role="tabpanel" aria-labelledby="tab-coa-tab">
+                <div class="text-muted">Placeholder — chart of accounts table.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-categories" role="tabpanel" aria-labelledby="tab-categories-tab">
+                <div class="text-muted">Placeholder — category accounts management.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-entries" role="tabpanel" aria-labelledby="tab-entries-tab">
+                <div class="text-muted">Placeholder — register journal entries.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-ledgers" role="tabpanel" aria-labelledby="tab-ledgers-tab">
+                <div class="text-muted">Placeholder — journal ledgers view.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-tax" role="tabpanel" aria-labelledby="tab-tax-tab">
+                <div class="text-muted">Placeholder — tax management settings and reports.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="section-accounting-bank-accounts" class="section" data-feature="bank_accounts">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Bank Accounts</h5>
+          <div class="text-muted">Placeholder — configure and list bank accounts here.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-cash-accounts" class="section" data-feature="cash_accounts">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Cash Accounts</h5>
+          <div class="text-muted">Placeholder — manage cash accounts.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-mobile-accounts" class="section" data-feature="mobile_accounts">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Mobile Money Accounts</h5>
+          <div class="text-muted">Placeholder — mobile money accounts setup.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-transactions" class="section" data-feature="transaction_accounts">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5>Transaction Accounts</h5>
+            <ul class="nav nav-tabs mt-2" id="acctTabs" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-bank-tab" data-bs-toggle="tab" data-bs-target="#tab-bank" type="button" role="tab">Bank Accounts</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-cash-tab" data-bs-toggle="tab" data-bs-target="#tab-cash" type="button" role="tab">Cash Accounts</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-mobile-tab" data-bs-toggle="tab" data-bs-target="#tab-mobile" type="button" role="tab">Mobile Money Accounts</button>
+              </li>
+            </ul>
+            <div class="tab-content mt-3" id="acctTabsContent">
+              <div class="tab-pane fade show active" id="tab-bank" role="tabpanel" aria-labelledby="tab-bank-tab">
+                <div class="text-muted">Placeholder — bank accounts list.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-cash" role="tabpanel" aria-labelledby="tab-cash-tab">
+                <div class="text-muted">Placeholder — cash accounts list.</div>
+              </div>
+              <div class="tab-pane fade" id="tab-mobile" role="tabpanel" aria-labelledby="tab-mobile-tab">
+                <div class="text-muted">Placeholder — mobile money accounts list.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="section-accounting-payables" class="section" data-feature="payables">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Payables</h5>
+          <div class="text-muted">Placeholder — supplier payables.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-receivables" class="section" data-feature="receivables">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Receivables</h5>
+          <div class="text-muted">Placeholder — customer receivables.</div>
+        </div></div>
+      </section>
+      <section id="section-accounting-staff-tillsheets" class="section" data-feature="staff_tillsheets">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Staff Till Sheets</h5>
+          <div class="text-muted">Placeholder — staff till sheets management.</div>
+        </div></div>
+      </section>
+
+      <!-- Reports Sections -->
+      <section id="section-reports-balance-sheet" class="section" data-feature="balance_sheet">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Balance Sheet</h5>
+          <div class="text-muted">Placeholder — balance sheet report.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-trial-balance" class="section" data-feature="trial_balance">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Trial Balance</h5>
+          <div class="text-muted">Placeholder — trial balance report.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-cash-flow" class="section" data-feature="cash_flow">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Cash Flow</h5>
+          <div class="text-muted">Placeholder — cash flow statement.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-sales" class="section" data-feature="sales_financial">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Sales Reports</h5>
+          <div class="text-muted">Placeholder — sales analytics and summaries.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-financial" class="section" data-feature="sales_financial">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Financial Reports</h5>
+          <div class="text-muted">Placeholder — financial reporting.</div>
+        </div></div>
+      </section>
+      <section id="section-reports-expenses" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Expense Reports</h5>
+          <div class="text-muted">Placeholder — expense breakdowns.</div>
+        </div></div>
+      </section>
+
+      <!-- Role & Permissions Sections -->
+      <!-- Users Management -->
+      <section id="section-users" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <h5 class="mb-0">Users</h5>
+            <button class="btn btn-primary btn-sm" id="btnNewUser">+ Create User</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Business ID</th><th>Txn Account</th><th>Created</th><th class="text-end">Actions</th></tr></thead>
+              <tbody id="usersTable"><tr><td colspan="7" class="text-muted">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div></div>
+      </section>
+      <section id="section-roles-roles" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Roles</h5>
+          <div class="text-muted">Placeholder — define and manage roles.</div>
+        </div></div>
+      </section>
+      <section id="section-roles-permissions" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Permissions Matrix</h5>
+          <div class="text-muted">Placeholder — map permissions to roles.</div>
+        </div></div>
+      </section>
+      <section id="section-roles-audit" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Audit Logs</h5>
+          <div class="text-muted">Placeholder — record and view audit trails.</div>
+        </div></div>
+      </section>
+
+      <!-- System Settings Sections -->
+      <section id="section-settings-shop" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Shop Settings</h5>
+          <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label small">Business</label>
+              <select id="shopBizSelect" class="form-select"></select>
+            </div>
+            <div class="col-md-6 d-flex gap-2">
+              <button id="shopLoad" class="btn btn-outline-secondary btn-sm">Load</button>
+              <button id="shopSave" class="btn btn-primary btn-sm">Save</button>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Start Date</label>
+              <input type="date" id="shopStartDate" class="form-control" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">End Date</label>
+              <input type="date" id="shopEndDate" class="form-control" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Logo URL</label>
+              <input type="url" id="shopLogoUrl" class="form-control" placeholder="https://..." />
+            </div>
+          </div>
+        </div></div>
+      </section>
+      <section id="section-settings-fiscal" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Fiscal Year Settings</h5>
+          <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label small">Business</label>
+              <select id="fiscalBizSelect" class="form-select"></select>
+            </div>
+            <div class="col-md-6 d-flex gap-2">
+              <button id="fiscalLoad" class="btn btn-outline-secondary btn-sm">Load</button>
+              <button id="fiscalSave" class="btn btn-primary btn-sm">Save</button>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Fiscal Year Start</label>
+              <input type="date" id="fiscalStart" class="form-control" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Fiscal Year End</label>
+              <input type="date" id="fiscalEnd" class="form-control" />
+            </div>
+          </div>
+        </div></div>
+      </section>
+      <section id="section-settings-currencies" class="section">
+        <div class="card shadow-sm"><div class="card-body">
+          <h5>Currencies</h5>
+          <div class="text-muted">Placeholder — currency list and defaults.</div>
+        </div></div>
+      </section>
+
+    </main>
+  </div>
+  
+  <!-- Floating Action Button for quick Create -->
+  <button id="fabCreate" class="btn btn-primary fab d-none" title="Create Tenant">Create Tenant</button>
+
+  <!-- Bootstrap JS Bundle (for modals, dropdowns, etc.) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Runtime config (API URL, etc.) -->
+  <script src="config.js"></script>
+  
+  <!-- App core and modules -->
+  <script src="js/main.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/i18n.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/acl.js"></script>
+  <script src="js/branding.js"></script>
+  <script src="js/feature-gate.js"></script>
+  <!-- Modular admin scripts -->
+  <script src="js/admin/features.js"></script>
+  <script src="js/admin/plans.js"></script>
+  <script src="js/admin/settings.js"></script>
+  <script src="js/admin/businesses.js"></script>
+  <script src="js/admin/subscriptions.js"></script>
+  <script src="js/admin/users.js"></script>
+  <script src="js/admin/billing.js"></script>
+  <script src="js/admin/dashboard.js"></script>
+  <script src="js/ui/table.js"></script>
+  <script src="js/admin/accounting.js"></script>
+  <script src="js/admin/stock.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

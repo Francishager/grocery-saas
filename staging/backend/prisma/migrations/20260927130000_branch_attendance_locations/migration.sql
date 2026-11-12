@@ -1,0 +1,5 @@
+ALTER TABLE "branches" ADD COLUMN IF NOT EXISTS "attendanceUseBusinessLocation" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "branches" ADD COLUMN IF NOT EXISTS "attendanceLatitude" DOUBLE PRECISION;
+ALTER TABLE "branches" ADD COLUMN IF NOT EXISTS "attendanceLongitude" DOUBLE PRECISION;
+ALTER TABLE "branches" ADD COLUMN IF NOT EXISTS "attendanceRadiusMeters" INTEGER NOT NULL DEFAULT 200;
+ALTER TABLE "attendance_records" ADD COLUMN IF NOT EXISTS "branchId" TEXT;

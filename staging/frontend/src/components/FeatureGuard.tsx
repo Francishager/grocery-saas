@@ -1,0 +1,168 @@
+import { ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { Lock, ArrowUpRight, MessageSquare, FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useFeatureAccess } from "@/services/featureAccessService";
+import { useJWTAuth } from "@/contexts/JWTAuthContext";
+import { SupportContactLinks } from "@/components/SupportContactLinks";
+
+interface FeatureGuardProps {
+  feature: string | string[];
+  permission?: string | string[];
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+/**
+ * Wraps a page or component and only renders children if the feature is enabled.
+ * Otherwise shows an UpgradePlan UI.
+ * Features are strictly enforced — no offline bypass.
+ */
+export function FeatureGuard({
+  feature,
+  permission,
+  children,
+  fallback,
+}: FeatureGuardProps) {
+  const { hasFeature, hasAnyFeature, loading, error, retryFeatureLoad, features } = useFeatureAccess();
+  const { hasPermission, user } = useJWTAuth();
+  const featureEnabled = Array.isArray(feature)
+    ? hasAnyFeature(feature)
+    : hasFeature(feature);
+  const requiredPermissions = Array.isArray(permission)
+    ? permission
+    : permission
+      ? [permission]
+      : [];
+  const hasRequiredPermission =
+    requiredPermissions.length === 0 ||
+    requiredPermissions.some((perm) => hasPermission(perm));
+  const isOwner = user?.role === "owner" || user?.role === "saas_admin";
+
+  // Only show loading on first load when we have no cached features yet
+  if (loading && Object.keys(features).length === 0) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <div className="text-muted-foreground">Loading plan features…</div>
+      </div>
+    );
+  }
+
+  if (error && Object.keys(features).length === 0) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <CardTitle className="text-xl">Feature access temporarily unavailable</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              JibuSales could not verify this business’s enabled features. Your plan has not been changed.
+            </p>
+            <Button className="w-full" onClick={() => void retryFeatureLoad()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!featureEnabled) {
+    if (fallback) return <>{fallback}</>;
+    return <UpgradePlan feature={feature} />;
+  }
+
+  if (permission && !hasRequiredPermission && !isOwner) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <Card className="max-w-md text-center">
+          <CardHeader>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+              <Lock className="h-8 w-8 text-amber-600" />
+            </div>
+            <CardTitle className="text-xl">Permission Required</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              You do not have permission to access this page. Contact your
+              administrator.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+/**
+ * Upgrade plan screen shown when a feature is not available.
+ */
+export function UpgradePlan({ feature }: { feature: string | string[] }) {
+  const navigate = useNavigate();
+  const featureLabel = (Array.isArray(feature) ? feature[0] || "" : feature)
+    .split(".")
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(" → ");
+
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center p-6">
+      <Card className="max-w-md text-center">
+        <CardHeader>
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+            <Lock className="h-8 w-8 text-amber-600" />
+          </div>
+          <CardTitle className="text-xl">Feature Not Available</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{featureLabel}</span>{" "}
+            is not available on your current subscription plan.
+          </p>
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              onClick={() => navigate("/tenant/settings")}
+              className="w-full"
+            >
+              <ArrowUpRight className="mr-2 h-4 w-4" />
+              Upgrade Plan
+            </Button>
+            <SupportContactLinks className="flex-col [&>a]:w-full" message={`Hello JibuSales Support Team, I would like help accessing ${featureLabel} for my business.`} />
+            <Button
+              variant="ghost"
+              className="w-full"
+              onClick={() => window.open(`https://wa.me/256788216271?text=${encodeURIComponent("Hello JibuSales Support Team, I would like to request a custom plan for my business.")}`, "_blank", "noopener,noreferrer")}
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Request Custom Plan
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Conditionally render children only if feature is enabled.
+ * Renders nothing (null) if the feature is disabled — useful for hiding buttons.
+ */
+export function FeatureGate({
+  feature,
+  children,
+  fallback = null,
+}: {
+  feature: string;
+  children: ReactNode;
+  fallback?: ReactNode;
+}) {
+  const { hasFeature } = useFeatureAccess();
+  const allowed = hasFeature(feature);
+  if (allowed) return <>{children}</>;
+  return <>{fallback}</>;
+}
+
+export default FeatureGuard;

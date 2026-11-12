@@ -1,6 +1,6 @@
 import express from 'express'
 import { randomUUID } from 'node:crypto'
-import { PrismaClient } from '@prisma/client'
+import prisma from '../src/db.js'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireFeature, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
@@ -30,7 +30,6 @@ import {
 } from '../src/utils/customerBalance.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 const salesView = createReceivableSalesView(prisma)
 
 const toMoney = (value, fallback = 0) => {

@@ -1,0 +1,3244 @@
+import express from 'express'
+import { randomUUID } from 'node:crypto'
+import prisma from '../src/db.js'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
+import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireFeature, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, tenantIdFromUser } from '../src/utils/branchAccess.js'
+import { checkUsageLimit } from '../src/utils/usageLimits.js'
+import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
+import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
+import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
+import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
+import { allocateCustomerReceipt, allocateCustomerReceiptToRentals } from '../src/utils/customerReceiptAllocation.js'
+import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
+import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
+import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
+import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
+import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
+import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
+import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
+import { ensureRentalAccounting, ensureRentalCashLedgerAccount, postRentalJournal, rentalReceiptLines } from '../src/services/rentalAccountingService.js'
+import { applyAvailableCustomerCredit, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
+import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
+import { allocatePharmacySaleBatches } from '../src/services/pharmacyBatchService.js'
+import {
+  attachCustomerReceivableBalances,
+  calculateCustomerReceivableBalance,
+  reconcileCustomerReceivableBalance,
+  effectiveCreditNoteRows
+} from '../src/utils/customerBalance.js'
+
+const router = express.Router()
+const salesView = createReceivableSalesView(prisma)
+
+const toMoney = (value, fallback = 0) => {
+  const num = Number(value)
+  return Number.isFinite(num) ? Math.round(num * 100) / 100 : fallback
+}
+async function trustModuleScope(scope, features = null) {
+  const enabled = features || await getTenantFeatures(scope.tenantId)
+  return {
+    ...scope,
+    includePropertyManagement: hasFeatureAccess(enabled, 'property_management.landlord') || hasFeatureAccess(enabled, 'property_management.agent'),
+    includeRentals: hasFeatureAccess(enabled, 'rentals'),
+  }
+}
+
+let plotSaleHistorySchemaWarningLogged = false
+async function optionalPlotSaleRows(query) {
+  try { return await query() }
+  catch (error) {
+    const detail = `${error?.message || ''} ${error?.meta?.table || ''} ${error?.meta?.column || ''}`.toLowerCase()
+    const isMissingPlotSaleSchema = ['P2021', 'P2022', '42P01', '42703'].includes(error?.code)
+      && /property_sales|property_sale_payments|property_sale_installments/.test(detail)
+    if (!isMissingPlotSaleSchema) throw error
+    if (!plotSaleHistorySchemaWarningLogged) {
+      console.warn('Plot-sale history tables are not migrated yet; omitting plot-sale history until migration deployment.')
+      plotSaleHistorySchemaWarningLogged = true
+    }
+    return []
+  }
+}
+
+const receivablePaymentFingerprint = (saleId, salePaid, linkedPayments) =>
+  `${saleId}:${toMoney(salePaid).toFixed(2)}:${toMoney(linkedPayments).toFixed(2)}`
+
+async function applyLinkedServiceRevenueSplit(client, scope, saleItems, productsById) {
+  const productIds = saleItems
+    .filter((item) => productsById.get(item.productId)?.itemType !== 'service')
+    .map((item) => item.productId)
+  const links = productIds.length
+    ? await client.productServiceLink.findMany({
+        where: { tenantId: scope.tenantId, productId: { in: [...new Set(productIds)] } },
+        include: { serviceProduct: { select: { id: true, price: true, isActive: true, branchId: true } } }
+      })
+    : []
+
+  for (const item of saleItems) {
+    const product = productsById.get(item.productId)
+    const lineTotal = toMoney(item.total)
+    if (product?.itemType === 'service') {
+      item.productRevenue = 0
+      item.serviceRevenue = lineTotal
+      continue
+    }
+
+    const linkedServices = links.filter((link) =>
+      link.productId === item.productId &&
+      link.serviceProduct?.isActive !== false &&
+      (!link.serviceProduct?.branchId || !scope.branchId || link.serviceProduct.branchId === scope.branchId)
+    )
+    const requestedServiceRevenue = toMoney(linkedServices.reduce((sum, link) => sum + toMoney(link.serviceProduct?.price) * Number(item.quantity || 0), 0))
+    const productCost = toMoney(Number(item.cost || 0) * Number(item.quantity || 0))
+    const serviceRevenue = toMoney(Math.min(requestedServiceRevenue, Math.max(0, lineTotal - productCost)))
+    item.serviceRevenue = serviceRevenue
+    item.productRevenue = toMoney(lineTotal - serviceRevenue)
+  }
+}
+
+const cashAccountMatchesPaymentMethod = (cashAccount, paymentMethod) => {
+  const type = String(cashAccount?.type || '').toLowerCase()
+  if (paymentMethod === 'cash') return type === 'cash' || type === 'safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque' || paymentMethod === 'bank') return type === 'bank'
+  if (paymentMethod === 'mobile_money') return type === 'mobile_money'
+  if (paymentMethod === 'card') return type === 'card'
+  return false
+}
+
+async function resolveReceiptCashAccount(client, scope, req, paymentMethod, cashAccountId = null, actionLabel = 'payments') {
+  if (cashAccountId) {
+    const account = await client.cashAccount.findFirst({
+      where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true }
+    })
+    if (!account) {
+      throw Object.assign(new Error('Invalid or inactive cash account'), { statusCode: 400 })
+    }
+    if (!canUseTransactionAccountForPayment(req, account, paymentMethod)) {
+      throw Object.assign(new Error(`You do not have permission to use ${paymentMethod} ${actionLabel} from this account`), { statusCode: 403 })
+    }
+    if (!cashAccountMatchesPaymentMethod(account, paymentMethod)) {
+      throw Object.assign(new Error(`Selected account cannot be used for ${paymentMethod} ${actionLabel}`), { statusCode: 400 })
+    }
+    return account
+  }
+
+  if (req.userCashAccountId) {
+    const account = await client.cashAccount.findFirst({
+      where: { id: req.userCashAccountId, tenantId: scope.tenantId, isActive: true }
+    })
+    if (
+      account &&
+      cashAccountMatchesPaymentMethod(account, paymentMethod) &&
+      canUseTransactionAccountForPayment(req, account, paymentMethod)
+    ) {
+      return account
+    }
+  }
+
+  throw Object.assign(
+    new Error(`Select an existing ${paymentMethodAccountLabel(paymentMethod)} account for ${paymentMethod} ${actionLabel}. Create it first in Transaction Accounts if it does not exist.`),
+    { statusCode: 400, code: 'PAYMENT_ACCOUNT_REQUIRED' }
+  )
+}
+
+const paymentMethodAccountLabel = (paymentMethod) => {
+  if (paymentMethod === 'cash') return 'cash or safe'
+  if (paymentMethod === 'bank_transfer' || paymentMethod === 'cheque' || paymentMethod === 'bank') return 'bank'
+  if (paymentMethod === 'mobile_money') return 'mobile money'
+  if (paymentMethod === 'card') return 'card'
+  return 'matching'
+}
+
+const openingBalanceRoles = new Set(['owner', 'admin', 'saas_admin', 'platform_admin', 'super_admin'])
+
+const customerHistoryCounts = {
+  sales: true,
+  payments: true,
+  paymentAllocations: true,
+  creditApplications: true,
+  receivableReconciliationReviews: true,
+  withdrawals: true,
+  invoices: true,
+  rentals: true,
+  saleReturns: true,
+  reservations: true,
+  deliveries: true,
+  restaurantOrders: true,
+  appointments: true,
+  workOrders: true,
+  serviceContracts: true,
+  serviceFeedback: true,
+  fuelCards: true,
+  propertyTenancies: true,
+  procurementSellerInvoices: true,
+  creditNotes: true,
+}
+
+const customerHistoryCount = (counts = {}) => Object.values(counts).reduce((sum, count) => sum + Number(count || 0), 0)
+
+const customerHasNoBalanceOrHistory = (customer) => (
+  Math.abs(toMoney(customer.balance)) < 0.005 &&
+  Math.abs(toMoney(customer.openingBalance)) < 0.005 &&
+  customerHistoryCount(customer._count) === 0 &&
+  !customer.procurementCounterpartyLink
+)
+
+const canManageOpeningBalance = (req) => (
+  openingBalanceRoles.has(req.user?.role) ||
+  req.user?.isPlatformUser ||
+  (req.user?.permissions || []).includes('*')
+)
+
+const hasOpeningBalanceInput = (body) => (
+  Object.prototype.hasOwnProperty.call(body, 'openingBalance') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceDate') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceNote')
+)
+
+const parseOpeningBalanceDate = (value, openingBalance) => {
+  if (!value) return openingBalance > 0 ? new Date() : null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+const paymentStatusFor = (total, amountPaid) => {
+  if (amountPaid >= total) return 'paid'
+  if (amountPaid > 0) return 'partial'
+  return 'unpaid'
+}
+
+const validateOptionalCustomerCreditLimit = (creditLimit) => {
+  const rawAmount = creditLimit === undefined || creditLimit === null || creditLimit === '' ? 0 : Number(creditLimit)
+  const amount = toMoney(rawAmount, 0)
+  if (!Number.isFinite(rawAmount) || amount < 0) {
+    return { valid: false, amount, message: 'Customer credit limit cannot be negative.' }
+  }
+  return { valid: true, amount }
+}
+
+const canManageCustomerCreditLimit = (req, action) =>
+  req.user?.role === 'owner' ||
+  req.user?.role === 'saas_admin' ||
+  req.user?.permissions?.includes('*') ||
+  req.user?.permissions?.includes(action) ||
+  req.userPermissions?.[action] === true ||
+  req.userPermissions?.canManageCustomerCreditLimit === true
+
+async function getTenantCustomerProfileAccess(req, tenantId) {
+  const access = customerProfileAccess(req.user?.permissions)
+  const features = await getTenantFeatures(tenantId)
+  if (!hasFeatureAccess(features, 'customers.credit_limits')) access.creditLimit = false
+  return access
+}
+
+const userSelect = { select: { id: true, fname: true, lname: true } }
+
+const withUser = (record) => {
+  if (!record) return record
+  const { User, ...rest } = record
+  return { ...rest, user: User || record.user || null }
+}
+
+const userName = (user) => [user?.fname, user?.lname].filter(Boolean).join(' ') || 'Staff'
+
+const sortLedgerRows = (rows) => rows.sort((a, b) => {
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+  const aTime = a.date ? new Date(a.date).getTime() : 0
+  const bTime = b.date ? new Date(b.date).getTime() : 0
+  if (aTime !== bTime) return aTime - bTime
+  return String(a.reference || a.id).localeCompare(String(b.reference || b.id))
+})
+
+// === CUSTOMERS ===
+
+// Get all customers for tenant
+router.get('/customers', authenticateToken, requirePermission('canViewCustomer'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { page = 1, limit = 50, search, status } = req.query
+    // Reports and customer selectors in deployed clients request up to 10,000 rows.
+    if (!Number.isSafeInteger(Number(page)) || Number(page) < 1 || !Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 10000) {
+      return res.status(400).json({ error: 'Page must be a positive integer and page size must be between 1 and 10000.' })
+    }
+    const skip = (Number(page) - 1) * Number(limit)
+    if (!Number.isSafeInteger(skip) || skip > 2147483647) {
+      return res.status(400).json({ error: 'Requested page is out of range.' })
+    }
+
+    const where = scopedWhere(scope, {
+      ...(status && status !== 'all' && { status }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          ...(req.userPermissions?.canViewCustomerPhone === true || req.user?.permissions?.includes('canViewCustomerPhone') ? [{ phone: { contains: search, mode: 'insensitive' } }] : []),
+          { email: { contains: search, mode: 'insensitive' } }
+        ]
+      })
+    })
+
+    const [customersRaw, total] = await Promise.all([
+      prisma.customer.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        include: {
+          _count: { select: customerHistoryCounts },
+          procurementCounterpartyLink: { select: { id: true } },
+        },
+      }),
+      prisma.customer.count({ where })
+    ])
+    const enrichmentWarnings = []
+    let balancedCustomers = customersRaw
+    try {
+      balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
+    } catch (error) {
+      console.error('Customer balance enrichment failed:', error)
+      enrichmentWarnings.push('Some balances could not be refreshed; showing the last saved customer balances.')
+    }
+    let scoredCustomers = balancedCustomers
+    try {
+      scoredCustomers = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), balancedCustomers)
+    } catch (error) {
+      console.error('Customer repayment score enrichment failed:', error)
+      enrichmentWarnings.push('Repayment scores could not be refreshed.')
+    }
+    const profileAccess = await getTenantCustomerProfileAccess(req, scope.tenantId)
+    const tenantFeatures = await getTenantFeatures(scope.tenantId)
+    const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord') || hasFeatureAccess(tenantFeatures, 'property_management.agent')
+    const propertyAddresses = new Map()
+    if (propertyManagementEnabled && profileAccess.address && scoredCustomers.length) {
+      try {
+        const activeTenancies = await prisma.propertyTenancy.findMany({
+          where: { tenantId: scope.tenantId, customerId: { in: scoredCustomers.map(customer => customer.id) }, status: 'active' },
+          select: { customerId: true, unit: { select: { unitCode: true, property: { select: { name: true, address: true, city: true } } } } },
+          orderBy: { createdAt: 'desc' },
+        })
+        for (const tenancy of activeTenancies) {
+          if (!tenancy.customerId) continue
+          const property = tenancy.unit.property
+          const location = [property.address, property.city].filter(Boolean).join(', ')
+          const entry = [property.name, `Unit ${tenancy.unit.unitCode}`, location].filter(Boolean).join(' · ')
+          const existing = propertyAddresses.get(tenancy.customerId) || []
+          if (!existing.includes(entry)) propertyAddresses.set(tenancy.customerId, [...existing, entry])
+        }
+      } catch (error) {
+        console.error('Tenant property address enrichment failed:', error)
+        enrichmentWarnings.push('Some tenant property locations could not be refreshed.')
+      }
+    }
+    let rentalBalances = new Map()
+    let rentalIntegrationEnabled = false
+    const canReadRentalBalances = profileAccess.balance && (req.user?.permissions || []).includes('canViewPropertyStatements')
+    if (canReadRentalBalances && scoredCustomers.length) {
+      try {
+        if (propertyManagementEnabled) {
+          rentalIntegrationEnabled = true
+          const rentals = await prisma.propertyTenancy.findMany({
+            where: { tenantId: scope.tenantId, customerId: { in: scoredCustomers.map(customer => customer.id) } },
+            select: { customerId: true, charges: { where: { status: { in: ['unpaid', 'partial', 'overdue'] } }, select: { amount: true, amountPaid: true } } },
+          })
+          for (const tenancy of rentals) {
+            if (!tenancy.customerId) continue
+            const outstanding = tenancy.charges.reduce((sum, charge) => sum + Math.max(0, Number(charge.amount) - Number(charge.amountPaid)), 0)
+            rentalBalances.set(tenancy.customerId, Math.round(((rentalBalances.get(tenancy.customerId) || 0) + outstanding) * 100) / 100)
+          }
+        }
+      } catch (error) {
+        console.error('Rental customer balance enrichment failed:', error)
+        enrichmentWarnings.push('Rental balances could not be refreshed.')
+      }
+    }
+    const customers = scoredCustomers.map((customer) => {
+      const canDelete = customerHasNoBalanceOrHistory(customer)
+      const { _count, procurementCounterpartyLink, ...publicCustomer } = customer
+      const propertyAddress = propertyAddresses.get(customer.id)?.join('; ')
+      return { ...customerProfilePayload({ ...publicCustomer, ...(propertyAddress ? { address: propertyAddress } : {}), ...(rentalIntegrationEnabled ? { rentalBalance: rentalBalances.get(customer.id) || 0 } : {}) }, profileAccess), canDelete }
+    })
+
+    res.json({
+      customers,
+      ...(enrichmentWarnings.length ? { warnings: enrichmentWarnings } : {}),
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit))
+      }
+    })
+  } catch (error) {
+    console.error('Get customers error:', error)
+    handleBranchError(res, error, 'Failed to fetch customers')
+  }
+})
+
+router.delete('/customers/:id', authenticateToken, requirePermission('canDeleteCustomer'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    await prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.findFirst({
+        where: scopedWhere(scope, { id }),
+        include: {
+          _count: { select: customerHistoryCounts },
+          procurementCounterpartyLink: { select: { id: true } },
+        },
+      })
+
+      if (!customer) throw Object.assign(new Error('Customer not found'), { statusCode: 404 })
+      if (!customerHasNoBalanceOrHistory(customer)) {
+        throw Object.assign(new Error('This customer cannot be deleted because they have a balance or transaction history.'), { statusCode: 409 })
+      }
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: scope.tenantId,
+          userId: req.user.id,
+          userEmail: req.user.email || '',
+          branchId: customer.branchId || null,
+          action: 'delete',
+          model: 'Customer',
+          recordId: customer.id,
+          changes: { data: { name: customer.name, reason: 'No balance or linked history' } },
+          ip: req.ip || req.connection?.remoteAddress || null,
+        },
+      })
+      await tx.customer.delete({ where: { id: customer.id } })
+    }, { isolationLevel: 'Serializable' })
+
+    res.json({ message: 'Customer deleted successfully' })
+  } catch (error) {
+    if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    if (error?.code === 'P2003' || error?.code === 'P2034') {
+      return res.status(409).json({ error: 'Customer activity was recorded while deleting. Refresh the list and try again.' })
+    }
+    console.error('Delete customer error:', error)
+    handleBranchError(res, error, 'Failed to delete customer')
+  }
+})
+
+// Get one customer's active credit position with outstanding goods/items
+router.get('/customers/:id/credit-info', authenticateToken, requirePermission('canViewCustomer'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
+
+    const customer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id }),
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        address: true,
+        creditLimit: true,
+        balance: true,
+        openingBalance: true,
+        openingBalanceDate: true,
+        openingBalanceNote: true,
+        status: true
+      }
+    })
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
+      access.sales ? salesView.findMany({
+        where: scopedWhere(scope, {
+          customerId: id,
+          balance: { gt: 0 },
+          status: { not: 'cancelled' }
+        }),
+        include: {
+          items: {
+            include: {
+              product: { select: { id: true, name: true, itemType: true, baseUnit: true } }
+            }
+          },
+          User: { select: { id: true, fname: true, lname: true } },
+          branch: { select: { id: true, name: true } },
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' }
+      }) : Promise.resolve([]),
+      access.payments ? prisma.customerPayment.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          sale: { select: { id: true, receiptNo: true } },
+          branch: { select: { id: true, name: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      }) : Promise.resolve([]),
+      access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
+    ])
+    const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
+    const trustScore = await getRepaymentTrustScore(prisma, await trustModuleScope(scope), reconciledCustomer)
+
+    const outstandingItems = access.sales ? outstandingSales.flatMap((sale) => sale.fuelSale ? [{
+        id: sale.fuelSale.id,
+        saleId: sale.id,
+        receiptNo: sale.receiptNo,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        productName: `${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}`,
+        itemType: 'fuel',
+        quantity: sale.fuelSale.litres,
+        unitName: 'L',
+        unitPrice: sale.fuelSale.unitPrice,
+        total: sale.total,
+        saleTotal: sale.total,
+        ...(access.balance && { amountPaid: sale.amountPaid, saleBalance: sale.balance, paymentStatus: sale.paymentStatus }),
+        staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
+        branch: sale.branch?.name || '',
+      }] : sale.items.map((item) => ({
+        id: item.id,
+        saleId: sale.id,
+        receiptNo: sale.receiptNo,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        productId: item.productId,
+        productName: item.product?.name || 'Item',
+        itemType: item.product?.itemType || 'product',
+        quantity: item.quantity,
+        unitName: item.unitName || item.product?.baseUnit || '',
+        unitPrice: item.price,
+        discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+        total: item.total,
+        saleTotal: sale.total,
+        ...(access.balance && { amountPaid: sale.amountPaid, saleBalance: sale.balance, paymentStatus: sale.paymentStatus }),
+        staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
+        branch: sale.branch?.name || ''
+      }))
+    ) : []
+
+    res.json({
+      customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
+      summary: {
+        ...(access.creditLimit && { creditLimit: toMoney(customer.creditLimit) }),
+        ...(access.balance && {
+          balance: toMoney(reconciledCustomer.balance),
+          trustScore,
+          openingBalance: toMoney(customer.openingBalance),
+        }),
+        ...(access.balance && {
+          outstandingSalesCount: outstandingSales.length,
+          outstandingItemsCount: outstandingItems.length,
+          overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
+          oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null,
+        }),
+      },
+      outstandingSales: access.sales ? outstandingSales.map((sale) => ({
+        id: sale.id,
+        receiptNo: sale.receiptNo,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        total: sale.total,
+        ...(access.balance && { amountPaid: sale.amountPaid, balance: sale.balance, paymentStatus: sale.paymentStatus }),
+        paymentMethod: sale.paymentMethod,
+        staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(' ') || 'Staff',
+        branch: sale.branch?.name || '',
+          items: sale.fuelSale ? [{
+            id: sale.fuelSale.id,
+            productName: `${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}`,
+            itemType: 'fuel',
+            quantity: sale.fuelSale.litres,
+            unitName: 'L',
+            unitPrice: sale.fuelSale.unitPrice,
+            total: sale.total,
+          }] : sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || item.product?.baseUnit || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total
+        }))
+      })) : [],
+      outstandingItems,
+      recentPayments: access.payments ? recentPayments.map((payment) => ({
+        id: payment.id,
+        saleId: payment.saleId,
+        receiptNo: payment.sale?.receiptNo || '',
+        date: payment.createdAt,
+        amount: payment.amount,
+        paymentMethod: payment.paymentMethod,
+        reference: customerPaymentDisplayReference(payment),
+        notes: payment.notes || '',
+        branch: payment.branch?.name || ''
+      })) : []
+    })
+  } catch (error) {
+    console.error('Customer credit info error:', error)
+    handleBranchError(res, error, 'Failed to fetch customer credit information')
+  }
+})
+
+// Get one customer's transaction history without requiring the statement report screen
+router.get('/customers/:id/history', authenticateToken, requirePermission('canViewCustomer'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
+    const tenantFeatures = await getTenantFeatures(scope.tenantId)
+    const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord')
+      || hasFeatureAccess(tenantFeatures, 'property_management.agent')
+    const rentalFeatureEnabled = hasFeatureAccess(tenantFeatures, 'rentals')
+    const limit = Math.min(Math.max(Number(req.query.limit || 250), 25), 1000)
+
+    const customer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id }),
+      include: { branch: { select: { id: true, name: true } } }
+    })
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const customerNameFilter = customer.name
+      ? { customerName: { equals: customer.name, mode: 'insensitive' } }
+      : { id: '__no_matching_customer_name__' }
+    const unavailableActivitySections = []
+    const loadOptionalActivity = async (section, load) => {
+      try {
+        return await load()
+      } catch (error) {
+        if (!['P2021', 'P2022', '42P01', '42703'].includes(error?.code)) throw error
+        unavailableActivitySections.push(section)
+        console.error('Customer profile optional activity unavailable:', { section, code: error?.code, message: error?.message })
+        return []
+      }
+    }
+
+    const [receivableSales, payments, withdrawals, posSales, creditNotes, saleReturns, invoices, rentals, restaurantOrders, reservations, deliveries, appointments, workOrders, serviceContracts, balanceSnapshot] = await Promise.all([
+      access.sales ? prisma.saleRecord.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          User: userSelect,
+          creditApplications: { select: { id: true, sourceType: true, sourceId: true, amount: true, createdAt: true } },
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } },
+          items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }) : Promise.resolve([]),
+      access.payments ? prisma.customerPayment.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          sale: {
+            select: {
+              id: true,
+              receiptNo: true,
+              ...(access.sales && { items: {
+                select: {
+                  id: true,
+                  productId: true,
+                  quantity: true,
+                  unitName: true,
+                  price: true,
+                  discount: true,
+                  cashDiscount: true,
+                  total: true,
+                  product: { select: { name: true, sku: true, itemType: true } },
+                },
+              } }),
+            },
+          },
+          allocations: {
+            where: { targetType: 'rental' },
+            select: { amount: true, rental: { select: { rentalNo: true, historicalReference: true } } },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }) : Promise.resolve([]),
+      access.withdrawals ? prisma.customerWithdrawal.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          cashAccount: { select: { id: true, name: true, type: true } },
+          user: userSelect
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }) : Promise.resolve([]),
+      access.sales ? prisma.sale.findMany({
+        where: scopedWhere(scope, customerNameFilter),
+        include: {
+          branch: { select: { id: true, name: true } },
+          user: userSelect,
+          items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }) : Promise.resolve([]),
+      access.creditNotes ? prisma.creditNote.findMany({
+        where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          sale: { select: { id: true, receiptNo: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }) : Promise.resolve([]),
+      access.returns ? prisma.saleReturn.findMany({
+        where: scopedWhere(scope, { customerId: id, status: 'completed' }),
+        include: {
+          branch: { select: { id: true, name: true } },
+          user: userSelect,
+          sale: { select: { id: true, receiptNo: true } },
+          items: { include: { product: { select: { id: true, name: true, sku: true, itemType: true } } } }
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit
+      }) : Promise.resolve([]),
+      access.sales ? prisma.invoice.findMany({
+        where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }),
+        include: { branch: { select: { id: true, name: true } } },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      }) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('rentals', () => prisma.rental.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          User: userSelect,
+          items: { include: { product: { select: { name: true, sku: true } } } },
+          chargeLines: true,
+          payments: { where: { status: { in: ['posted', 'historical'] } }, include: { user: userSelect }, orderBy: { paymentDate: 'asc' } },
+          ...((req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes('canViewRentalCreditNotes'))
+            ? { creditNotes: { where: { status: 'issued' }, include: { payments: { where: { kind: 'rental_credit_refund', status: 'posted' }, include: { user: userSelect } }, user: userSelect }, orderBy: { createdAt: 'asc' } } }
+            : { creditNotes: { where: { status: 'issued' }, select: { amount: true, refundDue: true, refundedAmount: true }, orderBy: { createdAt: 'asc' } } }),
+        },
+        orderBy: { hireDate: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('restaurant orders', () => prisma.restaurantOrder.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          user: userSelect,
+          table: { select: { name: true } },
+          items: { include: { product: { select: { name: true } } } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('reservations', () => prisma.reservation.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: { branch: { select: { name: true } }, table: { select: { name: true } } },
+        orderBy: { date: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('deliveries', () => prisma.delivery.findMany({
+        where: {
+          tenantId: scope.tenantId,
+          customerId: id,
+          ...(scope.branchId ? { order: { is: { branchId: scope.branchId } } } : {}),
+        },
+        include: { order: { select: { orderNo: true, branch: { select: { name: true } } } } },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('appointments', () => prisma.appointment.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          product: { select: { name: true } },
+          technician: { select: { fname: true, lname: true } },
+        },
+        orderBy: { scheduledDate: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('work orders', () => prisma.workOrder.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: {
+          branch: { select: { name: true } },
+          product: { select: { name: true } },
+          technician: { select: { fname: true, lname: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.businessActivity ? loadOptionalActivity('service contracts', () => prisma.serviceContract.findMany({
+        where: scopedWhere(scope, { customerId: id }),
+        include: { branch: { select: { name: true } } },
+        orderBy: { startDate: 'asc' },
+        take: limit,
+      })) : Promise.resolve([]),
+      access.balance ? calculateCustomerReceivableBalance(prisma, scope, id) : Promise.resolve(null)
+    ])
+    const [propertySales, propertySalePayments] = propertyManagementEnabled && (access.sales || access.payments) ? await Promise.all([
+      access.sales ? optionalPlotSaleRows(() => prisma.propertySale.findMany({
+        where: { tenantId: scope.tenantId, buyerId: id },
+        include: {
+          property: { select: { name: true, address: true, owner: { select: { name: true } } } },
+          unit: { select: { unitCode: true, currency: true } },
+          owner: { select: { name: true } },
+          createdBy: { select: { id: true, fname: true, lname: true } },
+          installments: { orderBy: { sequence: 'asc' } },
+        },
+        orderBy: { saleDate: 'asc' }, take: limit,
+      })) : Promise.resolve([]),
+      access.payments ? optionalPlotSaleRows(() => prisma.propertySalePayment.findMany({
+        where: { tenantId: scope.tenantId, sale: { buyerId: id } },
+        include: { sale: { include: { property: { select: { name: true } }, unit: { select: { unitCode: true, currency: true } } } }, cashAccount: { select: { name: true } } },
+        orderBy: { paymentDate: 'asc' }, take: limit,
+      })) : Promise.resolve([]),
+    ]) : [[], []]
+    const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
+    const trustScore = await getRepaymentTrustScore(prisma, await trustModuleScope(scope, tenantFeatures), reconciledCustomer)
+    const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+    const canViewTrustScore = access.balance
+      || (propertyManagementEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewPropertyStatements') || req.userPermissions?.canViewPropertyStatements === true))
+      || (rentalFeatureEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewRental') || req.userPermissions?.canViewRental === true))
+    let tenantPropertyAddress = null
+    if (propertyManagementEnabled && access.address) {
+      try {
+        const activeTenancies = await prisma.propertyTenancy.findMany({
+          where: { tenantId: scope.tenantId, customerId: id, status: 'active' },
+          select: { unit: { select: { unitCode: true, property: { select: { name: true, address: true, city: true } } } } },
+          orderBy: { createdAt: 'desc' },
+        })
+        const locations = [...new Set(activeTenancies.map(({ unit }) => {
+          const property = unit.property
+          return [property.name, `Unit ${unit.unitCode}`, [property.address, property.city].filter(Boolean).join(', ')].filter(Boolean).join(' · ')
+        }))]
+        if (locations.length) tenantPropertyAddress = locations.join('; ')
+      } catch (error) {
+        console.error('Load tenant property address failed:', error)
+      }
+    }
+    const profileCustomer = customerProfilePayload({ ...reconciledCustomer, ...(tenantPropertyAddress ? { address: tenantPropertyAddress } : {}), trustScore }, access)
+    if (canViewTrustScore) profileCustomer.trustScore = trustScore
+
+    const rows = []
+    const paymentTotalBySale = new Map()
+    payments.forEach((payment) => {
+      if (!payment.saleId) return
+      paymentTotalBySale.set(payment.saleId, toMoney(paymentTotalBySale.get(payment.saleId)) + toMoney(payment.amount))
+    })
+
+    const adjustedSaleIds = new Set([
+      ...effectiveCreditNoteRows(creditNotes)
+        .filter((note) => note.effectiveAmount > 0 && note.saleId)
+        .map((note) => note.saleId),
+      ...saleReturns
+        .filter((ret) => ret.refundMethod !== 'credit_note_stock' && ret.saleId)
+        .map((ret) => ret.saleId),
+    ])
+
+    if (access.balance && toMoney(customer.openingBalance) > 0) {
+      rows.push({
+        id: `opening-${customer.id}`,
+        source: 'opening_balance',
+        type: 'Opening Balance',
+        date: customer.openingBalanceDate || customer.createdAt,
+        reference: 'Opening Balance',
+        description: customer.openingBalanceNote || 'Balance brought forward before using JibuSales',
+        debit: toMoney(customer.openingBalance),
+        credit: 0,
+        amount: toMoney(customer.openingBalance),
+        balanceImpact: toMoney(customer.openingBalance),
+        affectsBalance: true,
+        paymentMethod: null,
+        status: 'system',
+        branch: customer.branch?.name || '',
+        staff: 'System',
+        items: [],
+        sortOrder: 0
+      })
+    }
+
+    receivableSales.forEach((sale) => {
+      const cancelled = sale.status === 'cancelled'
+      const adjusted = adjustedSaleIds.has(sale.id)
+      rows.push({
+        id: sale.id,
+        source: 'receivable_sale',
+        type: cancelled ? 'Cancelled Sale' : toMoney(sale.balance) > 0 ? 'Credit Sale' : 'Customer Sale',
+        receiptStatus: cancelled ? 'cancelled' : adjusted ? 'adjusted' : null,
+        date: sale.createdAt,
+        dueDate: sale.dueDate,
+        reference: sale.receiptNo,
+        description: cancelled
+          ? `Cancelled sale; retained for customer history${sale.receiptNo ? ` (${sale.receiptNo})` : ''}`
+          : adjusted
+            ? `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold; adjusted by return or credit note`
+            : sale.fuelSale ? `${sale.fuelSale.litres} L ${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}` : `${sale.items.length || 0} item${sale.items.length === 1 ? '' : 's'} sold`,
+        debit: cancelled ? 0 : toMoney(sale.total),
+        credit: 0,
+        amount: toMoney(sale.total),
+        amountPaid: toMoney(sale.amountPaid),
+        remainingBalance: toMoney(sale.balance),
+        balanceImpact: cancelled ? 0 : toMoney(sale.total),
+        affectsBalance: !cancelled,
+        paymentMethod: sale.paymentMethod,
+        status: sale.paymentStatus,
+        branch: sale.branch?.name || '',
+        staff: userName(sale.User),
+        items: sale.fuelSale ? [{
+          id: sale.fuelSale.id,
+          productName: `${sale.fuelSale.tank.fuelType} fuel - ${sale.fuelSale.tank.name}`,
+          sku: '',
+          itemType: 'fuel',
+          quantity: sale.fuelSale.litres,
+          unitName: 'L',
+          unitPrice: sale.fuelSale.unitPrice,
+          total: sale.total,
+        }] : sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total
+        })),
+        sortOrder: 10
+      })
+
+      const saleCreditApplied = (sale.creditApplications || []).reduce((sum, application) => sum + toMoney(application.amount), 0)
+      const missingPayment = cancelled ? 0 : Math.max(0, Math.round((toMoney(sale.amountPaid) - toMoney(paymentTotalBySale.get(sale.id)) - saleCreditApplied) * 100) / 100)
+      if (missingPayment > 0) {
+        rows.push({
+          id: `${sale.id}-paid-at-sale`,
+          source: 'sale_payment_adjustment',
+          type: 'Paid At Sale',
+          date: sale.createdAt,
+          reference: sale.receiptNo,
+          description: `Payment captured on ${sale.receiptNo}`,
+          debit: 0,
+          credit: missingPayment,
+          amount: missingPayment,
+          balanceImpact: -missingPayment,
+          affectsBalance: true,
+          paymentMethod: sale.paymentMethod,
+          status: 'paid',
+          branch: sale.branch?.name || '',
+          staff: userName(sale.User),
+          items: [],
+          sortOrder: 11
+        })
+      }
+      ;(sale.creditApplications || []).forEach((application) => {
+        rows.push({
+          id: application.id,
+          source: 'customer_credit_application',
+          type: 'Customer Credit Applied',
+          date: application.createdAt,
+          reference: sale.receiptNo,
+          description: `Applied ${application.sourceType.replace('_', ' ')} credit to ${sale.receiptNo}`,
+          debit: 0,
+          credit: 0,
+          amount: toMoney(application.amount),
+          balanceImpact: 0,
+          affectsBalance: false,
+          paymentMethod: 'customer_credit',
+          status: 'applied',
+          branch: sale.branch?.name || '',
+          staff: userName(sale.User),
+          items: [],
+          sortOrder: 12,
+        })
+      })
+    })
+
+    const paidByPropertySale = new Map()
+    propertySalePayments.filter((payment) => payment.status === 'posted').forEach((payment) => {
+      paidByPropertySale.set(payment.saleId, toMoney(paidByPropertySale.get(payment.saleId)) + toMoney(payment.amount))
+    })
+    propertySales.forEach((sale) => {
+      const cancelled = sale.status !== 'active'
+      const paid = toMoney(paidByPropertySale.get(sale.id))
+      const plotLabel = `${sale.property.name} · ${sale.unit.unitCode}`
+      rows.push({
+        id: sale.id, source: 'property_sale', type: cancelled ? 'Cancelled Plot Sale' : 'Plot Sale',
+        date: sale.saleDate, dueDate: sale.installments.find((item) => item.status !== 'paid')?.dueDate || null,
+        reference: sale.saleNo,
+        description: `${plotLabel}${sale.saleMode === 'brokered' ? ` · brokered for ${sale.owner?.name || 'owner'}` : ' · business-owned land'}`,
+        debit: cancelled ? 0 : toMoney(sale.salePrice), credit: 0, amount: toMoney(sale.salePrice),
+        amountPaid: paid, remainingBalance: cancelled ? 0 : Math.max(0, toMoney(sale.salePrice) - paid),
+        balanceImpact: cancelled ? 0 : toMoney(sale.salePrice), affectsBalance: !cancelled,
+        paymentMethod: sale.paymentPlan, status: cancelled ? sale.status : paid >= sale.salePrice - 0.01 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+        branch: '', staff: userName(sale.createdBy),
+        items: [{ productName: plotLabel, quantity: 1, unitPrice: toMoney(sale.salePrice), total: toMoney(sale.salePrice) }],
+        sortOrder: 13,
+      })
+    })
+    propertySalePayments.forEach((payment) => {
+      const posted = payment.status === 'posted'
+      rows.push({
+        id: payment.id, source: 'property_sale_payment', type: posted ? 'Plot Sale Payment' : 'Voided Plot Sale Payment',
+        date: payment.paymentDate, reference: payment.receiptNo,
+        originalReference: payment.sale.saleNo,
+        description: `${payment.sale.property.name} · ${payment.sale.unit.unitCode}${payment.cashAccount?.name ? ` · ${payment.cashAccount.name}` : ''}${payment.voidReason ? ` · ${payment.voidReason}` : ''}`,
+        debit: 0, credit: posted ? toMoney(payment.amount) : 0, amount: toMoney(payment.amount),
+        balanceImpact: posted ? -toMoney(payment.amount) : 0, affectsBalance: posted,
+        paymentMethod: payment.paymentMethod, status: payment.status, branch: '', staff: '', items: [], sortOrder: 14,
+      })
+    })
+
+    payments.forEach((payment) => {
+      rows.push({
+        id: payment.id,
+        source: 'customer_payment',
+        type: 'Payment',
+        date: payment.createdAt,
+        reference: customerPaymentDisplayReference(payment),
+        originalReference: payment.sale?.receiptNo || payment.allocations?.[0]?.rental?.historicalReference || payment.allocations?.[0]?.rental?.rentalNo || null,
+        description: (() => {
+          const linkedRentals = (payment.allocations || []).map((allocation) => {
+            const reference = allocation.rental?.historicalReference || allocation.rental?.rentalNo
+            return reference ? `${reference} (${toMoney(allocation.amount).toLocaleString('en-GB')})` : null
+          }).filter(Boolean)
+          const saleText = payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : ''
+          const rentalText = linkedRentals.length ? `Applied to rental ${linkedRentals.join(', ')}` : ''
+          return [saleText, rentalText, !saleText && !rentalText ? payment.notes || 'Customer payment' : ''].filter(Boolean).join(' · ')
+        })(),
+        debit: 0,
+        credit: toMoney(payment.amount),
+        amount: toMoney(payment.amount),
+        balanceImpact: -toMoney(payment.amount),
+        affectsBalance: true,
+        paymentMethod: payment.paymentMethod,
+        mobileProvider: payment.mobileProvider || null,
+        phoneNumber: payment.phoneNumber || null,
+        transactionId: payment.transactionId || null,
+        notes: payment.notes || null,
+        status: 'paid',
+        branch: payment.branch?.name || '',
+        staff: '',
+        items: (payment.sale?.items || []).map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total,
+        })),
+        sortOrder: 20
+      })
+    })
+
+    withdrawals.forEach((withdrawal) => {
+      rows.push({
+        id: withdrawal.id,
+        source: 'customer_withdrawal',
+        type: 'Withdrawal',
+        date: withdrawal.createdAt,
+        reference: withdrawal.reference || withdrawal.transactionId || withdrawal.id,
+        description: withdrawal.notes || `Customer withdrawal from ${withdrawal.cashAccount?.name || paymentMethodAccountLabel(withdrawal.paymentMethod)}`,
+        debit: toMoney(withdrawal.amount),
+        credit: 0,
+        amount: toMoney(withdrawal.amount),
+        balanceImpact: toMoney(withdrawal.amount),
+        affectsBalance: true,
+        paymentMethod: withdrawal.paymentMethod,
+        status: 'posted',
+        branch: withdrawal.branch?.name || '',
+        staff: userName(withdrawal.user),
+        items: [],
+        sortOrder: 25
+      })
+    })
+
+    const stockReturnByCreditNote = new Map(
+      saleReturns
+        .filter((ret) => ret.refundMethod === 'credit_note_stock')
+        .map((ret) => [String(ret.returnNo || '').replace(/^RET-/, ''), ret])
+    )
+
+    effectiveCreditNoteRows(creditNotes).filter((note) => note.effectiveAmount > 0).forEach((note) => {
+      const stockReturn = stockReturnByCreditNote.get(note.noteNo)
+      rows.push({
+        id: note.id,
+        source: 'credit_note',
+        type: 'Credit Note',
+        date: note.createdAt,
+        reference: note.noteNo,
+        originalReference: note.sale?.receiptNo || null,
+        reason: note.reason || note.notes || null,
+        refundAmount: toMoney(note.refundAmount),
+        description: `${note.notes || note.reason || 'Customer credit note'}${note.effectiveAmount !== toMoney(note.amount) ? ` (adjusted from recorded ${note.amount})` : ''}`,
+        debit: 0,
+        credit: toMoney(note.effectiveAmount),
+        amount: toMoney(note.effectiveAmount),
+        recordedAmount: toMoney(note.amount),
+        balanceImpact: -toMoney(note.effectiveAmount),
+        affectsBalance: true,
+        paymentMethod: null,
+        status: note.status,
+        branch: note.branch?.name || '',
+        staff: '',
+        items: access.returns ? (stockReturn?.items || []).map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitPrice: item.price,
+          total: item.total,
+        })) : [],
+        sortOrder: 30
+      })
+    })
+
+    saleReturns.forEach((ret) => {
+      if (ret.refundMethod === 'credit_note_stock') return
+      const affectsBalance = ret.refundMethod === 'credit'
+      rows.push({
+        id: ret.id,
+        source: 'sale_return',
+        type: 'Sale Return',
+        date: ret.createdAt,
+        reference: ret.returnNo,
+        originalReference: ret.sale?.receiptNo || null,
+        reason: ret.reason || null,
+        refundAmount: affectsBalance ? 0 : toMoney(ret.total),
+        description: ret.sale?.receiptNo ? `Return for ${ret.sale.receiptNo}` : (ret.reason || 'Returned goods'),
+        debit: 0,
+        credit: affectsBalance ? toMoney(ret.total) : 0,
+        amount: toMoney(ret.total),
+        balanceImpact: affectsBalance ? -toMoney(ret.total) : 0,
+        affectsBalance,
+        paymentMethod: ret.refundMethod,
+        status: ret.status,
+        branch: ret.branch?.name || '',
+        staff: userName(ret.user),
+        items: ret.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitPrice: item.price,
+          total: item.total
+        })),
+        sortOrder: 40
+      })
+    })
+
+    posSales.forEach((sale) => {
+      const cancelled = sale.status === 'cancelled'
+      rows.push({
+        id: sale.id,
+        source: 'pos_sale',
+        type: cancelled ? 'Cancelled POS Sale' : 'Cash Sale',
+        receiptStatus: cancelled ? 'cancelled' : null,
+        date: sale.createdAt,
+        reference: sale.receiptNo,
+        description: cancelled ? 'Cancelled sale; retained for customer history' : `${sale.items.length || 0} POS item${sale.items.length === 1 ? '' : 's'} sold`,
+        debit: 0,
+        credit: 0,
+        amount: toMoney(sale.total),
+        balanceImpact: 0,
+        affectsBalance: false,
+        paymentMethod: sale.paymentMethod,
+        status: sale.status,
+        branch: sale.branch?.name || '',
+        staff: userName(sale.user),
+        items: sale.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product?.name || 'Item',
+          sku: item.product?.sku || '',
+          itemType: item.product?.itemType || 'product',
+          quantity: item.quantity,
+          unitName: item.unitName || '',
+          unitPrice: item.price,
+          discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+          total: item.total
+        })),
+        sortOrder: 50
+      })
+    })
+
+    invoices.forEach((invoice) => rows.push({
+      id: invoice.id, source: 'customer_invoice', type: 'Invoice', date: invoice.createdAt,
+      dueDate: invoice.dueDate, reference: invoice.invoiceNo,
+      description: invoice.saleId ? `Invoice for sale ${invoice.saleId}` : 'Customer invoice',
+      debit: toMoney(invoice.total), credit: 0, amount: toMoney(invoice.total),
+      amountPaid: toMoney(invoice.amountPaid), remainingBalance: toMoney(invoice.balance),
+      balanceImpact: 0, affectsBalance: false, paymentMethod: null, status: invoice.status,
+      branch: invoice.branch?.name || '', staff: '', items: [], sortOrder: 55,
+    }))
+
+    rentals.forEach((rental) => {
+      const historicalCollectible = rental.isHistoricalReceivable === true
+      const cancellationCollectible = rental.status === 'cancelled' && toMoney(rental.cancellationChargeAmount) > 0
+      const collectible = historicalCollectible || cancellationCollectible || (!rental.isHistoricalRecord && Boolean(rental.customerId) && ['checked_out', 'returned'].includes(rental.bookingState))
+      const canViewRentalNotes = Boolean(req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes('canViewRentalCreditNotes'))
+      const creditNotes = rental.creditNotes || []
+      const activeCreditAmount = creditNotes.reduce((sum, note) => sum + toMoney(note.amount), 0)
+      const postedRentalPayments = (rental.payments || []).reduce((sum, payment) => (
+        payment.status === 'posted' && ['rental_payment', 'rental_advance'].includes(payment.kind)
+          ? sum + toMoney(payment.amount)
+          : sum
+      ), 0)
+      const outstandingCreditRefund = creditNotes.reduce((sum, note) => sum + Math.max(0, toMoney(note.refundDue) - toMoney(note.refundedAmount)), 0)
+      const currentReceivable = historicalCollectible ? toMoney(rental.historicalReceivableAmount) : cancellationCollectible ? toMoney(rental.cancellationChargeAmount) : toMoney(rental.totalAmount)
+      const receivableAmount = !collectible ? 0 : canViewRentalNotes
+        ? currentReceivable + activeCreditAmount
+        : Math.max(0, toMoney(rental.balance) + outstandingCreditRefund + postedRentalPayments)
+      const reference = rental.historicalReference || rental.rentalNo
+      const rentalDescription = cancellationCollectible
+        ? `Cancellation fee · ${rental.cancellationChargePercent}%${rental.cancellationReason ? ` · ${rental.cancellationReason}` : ''}`
+        : !canViewRentalNotes && activeCreditAmount > 0
+          ? 'Rental receivable · net of booking adjustments'
+          : historicalCollectible
+            ? `Unpaid balance brought forward from rental dated ${new Date(rental.hireDate).toLocaleDateString('en-GB')}`
+            : collectible ? `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · rental charge` : `${rental.items.length} item${rental.items.length === 1 ? '' : 's'} hired · ${rental.status}`
+      rows.push({
+        id: rental.id, source: collectible ? 'rental_receivable' : 'customer_activity',
+        type: collectible ? historicalCollectible ? 'Historical Rental Receivable' : cancellationCollectible ? 'Rental Cancellation Fee' : 'Rental Receivable' : 'Rental', date: cancellationCollectible ? rental.cancelledAt || rental.hireDate : rental.hireDate,
+        dueDate: rental.expectedReturnDate, reference,
+        originalReference: rental.rentalNo,
+        description: `${rentalDescription}${rental.deliveryAddress ? ` · Delivery to ${rental.deliveryAddress}` : ''}`,
+        debit: collectible ? receivableAmount : toMoney(rental.totalAmount), credit: 0,
+        amount: collectible ? receivableAmount : toMoney(rental.totalAmount),
+        amountPaid: collectible ? Math.max(0, currentReceivable - toMoney(rental.balance)) : toMoney(rental.amountPaid),
+        remainingBalance: collectible ? toMoney(rental.balance) : toMoney(rental.balance),
+        balanceImpact: collectible ? receivableAmount : 0, affectsBalance: collectible,
+        paymentMethod: rental.paymentMethod, status: collectible ? (rental.balance <= 0 ? 'paid' : rental.balance < receivableAmount ? 'partial' : 'unpaid') : rental.paymentStatus,
+        branch: rental.branch?.name || '', staff: userName(rental.User),
+        items: [
+          ...rental.items.map((item) => ({
+            productName: item.product?.name || 'Rental item', sku: item.product?.sku || '', quantity: item.quantity,
+            unitPrice: item.unitHirePrice, total: item.totalAmount,
+          })),
+          ...(rental.chargeLines || []).map((line) => ({
+            productName: line.label, sku: '', quantity: line.quantity,
+            unitPrice: line.unitPrice, total: line.totalAmount,
+          })),
+        ], sortOrder: 60,
+      })
+      for (const payment of rental.payments || []) {
+        if (String(payment.idempotencyKey || '').startsWith('customer-payment:')) continue
+        const appliedAdvance = payment.status === 'posted' && payment.kind === 'rental_advance' && collectible
+        if (appliedAdvance) {
+          rows.push({
+            id: `advance-applied-${payment.id}`, source: 'rental_advance_application', type: 'Rental Advance Applied',
+            date: rental.hireDate, reference: payment.receiptNo, originalReference: reference,
+            description: `Reservation advance applied to rental ${reference}`,
+            debit: 0, credit: toMoney(payment.amount), amount: toMoney(payment.amount),
+            balanceImpact: -toMoney(payment.amount), affectsBalance: true,
+            paymentMethod: payment.paymentMethod, status: 'posted', branch: rental.branch?.name || '', staff: userName(payment.user),
+            items: [], sortOrder: 61,
+          })
+          continue
+        }
+        const posted = payment.status === 'posted' && ['rental_payment', 'rental_cancellation_fee'].includes(payment.kind)
+        const historical = payment.status === 'historical' && payment.kind === 'rental_payment'
+        if (!posted && !historical) continue
+        rows.push({
+          id: payment.id, source: 'rental_payment', type: historical ? 'Historical Rental Payment' : payment.kind === 'rental_cancellation_fee' ? 'Rental Cancellation Fee Payment' : 'Rental Payment',
+          date: payment.paymentDate, reference: payment.receiptNo, originalReference: reference,
+          description: `${historical ? 'Historical receipt copy' : 'Payment'} for rental ${reference}${payment.transactionRef ? ` · Ref ${payment.transactionRef}` : ''}`,
+          debit: 0, credit: collectible && posted ? toMoney(payment.amount) : 0, amount: toMoney(payment.amount),
+          balanceImpact: collectible && posted ? -toMoney(payment.amount) : 0,
+          affectsBalance: collectible && posted, paymentMethod: payment.paymentMethod,
+          status: historical ? 'historical' : 'posted', branch: rental.branch?.name || '', staff: userName(payment.user),
+          items: [], sortOrder: 61,
+        })
+      }
+      for (const note of canViewRentalNotes ? creditNotes : []) {
+        rows.push({
+          id: note.id, source: 'rental_credit_note', type: 'Rental Credit Note', date: note.createdAt,
+          reference: note.noteNo, originalReference: rental.rentalNo,
+          description: `${String(note.reason).replaceAll('_', ' ')}${note.notes ? ` · ${note.notes}` : ''}`,
+          debit: 0, credit: toMoney(note.amount), amount: toMoney(note.amount),
+          refundDue: Math.max(0, toMoney(note.refundDue) - toMoney(note.refundedAmount)),
+          balanceImpact: collectible ? -toMoney(note.amount) : 0, affectsBalance: collectible,
+          paymentMethod: null, status: note.status, branch: rental.branch?.name || '', staff: userName(note.user),
+          items: [], sortOrder: 62,
+        })
+        for (const refund of note.payments || []) rows.push({
+          id: refund.id, source: 'rental_credit_refund', type: 'Rental Credit Refund', date: refund.paymentDate,
+          reference: refund.receiptNo, originalReference: note.noteNo,
+          description: `Refund paid for rental credit note ${note.noteNo}${refund.transactionRef ? ` · Ref ${refund.transactionRef}` : ''}`,
+          debit: toMoney(refund.amount), credit: 0, amount: toMoney(refund.amount), balanceImpact: collectible ? toMoney(refund.amount) : 0,
+          affectsBalance: collectible, paymentMethod: refund.paymentMethod, mobileProvider: refund.mobileProvider || null,
+          phoneNumber: refund.phoneNumber || null, transactionId: refund.transactionRef || null,
+          notes: refund.notes || null, status: 'posted', branch: rental.branch?.name || '', staff: userName(refund.user), items: [], sortOrder: 63,
+        })
+      }
+    })
+
+    restaurantOrders.forEach((order) => rows.push({
+      id: order.id, source: 'customer_activity', type: 'Restaurant Order', date: order.createdAt,
+      reference: order.orderNo, description: `${String(order.orderType).replace('_', ' ')}${order.table?.name ? ` · ${order.table.name}` : ''}`,
+      debit: 0, credit: 0, amount: toMoney(order.total), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: order.paymentMethod, status: order.status, branch: order.branch?.name || '',
+      staff: userName(order.user), items: order.items.map((item) => ({
+        productName: item.product?.name || 'Menu item', quantity: item.quantity,
+        unitPrice: item.price, discount: item.discount, total: item.total,
+      })), sortOrder: 61,
+    }))
+
+    reservations.forEach((reservation) => rows.push({
+      id: reservation.id, source: 'customer_activity', type: 'Reservation', date: reservation.date,
+      reference: reservation.id, description: `${reservation.guests} guest${reservation.guests === 1 ? '' : 's'} · ${reservation.time}${reservation.table?.name ? ` · ${reservation.table.name}` : ''}`,
+      amount: 0, balanceImpact: 0, affectsBalance: false, paymentMethod: null, status: reservation.status,
+      branch: reservation.branch?.name || '', staff: '', items: [], sortOrder: 62,
+    }))
+
+    deliveries.forEach((delivery) => rows.push({
+      id: delivery.id, source: 'customer_activity', type: 'Delivery', date: delivery.createdAt,
+      reference: delivery.order?.orderNo || delivery.id,
+      description: `Delivery${delivery.order?.orderNo ? ` for ${delivery.order.orderNo}` : ''}`,
+      amount: toMoney(delivery.deliveryFee), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: null, status: delivery.status, branch: delivery.order?.branch?.name || '', staff: '', items: [], sortOrder: 63,
+    }))
+
+    appointments.forEach((appointment) => rows.push({
+      id: appointment.id, source: 'customer_activity', type: 'Appointment', date: appointment.scheduledDate,
+      reference: appointment.title, description: appointment.product?.name || appointment.description || 'Service appointment',
+      amount: toMoney(appointment.actualPrice || appointment.price), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: null, status: appointment.status, branch: appointment.branch?.name || '',
+      staff: userName(appointment.technician), items: [], sortOrder: 64,
+    }))
+
+    workOrders.forEach((workOrder) => rows.push({
+      id: workOrder.id, source: 'customer_activity', type: workOrder.serviceKind === 'job_card' ? 'Job Card' : 'Work Order',
+      date: workOrder.createdAt, reference: workOrder.orderNo,
+      description: workOrder.product?.name || workOrder.title || 'Service work order',
+      amount: 0, balanceImpact: 0, affectsBalance: false, paymentMethod: null, status: workOrder.status,
+      branch: workOrder.branch?.name || '', staff: userName(workOrder.technician), items: [], sortOrder: 65,
+    }))
+
+    serviceContracts.forEach((contract) => rows.push({
+      id: contract.id, source: 'customer_activity', type: 'Service Contract', date: contract.startDate,
+      dueDate: contract.endDate, reference: contract.contractNo, description: contract.title,
+      amount: toMoney(contract.value), balanceImpact: 0, affectsBalance: false,
+      paymentMethod: contract.billingCycle, status: contract.status, branch: contract.branch?.name || '', staff: '', items: [], sortOrder: 66,
+    }))
+
+    let runningBalance = 0
+    const visibleRows = filterCustomerHistoryRows(rows, access)
+
+    const transactions = sortLedgerRows(visibleRows).map(({ sortOrder, balanceImpact, ...row }) => {
+      runningBalance = Math.round((runningBalance + toMoney(balanceImpact)) * 100) / 100
+      const publicRow = { ...row }
+      if (access.balance) publicRow.balance = runningBalance
+      else delete publicRow.remainingBalance
+      if (!access.payments) delete publicRow.amountPaid
+      return publicRow
+    }).reverse()
+
+    const openCreditSales = access.balance && access.sales ? await salesView.findMany({
+      where: scopedWhere(scope, { customerId: id, balance: { gt: 0 } }),
+      select: { id: true, receiptNo: true, createdAt: true, dueDate: true, total: true, amountPaid: true, balance: true, paymentStatus: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    }) : []
+    const now = new Date()
+    const aging = { notDue: 0, days1To30: 0, days31To60: 0, days61To90: 0, over90Days: 0, noDueDate: 0 }
+    const recordAging = (amount, dueDateValue) => {
+      if (!dueDateValue) { aging.noDueDate += amount; return }
+      const dueDate = new Date(dueDateValue)
+      const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      const dueDay = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate())
+      const overdueDays = Math.floor((today - dueDay) / 86400000)
+      if (overdueDays <= 0) aging.notDue += amount
+      else if (overdueDays <= 30) aging.days1To30 += amount
+      else if (overdueDays <= 60) aging.days31To60 += amount
+      else if (overdueDays <= 90) aging.days61To90 += amount
+      else aging.over90Days += amount
+    }
+    for (const sale of openCreditSales) {
+      const amount = toMoney(sale.balance)
+      recordAging(amount, sale.dueDate)
+    }
+    const openPropertySales = access.balance && access.sales ? propertySales.filter(sale => sale.status === 'active').map(sale => {
+      const paid = toMoney(paidByPropertySale.get(sale.id))
+      const balance = Math.max(0, toMoney(sale.salePrice) - paid)
+      for (const installment of sale.installments) recordAging(Math.max(0, toMoney(installment.amount) - toMoney(installment.amountPaid)), installment.dueDate)
+      return { id: sale.id, reference: sale.saleNo, date: sale.saleDate, dueDate: sale.installments.find(item => item.status !== 'paid')?.dueDate || null, total: toMoney(sale.salePrice), amountPaid: paid, balance, status: balance <= 0.01 ? 'paid' : paid > 0 ? 'partial' : 'unpaid', daysPastDue: null }
+    }).filter(sale => sale.balance > 0.01) : []
+    Object.keys(aging).forEach((key) => { aging[key] = toMoney(aging[key]) })
+
+    const totals = visibleRows.reduce((acc, row) => {
+      acc.debit += toMoney(row.debit)
+      acc.credit += toMoney(row.credit)
+      acc.amount += toMoney(row.amount)
+      if (row.source === 'receivable_sale' || row.source === 'property_sale') acc.receivableSales += toMoney(row.amount)
+      if (row.source === 'pos_sale') acc.cashSales += toMoney(row.amount)
+      if (row.source === 'customer_payment' || row.source === 'property_sale_payment') acc.payments += toMoney(row.amount)
+      if (row.source === 'customer_withdrawal') acc.withdrawals += toMoney(row.amount)
+      if (row.source === 'credit_note') acc.creditNotes += toMoney(row.amount)
+      if (row.source === 'sale_return') acc.returns += toMoney(row.amount)
+      return acc
+    }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, withdrawals: 0, creditNotes: 0, returns: 0 })
+
+    res.json({
+      customer: profileCustomer,
+      access: {
+        phone: access.phone,
+        email: access.email,
+        address: access.address,
+        balance: access.balance,
+        creditLimit: access.creditLimit,
+        sales: access.sales,
+        payments: access.payments,
+        returns: access.returns,
+        creditNotes: access.creditNotes,
+        withdrawals: access.withdrawals,
+        businessActivity: access.businessActivity,
+        creditHistory: access.creditHistory,
+        trustScore: canViewTrustScore,
+        notes: access.notes,
+        recordPayment: access.recordPayment,
+        printReceipts: access.printReceipts,
+        edit: access.edit,
+        delete: access.delete,
+        withdraw: access.withdraw,
+      },
+      summary: {
+        ...totals,
+        transactionCount: transactions.length,
+        ...(access.balance && {
+          currentBalance: toMoney(reconciledCustomer.balance),
+          computedBalance: balanceSnapshot?.balance ?? runningBalance,
+          openingBalance: toMoney(customer.openingBalance),
+          openingBalanceDate: customer.openingBalanceDate,
+          openingBalanceNote: customer.openingBalanceNote,
+        }),
+        ...(access.balance && access.creditLimit && { availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance) }),
+        ...(access.withdraw && { availableForWithdrawal: Math.max(0, -toMoney(reconciledCustomer.balance)) }),
+        lastTransactionDate: transactions[0]?.date || null
+      },
+      ...(access.creditHistory && {
+        creditHistory: {
+          asOf: now,
+          currentBalance: toMoney(reconciledCustomer.balance),
+          receivableExposure: Math.max(0, toMoney(reconciledCustomer.balance)),
+          customerFunds: Math.max(0, -toMoney(reconciledCustomer.balance)),
+          ...(access.creditLimit && {
+            creditLimit: toMoney(customer.creditLimit),
+            availableLimit: Math.max(0, toMoney(customer.creditLimit) - Math.max(0, toMoney(reconciledCustomer.balance))),
+            utilizationPercent: toMoney(customer.creditLimit) > 0
+              ? Math.round((Math.max(0, toMoney(reconciledCustomer.balance)) / toMoney(customer.creditLimit)) * 10000) / 100
+              : null,
+          }),
+          aging,
+          openSales: access.sales ? [...openCreditSales.map((sale) => ({
+            id: sale.id,
+            reference: sale.receiptNo,
+            date: sale.createdAt,
+            dueDate: sale.dueDate,
+            total: toMoney(sale.total),
+            amountPaid: toMoney(sale.amountPaid),
+            balance: toMoney(sale.balance),
+            status: sale.paymentStatus,
+            daysPastDue: sale.dueDate ? Math.max(0, Math.floor((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - Date.UTC(new Date(sale.dueDate).getUTCFullYear(), new Date(sale.dueDate).getUTCMonth(), new Date(sale.dueDate).getUTCDate())) / 86400000)) : null,
+          })), ...openPropertySales] : [],
+        },
+      }),
+      unavailableActivitySections,
+      transactions
+    })
+  } catch (error) {
+    console.error('Customer history error:', { code: error?.code, message: error?.message, meta: error?.meta })
+    const schemaNotReady = ['P2021', 'P2022', '42P01', '42703'].includes(error?.code)
+    if (schemaNotReady) return res.status(503).json({ error: 'Customer transaction history is temporarily unavailable while the accounting schema is synchronized. Retry after the backend schema sync completes.' })
+    handleBranchError(res, error, 'Failed to fetch customer transaction history')
+  }
+})
+
+// Create new customer
+router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCustomer', 'canCreateReceivable']), requireTenant, async (req, res) => {
+  try {
+    console.log('POST /customers - Request body:', req.body)
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: false,
+      allowOwnerAll: true
+    })
+    console.log('POST /customers - Scope resolved:', scope)
+    const { name, email, phone, alternatePhone, address, creditLimit, notes, openingBalanceNote } = req.body
+    if (!name?.trim()) {
+      return res.status(400).json({ error: 'Customer name is required' })
+    }
+    const normalizedPhone = String(phone || '').replace(/\D/g, '')
+    const normalizedAlternatePhone = String(alternatePhone || '').replace(/\D/g, '')
+    if (normalizedPhone && normalizedPhone === normalizedAlternatePhone) return res.status(400).json({ error: 'Use a different number for the alternate phone.' })
+
+    const customerFeatures = await getTenantFeatures(scope.tenantId)
+    const creditLimitsEnabled = hasFeatureAccess(customerFeatures, 'customers.credit_limits')
+    if (creditLimit !== undefined) {
+      if (!creditLimitsEnabled) {
+        return res.status(403).json({ error: 'Customer credit limits are not enabled for this business plan.', code: 'CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED' })
+      }
+      if (!canManageCustomerCreditLimit(req, 'canCreateCustomerCreditLimit')) {
+        return res.status(403).json({ error: 'You do not have permission to create customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_CREATE_PERMISSION_REQUIRED' })
+      }
+    } else if (creditLimitsEnabled && canManageCustomerCreditLimit(req, 'canCreateCustomerCreditLimit')) {
+      return res.status(400).json({ error: 'Customer credit limit is required. Enter 0 if this customer is not authorized to buy on credit.', code: 'CUSTOMER_CREDIT_LIMIT_REQUIRED' })
+    }
+    const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit)
+    if (!creditLimitCheck.valid) {
+      return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
+    }
+
+    const openingBalance = toMoney(req.body.openingBalance, 0)
+    if (openingBalance < 0) {
+      return res.status(400).json({ error: 'Opening balance cannot be negative' })
+    }
+
+    if ((openingBalance > 0 || req.body.openingBalanceDate || openingBalanceNote) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalance)
+    if (req.body.openingBalanceDate && !openingBalanceDate) {
+      return res.status(400).json({ error: 'Opening balance date is invalid' })
+    }
+
+    await checkUsageLimit(scope.tenantId, 'customers')
+
+    let customerRaw
+    try {
+      customerRaw = await prisma.$transaction(async (tx) => {
+        const identityConflict = await findCustomerIdentityConflict(tx, {
+          tenantId: scope.tenantId,
+          identity: { name, email, phone, alternatePhone },
+        })
+        if (identityConflict) {
+          const error = new Error(customerIdentityConflictMessage(identityConflict.field))
+          error.code = 'CUSTOMER_IDENTITY_CONFLICT'
+          error.conflictField = identityConflict.field
+          throw error
+        }
+
+        const created = await tx.customer.create({
+          data: {
+            name: name.trim(),
+            email: email?.trim() || null,
+            phone: phone?.trim() || null,
+            alternatePhone: alternatePhone?.trim() || null,
+            address,
+            creditLimit: creditLimitCheck.amount,
+            balance: openingBalance,
+            openingBalance,
+            openingBalanceDate,
+            openingBalanceNote,
+            notes,
+            trustScore: 0,
+            tenantId: scope.tenantId,
+            branchId: scope.branchId || req.body.branchId || null
+          }
+        })
+        if (openingBalance > 0) {
+          const config = await getReceivablesAccountingConfig(tx, scope.tenantId)
+          if (config?.isEnabled) await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+            sourceType: 'CUSTOMER_OPENING_BALANCE', sourceId: created.id,
+            date: openingBalanceDate || new Date(), reference: created.name,
+            description: `Opening balance for customer ${created.name}`,
+            lines: customerOpeningBalanceLines(config, openingBalance, `Opening receivable for ${created.name}`),
+          })
+        }
+        return created
+      })
+    } catch (error) {
+      if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
+        return res.status(409).json({ error: error.message, code: error.code, duplicateField: error.conflictField })
+      }
+      throw error
+    }
+
+    const [customer] = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), [customerRaw]).catch((err) => {
+      console.error('Error attaching repayment trust scores:', err)
+      return [customerRaw]
+    })
+    res.status(201).json(customerProfilePayload(customer, await getTenantCustomerProfileAccess(req, scope.tenantId)))
+  } catch (error) {
+    if (error?.code === 'LIMIT_REACHED') return res.status(403).json({ error: error.message })
+    console.error('Create customer error:', error)
+    handleBranchError(res, error, 'Failed to create customer')
+  }
+})
+
+// Update customer
+router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCustomer', 'canEditReceivable']), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const { name, email, phone, alternatePhone, address, creditLimit, status, notes, branchId, openingBalanceNote } = req.body
+
+    // Check if customer belongs to tenant
+    const existingCustomer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id })
+    })
+
+    if (!existingCustomer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+    if (alternatePhone !== undefined && !(req.userPermissions?.canViewCustomerPhone || req.user?.permissions?.includes('canViewCustomerPhone') || req.user?.permissions?.includes('*'))) {
+      return res.status(403).json({ error: 'You do not have permission to manage customer phone numbers.' })
+    }
+    const normalizedPrimaryPhone = String(phone === undefined ? existingCustomer.phone || '' : phone || '').replace(/\D/g, '')
+    const normalizedAlternatePhone = String(alternatePhone === undefined ? existingCustomer.alternatePhone || '' : alternatePhone || '').replace(/\D/g, '')
+    if (normalizedPrimaryPhone && normalizedPrimaryPhone === normalizedAlternatePhone) return res.status(400).json({ error: 'Use a different number for the alternate phone.' })
+
+    if (creditLimit !== undefined) {
+      const features = await getTenantFeatures(scope.tenantId)
+      if (!hasFeatureAccess(features, 'customers.credit_limits')) {
+        return res.status(403).json({ error: 'Customer credit limits are not enabled for this business plan.', code: 'CUSTOMER_CREDIT_LIMIT_FEATURE_REQUIRED' })
+      }
+      if (!canManageCustomerCreditLimit(req, 'canEditCustomerCreditLimit')) {
+        return res.status(403).json({ error: 'You do not have permission to edit customer credit limits.', code: 'CUSTOMER_CREDIT_LIMIT_EDIT_PERMISSION_REQUIRED' })
+      }
+    }
+
+    if (hasOpeningBalanceInput(req.body) && !canManageOpeningBalance(req)) {
+      return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
+    }
+
+    const existingOpeningBalance = toMoney(existingCustomer.openingBalance, 0)
+    let openingBalanceDelta = 0
+    const openingBalanceData = {}
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalance')) {
+      const openingBalance = toMoney(req.body.openingBalance, 0)
+      if (openingBalance < 0) {
+        return res.status(400).json({ error: 'Opening balance cannot be negative' })
+      }
+
+      openingBalanceDelta = openingBalance - existingOpeningBalance
+      if (openingBalanceDelta !== 0) {
+        const transactionCount = await Promise.all([
+          prisma.saleRecord.count({ where: scopedWhere(scope, { customerId: id }) }),
+          prisma.customerPayment.count({ where: scopedWhere(scope, { customerId: id }) }),
+          prisma.creditNote.count({ where: scopedWhere(scope, { customerId: id, status: { not: 'cancelled' } }) }),
+          prisma.saleReturn.count({ where: scopedWhere(scope, { customerId: id, status: 'completed' }) })
+        ]).then((counts) => counts.reduce((sum, count) => sum + count, 0))
+
+        if (transactionCount > 0 && req.body.confirmOpeningBalanceChange !== true) {
+          return res.status(409).json({
+            error: 'Changing opening balance after transactions exist requires confirmation',
+            requiresConfirmation: true
+          })
+        }
+      }
+
+      openingBalanceData.openingBalance = openingBalance
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceDate')) {
+      const openingBalanceForDate = Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')
+        ? openingBalanceData.openingBalance
+        : existingOpeningBalance
+      const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalanceForDate)
+      if (req.body.openingBalanceDate && !openingBalanceDate) {
+        return res.status(400).json({ error: 'Opening balance date is invalid' })
+      }
+      openingBalanceData.openingBalanceDate = openingBalanceDate
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceNote')) {
+      openingBalanceData.openingBalanceNote = openingBalanceNote
+    }
+
+    const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit === undefined ? existingCustomer.creditLimit : creditLimit)
+    if (!creditLimitCheck.valid) {
+      return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
+    }
+
+    const data = {
+      name,
+      email,
+      phone,
+      alternatePhone: alternatePhone !== undefined ? (String(alternatePhone || '').trim() || null) : undefined,
+      address,
+      creditLimit: creditLimit !== undefined ? creditLimitCheck.amount : undefined,
+      status,
+      notes,
+      ...openingBalanceData
+    }
+
+    if (branchId !== undefined) {
+      const targetScope = await resolveBranchScope(prisma, { ...req, body: { branchId } }, {
+        source: 'body',
+        requireBranch: true,
+        allowOwnerAll: false
+      })
+      data.branchId = targetScope.branchId
+    }
+
+    const customerRaw = await prisma.$transaction(async (tx) => {
+      const identityConflict = await findCustomerIdentityConflict(tx, {
+        tenantId: scope.tenantId,
+        identity: {
+          name: data.name ?? existingCustomer.name,
+          email: data.email ?? existingCustomer.email,
+          phone: data.phone ?? existingCustomer.phone,
+          alternatePhone: data.alternatePhone ?? existingCustomer.alternatePhone,
+        },
+        previousIdentity: existingCustomer,
+        excludeCustomerId: id,
+      })
+      if (identityConflict) {
+        const error = new Error(customerIdentityConflictMessage(identityConflict.field))
+        error.code = 'CUSTOMER_IDENTITY_CONFLICT'
+        error.conflictField = identityConflict.field
+        throw error
+      }
+
+      const updatedCustomer = await tx.customer.update({
+        where: { id },
+        data
+      })
+      if (openingBalanceDelta !== 0) {
+        const config = await getReceivablesAccountingConfig(tx, scope.tenantId)
+        if (config?.isEnabled) {
+          const amount = Math.abs(openingBalanceDelta)
+          const lines = openingBalanceDelta > 0
+            ? customerOpeningBalanceLines(config, amount, `Increase opening receivable for ${updatedCustomer.name}`)
+            : [
+                { accountId: config.openingBalanceEquityAccountId, debit: amount, credit: 0, description: `Reduce opening balance equity for ${updatedCustomer.name}` },
+                { accountId: config.receivableAccountId, debit: 0, credit: amount, description: `Reduce opening receivable for ${updatedCustomer.name}` },
+              ]
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: updatedCustomer.branchId, userId: req.user.id,
+            sourceType: 'CUSTOMER_OPENING_BALANCE_ADJUSTMENT', sourceId: `${updatedCustomer.id}-${randomUUID()}`,
+            date: new Date(), reference: updatedCustomer.name,
+            description: `Opening balance adjustment for customer ${updatedCustomer.name}`,
+            lines,
+          })
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')) {
+        const reconciled = await reconcileCustomerReceivableBalance(tx, scope, id)
+        return reconciled?.customer || updatedCustomer
+      }
+      return updatedCustomer
+    })
+
+    const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
+    const [customer] = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), [balancedCustomer])
+    res.json(customerProfilePayload(customer, await getTenantCustomerProfileAccess(req, scope.tenantId)))
+  } catch (error) {
+    if (error?.code === 'CUSTOMER_IDENTITY_CONFLICT') {
+      return res.status(409).json({ error: error.message, code: error.code, duplicateField: error.conflictField })
+    }
+    console.error('Update customer error:', error)
+    handleBranchError(res, error, 'Failed to update customer')
+  }
+})
+
+// === SALES RECORDS (Credit Sales) ===
+
+// Get all sales records
+router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { page = 1, limit = 50, customerId, paymentStatus, startDate, endDate, userId, staffId } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = scopedWhere(scope, {
+      ...salesUserWhere(req, userId || staffId),
+      ...(customerId && { customerId }),
+      status: { not: 'cancelled' },
+      ...(paymentStatus && { paymentStatus }),
+      ...(startDate && endDate && {
+        createdAt: {
+          gte: new Date(startDate),
+          lte: new Date(endDate)
+        }
+      })
+    })
+
+    const [sales, total] = await Promise.all([
+      salesView.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        include: {
+          customer: true,
+          branch: true,
+          User: userSelect,
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } },
+          items: {
+            include: {
+              product: { select: { id: true, name: true, sku: true } }
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      salesView.count({ where })
+    ])
+
+    res.json({
+      sales: sales.map(withUser),
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit))
+      }
+    })
+  } catch (error) {
+    console.error('Get sales error:', error)
+    handleBranchError(res, error, 'Failed to fetch sales')
+  }
+})
+
+// Create new sale (credit or cash)
+router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'), requireFeature('receivables'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const { 
+      customerId, 
+      items, 
+      paymentMethod, 
+      tax = 0,
+      discount = 0,
+      amountPaid = 0,
+      notes,
+      cashAccountId,
+      mobileProvider,
+      phoneNumber,
+      transactionId,
+      currency,
+      unitsPerBase
+    } = req.body
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one sale item is required' })
+    if (items.some((item) => Boolean(item.unitName)) && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'inventory.multi_unit')) {
+      return res.status(403).json({ error: 'Selling Units (Multi-UOM) is not enabled for this business.', code: 'FEATURE_NOT_ENABLED', feature: 'inventory.multi_unit' })
+    }
+
+    const customer = await prisma.customer.findFirst({
+      where: scopedWhere(scope, { id: customerId })
+    })
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    if (customer.status !== 'active') return res.status(400).json({ error: 'Customer is not active' })
+
+    const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
+    const products = await prisma.product.findMany({
+      where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } }),
+      include: { units: true }
+    })
+    const productsById = new Map(products.map((product) => [product.id, product]))
+    if (products.length !== productIds.length) return res.status(400).json({ error: 'One or more products were not found' })
+
+    const saleItems = items.map((item) => {
+      const product = productsById.get(item.productId)
+      const quantity = Math.max(1, Number.parseInt(item.quantity, 10) || 1)
+      let price = toMoney(item.price, product?.price || 0)
+      let conversionFactor = item.conversionFactor != null ? Number(item.conversionFactor) : null
+      const unitName = item.unitName || null
+      if (unitName) {
+        const unit = (product.units || []).find((entry) => entry.unitName === unitName)
+        if (!unit) throw Object.assign(new Error(`Selling unit "${unitName}" is not configured for ${product.name}.`), { statusCode: 400 })
+        price = toMoney(unit.sellingPrice, price)
+        conversionFactor = Number(unit.conversionFactor)
+      } else {
+        conversionFactor = 1
+      }
+      const normalizedConversionFactor = Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1
+      const baseQty = quantity * normalizedConversionFactor
+      if (!Number.isInteger(baseQty) || baseQty <= 0) {
+        throw Object.assign(new Error(`${product.name} selling unit must convert to a whole stock quantity`), { statusCode: 400 })
+      }
+      const cost = toMoney(product?.cost, 0) * normalizedConversionFactor
+      const itemDiscount = toMoney(item.discount)
+      const lineTotal = Math.max(0, price * quantity - itemDiscount)
+
+      if (product.itemType !== 'service' && product.quantity < baseQty) {
+        throw Object.assign(new Error(`${product.name} has only ${product.quantity} in stock`), { statusCode: 400 })
+      }
+
+      return {
+        productId: item.productId,
+        quantity,
+        baseQty,
+        price,
+        cost,
+        discount: itemDiscount,
+        unitName,
+        conversionFactor: normalizedConversionFactor,
+        itemType: product.itemType || 'product',
+        total: lineTotal
+      }
+    })
+
+    await applyLinkedServiceRevenueSplit(prisma, scope, saleItems, productsById)
+
+    const computedSubtotal = saleItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const computedDiscount = saleItems.reduce((sum, item) => sum + item.discount, 0) + toMoney(discount)
+    const computedTax = toMoney(tax)
+    const itemTaxAmounts = allocateSaleTaxToItems(saleItems, computedTax)
+    saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index] })
+    const computedTotal = Math.max(0, computedSubtotal + computedTax - computedDiscount)
+    const foreignPaidAmount = toMoney(amountPaid)
+    const paid = Math.min(toBaseCurrency(foreignPaidAmount, fx.rateToBase), computedTotal)
+    const balance = Math.max(0, computedTotal - paid)
+    const finalPaymentStatus = paymentStatusFor(computedTotal, paid)
+    const resolvedPaymentMethod = paymentMethod || (paid > 0 ? 'cash' : 'credit')
+
+    if (paid > 0 && resolvedPaymentMethod === 'credit') {
+      return res.status(400).json({ error: 'Select cash, mobile money, bank transfer, or card for the paid amount on this sale' })
+    }
+
+    if (paid > 0 && !canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, req.body.cashAccountId || req.userCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    // Generate receipt number
+    const receiptNo = `SALE-${Date.now()}`
+
+    const sale = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
+      const availableCustomerCredit = Math.max(0, -toMoney(customerBalanceBefore?.balance))
+        const createdSale = await tx.saleRecord.create({
+          data: {
+          receiptNo,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId: req.user.id,
+          customerId,
+          subtotal: computedSubtotal,
+          tax: computedTax,
+          discount: computedDiscount,
+          total: computedTotal,
+          currency: fx.currency,
+          foreignTotal: toTransactionCurrency(computedTotal, fx.rateToBase),
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+            amountPaid: paid,
+            legacyPaidAmountAtCutover: 0,
+          balance,
+          paymentMethod: resolvedPaymentMethod,
+          paymentStatus: finalPaymentStatus,
+          notes,
+          dueDate: balance > 0 ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : undefined
+        },
+        include: {
+          customer: true,
+          branch: true,
+          User: userSelect
+        }
+      })
+
+      await allocatePharmacySaleBatches(tx, { tenantId: scope.tenantId, branchId: scope.branchId, sourceId: createdSale.id, sourceType: 'credit', items: saleItems });
+
+      await tx.saleRecordItem.createMany({
+        data: saleItems.map(item => ({
+          saleId: createdSale.id,
+          productId: item.productId,
+          quantity: item.quantity,
+          price: item.price,
+          cost: item.cost,
+          discount: item.discount,
+          unitName: item.unitName,
+          conversionFactor: item.conversionFactor,
+          productRevenue: item.productRevenue,
+          serviceRevenue: item.serviceRevenue,
+          taxAmount: item.taxAmount,
+          total: item.total
+        }))
+      })
+
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
+      if (arConfig?.isEnabled) {
+        await postReceivablesJournal(tx, {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId: req.user.id,
+          sourceType: 'RECEIVABLE_SALE',
+          sourceId: createdSale.id,
+          date: createdSale.createdAt,
+          reference: createdSale.receiptNo,
+          description: `Credit sale ${createdSale.receiptNo}`,
+          lines: saleRecognitionLines(arConfig, createdSale, saleItems),
+        })
+      }
+
+      for (const item of saleItems) {
+        const product = productsById.get(item.productId)
+        if (product && product.itemType === 'service') continue
+        await tx.product.update({
+          where: { id: item.productId },
+          data: {
+            quantity: {
+              decrement: item.baseQty
+            }
+          }
+        })
+      }
+
+      if (paid > 0) {
+        const payment = await tx.customerPayment.create({
+          data: {
+            tenantId: scope.tenantId,
+            branchId: scope.branchId,
+            customerId,
+            saleId: createdSale.id,
+            amount: paid,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
+            allocationMode: 'explicit',
+            paymentMethod: resolvedPaymentMethod,
+            mobileProvider: resolvedPaymentMethod === 'mobile_money' ? mobileProvider : null,
+            phoneNumber: resolvedPaymentMethod === 'mobile_money' ? phoneNumber : null,
+            transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? transactionId : null,
+            reference: receiptNo,
+            notes: notes ? `Paid at sale: ${notes}` : 'Paid at sale'
+          }
+        })
+
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: payment.id,
+            saleId: createdSale.id,
+            targetType: 'sale',
+            amount: paid,
+            createdById: req.user.id,
+          }
+        })
+
+        const receiptAccount = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId)
+        const updatedAccount = await tx.cashAccount.update({
+          where: { id: receiptAccount.id },
+          data: { balance: { increment: paid } }
+        })
+
+        await tx.cashTransaction.create({
+          data: {
+            tenantId: scope.tenantId,
+            accountId: receiptAccount.id,
+            type: 'receipt',
+            amount: paid,
+            balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: toTransactionCurrency(paid, fx.rateToBase),
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            exchangeRateSource: fx.provider,
+            reference: receiptNo || payment.id,
+            description: `Customer sale payment: ${customer.name || customer.email}`,
+            userId: req.user.id
+          }
+        })
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, receiptAccount.id)
+        if (arConfig?.isEnabled) {
+          const transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${receiptAccount.id}` } } })
+          if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${receiptAccount.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId,
+            branchId: scope.branchId,
+            userId: req.user.id,
+            sourceType: 'CUSTOMER_RECEIPT',
+            sourceId: payment.id,
+            date: payment.createdAt,
+            reference: receiptNo,
+            description: `Customer receipt ${receiptNo}`,
+            lines: receiptCollectionLines(arConfig, { transactionAccountId: transactionAccount.id, amount: paid, receivableApplied: paid, reference: receiptNo }),
+          })
+        }
+      }
+
+      let creditApplied = 0
+      if (balance > 0 && availableCustomerCredit > 0) {
+        const application = await applyAvailableCustomerCredit(tx, {
+          scope, customerId, saleId: createdSale.id,
+          amountDue: balance, availableCredit: availableCustomerCredit,
+          userId: req.user.id, branchId: scope.branchId,
+        })
+        creditApplied = application.amount
+        if (creditApplied > 0 && arConfig?.isEnabled) {
+          for (const creditApplication of application.applications.filter((row) => row.sourceType === 'payment')) {
+            await postCustomerCreditApplicationJournal(tx, {
+              tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+              application: creditApplication, reference: createdSale.receiptNo,
+            })
+          }
+        }
+      }
+
+      const remainingOnCredit = Math.max(0, toMoney(balance) - toMoney(creditApplied))
+      const creditCheck = validateCustomerCreditSaleLimit({
+        ...customer,
+        balance: Math.max(0, toMoney(customerBalanceBefore?.balance)),
+      }, remainingOnCredit)
+      if (!creditCheck.valid) throw Object.assign(new Error(creditCheck.message), { statusCode: creditCheck.statusCode || 400, code: creditCheck.code })
+
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
+      return { ...createdSale, creditApplied }
+    })
+
+    const printableSale = await prisma.saleRecord.findUnique({
+      where: { id: sale.id },
+      include: {
+        customer: true,
+          branch: true,
+        User: userSelect,
+        creditApplications: { select: { id: true, sourceType: true, sourceId: true, amount: true, createdAt: true } },
+          fuelSale: { include: { tank: { select: { name: true, fuelType: true } } } },
+        items: {
+          include: {
+            product: { select: { id: true, name: true, sku: true } }
+          }
+        }
+      }
+    })
+
+    res.status(201).json({ ...withUser(printableSale), creditApplied: sale.creditApplied || 0 })
+  } catch (error) {
+    console.error('Create sale error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to create sale')
+  }
+})
+
+// === CUSTOMER PAYMENTS ===
+
+// Get customer payments
+const reconciliationDecisions = new Set([
+  'sale_amount_confirmed',
+  'receipt_rows_confirmed',
+  'requires_adjustment',
+  'investigate_duplicate',
+])
+
+router.get('/reconciliation/accounting-config', authenticateToken, requirePermission('canViewReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const [config, accounts] = await Promise.all([
+      getReceivablesAccountingConfig(prisma, tenantId),
+      prisma.account.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, code: true, name: true, type: true, subType: true, description: true, parentId: true, _count: { select: { children: true } } },
+        orderBy: { code: 'asc' },
+      }),
+    ])
+    res.json({ config, accounts: accounts.filter((account) => !account._count.children && !String(account.description || '').includes('cashAccount:')) })
+  } catch (error) {
+    handleBranchError(res, error, 'Failed to load receivables accounting mappings')
+  }
+})
+
+router.put('/reconciliation/accounting-config', authenticateToken, requirePermission('canEditAccounting'), requireTenant, async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId || req.user.tenant_id
+    const fields = ['receivableAccountId', 'salesRevenueAccountId', 'taxPayableAccountId', 'salesReturnsAccountId', 'costOfGoodsSoldAccountId', 'inventoryAccountId', 'customerAdvancesAccountId', 'openingBalanceEquityAccountId']
+    const values = Object.fromEntries(fields.map((field) => [field, req.body?.[field] || null]))
+    values.isEnabled = req.body?.isEnabled === true
+    const previous = await getReceivablesAccountingConfig(prisma, tenantId)
+    const changed = !previous || fields.some((field) => (previous[field] || null) !== values[field]) || Boolean(previous.isEnabled) !== values.isEnabled
+    if (changed) return res.status(409).json({ error: 'Accounting mappings and posting status are system-managed and cannot be changed manually.', code: 'SYSTEM_MANAGED_ACCOUNTING_CONFIG' })
+    res.json({ config: previous })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    handleBranchError(res, error, 'Failed to save receivables accounting mappings')
+  }
+})
+
+router.get('/reconciliation/payment-allocations', authenticateToken, requirePermission('canViewReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1)
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 25))
+    const skip = (page - 1) * limit
+    const branchId = scope.branchId || null
+    const baseWhere = `sr."tenantId" = $1 AND ($2::text IS NULL OR sr."branchId" = $2) AND sr."status" = 'completed' AND (sr."legacyPaidAmountAtCutover" IS NULL OR (sr."legacySaleAmountPaidAtCutover" IS NOT NULL AND sr."legacyLinkedPaymentsAtCutover" IS NOT NULL))`
+    const issues = await prisma.$queryRawUnsafe(
+      `SELECT sr."id" AS "saleId", sr."customerId", sr."branchId", c."name" AS "customerName", sr."receiptNo", sr."createdAt", sr."total", sr."balance", COALESCE(sr."legacySaleAmountPaidAtCutover", sr."amountPaid") AS "recordedSaleAmountPaid", COALESCE(sr."legacyLinkedPaymentsAtCutover", SUM(cp."amount") FILTER (WHERE cp."allocationMode" = 'legacy'), 0) AS "linkedPaymentTotal" FROM "sale_records" sr JOIN "customers" c ON c."id" = sr."customerId" LEFT JOIN "customer_payments" cp ON cp."saleId" = sr."id" AND cp."tenantId" = sr."tenantId" WHERE ${baseWhere} GROUP BY sr."id", c."name" HAVING ABS(COALESCE(sr."legacySaleAmountPaidAtCutover", sr."amountPaid") - COALESCE(sr."legacyLinkedPaymentsAtCutover", SUM(cp."amount") FILTER (WHERE cp."allocationMode" = 'legacy'), 0)) > 0.01 ORDER BY sr."createdAt" DESC LIMIT $3 OFFSET $4`,
+      scope.tenantId, branchId, limit, skip,
+    )
+    const countRows = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS "count" FROM (SELECT sr."id" FROM "sale_records" sr LEFT JOIN "customer_payments" cp ON cp."saleId" = sr."id" AND cp."tenantId" = sr."tenantId" WHERE ${baseWhere} GROUP BY sr."id" HAVING ABS(COALESCE(sr."legacySaleAmountPaidAtCutover", sr."amountPaid") - COALESCE(sr."legacyLinkedPaymentsAtCutover", SUM(cp."amount") FILTER (WHERE cp."allocationMode" = 'legacy'), 0)) > 0.01) mismatches`,
+      scope.tenantId, branchId,
+    )
+    const saleIds = issues.map((issue) => issue.saleId)
+    const reviews = saleIds.length ? await prisma.customerReceivableReconciliationReview.findMany({
+      where: { tenantId: scope.tenantId, saleId: { in: saleIds } },
+      include: { reviewer: { select: { id: true, fname: true, lname: true } } },
+      orderBy: { reviewedAt: 'desc' },
+    }) : []
+    const latestReviewByFingerprint = new Map()
+    for (const review of reviews) {
+      const key = `${review.saleId}:${review.sourceFingerprint}`
+      if (!latestReviewByFingerprint.has(key)) latestReviewByFingerprint.set(key, review)
+    }
+    const rows = issues.map((issue) => {
+      const recorded = toMoney(issue.recordedSaleAmountPaid)
+      const linked = toMoney(issue.linkedPaymentTotal)
+      const fingerprint = receivablePaymentFingerprint(issue.saleId, recorded, linked)
+      return {
+        ...issue,
+        total: toMoney(issue.total),
+        balance: toMoney(issue.balance),
+        recordedSaleAmountPaid: recorded,
+        linkedPaymentTotal: linked,
+        difference: toMoney(linked - recorded),
+        provisionalPaidAmount: Math.max(recorded, linked),
+        sourceFingerprint: fingerprint,
+        review: latestReviewByFingerprint.get(`${issue.saleId}:${fingerprint}`) || null,
+      }
+    })
+    const receiptRows = saleIds.length ? await prisma.customerPayment.findMany({
+      where: { tenantId: scope.tenantId, saleId: { in: saleIds }, allocationMode: 'legacy' },
+      select: { id: true, saleId: true, amount: true, paymentMethod: true, reference: true, transactionId: true, notes: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    }) : []
+    const receiptsBySale = new Map()
+    for (const receipt of receiptRows) {
+      const list = receiptsBySale.get(receipt.saleId) || []
+      list.push({
+        ...receipt,
+        reference: customerPaymentDisplayReference(receipt),
+        transactionId: String(receipt.transactionId || '').slice(0, 40),
+        amount: toMoney(receipt.amount),
+      })
+      receiptsBySale.set(receipt.saleId, list)
+    }
+    for (const row of rows) {
+      const review = row.review
+      row.resolved = review?.decision === 'receipts_confirmed_and_sale_projection_reconciled'
+      row.receipts = receiptsBySale.get(row.saleId) || []
+    }
+    const total = Number(countRows[0]?.count || 0)
+    res.json({ rows, pagination: { page, limit, total, open: rows.filter((row) => !row.resolved).length, pages: Math.ceil(total / limit) } })
+  } catch (error) {
+    console.error('Get receivable reconciliation issues error:', error)
+    handleBranchError(res, error, 'Failed to load receivable reconciliation issues')
+  }
+})
+
+router.post('/reconciliation/payment-allocations/:saleId/reconcile-to-receipts', authenticateToken, requirePermission('canApplyReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: true })
+    const { note, sourceFingerprint, confirmReceipts } = req.body || {}
+    const reviewNote = String(note || '').trim()
+    if (confirmReceipts !== true) return res.status(400).json({ error: 'Confirm that you verified every linked receipt against the actual cash, bank, or mobile-money evidence.' })
+    if (!reviewNote) return res.status(400).json({ error: 'Record the evidence checked before reconciling this sale.' })
+    if (reviewNote.length > 1000) return res.status(400).json({ error: 'Evidence note must be 1,000 characters or fewer' })
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "sale_records" WHERE "id" = ${req.params.saleId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const sale = await tx.saleRecord.findFirst({
+        where: scopedWhere(scope, { id: req.params.saleId, status: 'completed', customerId: { not: null } }),
+      })
+      if (!sale) throw Object.assign(new Error('Receivable sale not found'), { statusCode: 404 })
+
+      const legacyPayments = await tx.customerPayment.findMany({
+        where: { tenantId: scope.tenantId, customerId: sale.customerId, saleId: sale.id, allocationMode: 'legacy' },
+        select: { id: true, amount: true },
+        orderBy: { createdAt: 'asc' },
+      })
+      const recorded = sale.legacySaleAmountPaidAtCutover == null
+        ? toMoney(sale.amountPaid)
+        : toMoney(sale.legacySaleAmountPaidAtCutover)
+      const linked = sale.legacyLinkedPaymentsAtCutover == null
+        ? toMoney(legacyPayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
+        : toMoney(sale.legacyLinkedPaymentsAtCutover)
+      const fingerprint = receivablePaymentFingerprint(sale.id, recorded, linked)
+      if (sourceFingerprint !== fingerprint) throw Object.assign(new Error('Source values changed. Reload the reconciliation list and verify the current receipts.'), { statusCode: 409 })
+      if (Math.abs(recorded - linked) <= 0.01) throw Object.assign(new Error('This sale no longer has a payment mismatch.'), { statusCode: 409 })
+      if (linked < recorded) throw Object.assign(new Error('Linked receipts are below the sale-paid figure. This may require recording a missing receipt or correcting the sale with a balanced accounting entry; this workflow will not reduce paid amounts automatically.'), { statusCode: 409 })
+      if (!legacyPayments.length) throw Object.assign(new Error('No legacy receipt rows are available to allocate. This discrepancy needs a source-document correction.'), { statusCode: 409 })
+      const legacyTotal = toMoney(legacyPayments.reduce((sum, payment) => sum + toMoney(payment.amount), 0))
+      if (Math.abs(legacyTotal - linked) > 0.01) throw Object.assign(new Error('The linked receipt rows no longer match the captured reconciliation evidence. Reload and investigate.'), { statusCode: 409 })
+
+      const paymentIds = legacyPayments.map((payment) => payment.id)
+      const existingAllocations = await tx.customerPaymentAllocation.findMany({ where: { tenantId: scope.tenantId, paymentId: { in: paymentIds } } })
+      if (existingAllocations.length) throw Object.assign(new Error('One or more legacy receipts already have allocations. This requires a separate allocation review.'), { statusCode: 409 })
+      const existingExplicit = await tx.customerPaymentAllocation.aggregate({
+        where: { tenantId: scope.tenantId, saleId: sale.id, targetType: 'sale' },
+        _sum: { amount: true },
+      })
+      const paidAfter = toMoney(linked + toMoney(existingExplicit._sum.amount))
+      if (paidAfter > toMoney(sale.total) + 0.01) throw Object.assign(new Error('Verified receipts exceed the sale total. Allocate the excess to the customer account through an approved workflow.'), { statusCode: 409 })
+
+      const before = await calculateCustomerReceivableBalance(tx, scope, sale.customerId)
+      const originalRecorded = recorded
+      const originalLinked = linked
+      const previousBaseline = sale.legacyPaidAmountAtCutover == null
+        ? Math.max(toMoney(sale.amountPaid), linked)
+        : toMoney(sale.legacyPaidAmountAtCutover)
+      if (Math.abs(previousBaseline - linked) > 0.01) throw Object.assign(new Error('The existing customer balance uses a different legacy baseline. This requires an accountant-reviewed adjustment.'), { statusCode: 409 })
+
+      for (const payment of legacyPayments) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId: sale.customerId,
+            paymentId: payment.id,
+            saleId: sale.id,
+            targetType: 'sale',
+            amount: toMoney(payment.amount).toFixed(2),
+            createdById: req.user.id,
+          },
+        })
+        await tx.customerPayment.update({ where: { id: payment.id }, data: { allocationMode: 'explicit' } })
+      }
+
+      const projectionDelta = toMoney(paidAfter - toMoney(sale.amountPaid))
+      const remaining = Math.min(toMoney(sale.total), Math.max(0, toMoney(sale.balance) - projectionDelta))
+      await tx.saleRecord.update({
+        where: { id: sale.id },
+        data: {
+          legacyPaidAmountAtCutover: 0,
+          amountPaid: paidAfter,
+          balance: remaining,
+          paymentStatus: remaining <= 0.01 ? 'paid' : paidAfter > 0 ? 'partial' : 'unpaid',
+        },
+      })
+
+      const review = await tx.customerReceivableReconciliationReview.create({
+        data: {
+          tenantId: scope.tenantId,
+          customerId: sale.customerId,
+          saleId: sale.id,
+          recordedSaleAmountPaid: originalRecorded,
+          linkedPaymentTotal: originalLinked,
+          provisionalPaidAmount: Math.max(originalRecorded, originalLinked),
+          sourceFingerprint: fingerprint,
+          decision: 'receipts_confirmed_and_sale_projection_reconciled',
+          note: reviewNote,
+          reviewerId: req.user.id,
+        },
+      })
+      await reconcileCustomerReceivableBalance(tx, scope, sale.customerId)
+      const after = await calculateCustomerReceivableBalance(tx, scope, sale.customerId)
+      if (Math.abs(toMoney(before?.balance) - toMoney(after?.balance)) > 0.01) {
+        throw Object.assign(new Error('The correction would change the customer balance. No changes were saved; use an accountant-reviewed adjustment workflow.'), { statusCode: 409 })
+      }
+      return { review, customerBalance: toMoney(after?.balance), reconciledPaidAmount: paidAfter }
+    })
+
+    res.status(200).json({ ...result, financialRecordsChanged: true, customerBalanceChanged: false, cashOrGeneralLedgerChanged: false })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    if (error.code === 'P2002') return res.status(409).json({ error: 'A receipt allocation already exists. Reload the reconciliation list and verify the current state.' })
+    console.error('Reconcile receivable sale to receipts error:', error)
+    handleBranchError(res, error, 'Failed to reconcile sale to verified receipt records')
+  }
+})
+
+router.post('/reconciliation/payment-allocations/:saleId/reviews', authenticateToken, requirePermission('canReviewReceivableReconciliation'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: true })
+    const { decision, note, sourceFingerprint } = req.body || {}
+    const reviewNote = String(note || '').trim()
+    if (!reconciliationDecisions.has(decision)) return res.status(400).json({ error: 'Choose a valid reconciliation decision' })
+    if (!reviewNote) return res.status(400).json({ error: 'A review note is required' })
+    if (reviewNote.length > 1000) return res.status(400).json({ error: 'Review note must be 1,000 characters or fewer' })
+
+    const sale = await prisma.saleRecord.findFirst({
+      where: scopedWhere(scope, { id: req.params.saleId, status: 'completed', customerId: { not: null } }),
+    })
+    if (!sale) return res.status(404).json({ error: 'Legacy receivable sale not found' })
+
+    const linkedPayments = await prisma.customerPayment.aggregate({
+      where: { tenantId: scope.tenantId, customerId: sale.customerId, saleId: sale.id, allocationMode: 'legacy' },
+      _sum: { amount: true },
+    })
+    const recorded = sale.legacySaleAmountPaidAtCutover == null
+      ? toMoney(sale.amountPaid)
+      : toMoney(sale.legacySaleAmountPaidAtCutover)
+    const linked = sale.legacyLinkedPaymentsAtCutover == null
+      ? toMoney(linkedPayments._sum.amount)
+      : toMoney(sale.legacyLinkedPaymentsAtCutover)
+    const fingerprint = receivablePaymentFingerprint(sale.id, recorded, linked)
+    if (Math.abs(recorded - linked) <= 0.01) return res.status(409).json({ error: 'This sale no longer has a payment mismatch' })
+    if (sourceFingerprint !== fingerprint) return res.status(409).json({ error: 'The source values changed. Reload the reconciliation list and review the current evidence.' })
+
+    const review = await prisma.customerReceivableReconciliationReview.create({
+      data: {
+        tenantId: scope.tenantId,
+        customerId: sale.customerId,
+        saleId: sale.id,
+        recordedSaleAmountPaid: recorded,
+        linkedPaymentTotal: linked,
+        provisionalPaidAmount: Math.max(recorded, linked),
+        sourceFingerprint: fingerprint,
+        decision,
+        note: reviewNote,
+        reviewerId: req.user.id,
+      },
+      include: { reviewer: { select: { id: true, fname: true, lname: true } } },
+    })
+    res.status(201).json({ review, financialRecordsChanged: false })
+  } catch (error) {
+    console.error('Review receivable reconciliation issue error:', error)
+    handleBranchError(res, error, 'Failed to record reconciliation review')
+  }
+})
+
+router.get('/payments', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { page = 1, limit = 50, customerId, startDate, endDate } = req.query
+    const skip = (Number(page) - 1) * Number(limit)
+
+    const where = scopedWhere(scope, {
+      ...(customerId && { customerId }),
+      ...(startDate && endDate && {
+        createdAt: {
+          gte: new Date(startDate),
+          lte: new Date(endDate)
+        }
+      })
+    })
+
+    const [payments, total] = await Promise.all([
+      prisma.customerPayment.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          sale: { select: { id: true, receiptNo: true } }
+        },
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.customerPayment.count({ where })
+    ])
+
+    res.json({
+      payments: payments.map((payment) => ({ ...payment, reference: customerPaymentDisplayReference(payment) })),
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        pages: Math.ceil(total / Number(limit))
+      }
+    })
+  } catch (error) {
+    console.error('Get payments error:', error)
+    handleBranchError(res, error, 'Failed to fetch payments')
+  }
+})
+
+// Record customer payment
+router.post('/payments', authenticateToken, requirePermission('canRecordCustomerPayment'), requireFeature('receivables'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const { customerId, saleId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
+    let branchId = req.body?.branchId || req.body?.branch_id || null
+    const tenantId = tenantIdFromUser(req.user)
+    if (!branchId && customerId && saleId) {
+      const saleScope = await prisma.saleRecord.findFirst({
+        where: { id: saleId, customerId, tenantId },
+        select: { branchId: true },
+      })
+      branchId = saleScope?.branchId || null
+    }
+    if (!branchId && customerId) {
+      const customerScope = await prisma.customer.findFirst({
+        where: { id: customerId, tenantId },
+        select: { branchId: true },
+      })
+      branchId = customerScope?.branchId || null
+    }
+    const scopeRequest = branchId ? { ...req, body: { ...req.body, branchId } } : req
+    const scope = await resolveBranchScope(prisma, scopeRequest, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+    const foreignAmount = toMoney(amount)
+    const paidAmount = toBaseCurrency(foreignAmount, fx.rateToBase)
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    if (paidAmount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' })
+
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+    const rawPaymentRequestKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim()
+    const paymentRequestKey = rawPaymentRequestKey.replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160)
+    const paymentReference = customerPaymentReceiptReference(reference, paymentRequestKey)
+    const normalizedTransactionId = String(transactionId || '').trim() || null
+    const normalizedMobileProvider = String(mobileProvider || '').trim() || null
+    const normalizedPhoneNumber = String(phoneNumber || '').trim() || null
+
+    if (resolvedPaymentMethod === 'mobile_money' && (!normalizedMobileProvider || !normalizedPhoneNumber || !normalizedTransactionId)) {
+      return res.status(400).json({ error: 'Mobile money payments require a provider, phone number, and transaction ID.' })
+    }
+    if (resolvedPaymentMethod === 'card' && !normalizedTransactionId) {
+      return res.status(400).json({ error: 'Card payments require a transaction ID.' })
+    }
+
+    // Gate payment method by permission
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    // Get customer
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, tenantId: scope.tenantId }
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+    if (!saleId && scope.branchId && customer.branchId && customer.branchId !== scope.branchId) {
+      return res.status(403).json({ error: 'This customer belongs to another branch.', code: 'CUSTOMER_BRANCH_MISMATCH' })
+    }
+
+    let sale = null
+    if (saleId) {
+      sale = await prisma.saleRecord.findFirst({
+        where: scopedWhere(scope, { id: saleId, customerId })
+      })
+      if (!sale) return res.status(404).json({ error: 'Sale not found for this customer' })
+      if (sale.status !== 'completed') return res.status(400).json({ error: 'Payments can only be allocated to completed sales' })
+    }
+
+    const duplicateMarkers = [
+      paymentRequestKey ? { idempotencyKey: paymentRequestKey } : null,
+      paymentReference ? { reference: paymentReference } : null,
+      ['mobile_money', 'card'].includes(resolvedPaymentMethod) && normalizedTransactionId ? { transactionId: normalizedTransactionId } : null,
+    ].filter(Boolean)
+
+    if (duplicateMarkers.length > 0) {
+      const existingPayment = await prisma.customerPayment.findFirst({
+        where: scopedWhere(scope, {
+          customerId,
+          saleId: saleId || null,
+          amount: paidAmount,
+          paymentMethod: resolvedPaymentMethod,
+          OR: duplicateMarkers,
+        }),
+        orderBy: { createdAt: 'desc' },
+      })
+      if (existingPayment) return res.status(200).json({ ...existingPayment, reference: customerPaymentDisplayReference(existingPayment), duplicate: true })
+    }
+
+    const recentDuplicate = await prisma.customerPayment.findFirst({
+      where: scopedWhere(scope, {
+        customerId,
+        saleId: saleId || null,
+        amount: paidAmount,
+        paymentMethod: resolvedPaymentMethod,
+        notes: notes || null,
+        createdAt: { gte: new Date(Date.now() - 15000) },
+      }),
+      orderBy: { createdAt: 'desc' },
+    })
+    if (recentDuplicate) return res.status(200).json({ ...recentDuplicate, reference: customerPaymentDisplayReference(recentDuplicate), duplicate: true })
+
+    let payment
+    try {
+      payment = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
+      const candidateSales = await tx.saleRecord.findMany({
+        where: { tenantId: scope.tenantId, branchId: scope.branchId, customerId, status: 'completed' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true, total: true, balance: true, amountPaid: true,
+          legacyPaidAmountAtCutover: true, legacySaleAmountPaidAtCutover: true,
+          legacyLinkedPaymentsAtCutover: true, createdAt: true,
+        },
+      })
+      if (saleId && !candidateSales.some((row) => row.id === saleId)) {
+        throw Object.assign(new Error('Sale is no longer available for payment in this branch'), { statusCode: 409 })
+      }
+      const candidateSaleIds = candidateSales.map((row) => row.id)
+      const [allocationGroups, legacyPaymentGroups, creditApplicationGroups] = candidateSaleIds.length
+        ? await Promise.all([
+          tx.customerPaymentAllocation.groupBy({
+            by: ['saleId'],
+            where: { tenantId: scope.tenantId, saleId: { in: candidateSaleIds }, targetType: 'sale' },
+            _sum: { amount: true },
+          }),
+          tx.customerPayment.groupBy({
+            by: ['saleId'],
+            where: { tenantId: scope.tenantId, customerId, saleId: { in: candidateSaleIds }, allocationMode: 'legacy' },
+            _sum: { amount: true },
+          }),
+          tx.customerCreditApplication.groupBy({
+            by: ['saleId'],
+            where: { tenantId: scope.tenantId, customerId, saleId: { in: candidateSaleIds } },
+            _sum: { amount: true },
+          }),
+        ])
+        : [[], [], []]
+      const allocatedBySale = new Map(allocationGroups.map((row) => [row.saleId, toMoney(row._sum.amount)]))
+      const legacyPaymentsBySale = new Map(legacyPaymentGroups.map((row) => [row.saleId, toMoney(row._sum.amount)]))
+      const creditApplicationsBySale = new Map(creditApplicationGroups.map((row) => [row.saleId, toMoney(row._sum.amount)]))
+      const openSales = candidateSales.map((row) => {
+        const recordedPaid = toMoney(row.amountPaid)
+        const legacyReceipts = toMoney(legacyPaymentsBySale.get(row.id))
+        const allocatedBefore = toMoney(allocatedBySale.get(row.id))
+        const creditAppliedBefore = toMoney(creditApplicationsBySale.get(row.id))
+        const legacyBaseline = row.legacyPaidAmountAtCutover == null
+          ? Math.max(legacyReceipts, recordedPaid - allocatedBefore - creditAppliedBefore)
+          : toMoney(row.legacyPaidAmountAtCutover)
+        const legacyPaidIncrease = Math.max(0, legacyBaseline - recordedPaid)
+        const effectiveBalance = Math.max(0, toMoney(row.balance) - legacyPaidIncrease)
+        const calculatedDue = Math.max(0, toMoney(row.total) - legacyBaseline - allocatedBefore - creditAppliedBefore)
+        return {
+          ...row,
+          recordedPaid,
+          legacyReceipts,
+          legacyBaseline,
+          allocatedBefore,
+          creditAppliedBefore,
+          openAmount: Math.min(effectiveBalance, calculatedDue),
+        }
+      })
+      const receiptAllocation = allocateCustomerReceipt(paidAmount, openSales, saleId || null)
+      const allocationBySale = new Map(receiptAllocation.allocations.map((row) => [row.saleId, row.amount]))
+      let rentalUnallocated = receiptAllocation.unallocated
+      const openRentals = !saleId && rentalUnallocated > 0
+        ? await tx.rental.findMany({
+          where: {
+            tenantId: scope.tenantId,
+            customerId,
+            balance: { gt: 0 },
+            AND: [
+              { OR: [
+                { status: { not: 'cancelled' }, OR: [{ isHistoricalReceivable: true }, { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } }] },
+                { status: 'cancelled', cancellationChargeAmount: { gt: 0 } },
+              ] },
+              ...(scope.branchId ? [{ OR: [{ branchId: scope.branchId }, { branchId: null }] }] : []),
+            ],
+          },
+          orderBy: [{ hireDate: 'asc' }, { id: 'asc' }],
+          select: { id: true, rentalNo: true, branchId: true, balance: true, status: true },
+        })
+        : []
+      const rentalAllocations = []
+      for (const openRental of openRentals) {
+        if (rentalUnallocated <= 0.01) break
+        await tx.$queryRaw`SELECT "id" FROM "rentals" WHERE "id" = ${openRental.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+        const currentRental = await tx.rental.findFirst({
+          where: {
+            id: openRental.id, tenantId: scope.tenantId, customerId,
+            OR: [
+              { status: { not: 'cancelled' }, OR: [{ isHistoricalReceivable: true }, { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } }] },
+              { status: 'cancelled', cancellationChargeAmount: { gt: 0 } },
+            ],
+          },
+          select: { id: true, rentalNo: true, branchId: true, balance: true, amountPaid: true, status: true },
+        })
+        if (!currentRental) continue
+        const currentAllocation = allocateCustomerReceiptToRentals(rentalUnallocated, [currentRental])
+        const allocatedAmount = currentAllocation.allocations[0]?.amount || 0
+        if (allocatedAmount <= 0.01) continue
+        rentalAllocations.push({ rental: currentRental, amount: allocatedAmount })
+        rentalUnallocated = currentAllocation.unallocated
+      }
+
+      const accountToUse = await resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'payments')
+
+      const createdPayment = await tx.customerPayment.create({
+        data: {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          customerId,
+          saleId,
+          amount: paidAmount,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          allocationMode: 'explicit',
+          paymentMethod: resolvedPaymentMethod,
+          mobileProvider: resolvedPaymentMethod === 'mobile_money' ? normalizedMobileProvider : null,
+          phoneNumber: resolvedPaymentMethod === 'mobile_money' ? normalizedPhoneNumber : null,
+          transactionId: ['mobile_money', 'card'].includes(resolvedPaymentMethod) ? normalizedTransactionId : null,
+          reference: paymentReference,
+          idempotencyKey: paymentRequestKey || null,
+          notes
+        }
+      })
+
+      for (const allocation of receiptAllocation.allocations) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: createdPayment.id,
+            saleId: allocation.saleId,
+            targetType: 'sale',
+            amount: allocation.amount,
+            createdById: req.user.id,
+          }
+        })
+      }
+      for (const allocation of rentalAllocations) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: createdPayment.id,
+            rentalId: allocation.rental.id,
+            targetType: 'rental',
+            amount: allocation.amount,
+            createdById: req.user.id,
+          },
+        })
+        const receiptNo = `RNT-CP-${createdPayment.id.slice(-18)}-${allocation.rental.id.slice(-8)}`.slice(0, 64)
+        const idempotencyKey = `customer-payment:${createdPayment.id}:${allocation.rental.id}`.slice(0, 120)
+        const nextBalance = Math.max(0, toMoney(allocation.rental.balance) - allocation.amount)
+        await tx.rentalPayment.create({
+          data: {
+            tenantId: scope.tenantId,
+            rentalId: allocation.rental.id,
+            cashAccountId: accountToUse.id,
+            userId: req.user.id,
+            kind: allocation.rental.status === 'cancelled' ? 'rental_cancellation_fee' : 'rental_payment',
+            receiptNo,
+            idempotencyKey,
+            amount: allocation.amount,
+            balanceAfter: nextBalance,
+            paymentMethod: resolvedPaymentMethod,
+            mobileProvider: resolvedPaymentMethod === 'mobile_money' ? normalizedMobileProvider : null,
+            phoneNumber: resolvedPaymentMethod === 'mobile_money' ? normalizedPhoneNumber : null,
+            paymentDate: createdPayment.createdAt,
+            transactionRef: normalizedTransactionId || paymentReference || createdPayment.id,
+            notes: `Allocated from customer receipt ${paymentReference || createdPayment.id}`,
+            status: 'posted',
+          },
+        })
+        await tx.rental.update({
+          where: { id: allocation.rental.id },
+          data: {
+            amountPaid: { increment: allocation.amount },
+            balance: nextBalance,
+            ...(allocation.rental.status === 'cancelled' ? { cancellationChargeBalance: nextBalance } : {}),
+            paymentStatus: nextBalance <= 0.01 ? 'paid' : 'partial',
+            paymentMethod: resolvedPaymentMethod,
+          },
+        })
+      }
+      if (rentalUnallocated > 0.01) {
+        await tx.customerPaymentAllocation.create({
+          data: {
+            tenantId: scope.tenantId,
+            customerId,
+            paymentId: createdPayment.id,
+            targetType: 'customer_account',
+            amount: rentalUnallocated,
+            createdById: req.user.id,
+          }
+        })
+      }
+
+      if (String(accountToUse.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+        throw Object.assign(new Error(`This receipt posts to the business ledger in ${fx.baseCurrency}. Select a ${fx.baseCurrency} transaction account.`), { statusCode: 409 })
+      }
+      const updatedAccount = await tx.cashAccount.update({
+        where: { id: accountToUse.id },
+        data: { balance: { increment: paidAmount } }
+      })
+
+      await tx.cashTransaction.create({
+        data: {
+          tenantId: scope.tenantId,
+          accountId: accountToUse.id,
+          type: 'receipt',
+          amount: paidAmount,
+          balanceAfter: updatedAccount.balance,
+          currency: fx.currency,
+          foreignAmount,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          reference: paymentReference || createdPayment.id,
+          description: `Customer payment: ${customer.name || customer.email}`,
+          userId: req.user.id
+        }
+      })
+
+      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, accountToUse.id)
+
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
+      let transactionAccount = null
+      if (arConfig?.isEnabled) {
+        const receivableApplied = Math.min(paidAmount, Math.max(0, toMoney(customerBalanceBefore?.balance)))
+        transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` } } })
+        if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${accountToUse.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
+        await postReceivablesJournal(tx, {
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId: req.user.id,
+          sourceType: 'CUSTOMER_RECEIPT',
+          sourceId: createdPayment.id,
+          date: createdPayment.createdAt,
+          reference: paymentReference || createdPayment.id,
+          description: `Customer receipt ${paymentReference || createdPayment.id}`,
+          lines: receiptCollectionLines(arConfig, { transactionAccountId: transactionAccount.id, amount: paidAmount, receivableApplied, reference: paymentReference }),
+        })
+      }
+
+      if (rentalAllocations.length) {
+        if (!arConfig?.isEnabled && !transactionAccount) {
+          transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${accountToUse.id}` }, isActive: true } })
+        }
+        const rentalConfig = await ensureRentalAccounting(tx, scope.tenantId)
+        const cashLedger = await ensureRentalCashLedgerAccount(tx, scope.tenantId, accountToUse)
+        if (arConfig?.isEnabled && !transactionAccount) throw Object.assign(new Error('The selected transaction account is not linked to an active chart-of-accounts entry. No payment was recorded.'), { statusCode: 409 })
+        for (const allocation of rentalAllocations) {
+          const allocationRow = await tx.customerPaymentAllocation.findFirst({
+            where: { tenantId: scope.tenantId, paymentId: createdPayment.id, rentalId: allocation.rental.id, targetType: 'rental' },
+            select: { id: true },
+          })
+          if (!allocationRow) throw Object.assign(new Error('The rental receipt allocation could not be verified.'), { statusCode: 409 })
+          if (arConfig?.isEnabled) {
+            await postRentalJournal(tx, {
+              tenantId: scope.tenantId,
+              branchId: allocation.rental.branchId || scope.branchId,
+              userId: req.user.id,
+              sourceType: 'RENTAL_CUSTOMER_RECEIPT_REALLOCATION',
+              sourceId: allocationRow.id,
+              date: createdPayment.createdAt,
+              reference: paymentReference || createdPayment.id,
+              description: `Apply customer receipt to rental ${allocation.rental.rentalNo}`,
+              lines: [
+                { accountId: arConfig.receivableAccountId, debit: allocation.amount, credit: 0, description: `Move receipt allocation out of trade receivables ${allocation.rental.rentalNo}` },
+                { accountId: rentalConfig.receivableAccountId, debit: 0, credit: allocation.amount, description: `Settle rental receivable ${allocation.rental.rentalNo}` },
+              ],
+            })
+          } else {
+            await postRentalJournal(tx, {
+              tenantId: scope.tenantId,
+              branchId: allocation.rental.branchId || scope.branchId,
+              userId: req.user.id,
+              sourceType: 'RENTAL_CUSTOMER_RECEIPT',
+              sourceId: allocationRow.id,
+              date: createdPayment.createdAt,
+              reference: paymentReference || createdPayment.id,
+              description: `Customer receipt applied to rental ${allocation.rental.rentalNo}`,
+              lines: rentalReceiptLines(rentalConfig, { amount: allocation.amount, cashAccountId: cashLedger.id, reference: allocation.rental.rentalNo }),
+            })
+          }
+        }
+      }
+
+      for (const transactionSale of openSales) {
+        const allocatedNow = toMoney(allocationBySale.get(transactionSale.id))
+        if (allocatedNow <= 0) continue
+        if (transactionSale.legacyPaidAmountAtCutover == null) {
+          await tx.saleRecord.update({
+            where: { id: transactionSale.id },
+            data: {
+              legacyPaidAmountAtCutover: transactionSale.legacyBaseline,
+              legacySaleAmountPaidAtCutover: transactionSale.recordedPaid,
+              legacyLinkedPaymentsAtCutover: transactionSale.legacyReceipts,
+            },
+          })
+        }
+        const newAmountPaid = transactionSale.legacyBaseline + transactionSale.allocatedBefore + transactionSale.creditAppliedBefore + allocatedNow
+        const newSaleBalance = Math.max(0, transactionSale.openAmount - allocatedNow)
+        await tx.saleRecord.update({
+          where: { id: transactionSale.id },
+          data: {
+            amountPaid: newAmountPaid,
+            balance: newSaleBalance,
+            paymentStatus: newSaleBalance <= 0 ? 'paid' : 'partial'
+          }
+        })
+      }
+
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
+
+      return createdPayment
+    })
+    } catch (transactionError) {
+      if (transactionError?.code === 'P2002' && paymentRequestKey) {
+        const existingPayment = await prisma.customerPayment.findUnique({ where: { idempotencyKey: paymentRequestKey } })
+        if (existingPayment) return res.status(200).json({ ...existingPayment, reference: customerPaymentDisplayReference(existingPayment), duplicate: true })
+      }
+      throw transactionError
+    }
+
+    res.status(201).json({ ...payment, reference: customerPaymentDisplayReference(payment), baseCurrency: fx.baseCurrency })
+  } catch (error) {
+    console.error('Record payment error:', error)
+    handleBranchError(res, error, 'Failed to record payment')
+  }
+})
+
+// Record customer withdrawal
+router.post('/withdrawals', authenticateToken, requirePermission('canCreateWithdrawal'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const { customerId, amount, paymentMethod, reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    const tenantId = tenantIdFromUser(req.user)
+    const customer = await prisma.customer.findFirst({
+      where: { id: customerId, tenantId },
+      select: { id: true, branchId: true },
+    })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const requestedBranchId = req.body?.branchId || req.body?.branch_id || null
+    if (customer.branchId && requestedBranchId && customer.branchId !== requestedBranchId) {
+      return res.status(403).json({ error: 'Customer is not available in the selected branch', code: 'BRANCH_ACCESS_DENIED' })
+    }
+    const branchId = customer.branchId || requestedBranchId
+    const scopeRequest = branchId ? { ...req, body: { ...req.body, branchId } } : req
+    const scope = await resolveBranchScope(prisma, scopeRequest, {
+      source: 'body',
+      requireBranch: true,
+      allowOwnerAll: false
+    })
+    const resolvedPaymentMethod = paymentMethod || 'cash'
+    if (resolvedPaymentMethod === 'credit') {
+      return res.status(400).json({ error: 'Withdrawal must use cash, mobile money, bank transfer, or card' })
+    }
+
+    if (!canUsePaymentMethodOrAssignedCash(req, resolvedPaymentMethod, cashAccountId || req.userCashAccountId)) {
+      return res.status(403).json({
+        error: `You do not have permission to use ${resolvedPaymentMethod} as a payment method. Please contact your administrator.`,
+        code: 'NO_PAYMENT_METHOD_PERMISSION'
+      })
+    }
+
+    const withdrawal = await recordCustomerWithdrawal(prisma, {
+      scope, customerId, amount, userId: req.user.id, paymentMethod: resolvedPaymentMethod,
+      reference, notes, mobileProvider, phoneNumber, transactionId,
+      resolveAccount: (tx) => resolveReceiptCashAccount(tx, scope, req, resolvedPaymentMethod, cashAccountId, 'withdrawals')
+    })
+
+    res.status(201).json(withdrawal)
+  } catch (error) {
+    console.error('Record withdrawal error:', error)
+    if (error.statusCode) return res.status(error.statusCode).json({
+      error: error.message, code: error.code, availableFunds: error.availableFunds, currentBalance: error.currentBalance
+    })
+    handleBranchError(res, error, 'Failed to record withdrawal')
+  }
+})
+
+// === RECEIVABLES REPORTS ===
+
+// Get receivables summary
+router.get('/receivables/summary', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const saleWhere = scopedWhere(scope, {
+      balance: { gt: 0 },
+      paymentStatus: { not: 'paid' }
+    })
+
+    const [totalReceivables, overdueCount, agingSales] = await Promise.all([
+      // Total amount owed
+      outstandingCustomerSummary(prisma, scope),
+      
+      // Overdue customers count
+      salesView.count({
+        where: scopedWhere(scope, {
+          balance: { gt: 0 },
+          dueDate: { lt: new Date() }
+        })
+      }),
+
+      // Aging report
+      salesView.findMany({
+        where: saleWhere,
+        include: { customer: { select: { id: true, name: true, phone: true } } },
+        orderBy: { balance: 'desc' }
+      })
+    ])
+
+    const agingByCustomer = new Map()
+    agingSales.forEach((sale) => {
+      if (!sale.customerId) return
+      const current = agingByCustomer.get(sale.customerId) || {
+        customer_id: sale.customerId,
+        customer_name: sale.customer?.name || 'Customer',
+        phone: sale.customer?.phone,
+        total_owed: 0,
+        overdue_invoices: 0,
+        latest_due: null
+      }
+      current.total_owed += Number(sale.balance || 0)
+      current.overdue_invoices += 1
+      if (!current.latest_due || (sale.dueDate && sale.dueDate > current.latest_due)) {
+        current.latest_due = sale.dueDate
+      }
+      agingByCustomer.set(sale.customerId, current)
+    })
+
+    const agingReportRows = Array.from(agingByCustomer.values())
+      .sort((a, b) => b.total_owed - a.total_owed)
+
+    res.json({
+      totalReceivables: totalReceivables._sum.balance || 0,
+      overdueCount,
+      agingReport: agingReportRows
+    })
+  } catch (error) {
+    console.error('Receivables summary error:', error)
+    handleBranchError(res, error, 'Failed to fetch receivables summary')
+  }
+})
+
+// === FUEL CARDS ===
+
+// List fuel cards
+router.get('/fuel-cards', authenticateToken, requirePermission('canViewReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { search, status, cardType } = req.query
+
+    const where = scopedWhere(scope, {
+      ...(status && { status }),
+      ...(cardType && { cardType }),
+      ...(search && {
+        OR: [
+          { cardNumber: { contains: search, mode: 'insensitive' } },
+          { holderName: { contains: search, mode: 'insensitive' } }
+        ]
+      })
+    })
+
+    const cards = await prisma.fuelCard.findMany({
+      where,
+      include: { customer: { select: { id: true, name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' }
+    })
+
+    res.json({ cards })
+  } catch (error) {
+    console.error('Get fuel cards error:', error)
+    handleBranchError(res, error, 'Failed to fetch fuel cards')
+  }
+})
+
+// Create fuel card
+router.post('/fuel-cards', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    const { cardNumber, holderName, customerId, cardType = 'prepaid', balance = 0, creditLimit = 0, expiresAt, notes } = req.body
+
+    if (!cardNumber?.trim()) return res.status(400).json({ error: 'Card number is required' })
+    if (!holderName?.trim()) return res.status(400).json({ error: 'Holder name is required' })
+
+    // Check unique card number within tenant
+    const existing = await prisma.fuelCard.findFirst({
+      where: { tenantId: scope.tenantId, cardNumber: cardNumber.trim() }
+    })
+    if (existing) return res.status(400).json({ error: 'Card number already exists' })
+
+    // Validate customer if provided
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: customerId }) })
+      if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const card = await prisma.fuelCard.create({
+      data: {
+        cardNumber: cardNumber.trim(),
+        holderName: holderName.trim(),
+        customerId: customerId || null,
+        cardType,
+        balance: toMoney(balance),
+        creditLimit: toMoney(creditLimit),
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        notes,
+        tenantId: scope.tenantId,
+        branchId: scope.branchId
+      },
+      include: { customer: { select: { id: true, name: true, phone: true } } }
+    })
+
+    res.status(201).json(card)
+  } catch (error) {
+    console.error('Create fuel card error:', error)
+    handleBranchError(res, error, 'Failed to create fuel card')
+  }
+})
+
+// Update fuel card
+router.put('/fuel-cards/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const { holderName, customerId, cardType, creditLimit, status, expiresAt, notes } = req.body
+
+    const existing = await prisma.fuelCard.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!existing) return res.status(404).json({ error: 'Fuel card not found' })
+
+    const card = await prisma.fuelCard.update({
+      where: { id },
+      data: {
+        ...(holderName !== undefined && { holderName }),
+        ...(customerId !== undefined && { customerId: customerId || null }),
+        ...(cardType !== undefined && { cardType }),
+        ...(creditLimit !== undefined && { creditLimit: toMoney(creditLimit) }),
+        ...(status !== undefined && { status }),
+        ...(expiresAt !== undefined && { expiresAt: expiresAt ? new Date(expiresAt) : null }),
+        ...(notes !== undefined && { notes })
+      },
+      include: { customer: { select: { id: true, name: true, phone: true } } }
+    })
+
+    res.json(card)
+  } catch (error) {
+    console.error('Update fuel card error:', error)
+    handleBranchError(res, error, 'Failed to update fuel card')
+  }
+})
+
+// Reload fuel card (add balance)
+router.post('/fuel-cards/:id/reload', authenticateToken, requirePermission('canCreateReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    const { id } = req.params
+    const { amount, reference, notes } = req.body
+    const reloadAmount = toMoney(amount)
+    if (reloadAmount <= 0) return res.status(400).json({ error: 'Reload amount must be greater than zero' })
+
+    const card = await prisma.fuelCard.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!card) return res.status(404).json({ error: 'Fuel card not found' })
+    if (card.status !== 'active') return res.status(400).json({ error: 'Card is not active' })
+
+    const newBalance = card.balance + reloadAmount
+    const [updatedCard] = await Promise.all([
+      prisma.fuelCard.update({ where: { id }, data: { balance: newBalance }, include: { customer: { select: { id: true, name: true, phone: true } } } }),
+      prisma.fuelCardTransaction.create({
+        data: {
+          cardId: id,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          type: 'reload',
+          amount: reloadAmount,
+          balanceAfter: newBalance,
+          reference,
+          notes
+        }
+      })
+    ])
+
+    res.json(updatedCard)
+  } catch (error) {
+    console.error('Reload fuel card error:', error)
+    handleBranchError(res, error, 'Failed to reload fuel card')
+  }
+})
+
+// Delete fuel card
+router.delete('/fuel-cards/:id', authenticateToken, requirePermission('canEditReceivable'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+
+    const existing = await prisma.fuelCard.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!existing) return res.status(404).json({ error: 'Fuel card not found' })
+
+    await prisma.fuelCard.delete({ where: { id } })
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Delete fuel card error:', error)
+    handleBranchError(res, error, 'Failed to delete fuel card')
+  }
+})
+
+// === CREDIT ACCOUNTS (customers with credit limit > 0) ===
+
+router.get('/credit-accounts', authenticateToken, requirePermission('canViewReceivable'), requireFeature('receivables'), requireFeature('customers.credit_limits'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { search, status } = req.query
+
+    const where = scopedWhere(scope, {
+      creditLimit: { gt: 0 },
+      ...(status && { status }),
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { phone: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } }
+        ]
+      })
+    })
+
+    const accountsRaw = await prisma.customer.findMany({
+      where,
+      orderBy: { balance: 'desc' }
+    })
+    const balancedAccounts = await attachCustomerReceivableBalances(prisma, scope, accountsRaw)
+    const accounts = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), balancedAccounts)
+    const access = await getTenantCustomerProfileAccess(req, scope.tenantId)
+
+    res.json({ accounts: access.creditLimit ? accounts : accounts.map(({ creditLimit: _creditLimit, ...account }) => account) })
+  } catch (error) {
+    console.error('Get credit accounts error:', error)
+    handleBranchError(res, error, 'Failed to fetch credit accounts')
+  }
+})
+
+// Update credit terms. Trust score is calculated from repayment history.
+router.put('/credit-accounts/:id', authenticateToken, requirePermission('canEditCustomerCreditLimit'), requireFeature('receivables'), requireFeature('customers.credit_limits'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const { id } = req.params
+    const { creditLimit, status, notes } = req.body
+
+    const existing = await prisma.customer.findFirst({ where: scopedWhere(scope, { id }) })
+    if (!existing) return res.status(404).json({ error: 'Customer not found' })
+
+    let creditLimitAmount
+    if (creditLimit !== undefined) {
+      const creditLimitCheck = validateOptionalCustomerCreditLimit(creditLimit)
+      if (!creditLimitCheck.valid) {
+        return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
+      }
+      creditLimitAmount = creditLimitCheck.amount
+    }
+
+    const customerRaw = await prisma.customer.update({
+      where: { id },
+      data: {
+        ...(creditLimit !== undefined && { creditLimit: creditLimitAmount }),
+        ...(status !== undefined && { status }),
+        ...(notes !== undefined && { notes })
+      }
+    })
+
+    const [balancedCustomer] = await attachCustomerReceivableBalances(prisma, scope, [customerRaw])
+    const [customer] = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), [balancedCustomer])
+    res.json(customer)
+  } catch (error) {
+    console.error('Update credit account error:', error)
+    handleBranchError(res, error, 'Failed to update credit account')
+  }
+})
+
+export default router

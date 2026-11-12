@@ -1,0 +1,458 @@
+import { Router } from "express";
+import prisma from "../db.js";
+import { createReceivableSalesView } from '../utils/receivableSalesView.js';
+import { outstandingCustomerSummary } from '../utils/customerBalance.js';
+import { authenticateToken, requireAnyPermission, requirePermission } from "../../middleware/auth.js";
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
+import { expenseDateWhere, loadJournalExpenseRows } from '../utils/reportAccounting.js';
+
+const router = Router();
+const salesView = createReceivableSalesView(prisma);
+function hasPermission(req, permission) {
+  const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+  return permissions.includes("*") || permissions.includes(permission);
+}
+
+function hasAnyReportPermission(req, reportIds) {
+  return reportIds.some((id) => hasPermission(req, `canViewReport${id[0].toUpperCase()}${id.slice(1)}`));
+}
+
+function hasSalesVisibility(req) {
+  return hasPermission(req, "canViewSale") || hasAnyReportPermission(req, ["salesSummary", "salesDaily"]);
+}
+
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'private, no-store');
+  next();
+});
+
+function saleLineCogs(item) {
+  const rawCost = item?.cost;
+  if (rawCost !== null && rawCost !== undefined && rawCost !== "") {
+    const savedCost = Number(rawCost);
+    if (Number.isFinite(savedCost)) return savedCost * Number(item?.quantity || 0);
+  }
+
+  const productCost = Number(item?.product?.cost || 0);
+  const conversionFactor = Number(item?.conversionFactor || 1);
+  const effectiveCost = productCost * (Number.isFinite(conversionFactor) && conversionFactor > 0 ? conversionFactor : 1);
+  return effectiveCost * Number(item?.quantity || 0);
+}
+
+function saleCogs(sale) {
+  return (sale?.items || []).reduce((sum, item) => sum + saleLineCogs(item), 0);
+}
+
+const saleItemCostSelect = {
+  quantity: true,
+  cost: true,
+  conversionFactor: true,
+  product: { select: { cost: true } },
+};
+
+const aggregateTotal = (aggregate, field = "total") => Number(aggregate?._sum?.[field] || 0);
+const aggregateRevenue = (aggregate) => aggregateTotal(aggregate) - aggregateTotal(aggregate, 'tax');
+const aggregateCount = (aggregate) => Number(aggregate?._count || 0);
+
+function scopedExpenseWhere(scope, extra = {}) {
+  const { branchId, ...rest } = extra;
+  const branchScope = branchId || scope.branchId;
+  const clauses = [];
+
+  if (Object.keys(rest).length) clauses.push(rest);
+  if (branchScope) clauses.push({ OR: [{ branchId: branchScope }, { branchId: null }] });
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {}),
+  };
+}
+
+function scopedJournalWhere(scope, extra = {}) {
+  const { branchId, ...rest } = extra;
+  const branchScope = branchId || scope.branchId;
+  const clauses = [];
+
+  if (Object.keys(rest).length) clauses.push(rest);
+  if (branchScope) clauses.push({ OR: [{ branchId: branchScope }, { branchId: null }] });
+
+  return {
+    tenantId: scope.tenantId,
+    ...(clauses.length ? { AND: clauses } : {}),
+  };
+}
+
+function isExpenseAccount(account) {
+  return ["expense", "expenses"].includes(String(account?.type || "").trim().toLowerCase());
+}
+
+async function journalExpenseRows(scope, dateRange) {
+  return loadJournalExpenseRows(prisma, scope, dateRange);
+}
+
+async function journalExpenseTotal(scope, dateRange) {
+  const rows = await journalExpenseRows(scope, dateRange);
+  return rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+}
+
+function mergeGroupedTotals(groups) {
+  const map = new Map();
+  groups.flat().forEach((group) => {
+    const key = group.productId || "unknown";
+    const current = map.get(key) || { productId: group.productId, quantity: 0, revenue: 0, salesCount: 0 };
+    current.quantity += Number(group._sum?.quantity || 0);
+    current.revenue += Number(group._sum?.total || 0);
+    current.salesCount += Number(group._count || 0);
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
+}
+
+function mergePaymentMethods(groups) {
+  const map = new Map();
+  groups.flat().forEach((group) => {
+    const key = group.paymentMethod || "cash";
+    const current = map.get(key) || { method: key, total: 0, count: 0 };
+    current.total += Number(group._sum?.total || 0);
+    current.count += Number(group._count || 0);
+    map.set(key, current);
+  });
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
+// Dashboard KPIs
+router.get("/kpis", authenticateToken, async (req, res) => {
+  if (!req.user?.tenantId) return res.status(403).json({ error: "Business account required" });
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const visibleSales = { ...salesUserWhere(req), status: { notIn: ['cancelled', 'refunded'] } };
+
+    const [
+      salesThisMonth,
+      saleRecordsThisMonth,
+      salesLastMonth,
+      saleRecordsLastMonth,
+      purchasesThisMonth,
+      supplierPurchasesThisMonth,
+      expensesThisMonth,
+      journalExpensesThisMonth,
+    ] = await Promise.all([
+      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
+      salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true, discount: true }, _count: true }),
+      prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true } }),
+      salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfLastMonth, lt: startOfMonth }, ...visibleSales }), _sum: { total: true, tax: true } }),
+      prisma.purchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
+      prisma.supplierPurchase.aggregate({ where: scopedWhere(scope, { createdAt: { gte: startOfMonth } }), _sum: { total: true } }),
+      prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth })), _sum: { amount: true } }),
+      journalExpenseTotal(scope, { gte: startOfMonth }),
+    ]);
+
+    const [
+      products,
+      lowStockProducts,
+      expiringProducts,
+      customers,
+      salesWithItemsThisMonth,
+      saleRecordsWithItemsThisMonth,
+    ] = await Promise.all([
+      prisma.product.count({ where: scopedWhere(scope, { isActive: true }) }),
+      prisma.product.count({ where: scopedWhere(scope, { isActive: true, quantity: { lte: 10 } }) }),
+      prisma.product.count({ where: scopedWhere(scope, { isActive: true, expiryDate: { not: null, lte: new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000) } }) }),
+      prisma.customer.count({ where: scopedWhere(scope) }),
+      prisma.sale.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
+        select: { items: { select: saleItemCostSelect } },
+      }),
+      salesView.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
+        select: { items: { select: saleItemCostSelect } },
+      }),
+    ]);
+
+    // The reconciliation reads several related tables; keep it out of the broad
+    // dashboard fan-out so hosted databases do not exhaust their connection pool.
+    const receivables = await outstandingCustomerSummary(prisma, scope);
+
+    const revenueThisMonth = aggregateRevenue(salesThisMonth) + aggregateRevenue(saleRecordsThisMonth);
+    const revenueLastMonth = aggregateRevenue(salesLastMonth) + aggregateRevenue(saleRecordsLastMonth);
+    const revenueChange = revenueLastMonth ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1) : 0;
+    const totalExpenses = aggregateTotal(expensesThisMonth, "amount") + Number(journalExpensesThisMonth || 0);
+    const totalPurchases = aggregateTotal(purchasesThisMonth) + aggregateTotal(supplierPurchasesThisMonth);
+    const cogs = [...salesWithItemsThisMonth, ...saleRecordsWithItemsThisMonth].reduce((sum, sale) => sum + saleCogs(sale), 0);
+    const grossProfit = revenueThisMonth - cogs;
+    const netProfit = grossProfit - totalExpenses;
+
+    const canViewSales = hasSalesVisibility(req);
+    const canViewFinance = hasAnyReportPermission(req, ["financialProfitLoss"]);
+    const canViewExpenses = hasPermission(req, "canViewExpense");
+    const canViewInventory = hasPermission(req, "canViewProduct");
+    const canViewCustomers = hasPermission(req, "canViewCustomer");
+    const canViewReceivables = hasPermission(req, "canViewReceivable");
+    const canViewPurchases = hasPermission(req, "canViewPurchase") || hasPermission(req, "canViewPayable");
+
+    res.json({
+      revenue: canViewSales ? revenueThisMonth : null,
+      revenueChange: canViewSales ? Number(revenueChange) : null,
+      salesCount: canViewSales ? aggregateCount(salesThisMonth) + aggregateCount(saleRecordsThisMonth) : null,
+      taxCollected: hasPermission(req, "canViewTax") ? aggregateTotal(salesThisMonth, "tax") + aggregateTotal(saleRecordsThisMonth, "tax") : null,
+      totalDiscount: canViewSales ? aggregateTotal(salesThisMonth, "discount") + aggregateTotal(saleRecordsThisMonth, "discount") : null,
+      purchases: canViewPurchases ? totalPurchases : null,
+      expenses: canViewExpenses ? totalExpenses : null,
+      operatingExpenses: canViewExpenses ? totalExpenses : null,
+      cogs: canViewFinance ? cogs : null,
+      grossProfit: canViewFinance ? grossProfit : null,
+      netProfit: canViewFinance ? netProfit : null,
+      productCount: canViewInventory ? products : null,
+      lowStockCount: canViewInventory ? lowStockProducts : null,
+      expiringCount: canViewInventory ? expiringProducts : null,
+      customerCount: canViewCustomers ? customers : null,
+      receivablesOutstanding: canViewReceivables ? receivables._sum.balance || 0 : null,
+      receivablesCount: canViewReceivables ? receivables._count : null,
+    });
+  } catch (err) {
+    console.error("Dashboard KPIs error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+// Sales chart data (last 12 months)
+router.get("/sales-chart", authenticateToken, requireAnyPermission(["canViewSale", "canViewReportSalesSummary", "canViewReportSalesDaily", "canViewExpense"]), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const labels = [];
+    const revenue = [];
+    const expenses = [];
+    const visibleSales = { ...salesUserWhere(req), status: { notIn: ['cancelled', 'refunded'] } };
+
+    for (let i = 11; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const label = start.toLocaleString("default", { month: "short" });
+      labels.push(label);
+
+      const [saleAgg, saleRecordAgg, expAgg, journalExp] = await Promise.all([
+        prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true, tax: true } }),
+        salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true, tax: true } }),
+        prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
+        journalExpenseTotal(scope, { gte: start, lt: end }),
+      ]);
+      revenue.push(aggregateRevenue(saleAgg) + aggregateRevenue(saleRecordAgg));
+      expenses.push(aggregateTotal(expAgg, "amount") + Number(journalExp || 0));
+    }
+
+    res.json({ labels, revenue: hasSalesVisibility(req) ? revenue : null, expenses: hasPermission(req, "canViewExpense") ? expenses : null });
+  } catch (err) {
+    handleBranchError(res, err);
+  }
+});
+
+// Profit & Loss summary (last 6 months)
+router.get("/profit-loss", authenticateToken, requirePermission("canViewReportFinancialProfitLoss"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const labels = [];
+    const grossProfit = [];
+    const netProfit = [];
+    const visibleSales = { ...salesUserWhere(req), status: { notIn: ['cancelled', 'refunded'] } };
+
+    for (let i = 5; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      labels.push(start.toLocaleString("default", { month: "short" }));
+
+      const [saleAgg, saleRecordAgg, expAgg, journalExp, salesWithItems, saleRecordsWithItems] = await Promise.all([
+        prisma.sale.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true, tax: true } }),
+        salesView.aggregate({ where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }), _sum: { total: true, tax: true } }),
+        prisma.expense.aggregate({ where: scopedExpenseWhere(scope, expenseDateWhere({ gte: start, lt: end })), _sum: { amount: true } }),
+        journalExpenseTotal(scope, { gte: start, lt: end }),
+        prisma.sale.findMany({
+          where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }),
+          select: { items: { select: saleItemCostSelect } },
+        }),
+        salesView.findMany({
+          where: scopedWhere(scope, { createdAt: { gte: start, lt: end }, ...visibleSales }),
+          select: { items: { select: saleItemCostSelect } },
+        }),
+      ]);
+      const rev = aggregateRevenue(saleAgg) + aggregateRevenue(saleRecordAgg);
+      const cogs = [...salesWithItems, ...saleRecordsWithItems].reduce((sum, sale) => sum + saleCogs(sale), 0);
+      const exp = aggregateTotal(expAgg, "amount") + Number(journalExp || 0);
+      grossProfit.push(rev - cogs);
+      netProfit.push(rev - cogs - exp);
+    }
+
+    res.json({ labels, grossProfit, netProfit });
+  } catch (err) {
+    handleBranchError(res, err);
+  }
+});
+
+// Daily performance within current month
+router.get("/daily-performance", authenticateToken, requireAnyPermission(["canViewSale", "canViewReportSalesDaily", "canViewReportFinancialProfitLoss", "canViewReportFinancialExpense"]), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const visibleSales = { ...salesUserWhere(req), status: { notIn: ['cancelled', 'refunded'] } };
+
+    const [sales, saleRecords, expenses, journalExpenses] = await Promise.all([
+      prisma.sale.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth }, ...visibleSales }),
+        select: { total: true, tax: true, createdAt: true, items: { select: saleItemCostSelect } },
+        orderBy: { createdAt: "asc" },
+      }),
+      salesView.findMany({
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth, lt: endOfMonth }, ...visibleSales }),
+        select: { total: true, tax: true, createdAt: true, items: { select: saleItemCostSelect } },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.expense.findMany({
+        where: scopedExpenseWhere(scope, expenseDateWhere({ gte: startOfMonth, lt: endOfMonth })),
+        select: { amount: true, date: true, createdAt: true },
+        orderBy: { date: "asc" },
+      }),
+      journalExpenseRows(scope, { gte: startOfMonth, lt: endOfMonth }),
+    ]);
+
+    // Build a map of day -> data
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayMap = {};
+    for (let d = 1; d <= daysInMonth; d++) {
+      dayMap[d] = { day: d, label: `${d}`, revenue: 0, cogs: 0, expenses: 0, profit: 0, salesCount: 0 };
+    }
+
+    // Aggregate sales by day
+    [...sales, ...saleRecords].forEach((sale) => {
+      const day = new Date(sale.createdAt).getDate();
+      if (dayMap[day]) {
+        dayMap[day].revenue += Number(sale.total || 0) - Number(sale.tax || 0);
+        dayMap[day].salesCount += 1;
+        dayMap[day].cogs += saleCogs(sale);
+      }
+    });
+
+    // Aggregate expenses by day
+    [...expenses, ...journalExpenses].forEach((exp) => {
+      const day = new Date(exp.date || exp.createdAt).getDate();
+      if (dayMap[day]) {
+        dayMap[day].expenses += Number(exp.amount || 0);
+      }
+    });
+
+    // Calculate profit per day and build array (only up to today)
+    const data = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const entry = dayMap[d];
+      entry.profit = entry.revenue - entry.cogs - entry.expenses;
+      data.push(entry);
+    }
+
+    // Summary stats
+    const bestDay = data.reduce((best, d) => d.revenue > best.revenue ? d : best, { day: 0, revenue: 0 });
+    const worstDay = data.reduce((worst, d) => d.salesCount > 0 && (worst.day === 0 || d.revenue < worst.revenue) ? d : worst, { day: 0, revenue: 0 });
+    const avgRevenue = data.reduce((sum, d) => sum + d.revenue, 0) / now.getDate();
+
+    const canViewSales = hasSalesVisibility(req);
+    const canViewFinancials = hasAnyReportPermission(req, ["financialProfitLoss"]);
+    const canViewExpenses = hasPermission(req, "canViewExpense");
+    res.json({
+      data: data.map((entry) => ({
+        ...entry,
+        revenue: canViewSales ? entry.revenue : null,
+        salesCount: canViewSales ? entry.salesCount : null,
+        cogs: canViewFinancials ? entry.cogs : null,
+        expenses: canViewExpenses ? entry.expenses : null,
+        profit: canViewFinancials ? entry.profit : null,
+      })),
+      summary: {
+        bestDay: canViewSales && bestDay.day ? { day: bestDay.day, revenue: bestDay.revenue } : null,
+        worstDay: canViewSales && worstDay.day ? { day: worstDay.day, revenue: worstDay.revenue } : null,
+        avgDailyRevenue: canViewSales ? Math.round(avgRevenue * 100) / 100 : null,
+        daysElapsed: now.getDate(),
+        daysInMonth,
+      },
+    });
+  } catch (err) {
+    console.error("Daily performance error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+// Top selling products
+router.get("/top-products", authenticateToken, requireAnyPermission(["canViewSale", "canViewReportSalesByProduct"]), async (req, res, next) => {
+  if (!hasPermission(req, "canViewProduct")) return res.status(403).json({ message: "Permission denied", required: "canViewProduct" });
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const visibleSales = { ...salesUserWhere(req), status: { notIn: ['cancelled', 'refunded'] } };
+
+    const [saleItems, saleRecordItems] = await Promise.all([
+      prisma.saleItem.groupBy({
+        by: ["productId"],
+        where: { sale: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }) },
+        _sum: { quantity: true, total: true },
+        _count: true,
+      }),
+      salesView.itemGroupBy({
+        by: ["productId"],
+        where: { sale: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }) },
+        _sum: { quantity: true, total: true },
+        _count: true,
+      }),
+    ]);
+
+    const topItems = mergeGroupedTotals([saleItems, saleRecordItems]).slice(0, 5);
+    const productIds = topItems.map((t) => t.productId).filter(Boolean);
+    const products = await prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true, name: true } });
+    const byId = new Map(products.map((p) => [p.id, p.name]));
+
+    res.json(topItems.map((t) => ({
+      productId: t.productId,
+      name: byId.get(t.productId) || "Unknown",
+      quantity: t.quantity,
+      revenue: t.revenue,
+      salesCount: t.salesCount,
+    })));
+  } catch (err) {
+    handleBranchError(res, err);
+  }
+});
+
+// Payment method breakdown
+router.get("/payment-methods", authenticateToken, requireAnyPermission(["canViewSale", "canViewReportSalesSummary"]), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const visibleSales = { ...salesUserWhere(req), status: { notIn: ['cancelled', 'refunded'] } };
+
+    const [saleMethods, saleRecordMethods] = await Promise.all([
+      prisma.sale.groupBy({
+        by: ["paymentMethod"],
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
+        _sum: { total: true },
+        _count: true,
+      }),
+      salesView.groupBy({
+        by: ["paymentMethod"],
+        where: scopedWhere(scope, { createdAt: { gte: startOfMonth }, ...visibleSales }),
+        _sum: { total: true },
+        _count: true,
+      }),
+    ]);
+
+    res.json(mergePaymentMethods([saleMethods, saleRecordMethods]));
+  } catch (err) {
+    handleBranchError(res, err);
+  }
+});
+
+export default router;

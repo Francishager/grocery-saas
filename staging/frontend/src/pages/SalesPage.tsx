@@ -1,0 +1,1808 @@
+ import { useEffect, useState, useRef, useMemo } from 'react'
+import { ShoppingCart, Plus, Search, Trash2, Receipt, RefreshCw, ScanBarcode, WifiOff, Pencil, X, Check, ChevronsUpDown, AlertTriangle } from 'lucide-react'
+import { inventoryApi, salesApi, barcodeApi, settingsApi, categoriesApi, currencyApi, apiFetch, type InventoryItem, type CartItem, type LiveCurrencyRates } from '@/lib/api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { cn, formatCurrency } from '@/lib/utils'
+import { useToast } from '@/hooks/use-toast'
+import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { defaultBranchId } from '@/lib/branchSelection'
+import { branchesApi, type BranchOption } from '@/lib/api'
+import BarcodeScanner from '@/components/BarcodeScanner'
+import ReceiptViewer from '@/components/ReceiptViewer'
+import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
+import { openReceiptPrintWindow, printReceiptInBrowser } from '@/lib/receiptPrint'
+import { buildReceiptPreviewFromData } from '@/lib/receiptPreview'
+import { useOnlineStatus } from '@/db/hooks'
+import { getLocalProducts, getLocalSales, getLocalSettings } from '@/db/hybrid'
+import { queueMutation } from '@/db/sync'
+import { db } from '@/db/index'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useFeatureAccess } from '@/services/featureAccessService'
+import SaleServiceJobsEditor, { type SaleTechnician } from '@/components/SaleServiceJobsEditor'
+import { ToastAction } from '@/components/ui/toast'
+import { currencies as supportedCurrencies } from '@/components/Currency/Currencies'
+
+interface RecentSale {
+  id: string
+  receiptNo: string
+  total: number
+  currency?: string | null
+  foreignTotal?: number | null
+  exchangeRateToBase?: number | null
+  paymentMethod: string
+  customerName?: string | null
+  createdAt: string
+  items: { productId: string; quantity: number; price: number; total: number }[]
+  user?: { fname: string; lname: string }
+}
+
+interface CustomerOption {
+  id: string
+  name: string
+  phone?: string | null
+  balance?: number
+  creditLimit?: number
+}
+
+interface CustomerCreditInfo {
+  customer: CustomerOption & {
+    email?: string | null
+    address?: string | null
+    openingBalance?: number
+    openingBalanceDate?: string | null
+    openingBalanceNote?: string | null
+    status?: string
+  }
+  summary: {
+    balance: number
+    creditLimit: number
+    openingBalance: number
+    outstandingSalesCount: number
+    outstandingItemsCount: number
+    overdueSalesCount: number
+    oldestOutstandingDate?: string | null
+  }
+  outstandingSales: Array<{
+    id: string
+    receiptNo: string
+    date: string
+    dueDate?: string | null
+    total: number
+    amountPaid: number
+    balance: number
+    paymentStatus: string
+    staff?: string
+    branch?: string
+    items: Array<{
+      id: string
+      productName: string
+      itemType?: string
+      quantity: number
+      unitName?: string
+      unitPrice: number
+      discount: number
+      total: number
+    }>
+  }>
+  recentPayments: Array<{
+    id: string
+    receiptNo?: string
+    date: string
+    amount: number
+    paymentMethod: string
+    reference?: string
+  }>
+}
+
+export default function SalesPage() {
+  const { hasPermission, user } = useJWTAuth()
+  const { hasFeature } = useFeatureAccess()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const prescriptionId = searchParams.get('prescriptionId')
+  const prescriptionLoadRef = useRef('')
+  const [prescriptionContext, setPrescriptionContext] = useState<any>(null)
+  const [prescriptionContextError, setPrescriptionContextError] = useState('')
+  const multiUnitEnabled = hasFeature('inventory.multi_unit')
+  const canCreateSaleJobs = hasFeature('service.job_cards') && hasPermission('canCreateServiceJobCard')
+  const canViewCustomerCreditLimit = hasFeature('customers.credit_limits') && (hasPermission('canViewCustomerCreditLimit') || hasPermission('canCreateCustomerCreditLimit') || hasPermission('canEditCustomerCreditLimit'))
+  const [saleTechnicians, setSaleTechnicians] = useState<SaleTechnician[]>([])
+  const [serviceOptionsError, setServiceOptionsError] = useState('')
+  useEffect(() => {
+    if (!canCreateSaleJobs) return
+    let active = true
+    setServiceOptionsError('')
+    apiFetch('/api/sales/service-options').then(async response => {
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Unable to load technicians')
+      if (active) setSaleTechnicians(data.technicians || [])
+    }).catch(error => { if (active) { setSaleTechnicians([]); setServiceOptionsError(error.message) } })
+    return () => { active = false }
+  }, [canCreateSaleJobs, user?.branchId, user?.id])
+  const [inventory, setInventory] = useState<InventoryItem[]>([])
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const inventoryRequestRef = useRef(0)
+  const productSearchRef = useRef<HTMLInputElement>(null)
+  const [cart, setCart] = useState<CartItem[]>([])
+  const [paymentMode, setPaymentMode] = useState('cash')
+  const [mobileProvider, setMobileProvider] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+  const [customerName, setCustomerName] = useState('')
+  const [invoiceCashDiscount, setInvoiceCashDiscount] = useState(0)
+  const [amountPaid, setAmountPaid] = useState<number | ''>('')
+  const [transactionCurrency, setTransactionCurrency] = useState('UGX')
+  const [liveCurrencyRates, setLiveCurrencyRates] = useState<LiveCurrencyRates | null>(null)
+  const [currencyRatesError, setCurrencyRatesError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [processing, setProcessing] = useState(false)
+  const [recentSales, setRecentSales] = useState<RecentSale[]>([])
+  const [salesLoading, setSalesLoading] = useState(false)
+  const [quickEditItem, setQuickEditItem] = useState<InventoryItem | null>(null)
+  const [quickEditForm, setQuickEditForm] = useState({ name: '', barcode: '', cost_price: '', unit_price: '', categoryId: '', expiryDate: '' })
+  const [quickEditSaving, setQuickEditSaving] = useState(false)
+  const [showQuickEditScanner, setShowQuickEditScanner] = useState(false)
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categoryQuery, setCategoryQuery] = useState('')
+  const categoryPickerRef = useRef<HTMLDivElement | null>(null)
+  const [showScanner, setShowScanner] = useState(false)
+  const [scannerFailed, setScannerFailed] = useState(false)
+  const [barcodeInput, setBarcodeInput] = useState('')
+  const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
+  const [businessSettings, setBusinessSettings] = useState<any>(null)
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const [creditAlertCustomer, setCreditAlertCustomer] = useState<CustomerOption | null>(null)
+  const [dismissedCreditAlertId, setDismissedCreditAlertId] = useState('')
+  const [creditInfo, setCreditInfo] = useState<CustomerCreditInfo | null>(null)
+  const [creditInfoLoading, setCreditInfoLoading] = useState(false)
+  const [creditInfoError, setCreditInfoError] = useState('')
+  const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const ITEMS_PER_PAGE = 20
+  const { toast } = useToast()
+  const online = useOnlineStatus()
+
+  useEffect(() => {
+    loadRecentSales()
+    loadTaxConfig()
+    loadBusinessSettings()
+    loadCustomers()
+    branchesApi.active().then(setBranches).catch(() => {})
+  }, [])
+
+  const baseCurrency = String(businessSettings?.currency || 'UGX').toUpperCase()
+  const currencyFeatureEnabled = hasFeature('settings.currencies')
+  useEffect(() => {
+    if (businessSettings?.currency) setTransactionCurrency(String(businessSettings.currency).toUpperCase())
+  }, [businessSettings?.currency])
+  useEffect(() => {
+    if (!currencyFeatureEnabled || !online) {
+      setLiveCurrencyRates(null)
+      setCurrencyRatesError('')
+      return
+    }
+    let active = true
+    setCurrencyRatesError('')
+    currencyApi.rates(baseCurrency)
+      .then(rates => { if (active) setLiveCurrencyRates(rates) })
+      .catch(error => { if (active) setCurrencyRatesError(error?.message || 'Exchange rates could not be loaded.') })
+    return () => { active = false }
+  }, [baseCurrency, currencyFeatureEnabled, online])
+
+  const filteredCategories = useMemo(() => {
+    const query = categoryQuery.trim().toLowerCase()
+    if (!query) return categories
+    return categories.filter((c) => c.name.toLowerCase().includes(query))
+  }, [categories, categoryQuery])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (categoryPickerRef.current && !categoryPickerRef.current.contains(e.target as Node)) {
+        setCategoryOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const loadInventory = async (query = searchQuery) => {
+    const requestId = ++inventoryRequestRef.current
+    setLoading(true)
+    try {
+      if (online) {
+        const data = await inventoryApi.list(query)
+        if (requestId === inventoryRequestRef.current) setInventory(data)
+      } else {
+        const local = await getLocalProducts(query)
+        if (requestId === inventoryRequestRef.current) setInventory(local)
+      }
+    } catch (error: any) {
+      // API failed — fall back to local
+      try {
+        const local = await getLocalProducts(query)
+        if (requestId === inventoryRequestRef.current) setInventory(local)
+      } catch {
+        toast({ variant: 'destructive', title: 'Failed to load inventory', description: error.message })
+      }
+    } finally {
+      if (requestId === inventoryRequestRef.current) setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    ++inventoryRequestRef.current
+    setCurrentPage(1)
+    const timer = setTimeout(() => { void loadInventory(searchQuery.trim()) }, 200)
+    return () => { clearTimeout(timer); ++inventoryRequestRef.current }
+  }, [searchQuery, online, user?.branchId])
+
+  useEffect(() => {
+    if (!prescriptionId || !online || !inventory.length || prescriptionLoadRef.current === prescriptionId) return
+    prescriptionLoadRef.current = prescriptionId
+    let active = true
+    apiFetch(`/api/pharmacy/prescriptions/${encodeURIComponent(prescriptionId)}/sale-context`)
+      .then(async response => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || 'Could not load prescription items.')
+        if (!active) return
+        const prescription = data.prescription
+        const cartItems: CartItem[] = []
+        const missing: string[] = []
+        for (const line of prescription.items || []) {
+          const product = inventory.find(item => String(item.id) === String(line.productId))
+          if (!product) { missing.push(line.productName); continue }
+          const isUncategorized = Boolean((product as any).isUncategorized || (!product.categoryId && !((product as any).category?.id) && !((product as any).category)))
+          if (isUncategorized) { missing.push(`${line.productName} (needs a category)`); continue }
+          const existingCartItem = cartItems.find(item => String(item.productId) === String(product.id))
+          if (existingCartItem) { existingCartItem.qty += Number(line.remainingQuantity); continue }
+          cartItems.push({
+            id: String(product.id), productId: product.id, product_id: product.product_id,
+            name: product.product_name, qty: Number(line.remainingQuantity),
+            selling_price: Number(product.unit_price), cost_price: Number(product.cost_price),
+            unitName: null, conversionFactor: null, cashDiscount: 0, itemType: product.itemType,
+            includedServices: product.itemType === 'service' ? [{ id: String(product.id), name: product.product_name, description: product.description }] : product.includedServices || [],
+            serviceJobs: [],
+          })
+        }
+        setPrescriptionContext({ ...prescription, items: prescription.items || [] })
+        setCustomerName(prescription.patientName || '')
+        setCart(cartItems)
+        setPrescriptionContextError(missing.length ? `Not added to cart: ${missing.join(', ')}. Check inventory and add them before checkout.` : '')
+      })
+      .catch(error => { if (active) setPrescriptionContextError(error instanceof Error ? error.message : 'Could not prepare the prescription sale.') })
+    return () => { active = false }
+  }, [prescriptionId, online, inventory, user?.branchId])
+
+  const resetProductSearch = () => {
+    setSearchQuery('')
+    setCurrentPage(1)
+    void loadInventory('')
+    productSearchRef.current?.focus()
+  }
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    setCurrentPage(1)  // Reset to first page when searching
+    loadInventory()
+  }
+
+  const addToCart = (item: InventoryItem, unitName?: string, conversionFactor?: number, sellingPrice?: number) => {
+    const isUncategorized = Boolean((item as any).isUncategorized || (!item.categoryId && !((item as any).category?.id) && !((item as any).category)))
+
+    if (isUncategorized) {
+      toast({
+        variant: 'destructive',
+        title: 'Item needs categorization',
+        description: 'This product cannot be added to the cart until a category is assigned in inventory.',
+      })
+      return false
+    }
+
+    setCart((prev) => {
+      const cartKey = unitName ? `${item.id}-${unitName}` : String(item.id)
+      const existing = prev.find((c) => c.id === cartKey)
+      if (existing) {
+        return prev.map((c) =>
+          c.id === cartKey ? { ...c, qty: c.qty + 1 } : c
+        )
+      }
+      return [
+        ...prev,
+        {
+          id: cartKey,
+          productId: item.id,
+          product_id: item.product_id,
+          name: unitName ? `${item.product_name} (${unitName})` : item.product_name,
+          qty: 1,
+          selling_price: sellingPrice || item.unit_price,
+          cost_price: item.cost_price,
+          unitName: unitName || null,
+          conversionFactor: conversionFactor ?? null,
+          cashDiscount: 0,
+          itemType: item.itemType,
+          includedServices: item.itemType === 'service' ? [{ id: String(item.id), name: item.product_name, description: item.description }] : item.includedServices || [],
+          serviceJobs: [],
+        },
+      ]
+    })
+
+    return true
+  }
+
+  const updateCartQty = (id: string | number, qty: number) => {
+    if (qty < 1) {
+      removeFromCart(id)
+      return
+    }
+    setCart((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, qty } : c))
+    )
+  }
+
+  const removeFromCart = (id: string | number) => {
+    setCart((prev) => prev.filter((c) => c.id !== id))
+  }
+
+  const loadTaxConfig = async () => {
+    try {
+      const data = await settingsApi.getTaxConfig()
+      setTaxConfig({ taxEnabled: data.taxEnabled, taxRate: data.taxRate || 0, taxId: data.taxId || '' })
+    } catch {}
+  }
+
+  const loadBusinessSettings = async () => {
+    try {
+      if (online) {
+        const data = await settingsApi.getBusinessProfile()
+        setBusinessSettings(data)
+      } else {
+        const local = await getLocalSettings()
+        setBusinessSettings(local)
+      }
+    } catch {
+      try {
+        const local = await getLocalSettings()
+        setBusinessSettings(local)
+      } catch {}
+    }
+  }
+
+  const loadCustomers = async () => {
+    try {
+      const endpoints = ['/api/sales/customers/credit-options?limit=10000', '/api/receivables/customers?limit=10000']
+      for (const endpoint of endpoints) {
+        const res = await apiFetch(endpoint)
+        if (!res.ok) continue
+        const data = await res.json()
+        const list = Array.isArray(data?.customers) ? data.customers : Array.isArray(data) ? data : []
+        setCustomers(list.map((customer: any) => ({
+          id: customer.id,
+          name: customer.name,
+          phone: customer.phone,
+          balance: Number(customer.balance || 0),
+          creditLimit: Number(customer.creditLimit || 0),
+        })))
+        return
+      }
+    } catch { /* customer balance hint is optional */ }
+  }
+
+  const ensureBusinessSettings = async () => {
+    if (businessSettings?.name || businessSettings?.businessName) return businessSettings
+
+    try {
+      const data = online ? await settingsApi.getBusinessProfile() : await getLocalSettings()
+      if (data) setBusinessSettings(data)
+      return data
+    } catch {
+      try {
+        const local = await getLocalSettings()
+        if (local) setBusinessSettings(local)
+        return local
+      } catch {
+        return null
+      }
+    }
+  }
+
+  const cartSubtotal = cart.reduce(
+    (sum, item) => sum + item.selling_price * item.qty,
+    0
+  )
+  const lineCashDiscounts = cart.reduce(
+    (sum, item) => sum + (item.cashDiscount || 0),
+    0
+  )
+  const taxableAmount = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount)
+  const cartTax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
+  const cartTotal = Math.max(0, cartSubtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
+  const unitsPerBase = transactionCurrency === baseCurrency ? 1 : Number(liveCurrencyRates?.rates?.[transactionCurrency] || 0)
+  const rateToBase = unitsPerBase > 0 ? 1 / unitsPerBase : 0
+  const freshRateAvailable = transactionCurrency === baseCurrency || liveCurrencyRates?.cacheStatus === 'fresh'
+  const transactionTotal = cartTotal * unitsPerBase
+  const changeDue = amountPaid !== '' && unitsPerBase > 0 && amountPaid >= transactionTotal ? amountPaid - transactionTotal : 0
+  const hasValidAmountPaid = amountPaid !== '' && Number.isFinite(Number(amountPaid)) && Number(amountPaid) > 0
+  const matchedCustomer = useMemo(() => {
+    const name = customerName.trim().toLowerCase()
+    if (!name) return null
+    return customers.find((customer) => customer.name.trim().toLowerCase() === name) || customers.find((customer) => customer.name.trim().toLowerCase().includes(name)) || null
+  }, [customers, customerName])
+
+  const findCustomerByName = (name?: string | null) => {
+    const normalized = String(name || '').trim().toLowerCase()
+    if (!normalized) return null
+    return customers.find((customer) => customer.name.trim().toLowerCase() === normalized) || null
+  }
+
+  useEffect(() => {
+    const balance = Number(matchedCustomer?.balance || 0)
+    const isExactCustomerName = matchedCustomer?.name.trim().toLowerCase() === customerName.trim().toLowerCase()
+    if (!matchedCustomer || balance <= 0) {
+      if (!customerName.trim()) setDismissedCreditAlertId('')
+      return
+    }
+    if (isExactCustomerName && dismissedCreditAlertId !== matchedCustomer.id) {
+      setCreditAlertCustomer(matchedCustomer)
+      setCreditInfo(null)
+      setCreditInfoError('')
+    }
+  }, [matchedCustomer, customerName, dismissedCreditAlertId])
+
+  const loadCustomerCreditInfo = async (customer: CustomerOption) => {
+    setCreditAlertCustomer(customer)
+    setCreditInfo(null)
+    setCreditInfoError('')
+    setCreditInfoLoading(true)
+    try {
+      let res = await apiFetch(`/api/sales/customers/${customer.id}/credit-info`)
+      if (!res.ok && (res.status === 403 || res.status === 404)) {
+        res = await apiFetch(`/api/receivables/customers/${customer.id}/credit-info`)
+      }
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Failed to load customer credit details')
+      setCreditInfo(data)
+    } catch (error: any) {
+      setCreditInfoError(error?.message || 'Failed to load customer credit details')
+    } finally {
+      setCreditInfoLoading(false)
+    }
+  }
+
+  const closeCreditAlert = () => {
+    if (creditAlertCustomer?.id) setDismissedCreditAlertId(creditAlertCustomer.id)
+    setCreditAlertCustomer(null)
+    setCreditInfo(null)
+    setCreditInfoError('')
+  }
+
+  const buildCurrentSaleReceiptPreview = (saleId: string, receiptNoValue: string, settings = businessSettings, customerName?: string) => {
+    const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
+    const lineCashDiscounts = cart.reduce((sum, item) => sum + (item.cashDiscount || 0), 0)
+    const taxableAmount = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount)
+    const tax = (taxConfig?.taxEnabled && taxConfig?.taxRate) ? Math.round(taxableAmount * taxConfig.taxRate / 100 * 100) / 100 : 0
+    const total = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount + tax)
+    const amountPaidValue = amountPaid !== '' ? Number(amountPaid) : null
+    const changeGivenValue = amountPaidValue != null && changeDue > 0 ? changeDue : 0
+    const cashierName = [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || user?.name || 'Cashier'
+
+    return buildReceiptPreviewFromData({
+      id: saleId,
+      receiptNo: receiptNoValue,
+      business: {
+        name: settings?.name || settings?.businessName || 'Business',
+        address: settings?.address || null,
+        phone: settings?.phone || null,
+        email: settings?.email || null,
+        logo: settings?.logo || null,
+        receiptHeader: settings?.receiptHeader || settings?.receipt_header || null,
+        receiptFooter: settings?.receiptFooter || settings?.receipt_footer || null,
+        currency: baseCurrency,
+      },
+      cashier: cashierName,
+      paymentMethod: paymentMode,
+      createdAt: new Date().toISOString(),
+      subtotal,
+      discount: invoiceCashDiscount,
+      tax,
+      total,
+      baseCurrency,
+      transactionCurrency,
+      foreignTotal: total * unitsPerBase,
+      exchangeRateToBase: rateToBase || 1,
+      exchangeRateAsOf: liveCurrencyRates?.rateDate || null,
+      exchangeRateSource: transactionCurrency === baseCurrency ? 'Business base currency' : liveCurrencyRates?.provider || null,
+      customerName: customerName || undefined,
+      amountPaid: amountPaidValue,
+      changeGiven: changeGivenValue,
+      items: cart.map((item) => ({
+        id: String(item.id),
+        name: item.product_name || item.name || 'Item',
+        quantity: item.qty,
+        price: item.selling_price,
+        total: item.selling_price * item.qty - (item.cashDiscount || 0),
+      })),
+    })
+  }
+
+  const openBrowserReceiptPreview = async (saleId: string, receiptNoValue: string, printWindow?: Window | null) => {
+    const settings = await ensureBusinessSettings()
+    const preview = buildCurrentSaleReceiptPreview(saleId, receiptNoValue, settings, customerName)
+    return printReceiptInBrowser(() => Promise.resolve(preview), receiptNoValue, printWindow)
+  }
+
+  const autoPrintReceipt = async (saleId: string, fallbackReceiptNo?: string, printWindow?: Window | null) => {
+    const previewReceiptNo = fallbackReceiptNo || 'Receipt'
+
+    try {
+      const opened = await openBrowserReceiptPreview(saleId, previewReceiptNo, printWindow)
+      if (!opened) {
+        toast({ variant: 'destructive', title: 'Pop-up blocked', description: 'Enable pop-ups to print the receipt.' })
+      } else {
+        toast({ title: 'Print dialog ready', description: 'A browser print window has been opened. Use it to finish printing the receipt.' })
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Auto print failed',
+        description: error?.message || 'Unable to open the browser receipt.',
+      })
+    }
+  }
+
+  const handleCheckout = async () => {
+    if (processing) return
+    const jobs = cart.flatMap(item => item.serviceJobs || [])
+    if (jobs.length && (!online || !canCreateSaleJobs || !customerName.trim() || jobs.some(job => !job.technicianId || !job.description.trim()))) {
+      toast({ variant: 'destructive', title: 'Complete the service job details', description: !online ? 'Connect to the internet to create service job cards.' : !canCreateSaleJobs ? 'Job-card access is required.' : 'Enter the customer name, technician, and job details for every selected service.' })
+      return
+    }
+    if (cart.length === 0) {
+      toast({ variant: 'destructive', title: 'Cart is empty', description: 'Add at least one item to checkout.' })
+      return
+    }
+    if (prescriptionContext?.id && !online) {
+      toast({ variant: 'destructive', title: 'Connect to complete this prescription sale', description: 'Prescription-linked sales need an online receipt so the clinic receives the confirmed fulfillment.' })
+      return
+    }
+    if (transactionCurrency !== baseCurrency && (!online || unitsPerBase <= 0 || !freshRateAvailable)) {
+      toast({ variant: 'destructive', title: 'Exchange rate unavailable', description: !online ? 'Foreign-currency checkout requires an internet connection.' : 'Refresh a current exchange-rate quote before checkout.' })
+      return
+    }
+
+    setProcessing(true)
+    const browserPrintWindow = openReceiptPrintWindow('Receipt')
+
+    if (!online) {
+      // Offline checkout — save locally, queue for sync
+      try {
+        const saleId = `offline-${Date.now()}`
+        const receiptNo = `OFF-${String(Date.now()).slice(-5)}`
+        const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.qty, 0)
+        const total = Math.max(0, subtotal - lineCashDiscounts - invoiceCashDiscount + cartTax)
+
+        const saleData = {
+          id: saleId,
+          receiptNo,
+          subtotal,
+          discount: invoiceCashDiscount,
+          tax: cartTax,
+          total,
+          paymentMethod: paymentMode,
+          status: 'completed',
+          items: cart.map(c => ({
+            productId: c.productId,
+            quantity: c.qty,
+            price: c.selling_price,
+            discount: c.cashDiscount || 0,
+            total: c.selling_price * c.qty - (c.cashDiscount || 0),
+          })),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+
+        await db.sales.put(saleData)
+
+        // Deduct stock locally
+        for (const item of cart) {
+          const product = await db.products.get(item.productId)
+          if (product) {
+            await db.products.update(item.productId, {
+              quantity: Math.max(0, product.quantity - item.qty),
+            })
+          }
+        }
+
+        // Queue for sync
+        await queueMutation('sales', 'create', saleId, {
+          cart: cart.map(c => ({
+            productId: c.productId,
+            qty: c.qty,
+            price: c.selling_price,
+            discount: c.discount || 0,
+            cashDiscount: c.cashDiscount || 0,
+            unitName: c.unitName || null,
+            conversionFactor: c.conversionFactor ?? null,
+          })),
+          paymentMethod: paymentMode,
+          customerName: customerName?.trim() || undefined,
+          cashDiscount: invoiceCashDiscount,
+          amountPaid: amountPaid !== '' ? amountPaid : undefined,
+          changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
+          currency: baseCurrency,
+        })
+
+        window.dispatchEvent(new CustomEvent('jibusales:notification', {
+          detail: {
+            id: 'sale:' + saleId, title: 'Sale recorded offline', type: 'sale',
+            message: `${cart.length} items sold for ${formatCurrency(total)}. Saved on this device, pending sync.`,
+            metadata: { saleId, receiptNo },
+          },
+        }))
+        setCart([])
+        setInvoiceCashDiscount(0)
+        setAmountPaid('')
+        setMobileProvider('')
+        setPhoneNumber('')
+        setTransactionId('')
+        loadRecentSales()
+        resetProductSearch()
+        void autoPrintReceipt(saleId, receiptNo, browserPrintWindow)
+      } catch (error: any) {
+        browserPrintWindow?.close()
+        toast({ variant: 'destructive', title: 'Offline checkout failed', description: error.message })
+      } finally {
+        setProcessing(false)
+      }
+      return
+    }
+
+    try {
+      const result = await salesApi.checkout(cart, paymentMode, invoiceCashDiscount, {
+        mobileProvider: paymentMode === 'mobile_money' ? mobileProvider : undefined,
+        phoneNumber: paymentMode === 'mobile_money' ? phoneNumber : undefined,
+        transactionId: ['mobile_money', 'card'].includes(paymentMode) ? transactionId : undefined,
+        customerName: customerName?.trim() || undefined,
+        amountPaid: amountPaid !== '' ? amountPaid : undefined,
+        changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
+        currency: transactionCurrency,
+        unitsPerBase,
+      })
+      if (prescriptionContext?.id && result?.sale?.id) {
+        const soldByProduct = new Map<string, number>()
+        cart.forEach(item => soldByProduct.set(String(item.productId), (soldByProduct.get(String(item.productId)) || 0) + Number(item.qty) * Number(item.conversionFactor || 1)))
+        const fulfillmentItems = (prescriptionContext.items || []).flatMap((line: any) => {
+          const key = String(line.productId)
+          const available = soldByProduct.get(key) || 0
+          const quantityDispensed = Math.min(Number(line.remainingQuantity), available)
+          soldByProduct.set(key, Math.max(0, available - quantityDispensed))
+          return quantityDispensed > 0 ? [{ prescriptionItemId: line.prescriptionItemId, quantityDispensed, outcome: 'dispensed' }] : []
+        })
+        if (fulfillmentItems.length) {
+          try {
+            await apiFetch(`/api/pharmacy/prescriptions/${encodeURIComponent(prescriptionContext.id)}/fulfillments`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ saleId: result.sale.id, items: fulfillmentItems }),
+            }).then(async response => { if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || 'Sale saved, but prescription fulfillment needs review.') } })
+            toast({ title: 'Prescription fulfilled', description: 'The completed receipt was linked to the prescription and shared back with the clinic.' })
+          } catch (error) {
+            toast({ variant: 'destructive', title: 'Sale completed; fulfillment needs review', description: error instanceof Error ? error.message : 'Open Pharmacy Management to reconcile the prescription.' })
+          }
+        }
+      }
+      const completedSaleId = String(result?.sale?.id || result?.sale?.receiptNo || Date.now())
+      const completedSaleMessage = cart.length + (cart.length === 1 ? ' item' : ' items') + ' sold for ' + formatCurrency(result?.foreignTotal ?? transactionTotal, transactionCurrency)
+      window.dispatchEvent(new CustomEvent('jibusales:notification', {
+        detail: {
+          id: 'sale:' + completedSaleId, title: 'Sale completed', message: completedSaleMessage, type: 'sale',
+          metadata: { saleId: completedSaleId, receiptNo: result?.sale?.receiptNo },
+        },
+      }))
+      setCart([])
+      setInvoiceCashDiscount(0)
+      setAmountPaid('')
+      setMobileProvider('')
+      setPhoneNumber('')
+      setTransactionId('')
+      if (result?.sale?.id) void autoPrintReceipt(String(result.sale.id), result.sale.receiptNo, browserPrintWindow).then(() => {
+        const jobCards = result.sale.serviceJobCards || []
+        if (jobCards.length) toast({ title: `${jobCards.length} job card(s) created`, description: `${customerName}: assigned service work is pending completion.`,
+          action: <ToastAction altText="Open job cards" onClick={() => navigate(`/tenant/service/job-cards?jobCardId=${jobCards[0].id}`)}>Open job cards</ToastAction>,
+        })
+      })
+      loadRecentSales()
+      resetProductSearch()
+      if (prescriptionContext) {
+        setPrescriptionContext(null)
+        prescriptionLoadRef.current = ''
+        navigate('/tenant/sales', { replace: true })
+      }
+    } catch (error: any) {
+      browserPrintWindow?.close()
+      toast({
+        variant: 'destructive',
+        title: 'Checkout failed',
+        description: error.message,
+      })
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const loadRecentSales = async () => {
+    setSalesLoading(true)
+    try {
+      if (online) {
+        const data = await salesApi.list()
+        setRecentSales((Array.isArray(data) ? data : []).filter((sale: RecentSale) => !['cancelled', 'refunded'].includes(String((sale as any).status || '').toLowerCase())))
+      } else {
+        const local = await getLocalSales(50)
+        setRecentSales(local.filter((sale: RecentSale) => !['cancelled', 'refunded'].includes(String((sale as any).status || '').toLowerCase())))
+      }
+    } catch {
+      // API failed — try local
+      try {
+        const local = await getLocalSales(50)
+        setRecentSales(local.filter((sale: RecentSale) => !['cancelled', 'refunded'].includes(String((sale as any).status || '').toLowerCase())))
+      } catch {
+        // silently fail — sales history is secondary
+      }
+    } finally {
+      setSalesLoading(false)
+    }
+  }
+
+  const filteredInventory = inventory
+
+  const canEditItem = (item: InventoryItem) => {
+    const itemType = (item as any).itemType || 'product'
+    if (itemType === 'service') return hasPermission('canEditService')
+    if (itemType === 'rental') return hasPermission('canEditRental')
+    return hasPermission('canEditProduct')
+  }
+
+  const openQuickEdit = (item: InventoryItem) => {
+    setQuickEditItem(item)
+    setQuickEditForm({
+      name: item.product_name || '',
+      barcode: (item as any).barcode || '',
+      cost_price: String(item.cost_price ?? ''),
+      unit_price: String(item.unit_price ?? ''),
+      categoryId: (item as any).categoryId || '',
+      expiryDate: (item as any).expiryDate ? new Date((item as any).expiryDate).toISOString().split('T')[0] : '',
+    })
+    setShowQuickEditScanner(false)
+    // Load categories if not already loaded
+    if (categories.length === 0) {
+      categoriesApi.list().then((data: any) => setCategories(Array.isArray(data) ? data : [])).catch(() => {})
+    }
+  }
+
+  const handleQuickEditSave = async () => {
+    if (!quickEditItem) return
+    setQuickEditSaving(true)
+    try {
+      const itemType = (quickEditItem as any).itemType || 'product'
+      await inventoryApi.update(String(quickEditItem.id), {
+        ...quickEditItem,
+        product_name: quickEditForm.name,
+        barcode: quickEditForm.barcode || null,
+        cost_price: quickEditForm.cost_price !== '' ? Number(quickEditForm.cost_price) : 0,
+        unit_price: quickEditForm.unit_price !== '' ? Number(quickEditForm.unit_price) : 0,
+        categoryId: quickEditForm.categoryId || null,
+        expiryDate: quickEditForm.expiryDate || null,
+        itemType,
+      } as any)
+      toast({ title: 'Item updated', description: quickEditItem.product_name })
+      setQuickEditItem(null)
+      loadInventory()
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Update failed', description: error.message })
+    } finally {
+      setQuickEditSaving(false)
+    }
+  }
+
+  // Pagination calculation
+  const totalPages = Math.ceil(filteredInventory.length / ITEMS_PER_PAGE)
+  const pageStartIdx = (currentPage - 1) * ITEMS_PER_PAGE
+  const pageEndIdx = pageStartIdx + ITEMS_PER_PAGE
+  const paginatedInventory = filteredInventory.slice(pageStartIdx, pageEndIdx)
+
+  // Separate items by type for display
+  const sellableItems = paginatedInventory.filter((item) => (item as any).itemType !== 'rental')
+  const serviceItems = sellableItems.filter((item) => (item as any).itemType === 'service')
+  const productItems = sellableItems.filter((item) => (item as any).itemType !== 'service')
+
+  return (
+    <div className="space-y-6">
+      {prescriptionId && <div className={`rounded-md border p-3 text-sm ${prescriptionContextError ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-cyan-300 bg-cyan-50 text-cyan-950'}`} role={prescriptionContextError ? 'alert' : 'status'}>
+        {prescriptionContextError || (prescriptionContext ? `Prescription ${prescriptionContext.reference} is loaded for ${prescriptionContext.patientName}. Review the prescribed items and prices, then complete the sale to update the clinic.` : 'Loading prescription items into the sale...')}
+      </div>}
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Sales</h1>
+        {branches.find(branch => branch.id === defaultBranchId(user, branches)) && (
+          <p className="text-sm font-medium">Branch: {branches.find(branch => branch.id === defaultBranchId(user, branches))?.name}</p>
+        )}
+        <p className="text-muted-foreground">
+          Process sales and manage transactions
+        </p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3 lg:items-start">
+        {/* Inventory List */}
+        <div className="lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Products & Services</CardTitle>
+              <CardDescription>
+                Click on an item to add it to the cart
+              </CardDescription>
+              <form onSubmit={handleSearch} className="flex flex-wrap gap-2 mt-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search products..."
+                    ref={productSearchRef}
+                    aria-label="Search products"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <Button type="submit" variant="secondary">
+                  Search
+                </Button>
+                <Button
+                  type="button"
+                  variant={showScanner ? 'default' : 'outline'}
+                  size="icon"
+                  onClick={() => { setShowScanner(!showScanner); if (!showScanner) setScannerFailed(false) }}
+                  title="Scan barcode"
+                >
+                  <ScanBarcode className="h-4 w-4" />
+                </Button>
+              </form>
+
+              {/* Fallback barcode input — only visible when scanner fails */}
+              {scannerFailed && !showScanner && (
+                <div className="flex gap-2 mt-2">
+                  <div className="relative flex-1">
+                    <ScanBarcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Type barcode manually..."
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter' && barcodeInput.trim()) {
+                          e.preventDefault()
+                          try {
+                            const result = await barcodeApi.lookup(barcodeInput.trim())
+                            const products = Array.isArray(result?.products) ? result.products : []
+                            if (products.length > 0) {
+                              const added = addToCart(products[0])
+                              if (added) {
+                                toast({ title: `Added: ${products[0].product_name}` })
+                              }
+                            } else {
+                              toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${barcodeInput.trim()}` })
+                            }
+                          } catch {
+                            toast({ variant: 'destructive', title: 'Barcode lookup failed' })
+                          }
+                          setBarcodeInput('')
+                        }
+                      }}
+                      className="pl-9"
+                      autoFocus
+                    />
+                  </div>
+                  <Button
+                    onClick={async () => {
+                      if (!barcodeInput.trim()) return
+                      try {
+                        const result = await barcodeApi.lookup(barcodeInput.trim())
+                        const products = Array.isArray(result?.products) ? result.products : []
+                        if (products.length > 0) {
+                          const added = addToCart(products[0])
+                          if (added) {
+                            toast({ title: `Added: ${products[0].product_name}` })
+                          }
+                        } else {
+                          toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${barcodeInput.trim()}` })
+                        }
+                      } catch {
+                        toast({ variant: 'destructive', title: 'Barcode lookup failed' })
+                      }
+                      setBarcodeInput('')
+                    }}
+                    size="sm"
+                  >
+                    Search
+                  </Button>
+                </div>
+              )}
+
+              {showScanner && (
+                <div className="mt-3">
+                  <BarcodeScanner
+                    onScan={async (code) => {
+                      try {
+                        const result = await barcodeApi.lookup(code)
+                        const products = Array.isArray(result?.products) ? result.products : []
+                        if (products.length > 0) {
+                          const added = addToCart(products[0])
+                          if (added) {
+                            toast({ title: `Added: ${products[0].product_name}` })
+                          }
+                        } else {
+                          toast({ variant: 'destructive', title: 'Product not found', description: `No product with barcode: ${code}` })
+                        }
+                      } catch {
+                        toast({ variant: 'destructive', title: 'Barcode lookup failed' })
+                      }
+                    }}
+                    onClose={() => setShowScanner(false)}
+                    onFail={() => { setShowScanner(false); setScannerFailed(true) }}
+                  />
+                </div>
+              )}
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex items-center justify-center h-32">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                </div>
+              ) : sellableItems.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No items found
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {productItems.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Products</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {productItems.map((item) => {
+                          const units = multiUnitEnabled ? ((item as any).units || []) : []
+                          const baseUnit = (item as any).baseUnit || 'Piece'
+                          const isUncategorized = (item as any).isUncategorized
+                          return (
+                            <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
+                              <div className="grid grid-cols-1 justify-items-center gap-2 text-center sm:grid-cols-[minmax(0,1fr)_auto] sm:justify-items-stretch sm:text-left mb-1">
+                                <div className="min-w-0">
+                                  <p className="font-medium whitespace-normal break-words leading-snug" title={item.product_name}>{item.product_name}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {item.quantity} {baseUnit} in stock
+                                  </p>
+                                </div>
+                                {isUncategorized && (
+                                  <span className="shrink-0 px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                                    Uncategorized
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center justify-center gap-2 mt-2 sm:justify-between">
+                                <p className="font-bold text-primary whitespace-nowrap">
+                                  {formatCurrency(item.unit_price)}
+                                </p>
+                                {canEditItem(item) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
+                                    className="shrink-0 rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
+                                    title="Quick edit barcode & prices"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 inline mr-1" />
+                                    Edit
+                                  </button>
+                                )}
+                              </div>
+                              {isUncategorized && (
+                                <p className="text-xs text-yellow-700 mb-2">
+                                  This product needs to be categorized before adding to cart. Edit in inventory.
+                                </p>
+                              )}
+                              {units.length > 0 ? (
+                                <div className="flex flex-wrap justify-center gap-1 mt-2 sm:justify-start">
+                                  <button
+                                    onClick={() => !isUncategorized && addToCart(item)}
+                                    disabled={isUncategorized}
+                                    className={`rounded border px-2 py-1 text-left text-xs whitespace-normal break-words transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                                  >
+                                    {baseUnit} (1)
+                                  </button>
+                                  {units.map((u: any) => (
+                                    <button
+                                      key={u.id}
+                                      onClick={() => !isUncategorized && addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
+                                      disabled={isUncategorized}
+                                      className={`rounded border px-2 py-1 text-left text-xs whitespace-normal break-words transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                                    >
+                                      {u.unitName} ({u.conversionFactor})
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => !isUncategorized && addToCart(item)}
+                                  disabled={isUncategorized}
+                                  className={`mt-2 w-full rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                                >
+                                  {isUncategorized ? 'Needs Categorization' : 'Add to Cart'}
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {serviceItems.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Services</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {serviceItems.map((item) => {
+                          const isUncategorized = (item as any).isUncategorized
+                          return (
+                            <div key={item.id} className={`rounded-lg border p-3 transition-colors ${isUncategorized ? 'bg-yellow-50 border-yellow-200' : 'hover:bg-muted'}`}>
+                              <div className="grid grid-cols-1 justify-items-center gap-2 text-center sm:grid-cols-[minmax(0,1fr)_auto] sm:justify-items-stretch sm:text-left mb-1">
+                                <div className="min-w-0">
+                                  <p className="font-medium whitespace-normal break-words leading-snug" title={item.product_name}>{item.product_name}</p>
+                                  <p className="text-sm text-muted-foreground">Service</p>
+                                </div>
+                                {isUncategorized && (
+                                  <span className="shrink-0 px-2 py-0.5 bg-yellow-200 text-yellow-800 text-xs font-semibold rounded">
+                                    Uncategorized
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-wrap items-center justify-center gap-2 mt-2 sm:justify-between">
+                                <p className="font-bold text-primary whitespace-nowrap">
+                                  {formatCurrency(item.unit_price)}
+                                </p>
+                                {canEditItem(item) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openQuickEdit(item) }}
+                                    className="shrink-0 rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-primary transition-colors"
+                                    title="Quick edit price"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 inline mr-1" />
+                                    Edit
+                                  </button>
+                                )}
+                              </div>
+                              {isUncategorized && (
+                                <p className="text-xs text-yellow-700 mb-2">
+                                  This service needs to be categorized before adding to cart. Edit in inventory.
+                                </p>
+                              )}
+                              <button
+                                onClick={() => !isUncategorized && addToCart(item)}
+                                disabled={isUncategorized}
+                                className={`mt-2 w-full rounded border px-2 py-1 text-xs transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
+                              >
+                                {isUncategorized ? 'Needs Categorization' : 'Add to Cart'}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* Pagination Controls */}
+              {filteredInventory.length > ITEMS_PER_PAGE && (
+                <div className="flex flex-col items-center justify-center gap-3 mt-4 pt-4 border-t text-center sm:flex-row sm:justify-between sm:text-left">
+                  <p className="text-xs text-muted-foreground">
+                    Showing {pageStartIdx + 1} to {Math.min(pageStartIdx + ITEMS_PER_PAGE, filteredInventory.length)} of {filteredInventory.length} items
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex flex-wrap items-center justify-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-2 py-1 rounded text-sm ${
+                            currentPage === page
+                              ? 'bg-primary text-primary-foreground'
+                              : 'border hover:bg-muted'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Cart */}
+        <div className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5" />
+                <CardTitle>Cart</CardTitle>
+              </div>
+              <CardDescription>
+                {cart.length} item{cart.length !== 1 ? 's' : ''}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {cart.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  Cart is empty
+                </p>
+              ) : (
+                <>
+                  <div className="space-y-3 mb-4">
+                    {cart.map((item) => (
+                      <div
+                        key={item.id}
+                        className="grid justify-items-center gap-3 rounded-lg border p-2 text-center sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:justify-items-stretch sm:text-left"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium whitespace-normal break-words leading-snug">{item.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatCurrency(item.selling_price)} each
+                            {item.unitName && <span className="ml-1 text-xs">({item.unitName})</span>}
+                          </p>
+                          <div className="flex items-center justify-center gap-1 mt-1 sm:justify-start">
+                            <span className="text-xs text-muted-foreground">Disc:</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={item.cashDiscount || 0}
+                              onChange={(e) =>
+                                setCart((prev) => prev.map((c) => c.id === item.id ? { ...c, cashDiscount: parseFloat(e.target.value) || 0 } : c))
+                              }
+                              className="w-20 h-6 text-xs"
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center justify-center gap-2 sm:justify-end">
+                          <Input
+                            type="number"
+                            min="1"
+                            value={item.qty}
+                            onChange={(e) =>
+                              updateCartQty(item.id, parseInt(e.target.value) || 0)
+                            }
+                            className="w-16 h-8 text-center"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => removeFromCart(item.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {canCreateSaleJobs && (item.itemType === 'service' || !!item.includedServices?.length) && <>
+                          {serviceOptionsError && <p role="alert" className="col-span-full text-sm text-red-600">{serviceOptionsError}</p>}
+                          <SaleServiceJobsEditor item={item} technicians={saleTechnicians} currentUserId={user?.id} disabled={processing} onChange={serviceJobs => setCart(prev => prev.map(row => row.id === item.id ? { ...row, serviceJobs } : row))} />
+                        </>}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <div className="flex justify-between mb-1">
+                      <span className="font-medium">Subtotal</span>
+                      <span>{formatCurrency(cartSubtotal)}</span>
+                    </div>
+                    {currencyFeatureEnabled && <div className="mb-3 space-y-2 rounded-md border p-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="sale-transaction-currency">Transaction currency</Label>
+                        <select
+                          id="sale-transaction-currency"
+                          value={transactionCurrency}
+                          onChange={e => { setTransactionCurrency(e.target.value); setAmountPaid('') }}
+                          disabled={!online}
+                          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value={baseCurrency}>{baseCurrency} · business base currency</option>
+                          {(liveCurrencyRates ? supportedCurrencies.filter(c => c.code !== baseCurrency && liveCurrencyRates.rates[c.code] != null) : []).map(c => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
+                        </select>
+                      </div>
+                      {transactionCurrency !== baseCurrency && <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">
+                        {unitsPerBase > 0
+                          ? `1 ${baseCurrency} = ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(unitsPerBase)} ${transactionCurrency}. Applied rate: 1 ${transactionCurrency} = ${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 7 }).format(rateToBase)} ${baseCurrency}.`
+                          : currencyRatesError || 'Loading the live exchange rate…'}
+                        {liveCurrencyRates?.rateDate ? ` Provider update: ${new Date(liveCurrencyRates.rateDate).toLocaleString()}.` : ''}
+                      </p>
+                      {liveCurrencyRates?.cacheStatus === 'stale' && <p role="alert" className="text-xs text-amber-700">This saved rate is stale and cannot be used to post a sale.</p>}
+                      <Button type="button" size="sm" variant="outline" disabled={!online} onClick={() => currencyApi.rates(baseCurrency).then(setLiveCurrencyRates).catch(error => setCurrencyRatesError(error?.message || 'Exchange rates could not be loaded.'))}>
+                        <RefreshCw className="mr-2 h-4 w-4" /> Refresh quote
+                      </Button>
+                      </div>}
+                    </div>}
+                    {lineCashDiscounts > 0 && (
+                      <div className="flex justify-between mb-1 text-sm text-muted-foreground">
+                        <span>Line Discounts</span>
+                        <span>-{formatCurrency(lineCashDiscounts)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <span className="text-sm font-medium">Invoice Discount</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={Number((invoiceCashDiscount * unitsPerBase).toFixed(2))}
+                        onChange={(e) => setInvoiceCashDiscount((parseFloat(e.target.value) || 0) * rateToBase)}
+                        className="w-28 h-8 text-sm text-right"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="text-sm font-medium">Customer Name {cart.some(item => item.serviceJobs?.length) ? '*' : '(optional)'}</label>
+                      <Input
+                        list="cash-sale-customer-list"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="Walk-in / Customer name"
+                        className="w-full"
+                      />
+                      <datalist id="cash-sale-customer-list">
+                        {customers.slice(0, 200).map((customer) => (
+                          <option key={customer.id} value={customer.name} />
+                        ))}
+                      </datalist>
+                      {matchedCustomer && (
+                        <button
+                          type="button"
+                          className={cn(
+                            "mt-2 w-full rounded-md border p-3 text-left text-sm transition hover:border-primary hover:bg-muted/40",
+                            Number(matchedCustomer.balance || 0) > 0 ? "border-amber-300 bg-amber-50 text-amber-950" : "bg-muted/30"
+                          )}
+                          onClick={() => loadCustomerCreditInfo(matchedCustomer)}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="flex min-w-0 items-start gap-2">
+                              {Number(matchedCustomer.balance || 0) > 0 && <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
+                              <span className="min-w-0">
+                                <span className="block break-words font-medium">{matchedCustomer.name}</span>
+                                {Number(matchedCustomer.balance || 0) > 0 && <span className="text-xs font-medium text-amber-700">Outstanding customer credit. Click to view goods and dates.</span>}
+                                {matchedCustomer.phone && <span className="block text-xs text-muted-foreground">{matchedCustomer.phone}</span>}
+                              </span>
+                            </span>
+                            <span className="shrink-0 text-right">
+                              <span className="block font-semibold">{formatCurrency(matchedCustomer.balance || 0)}</span>
+                              <span className="text-xs text-muted-foreground">Credit balance</span>
+                            </span>
+                          </div>
+                          {canViewCustomerCreditLimit && Number(matchedCustomer.creditLimit || 0) > 0 && (
+                            <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(matchedCustomer.creditLimit || 0)}</p>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    {cartTax > 0 && (
+                      <div className="flex justify-between mb-1 text-sm">
+                        <span className="font-medium">Tax{taxConfig?.taxId ? ` (${taxConfig.taxId})` : ''}</span>
+                        <span>{formatCurrency(cartTax)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between mb-2">
+                      <span className="font-medium">Total</span>
+                      <span className="text-right">
+                        <strong className="block text-lg">{formatCurrency(transactionTotal, transactionCurrency)}</strong>
+                        {transactionCurrency !== baseCurrency && <span className="text-xs text-muted-foreground">Base total {formatCurrency(cartTotal, baseCurrency)}</span>}
+                      </span>
+                    </div>
+
+                    {/* Amount Paid + Change */}
+                    <div className="space-y-2 mb-4 p-3 rounded-lg border bg-muted/30">
+                      <div className="flex items-center justify-between gap-2">
+                          <label className="text-sm font-medium">Amount Paid ({transactionCurrency})</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={amountPaid}
+                          onChange={(e) => setAmountPaid(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                          className="w-32 h-8 text-sm text-right"
+                          placeholder="Enter amount"
+                        />
+                      </div>
+                      {!hasValidAmountPaid && <p className="text-xs text-muted-foreground">Enter the amount received to enable checkout.</p>}
+                      {amountPaid !== '' && amountPaid > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className={changeDue > 0 ? 'font-medium text-green-600' : 'font-medium text-muted-foreground'}>
+                            {changeDue > 0 ? 'Change Due' : amountPaid < cartTotal ? 'Shortfall' : 'Change Due'}
+                          </span>
+                          <span className={changeDue > 0 ? 'font-bold text-green-600' : 'font-bold text-red-600'}>
+                            {changeDue > 0 ? formatCurrency(changeDue, transactionCurrency) : formatCurrency(amountPaid - transactionTotal, transactionCurrency)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mb-4">
+                      <label className="text-sm font-medium">Payment Mode</label>
+                      <select
+                        value={paymentMode}
+                        onChange={(e) => setPaymentMode(e.target.value)}
+                        className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="mobile_money">Mobile Money</option>
+                        <option value="card">Card</option>
+                      </select>
+                    </div>
+
+                    {/* Mobile Money fields */}
+                    {paymentMode === 'mobile_money' && (
+                      <div className="space-y-3 mb-4 p-3 rounded-lg border bg-muted/30">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Mobile Money Details</p>
+                        <div>
+                          <label className="text-sm font-medium">Network Provider *</label>
+                          <select
+                            value={mobileProvider}
+                            onChange={(e) => setMobileProvider(e.target.value)}
+                            className="w-full mt-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          >
+                            <option value="">Select provider</option>
+                            <option value="MTN">MTN</option>
+                            <option value="Airtel">Airtel</option>
+                            <option value="Zamtel">Zamtel</option>
+                            <option value="Vodafone">Vodafone</option>
+                            <option value="M-Pesa">M-Pesa</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Phone Number *</label>
+                          <Input
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            placeholder="e.g. 0977123456"
+                            type="tel"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Transaction ID *</label>
+                          <Input
+                            value={transactionId}
+                            onChange={(e) => setTransactionId(e.target.value)}
+                            placeholder="e.g. TXN123456789"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card fields */}
+                    {paymentMode === 'card' && (
+                      <div className="space-y-3 mb-4 p-3 rounded-lg border bg-muted/30">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Card Payment Details</p>
+                        <div>
+                          <label className="text-sm font-medium">Transaction ID *</label>
+                          <Input
+                            value={transactionId}
+                            onChange={(e) => setTransactionId(e.target.value)}
+                            placeholder="e.g. TXN123456789"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <Button
+                      className="w-full"
+                      onClick={handleCheckout}
+                      disabled={processing || !hasValidAmountPaid || cartTotal <= 0 || unitsPerBase <= 0 || !freshRateAvailable || (
+                        paymentMode === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) :
+                        paymentMode === 'card' ? !transactionId.trim() :
+                        false
+                      )}
+                    >
+                      {processing ? 'Processing...' : 'Complete Sale'}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Recent Sales */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Receipt className="h-5 w-5" />
+              <CardTitle>Recent Sales</CardTitle>
+            </div>
+            <Button variant="ghost" size="icon" onClick={loadRecentSales}>
+              <RefreshCw className={`h-4 w-4 ${salesLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {salesLoading ? (
+            <div className="flex items-center justify-center h-20">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+           </div>
+          ) : recentSales.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6">No sales recorded yet</p>
+          ) : (
+            <div className="space-y-2">
+              {recentSales.slice(0, 10).map((sale) => {
+                const payLabel = (sale.paymentMethod || "cash").split("_").join(" ")
+                const staff = sale.user ? [sale.user.fname, sale.user.lname].filter(Boolean).join(" ") || "—" : "—"
+                const dateStr = new Date(sale.createdAt).toLocaleString("en-GB", {day:"2-digit", month:"2-digit", year:"2-digit", hour:"2-digit", minute:"2-digit"})
+                const matchedSaleCustomer = findCustomerByName(sale.customerName)
+                return (
+                  <div key={sale.id} className="flex items-center justify-between rounded-lg border p-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-mono text-sm font-medium">{sale.receiptNo}</p>
+                      {sale.customerName && (
+                        <p className="text-xs">
+                          {matchedSaleCustomer ? (
+                            <button
+                              type="button"
+                              className="break-words text-left font-medium text-primary underline-offset-2 hover:underline"
+                              onClick={() => setHistoryCustomer(matchedSaleCustomer)}
+                            >
+                              {sale.customerName}
+                            </button>
+                          ) : (
+                            <span className="break-words text-muted-foreground">{sale.customerName}</span>
+                          )}
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground">{sale.items ? sale.items.length : 0} items &middot; {payLabel} &middot; {staff}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-right font-medium">
+                        {sale.currency && sale.currency !== baseCurrency && sale.foreignTotal != null ? <>
+                          <span className="block">{formatCurrency(sale.foreignTotal, sale.currency)}</span>
+                          <span className="block text-xs text-muted-foreground">Base {formatCurrency(sale.total, baseCurrency)}</span>
+                        </> : formatCurrency(sale.total, baseCurrency)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{dateStr}</span>
+                      <ReceiptViewer saleId={String(sale.id)} receiptNo={sale.receiptNo} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <CustomerTransactionHistoryDialog
+        customer={historyCustomer}
+        open={!!historyCustomer}
+        onOpenChange={(open) => {
+          if (!open) setHistoryCustomer(null)
+        }}
+      />
+
+      {/* Customer Credit Alert Dialog */}
+      <Dialog open={!!creditAlertCustomer} onOpenChange={(open) => { if (!open) closeCreditAlert() }}>
+        <DialogContent className="max-h-[88vh] max-w-4xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5" />
+              Customer has outstanding credit
+            </DialogTitle>
+            <DialogDescription>
+              {creditAlertCustomer?.name} currently owes {formatCurrency(creditAlertCustomer?.balance || 0)}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-md border bg-amber-50 p-3">
+                <p className="text-xs text-muted-foreground">Customer</p>
+                <p className="mt-1 break-words font-semibold">{creditAlertCustomer?.name}</p>
+                {creditAlertCustomer?.phone && <p className="text-xs text-muted-foreground">{creditAlertCustomer.phone}</p>}
+              </div>
+              <div className="rounded-md border bg-amber-50 p-3">
+                <p className="text-xs text-muted-foreground">Outstanding Balance</p>
+                <p className="mt-1 font-semibold">{formatCurrency(creditAlertCustomer?.balance || 0)}</p>
+              </div>
+              {canViewCustomerCreditLimit && <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Credit Limit</p>
+                <p className="mt-1 font-semibold">{formatCurrency(creditAlertCustomer?.creditLimit || 0)}</p>
+              </div>}
+            </div>
+
+            {!creditInfo && !creditInfoLoading && (
+              <div className="rounded-md border p-4 text-sm text-muted-foreground">
+                Open the credit details to see which receipts, products/goods, dates, and balances created this customer credit.
+              </div>
+            )}
+
+            {creditInfoLoading && (
+              <div className="flex items-center justify-center rounded-md border p-8">
+                <div className="h-6 w-6 animate-spin rounded-full border-b-2 border-primary" />
+              </div>
+            )}
+
+            {creditInfoError && (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{creditInfoError}</div>
+            )}
+
+            {creditInfo && (
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Outstanding Receipts</p><p className="font-semibold">{creditInfo.summary.outstandingSalesCount}</p></div>
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Goods / Services</p><p className="font-semibold">{creditInfo.summary.outstandingItemsCount}</p></div>
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Overdue</p><p className="font-semibold">{creditInfo.summary.overdueSalesCount}</p></div>
+                  <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Opening Balance</p><p className="font-semibold">{formatCurrency(creditInfo.summary.openingBalance || 0)}</p></div>
+                </div>
+
+                {Number(creditInfo.summary.openingBalance || 0) > 0 && (
+                  <div className="rounded-md border p-3 text-sm">
+                    <p className="font-medium">Opening Balance</p>
+                    <p className="text-muted-foreground">
+                      {formatCurrency(creditInfo.summary.openingBalance)} on {creditInfo.customer.openingBalanceDate ? new Date(creditInfo.customer.openingBalanceDate).toLocaleDateString() : 'recorded date'}
+                      {creditInfo.customer.openingBalanceNote ? ` - ${creditInfo.customer.openingBalanceNote}` : ''}
+                    </p>
+                  </div>
+                )}
+
+                <div>
+                  <h3 className="mb-2 font-semibold">Outstanding Credit Receipts</h3>
+                  <div className="space-y-2">
+                    {creditInfo.outstandingSales.length ? creditInfo.outstandingSales.map((sale) => (
+                      <div key={sale.id} className="rounded-md border p-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="font-mono text-sm font-semibold">{sale.receiptNo}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(sale.date).toLocaleString()} {sale.dueDate ? `- Due ${new Date(sale.dueDate).toLocaleDateString()}` : ''}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{sale.staff || 'Staff'} {sale.branch ? `- ${sale.branch}` : ''}</p>
+                          </div>
+                          <div className="text-sm sm:text-right">
+                            <p>Total {formatCurrency(sale.total)}</p>
+                            <p>Paid {formatCurrency(sale.amountPaid)}</p>
+                            <p className="font-semibold text-amber-700">Balance {formatCurrency(sale.balance)}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 overflow-x-auto rounded-md border">
+                          <table className="min-w-[680px] w-full text-sm">
+                            <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                              <tr><th className="px-3 py-2 text-left">Goods / Service</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Price</th><th className="px-3 py-2 text-right">Discount</th><th className="px-3 py-2 text-right">Total</th></tr>
+                            </thead>
+                            <tbody>
+                              {sale.items.map((item) => (
+                                <tr key={item.id} className="border-t">
+                                  <td className="px-3 py-2">{item.productName}</td>
+                                  <td className="px-3 py-2 text-right">{item.quantity} {item.unitName || ''}</td>
+                                  <td className="px-3 py-2 text-right">{formatCurrency(item.unitPrice)}</td>
+                                  <td className="px-3 py-2 text-right">{formatCurrency(item.discount || 0)}</td>
+                                  <td className="px-3 py-2 text-right font-medium">{formatCurrency(item.total)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )) : <p className="rounded-md border p-4 text-sm text-muted-foreground">No open credit sale receipts. The balance may come from opening balance or older adjustments.</p>}
+                  </div>
+                </div>
+
+                {creditInfo.recentPayments.length > 0 && (
+                  <div>
+                    <h3 className="mb-2 font-semibold">Recent Payments</h3>
+                    <div className="space-y-2">
+                      {creditInfo.recentPayments.slice(0, 5).map((payment) => (
+                        <div key={payment.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
+                          <span className="min-w-0">
+                            <span className="block font-medium">{payment.receiptNo || payment.reference || `PAY-${String(payment.id || '').slice(-8).toUpperCase()}`}</span>
+                            <span className="text-xs text-muted-foreground">{new Date(payment.date).toLocaleString()} - {payment.paymentMethod?.replace(/_/g, ' ')}</span>
+                          </span>
+                          <span className="shrink-0 font-semibold">{formatCurrency(payment.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={closeCreditAlert}>Continue Sale</Button>
+            <div className="flex flex-wrap gap-2">
+              {creditAlertCustomer && !creditInfo && (
+                <Button onClick={() => loadCustomerCreditInfo(creditAlertCustomer)} disabled={creditInfoLoading}>View Credit Details</Button>
+              )}
+              {creditAlertCustomer && creditInfo && (
+                <Button variant="outline" onClick={() => window.location.assign(`/tenant/reports?report=customersStatement&customerId=${creditAlertCustomer.id}`)}>Customer Statement</Button>
+              )}
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Edit Dialog — edit barcode & prices inline from sales */}
+      <Dialog open={!!quickEditItem} onOpenChange={(open) => { if (!open) setQuickEditItem(null) }}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto z-[100]">
+          <DialogHeader>
+            <DialogTitle>Quick Edit: {quickEditItem?.product_name}</DialogTitle>
+            <DialogDescription>Update item name, category, barcode, or prices. Other fields remain unchanged.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Item Name</Label>
+              <Input
+                value={quickEditForm.name}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, name: e.target.value })}
+                placeholder="Item name"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Category</Label>
+              <div className="relative" ref={categoryPickerRef}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={categoryOpen}
+                  className="w-full justify-between mt-1"
+                  onClick={() => setCategoryOpen((current) => !current)}
+                >
+                  <span className={cn("truncate", !quickEditForm.categoryId && "text-muted-foreground")}>
+                    {categories.find((c) => c.id === quickEditForm.categoryId)?.name || "Select category"}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                </Button>
+
+                {categoryOpen && (
+                  <div className="absolute left-0 right-0 z-[110] mt-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg">
+                    <div className="relative mb-2">
+                      <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        autoFocus
+                        value={categoryQuery}
+                        onChange={(e) => setCategoryQuery(e.target.value)}
+                        placeholder="Search category..."
+                        className="pl-8"
+                      />
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto pr-1">
+                      {filteredCategories.length === 0 ? (
+                        <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                          {categories.length === 0 ? 'No categories available' : 'No category found'}
+                        </div>
+                      ) : (
+                        filteredCategories.map((category) => {
+                          const categoryId = String(category.id)
+                          const isSelected = quickEditForm.categoryId === categoryId
+                          return (
+                            <button
+                              key={categoryId}
+                              type="button"
+                              className={cn(
+                                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
+                                isSelected && "bg-muted font-medium"
+                              )}
+                              onClick={() => {
+                                setQuickEditForm((prev) => ({ ...prev, categoryId }))
+                                setCategoryQuery('')
+                                setCategoryOpen(false)
+                              }}
+                            >
+                              <Check className={cn("h-4 w-4", isSelected ? "opacity-100" : "opacity-0")} />
+                              <span className="truncate">{category.name}</span>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <Label>Barcode</Label>
+              <div className="flex gap-2 mt-1">
+                <Input
+                  value={quickEditForm.barcode}
+                  onChange={(e) => setQuickEditForm({ ...quickEditForm, barcode: e.target.value })}
+                  placeholder="Scan or enter barcode"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowQuickEditScanner(!showQuickEditScanner)}
+                >
+                  <ScanBarcode className="h-4 w-4" />
+                </Button>
+              </div>
+              {showQuickEditScanner && (
+                <div className="mt-2">
+                  <BarcodeScanner
+                    onScan={(code) => {
+                      setQuickEditForm((prev) => ({ ...prev, barcode: code }))
+                      setShowQuickEditScanner(false)
+                      toast({ title: 'Barcode captured', description: code })
+                    }}
+                    onClose={() => setShowQuickEditScanner(false)}
+                    placeholder="Scan barcode for this item..."
+                  />
+                </div>
+              )}
+            </div>
+            <div>
+              <Label>Current Cost Price</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={quickEditForm.cost_price}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, cost_price: e.target.value })}
+                placeholder="0.00"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Current Selling Price</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={quickEditForm.unit_price}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, unit_price: e.target.value })}
+                placeholder="0.00"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label>Expiry Date</Label>
+              <Input
+                type="date"
+                value={quickEditForm.expiryDate}
+                onChange={(e) => setQuickEditForm({ ...quickEditForm, expiryDate: e.target.value })}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setQuickEditItem(null)}>Cancel</Button>
+            <Button onClick={handleQuickEditSave} disabled={quickEditSaving}>
+              {quickEditSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

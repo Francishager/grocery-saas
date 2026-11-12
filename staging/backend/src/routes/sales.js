@@ -1,0 +1,704 @@
+import { Router } from "express";
+import { randomUUID } from 'node:crypto';
+import { requireFeature } from '../../middleware/auth.js';
+import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
+import { normalizeJobRequests, prepareSaleServiceJobs, createSaleServiceJobs, applySaleServiceRevenueSplit, hasSaleServicePermission } from '../services/saleServiceJobs.js';
+import prisma from "../db.js";
+import { createReceivableSalesView } from '../utils/receivableSalesView.js';
+import { authenticateToken, requirePermission, requireCashAccount, canUsePaymentMethodOrAssignedCash } from "../../middleware/auth.js";
+import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere } from "../utils/branchAccess.js";
+import { notifyOwnerOfLowStock, notifyOwnerOfSale } from "../utils/notifications.js";
+import { syncLinkedTransactionAccountBalance } from "../utils/accountingSync.js";
+import { getRepaymentTrustScore } from "../utils/customerCreditScore.js";
+import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance } from "../utils/customerBalance.js";
+import { allocateSaleTaxToItems } from "../utils/saleTaxAllocation.js";
+import { cashSaleRecognitionLines, getReceivablesAccountingConfig, postReceivablesJournal } from '../services/receivablesAccountingService.js';
+import { customerProfileAccess, customerProfilePayload } from '../utils/customerProfileAccess.js';
+import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
+import { getRateToBase, normalizeCurrencyCode } from '../services/currencyRates.js';
+import { allocatePharmacySaleBatches } from '../services/pharmacyBatchService.js';
+
+const router = Router();
+const salesView = createReceivableSalesView(prisma);
+
+const saleRoles = ["owner", "manager", "attendant"];
+
+const toMoney = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+function normalizeItems(items, idKey = "productId") {
+  return items.map((item) => ({
+    productId: item[idKey] || item.productId || item.id,
+    jobRequests: normalizeJobRequests(item.serviceJobs),
+    quantity: Math.max(1, Number(item.qty || item.quantity || 1)),
+    price: Number(item.price || 0),
+    discount: Number(item.discount || 0),
+    cashDiscount: Number(item.cashDiscount || 0),
+    unitName: item.unitName || null,
+    conversionFactor: item.conversionFactor != null ? Number(item.conversionFactor) : null,
+  }));
+}
+
+function userHasEffectivePermission(req, permission) {
+  const permissions = req.user?.permissions || [];
+  return permissions.includes(permission) || permissions.includes("*");
+}
+
+async function resolveSaleCurrency(tenantId, requestedCurrency, quotedUnitsPerBase) {
+  const baseCurrency = (await prisma.tenant.findUnique({ where: { id: tenantId }, select: { currency: true } }))?.currency || 'UGX';
+  const currency = normalizeCurrencyCode(requestedCurrency || baseCurrency);
+  if (!currency) throw Object.assign(new Error('Select a valid three-letter transaction currency.'), { statusCode: 400 });
+  if (currency !== baseCurrency && !hasFeatureAccess(await getTenantFeatures(tenantId), 'settings.currencies')) {
+    throw Object.assign(new Error('Foreign-currency transactions are not enabled on this business plan.'), { statusCode: 403 });
+  }
+  const fx = await getRateToBase(baseCurrency, currency);
+  if (currency !== baseCurrency && fx.cacheStatus === 'stale') {
+    throw Object.assign(new Error('A fresh exchange rate is required to record this sale. Refresh the rate and try again.'), { statusCode: 503 });
+  }
+  if (currency !== baseCurrency && Number.isFinite(Number(quotedUnitsPerBase)) && Math.abs(Number(quotedUnitsPerBase) - (1 / fx.rateToBase)) / (1 / fx.rateToBase) > 0.001) {
+    throw Object.assign(new Error('The displayed exchange rate changed. Refresh the quote before completing this sale.'), { statusCode: 409 });
+  }
+  return { baseCurrency, currency, ...fx };
+}
+
+async function ensureSaleCashAccountBaseCurrency(cashAccountId, fx) {
+  if (fx.currency === fx.baseCurrency || !cashAccountId) return;
+  const account = await prisma.cashAccount.findFirst({ where: { id: cashAccountId }, select: { currency: true } });
+  if (!account || String(account.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) {
+    throw Object.assign(new Error(`Foreign-currency sales must settle through a transaction account denominated in ${fx.baseCurrency} so the account and general ledger stay reconciled.`), { statusCode: 409 });
+  }
+}
+
+function toBaseSaleItem(item, rateToBase) {
+  return {
+    ...item,
+    price: Number(item.price || 0) * rateToBase,
+    discount: Number(item.discount || 0) * rateToBase,
+    cashDiscount: Number(item.cashDiscount || 0) * rateToBase,
+  };
+}
+
+async function checkDiscountPermission(req, userId, saleItems, cashDiscount = 0) {
+  const invoiceCashDiscount = Number(cashDiscount) || 0;
+  const hasLineItemDiscount = saleItems.some((item) =>
+    Number(item.discount || 0) > 0 || Number(item.cashDiscount || 0) > 0
+  );
+  const hasAnyDiscount = hasLineItemDiscount || invoiceCashDiscount > 0;
+
+  if (!hasAnyDiscount) {
+    return { allowed: true, invoiceCashDiscount };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      discountPermission: true,
+      permissions: { select: { canGiveDiscount: true } },
+    },
+  });
+
+  const canGiveDiscount =
+    userHasEffectivePermission(req, "canGiveDiscount") ||
+    Boolean(user?.permissions?.canGiveDiscount);
+  const discountPermission = user?.discountPermission || "none";
+
+  if (!canGiveDiscount && discountPermission === "none") {
+    return { allowed: false, invoiceCashDiscount, error: "You do not have permission to give discounts" };
+  }
+
+  if (!canGiveDiscount) {
+    if (hasLineItemDiscount && discountPermission === "invoice") {
+      return { allowed: false, invoiceCashDiscount, error: "You can only give invoice-level discounts" };
+    }
+    if (invoiceCashDiscount > 0 && discountPermission === "lineItem") {
+      return { allowed: false, invoiceCashDiscount, error: "You can only give line item discounts" };
+    }
+  }
+
+  return { allowed: true, invoiceCashDiscount };
+}
+
+async function checkedSaleItems(items, scope) {
+  const normalized = normalizeItems(items);
+  const usesSellingUnits = normalized.some((item) => Boolean(item.unitName));
+  if (usesSellingUnits && !hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'inventory.multi_unit')) {
+    throw Object.assign(new Error('Selling Units (Multi-UOM) is not enabled for this business.'), { statusCode: 403 });
+  }
+  const productIds = [...new Set(normalized.map((item) => item.productId).filter(Boolean))];
+  const products = await prisma.product.findMany({
+    where: scopedWhere(scope, { id: { in: productIds }, isActive: { not: false } }),
+    include: { units: true },
+  });
+  const byId = new Map(products.map((product) => [product.id, product]));
+
+  if (products.length !== productIds.length) {
+    const error = new Error("One or more products were not found in this branch");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return normalized.map((item) => {
+    const product = byId.get(item.productId);
+
+    // Multi-UOM: if unitName specified, use conversion factor and unit price
+    let effectivePrice = item.price || product.price || 0;
+    let baseQty = item.quantity; // quantity in base units to deduct from stock
+    let unitName = item.unitName || null;
+    let conversionFactor = item.conversionFactor;
+
+    if (unitName) {
+      const unit = product.units.find((u) => u.unitName === unitName);
+      if (!unit) throw Object.assign(new Error(`Selling unit "${unitName}" is not configured for ${product.name}.`), { statusCode: 400 });
+      effectivePrice = unit.sellingPrice;
+      conversionFactor = unit.conversionFactor;
+      baseQty = item.quantity * unit.conversionFactor; // convert to base units
+    } else {
+      conversionFactor = 1;
+    }
+
+    if (!Number.isFinite(Number(conversionFactor)) || Number(conversionFactor) <= 0) {
+      throw Object.assign(new Error(`Selling unit conversion is invalid for ${product.name}.`), { statusCode: 400 });
+    }
+
+    // Check stock in base units (skip for service items)
+    if (product.itemType !== "service" && product.quantity < baseQty) {
+      const error = new Error(`${product.name} has only ${product.quantity} ${product.baseUnit} in stock`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const costPerBaseUnit = Number(product.cost || 0);
+    const costConversionFactor = Number(conversionFactor || 1);
+    const effectiveCost = costPerBaseUnit * (Number.isFinite(costConversionFactor) && costConversionFactor > 0 ? costConversionFactor : 1);
+    const lineTotal = effectivePrice * item.quantity;
+    const totalDiscount = item.discount + item.cashDiscount;
+    return {
+      id: randomUUID(),
+      jobRequests: item.jobRequests,
+      productId: item.productId,
+      quantity: item.quantity, // quantity in selling units
+      baseQty, // quantity in base units (for stock deduction)
+      price: effectivePrice,
+      cost: effectiveCost,
+      discount: item.discount,
+      cashDiscount: item.cashDiscount,
+      unitName,
+      conversionFactor,
+      itemType: product.itemType || "product",
+      productName: product.name,
+      total: Math.max(0, lineTotal - totalDiscount),
+    };
+  });
+}
+
+async function getCustomerCreditInfo(scope, customerId, access) {
+  const customer = await prisma.customer.findFirst({
+    where: scopedWhere(scope, { id: customerId }),
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      email: true,
+      address: true,
+      creditLimit: true,
+      balance: true,
+      openingBalance: true,
+      openingBalanceDate: true,
+      openingBalanceNote: true,
+      status: true,
+    },
+  });
+
+  if (!customer) return null;
+
+  const [outstandingSales, recentPayments, balanceSnapshot] = await Promise.all([
+    access.sales ? salesView.findMany({
+      where: scopedWhere(scope, {
+        customerId,
+        balance: { gt: 0 },
+        status: { not: "cancelled" },
+      }),
+      include: {
+        items: {
+          include: {
+            product: { select: { id: true, name: true, itemType: true, baseUnit: true } },
+          },
+        },
+        User: { select: { id: true, fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    }) : Promise.resolve([]),
+    access.payments ? prisma.customerPayment.findMany({
+      where: scopedWhere(scope, { customerId }),
+      include: {
+        sale: { select: { id: true, receiptNo: true } },
+        branch: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }) : Promise.resolve([]),
+    access.balance ? calculateCustomerReceivableBalance(prisma, scope, customerId) : Promise.resolve(null),
+  ]);
+  const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? customer.balance };
+  const enabledFeatures = await getTenantFeatures(scope.tenantId);
+  const trustScore = await getRepaymentTrustScore(prisma, scope, reconciledCustomer, {
+    includePropertyManagement: hasFeatureAccess(enabledFeatures, 'property_management.landlord') || hasFeatureAccess(enabledFeatures, 'property_management.agent'),
+    includeRentals: hasFeatureAccess(enabledFeatures, 'rentals'),
+  });
+
+  const saleItems = (sale) =>
+    sale.items.map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      productName: item.product?.name || "Item",
+      itemType: item.product?.itemType || "product",
+      quantity: item.quantity,
+      unitName: item.unitName || item.product?.baseUnit || "",
+      unitPrice: item.price,
+      discount: toMoney(item.discount) + toMoney(item.cashDiscount),
+      total: item.total,
+    }));
+
+  const outstandingItems = outstandingSales.flatMap((sale) =>
+    saleItems(sale).map((item) => ({
+      ...item,
+      saleId: sale.id,
+      receiptNo: sale.receiptNo,
+      date: sale.createdAt,
+      dueDate: sale.dueDate,
+      saleTotal: sale.total,
+      ...(access.balance && { amountPaid: sale.amountPaid, saleBalance: sale.balance, paymentStatus: sale.paymentStatus }),
+      staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(" ") || "Staff",
+      branch: sale.branch?.name || "",
+    }))
+  );
+
+  return {
+    customer: customerProfilePayload({ ...reconciledCustomer, trustScore }, access),
+    summary: {
+      ...(access.balance && {
+        balance: toMoney(reconciledCustomer.balance),
+        creditLimit: toMoney(customer.creditLimit),
+        trustScore,
+        openingBalance: toMoney(customer.openingBalance),
+      }),
+      ...(access.balance && {
+        outstandingSalesCount: outstandingSales.length,
+        outstandingItemsCount: outstandingItems.length,
+        overdueSalesCount: outstandingSales.filter((sale) => sale.dueDate && sale.dueDate < new Date()).length,
+        oldestOutstandingDate: outstandingSales[0]?.createdAt || customer.openingBalanceDate || null,
+      }),
+    },
+    outstandingSales: access.sales ? outstandingSales.map((sale) => ({
+      id: sale.id,
+      receiptNo: sale.receiptNo,
+      date: sale.createdAt,
+      dueDate: sale.dueDate,
+      total: sale.total,
+      ...(access.balance && { amountPaid: sale.amountPaid, balance: sale.balance, paymentStatus: sale.paymentStatus }),
+      paymentMethod: sale.paymentMethod,
+      staff: [sale.User?.fname, sale.User?.lname].filter(Boolean).join(" ") || "Staff",
+      branch: sale.branch?.name || "",
+      items: saleItems(sale),
+    })) : [],
+    outstandingItems: access.sales ? outstandingItems : [],
+    recentPayments: access.payments ? recentPayments.map((payment) => ({
+      id: payment.id,
+      saleId: payment.saleId,
+      receiptNo: payment.sale?.receiptNo || "",
+      date: payment.createdAt,
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod,
+      reference: customerPaymentDisplayReference(payment),
+      notes: payment.notes || "",
+      branch: payment.branch?.name || "",
+    })) : [],
+  };
+}
+
+router.get("/customers/credit-options", authenticateToken, requirePermission("canCreateSale"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 1000, 1), 10000);
+    const search = String(req.query.search || "").trim();
+    const where = scopedWhere(scope, {
+      status: "active",
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { phone: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    });
+    const customersRaw = await prisma.customer.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        balance: true,
+        creditLimit: true,
+        openingBalance: true,
+        openingBalanceDate: true,
+        openingBalanceNote: true,
+      },
+      orderBy: { name: "asc" },
+      take: limit,
+    });
+    const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw);
+    const access = customerProfileAccess(req.user?.permissions);
+    const customers = balancedCustomers.map((customer) => ({
+      ...customerProfilePayload(customer, access),
+    }));
+    res.json({ customers });
+  } catch (err) {
+    console.error("Sales customer credit options error:", err);
+    handleBranchError(res, err, "Failed to fetch customer credit options");
+  }
+});
+
+router.get("/customers/:id/credit-info", authenticateToken, requirePermission("canCreateSale"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const payload = await getCustomerCreditInfo(scope, req.params.id, customerProfileAccess(req.user?.permissions));
+    if (!payload) return res.status(404).json({ error: "Customer not found" });
+    res.json(payload);
+  } catch (err) {
+    console.error("Sales customer credit info error:", err);
+    handleBranchError(res, err, "Failed to fetch customer credit information");
+  }
+});
+
+// Create single sale
+router.get('/service-options', authenticateToken, requirePermission('canCreateSale'), requirePermission('canCreateServiceJobCard'), requireFeature('service.job_cards'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: false });
+    const technicians = await prisma.serviceTechnician.findMany({ where: {
+      tenantId: scope.tenantId, isActive: true, OR: [{ branchId: scope.branchId }, { branchId: null }],
+      ...(!hasSaleServicePermission(req, 'canAssignServiceJobCard') ? { userId: req.user.id } : {}),
+    }, select: { id: true, name: true, userId: true }, orderBy: { name: 'asc' } });
+    res.json({ technicians });
+  } catch (err) { handleBranchError(res, err); }
+});
+
+async function validateServiceCheckout(req, scope, saleItems, customerName) {
+  if (!saleItems.some(item => item.jobRequests.length)) return;
+  if (!hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'service.job_cards')) throw Object.assign(new Error('Job Cards is not available on this business subscription'), { statusCode: 403 });
+  await prepareSaleServiceJobs(prisma, req, scope, saleItems, customerName);
+}
+
+router.post("/", authenticateToken, requirePermission("canCreateSale"), requireCashAccount, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: "body",
+      requireBranch: true,
+      allowOwnerAll: false,
+    });
+    const userId = req.user?.id;
+    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName } = req.body;
+    if (!items.length) return res.status(400).json({ error: "Items required" });
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
+      return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
+    }
+
+    const discountCheck = await checkDiscountPermission(req, userId, items, cashDiscount);
+    if (!discountCheck.allowed) {
+      return res.status(403).json({ error: discountCheck.error });
+    }
+    const fx = await resolveSaleCurrency(scope.tenantId, req.body.currency, req.body.unitsPerBase);
+    await ensureSaleCashAccountBaseCurrency(req.userCashAccountId, fx);
+    const invoiceCashDiscount = discountCheck.invoiceCashDiscount * fx.rateToBase;
+
+    const saleItems = await checkedSaleItems(items.map(item => toBaseSaleItem(item, fx.rateToBase)), scope);
+    await validateServiceCheckout(req, scope, saleItems, customerName);
+    applySaleServiceRevenueSplit(saleItems);
+    const subtotal = saleItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    const lineDiscount = saleItems.reduce((sum, i) => sum + i.discount + i.cashDiscount, 0);
+    const totalDiscount = lineDiscount + invoiceCashDiscount;
+
+    // Fetch tenant tax settings
+    const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
+    const taxRate = (tenant?.taxEnabled && tenant?.taxRate) ? tenant.taxRate / 100 : 0;
+    const taxableAmount = Math.max(0, subtotal - totalDiscount);
+    const tax = Math.round(taxableAmount * taxRate * 100) / 100;
+    const total = Math.max(0, subtotal - totalDiscount + tax);
+    const itemTaxAmounts = allocateSaleTaxToItems(saleItems, tax);
+    saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index]; });
+
+    const sale = await prisma.$transaction(async (tx) => {
+      const created = await tx.sale.create({
+        data: {
+          receiptNo: `RCP-${Date.now()}`,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId,
+          total,
+          subtotal,
+          tax,
+          discount: lineDiscount,
+          cashDiscount: invoiceCashDiscount,
+          currency: fx.currency,
+          foreignTotal: total / fx.rateToBase,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          paymentMethod,
+          mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
+          phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
+          transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
+          notes,
+          customerName: customerName?.trim() || null,
+          items: { create: saleItems.map(({ baseQty, itemType, productName, jobRequests, ...rest }) => rest) },
+        },
+        include: { items: true, branch: true },
+      });
+
+      created.serviceJobCards = await createSaleServiceJobs(tx, created, saleItems);
+      await allocatePharmacySaleBatches(tx, { tenantId: scope.tenantId, branchId: scope.branchId, sourceId: created.id, sourceType: 'cash', items: saleItems });
+
+      // Deduct stock in base units (skip service items)
+      for (const item of saleItems) {
+        if (item.itemType === "service") continue;
+        const updatedProduct = await tx.product.update({
+          where: { id: item.productId },
+          data: { quantity: { decrement: item.baseQty } },
+        });
+        if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
+          await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
+        }
+      }
+
+      // Add sale total to user's assigned cash account (money coming in)
+      if (req.userCashAccountId) {
+        const updatedAccount = await tx.cashAccount.update({
+          where: { id: req.userCashAccountId },
+          data: { balance: { increment: total } },
+        });
+
+        await tx.cashTransaction.create({
+          data: {
+            tenantId: scope.tenantId,
+            accountId: req.userCashAccountId,
+            type: "sale",
+            amount: total,
+            balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: total / fx.rateToBase,
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            reference: created.receiptNo,
+            description: `Sale: ${created.receiptNo}`,
+            userId,
+          },
+        });
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, req.userCashAccountId);
+        const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId);
+        if (arConfig?.isEnabled) {
+          const linkedAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${req.userCashAccountId}` }, isActive: true } });
+          if (!linkedAccount) throw Object.assign(new Error('Receivables accounting is enabled, but this till has no linked chart-of-accounts record.'), { statusCode: 409 });
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: scope.branchId, userId,
+            sourceType: 'POS_SALE', sourceId: created.id, date: created.createdAt,
+            reference: created.receiptNo, description: `Point-of-sale ${created.receiptNo}`,
+            lines: cashSaleRecognitionLines(arConfig, created, saleItems, linkedAccount.id),
+          });
+        }
+      }
+
+      return created;
+    });
+
+    await notifyOwnerOfSale({
+      tenantId: scope.tenantId,
+      sale,
+      user: { id: userId },
+      itemDetails: saleItems.map((item) => ({
+        name: item.productName || item.productId,
+        price: item.price,
+      })),
+      branchName: sale.branch?.name || null,
+    }).catch(err => console.error("Sale notification failed after sale was saved:", err));
+
+    res.status(201).json({ message: "Sale recorded", sale, baseCurrency: fx.baseCurrency, foreignTotal: sale.foreignTotal, exchangeRateToBase: fx.rateToBase });
+  } catch (err) {
+    console.error("Sale create error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+// Checkout multiple items
+router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), requireCashAccount, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, {
+      source: "body",
+      requireBranch: true,
+      allowOwnerAll: false,
+    });
+    const userId = req.user?.id;
+    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, amountPaid, changeGiven } = req.body;
+    if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
+    if (amountPaid === undefined || amountPaid === null || amountPaid === '' || !Number.isFinite(Number(amountPaid)) || Number(amountPaid) <= 0) {
+      return res.status(400).json({ error: "Enter the amount received before completing this sale." });
+    }
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
+      return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
+    }
+
+    const discountCheck = await checkDiscountPermission(req, userId, cart, cashDiscount);
+    if (!discountCheck.allowed) {
+      return res.status(403).json({ error: discountCheck.error });
+    }
+    const fx = await resolveSaleCurrency(scope.tenantId, req.body.currency, req.body.unitsPerBase);
+    await ensureSaleCashAccountBaseCurrency(req.userCashAccountId, fx);
+    const baseInvoiceCashDiscount = discountCheck.invoiceCashDiscount * fx.rateToBase;
+
+    const saleItems = await checkedSaleItems(cart.map(item => toBaseSaleItem(item, fx.rateToBase)), scope);
+    await validateServiceCheckout(req, scope, saleItems, customerName);
+    applySaleServiceRevenueSplit(saleItems);
+    const subtotal = saleItems.reduce((sum, c) => sum + c.price * c.quantity, 0);
+    const lineDiscount = saleItems.reduce((sum, c) => sum + c.discount + c.cashDiscount, 0);
+    const totalDiscount = lineDiscount + baseInvoiceCashDiscount;
+
+    // Fetch tenant tax settings
+    const tenant = await prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { taxEnabled: true, taxRate: true } });
+    const taxRate = (tenant?.taxEnabled && tenant?.taxRate) ? tenant.taxRate / 100 : 0;
+    const taxableAmount = Math.max(0, subtotal - totalDiscount);
+    const tax = Math.round(taxableAmount * taxRate * 100) / 100;
+    const total = Math.max(0, subtotal - totalDiscount + tax);
+    const itemTaxAmounts = allocateSaleTaxToItems(saleItems, tax);
+    saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index]; });
+
+    const sale = await prisma.$transaction(async (tx) => {
+      const created = await tx.sale.create({
+        data: {
+          receiptNo: `RCP-${Date.now()}`,
+          tenantId: scope.tenantId,
+          branchId: scope.branchId,
+          userId,
+          total,
+          subtotal,
+          tax,
+          discount: lineDiscount,
+          cashDiscount: baseInvoiceCashDiscount,
+          paymentMethod,
+          mobileProvider: paymentMethod === "mobile_money" ? mobileProvider : null,
+          phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
+          transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
+          customerName: customerName?.trim() || null,
+          amountPaid: amountPaid != null ? Number(amountPaid) * fx.rateToBase : null,
+          changeGiven: changeGiven != null ? Number(changeGiven) * fx.rateToBase : null,
+          currency: fx.currency,
+          foreignTotal: total / fx.rateToBase,
+          exchangeRateToBase: fx.rateToBase,
+          exchangeRateAsOf: fx.rateDate,
+          exchangeRateSource: fx.provider,
+          items: { create: saleItems.map(({ baseQty, itemType, productName, jobRequests, ...rest }) => rest) },
+        },
+        include: { items: true, branch: true },
+      });
+
+      created.serviceJobCards = await createSaleServiceJobs(tx, created, saleItems);
+      await allocatePharmacySaleBatches(tx, { tenantId: scope.tenantId, branchId: scope.branchId, sourceId: created.id, sourceType: 'cash', items: saleItems });
+
+      // Deduct stock in base units (skip service items)
+      for (const item of saleItems) {
+        if (item.itemType === "service") continue;
+        const updatedProduct = await tx.product.update({
+          where: { id: item.productId },
+          data: { quantity: { decrement: item.baseQty } },
+        });
+        if (updatedProduct && updatedProduct.quantity <= (updatedProduct.minStock || 0)) {
+          await notifyOwnerOfLowStock({ prismaClient: tx, tenantId: scope.tenantId, product: updatedProduct });
+        }
+      }
+
+      // Add sale total to user's assigned cash account (money coming in)
+      if (req.userCashAccountId) {
+        const updatedAccount = await tx.cashAccount.update({
+          where: { id: req.userCashAccountId },
+          data: { balance: { increment: total } },
+        });
+
+        await tx.cashTransaction.create({
+          data: {
+            tenantId: scope.tenantId,
+            accountId: req.userCashAccountId,
+            type: "sale",
+            amount: total,
+            balanceAfter: updatedAccount.balance,
+            currency: fx.currency,
+            foreignAmount: total / fx.rateToBase,
+            exchangeRateToBase: fx.rateToBase,
+            exchangeRateAsOf: fx.rateDate,
+            reference: created.receiptNo,
+            description: `Sale: ${created.receiptNo}`,
+            userId,
+          },
+        });
+
+        await syncLinkedTransactionAccountBalance(tx, scope.tenantId, req.userCashAccountId);
+        const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId);
+        if (arConfig?.isEnabled) {
+          const linkedAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${req.userCashAccountId}` }, isActive: true } });
+          if (!linkedAccount) throw Object.assign(new Error('Receivables accounting is enabled, but this till has no linked chart-of-accounts record.'), { statusCode: 409 });
+          await postReceivablesJournal(tx, {
+            tenantId: scope.tenantId, branchId: scope.branchId, userId,
+            sourceType: 'POS_SALE', sourceId: created.id, date: created.createdAt,
+            reference: created.receiptNo, description: `Point-of-sale ${created.receiptNo}`,
+            lines: cashSaleRecognitionLines(arConfig, created, saleItems, linkedAccount.id),
+          });
+        }
+      }
+
+      return created;
+    });
+
+    await notifyOwnerOfSale({
+      tenantId: scope.tenantId,
+      sale,
+      user: { id: userId },
+      itemDetails: saleItems.map((item) => ({
+        name: item.productName || item.productId,
+        price: item.price,
+      })),
+      branchName: sale.branch?.name || null,
+    }).catch(err => console.error("Sale notification failed after checkout was saved:", err));
+
+    res.status(201).json({ message: "Checkout successful", count: cart.length, total, sale, baseCurrency: fx.baseCurrency, foreignTotal: sale.foreignTotal, exchangeRateToBase: fx.rateToBase });
+  } catch (err) {
+    console.error("Sales checkout error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+// List sales
+router.get("/", authenticateToken, requirePermission("canViewSale"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const { from, to, page = 1, limit = 50, userId, staffId } = req.query;
+    const where = scopedWhere(scope, {
+      ...salesUserWhere(req, userId || staffId),
+      status: { notIn: ['cancelled', 'refunded'] },
+    });
+    if (from || to) {
+      where.createdAt = {};
+      if (from) where.createdAt.gte = new Date(from);
+      if (to) where.createdAt.lte = new Date(to);
+    }
+    const sales = await prisma.sale.findMany({ where, include: { items: { include: { product: { select: { id: true, name: true } } } }, branch: true, user: { select: { id: true, fname: true, lname: true } } }, orderBy: { createdAt: "desc" }, skip: (Number(page) - 1) * Number(limit), take: Number(limit) });
+    const count = await prisma.sale.count({ where });
+    res.json({ sales, total: count, page: Number(page), limit: Number(limit) });
+  } catch (err) {
+    console.error("List sales error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+export default router;

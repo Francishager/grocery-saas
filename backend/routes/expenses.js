@@ -1,6 +1,6 @@
 import express from 'express'
 import { moveToTrash, assertOutsideTrash } from '../src/services/trashService.js';
-import { PrismaClient } from '@prisma/client'
+import prisma from '../src/db.js'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireTenant, getPaymentMethodPermissions, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
@@ -10,8 +10,6 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { resolveTenantTransactionCurrency, toBaseCurrency } from '../src/services/currencyRates.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
-
 const CASH_ACCOUNTS_BY_PAYMENT_METHOD = {
   cash: { type: 'cash' },
   safe: { type: 'safe' },

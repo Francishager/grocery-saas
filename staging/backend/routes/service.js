@@ -1,0 +1,958 @@
+import { requireServiceUpdate, requireServiceAssignment, servicePermission } from '../middleware/servicePermissions.js';
+import { SERVICE_PERMISSION_DEFINITIONS } from '../src/utils/servicePermissions.js';
+import { Router } from "express";
+import crypto from "crypto";
+import { ensureServiceFeedbackSchema } from '../src/utils/serviceFeedbackSchema.js';
+import prisma from "../src/db.js";
+import { resolveServiceTechnician, technicianEmployeeLink } from '../src/services/serviceTechnicianIdentity.js';
+import { saleJobInclude, hasSaleServicePermission } from '../src/services/saleServiceJobs.js';
+import { resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js';
+import { authenticateToken, requirePermission, requireAnyPermission } from "../middleware/auth.js";
+import { requireFeature, requireAnyFeature, getTenantFeatures, hasFeatureAccess } from "../middleware/featureCheck.js";
+
+const router = Router();
+const t = (req) => req.user.tenantId || req.user.tenant_id;
+
+async function updateTenantRecord(model, where, data) {
+  const existing = await prisma[model].findFirst({ where, select: { id: true } });
+  if (!existing) return null;
+  return prisma[model].update({ where: { id: existing.id }, data });
+}
+
+async function deleteTenantRecord(model, where) {
+  const deleted = await prisma[model].deleteMany({ where });
+  return deleted.count > 0;
+}
+
+
+function userId(req) {
+  return req.user?.id || req.user?.userId || req.user?.sub;
+}
+
+async function currentServiceTechnician(req, create = false) {
+  const id = userId(req);
+  if (!id) return null;
+  return resolveServiceTechnician(t(req), id, { create });
+}
+
+function arrayUnique(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
+function canApproveServiceShare(record, currentTech, id) {
+  return record.createdByUserId === id || (currentTech?.id && record.createdByTechnicianId === currentTech.id);
+}
+function feedbackTokenHash(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+function timeToMinutes(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function appointmentEndMinutes(appointment) {
+  const start = timeToMinutes(appointment.scheduledTime);
+  if (start === null) return null;
+  const explicitEnd = timeToMinutes(appointment.endTime);
+  if (explicitEnd !== null) return explicitEnd > start ? explicitEnd : explicitEnd + 1440;
+  const duration = String(appointment.duration || '').match(/(\d+(?:\.\d+)?)\s*(h|hr|hour|hours|min|minute|minutes)/i);
+  if (!duration) return start + 60;
+  const amount = Number(duration[1]);
+  const minutes = /^(h|hr|hour|hours)$/i.test(duration[2]) ? amount * 60 : amount;
+  return start + Math.max(1, Math.round(minutes));
+}
+
+async function validateChairSlot(db, { tenantId, chairId, branchId, date, time, endTime, duration, excludeId }) {
+  if (!chairId) return;
+  const chair = await db.salonChair.findFirst({ where: { id: chairId, tenantId, isActive: true }, select: { id: true, branchId: true } });
+  if (!chair) throw Object.assign(new Error('Select an active salon chair.'), { status: 400 });
+  if (chair.branchId && chair.branchId !== branchId) throw Object.assign(new Error('The selected chair belongs to another branch.'), { status: 400 });
+  const day = new Date(date);
+  if (Number.isNaN(day.getTime())) throw Object.assign(new Error('Enter a valid appointment date.'), { status: 400 });
+  const startOfDay = new Date(day); startOfDay.setUTCHours(0, 0, 0, 0);
+  const endOfDay = new Date(startOfDay); endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+  const conflicts = await db.appointment.findMany({
+    where: { tenantId, salonChairId: chairId, scheduledDate: { gte: startOfDay, lt: endOfDay }, status: { notIn: ['cancelled', 'no_show'] }, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true, scheduledTime: true, endTime: true, duration: true },
+  });
+  const requested = { scheduledTime: time, endTime, duration };
+  const start = timeToMinutes(time);
+  const end = appointmentEndMinutes(requested);
+  if (start === null || end === null) throw Object.assign(new Error('Enter a valid appointment time.'), { status: 400 });
+  if (conflicts.some(item => {
+    const otherStart = timeToMinutes(item.scheduledTime);
+    const otherEnd = appointmentEndMinutes(item);
+    return otherStart !== null && otherEnd !== null && start < otherEnd && otherStart < end;
+  })) throw Object.assign(new Error('That chair is already booked during this time.'), { status: 409 });
+}
+
+async function saveSalonCommission(appointment) {
+  if (appointment.status !== 'completed' || (!appointment.salonStylistId && !appointment.technicianId)) {
+    await prisma.salonCommission.updateMany({ where: { appointmentId: appointment.id, status: { in: ['pending', 'approved'] } }, data: { status: 'voided' } });
+    return;
+  }
+  const features = await getTenantFeatures(appointment.tenantId);
+  if (!hasFeatureAccess(features, 'salon_spa') || !hasFeatureAccess(features, 'salon.stylist_commissions')) return;
+  const stylist = await prisma.serviceTechnician.findFirst({ where: { tenantId: appointment.tenantId, isActive: true, ...(appointment.salonStylistId ? { id: appointment.salonStylistId } : { userId: appointment.technicianId }) } });
+  if (!stylist || stylist.commissionValue <= 0) return;
+  const serviceRevenue = Math.max(0, Number(appointment.actualPrice || appointment.price || 0));
+  const commissionAmount = Math.min(serviceRevenue, Number((stylist.commissionType === 'fixed' ? stylist.commissionValue : serviceRevenue * stylist.commissionValue / 100).toFixed(2)));
+  if (commissionAmount <= 0) return;
+  const existing = await prisma.salonCommission.findUnique({ where: { appointmentId: appointment.id } });
+  if (existing && existing.status !== 'pending') return;
+  const product = appointment.productId ? await prisma.product.findFirst({ where: { id: appointment.productId, tenantId: appointment.tenantId }, select: { name: true } }) : null;
+  await prisma.salonCommission.upsert({
+    where: { appointmentId: appointment.id },
+    create: { tenantId: appointment.tenantId, appointmentId: appointment.id, stylistId: stylist.id, stylistName: stylist.name, serviceName: product?.name || appointment.title, serviceRevenue, commissionType: stylist.commissionType, commissionValue: stylist.commissionValue, commissionAmount, completedAt: appointment.completedAt || new Date() },
+    update: { stylistId: stylist.id, stylistName: stylist.name, serviceName: product?.name || appointment.title, serviceRevenue, commissionType: stylist.commissionType, commissionValue: stylist.commissionValue, commissionAmount, completedAt: appointment.completedAt || new Date() },
+  });
+}
+
+async function findServiceProduct(tenantId, productId) {
+  if (!productId) return null;
+  return prisma.product.findFirst({
+    where: { id: productId, tenantId, itemType: "service", isActive: true },
+    include: { category: { select: { name: true } } },
+  });
+}
+
+function publicService(service) {
+  if (!service) return null;
+  return {
+    id: service.id,
+    name: service.name,
+    description: service.description || "",
+    duration: service.duration || null,
+    category: service.serviceCategory || service.category?.name || null,
+  };
+}
+
+async function validateServiceLinks(tenantId, body, productId) {
+  for (const [field, model] of [['appointmentId', 'appointment'], ['workOrderId', 'workOrder'], ['contractId', 'serviceContract'], ['branchId', 'branch']]) {
+    if (!body[field]) continue;
+    if (typeof body[field] !== 'string') return `Invalid ${field}`;
+    const record = await prisma[model].findFirst({ where: { id: body[field], tenantId } });
+    if (!record || (productId && record.productId && record.productId !== productId)) return `The selected ${field} does not belong to this business and service`;
+  }
+  return null;
+}
+
+router.get('/catalog', authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.action !== 'Report').map(p => p.id)), requireAnyFeature(['service', 'service.appointments', 'salon_spa']), async (req, res) => {
+  try {
+    const services = await prisma.product.findMany({ where: { tenantId: t(req), itemType: 'service', isActive: true }, select: { id: true, name: true, description: true, price: true, serviceCategory: true, category: { select: { name: true } } }, orderBy: { name: 'asc' } });
+    res.json(services.map(service => ({ id: service.id, product_name: service.name, description: service.description || '', unit_price: service.price, serviceCategory: service.serviceCategory, categoryName: service.category?.name, isActive: true })));
+  } catch { res.status(500).json({ error: 'Unable to load services' }); }
+});
+
+router.get('/technician-options', authenticateToken, requireAnyPermission(['canAssignServiceAppointment', 'canAssignServiceWorkOrder', 'canAssignServiceJobCard', servicePermission('work-orders', 'Create'), servicePermission('job-cards', 'Create')]), requireAnyFeature(['service', 'service.technicians', 'salon_spa']), async (req, res) => {
+  try {
+    const currentTech = await currentServiceTechnician(req);
+    const options = await prisma.serviceTechnician.findMany({ where: { tenantId: t(req), isActive: true }, select: { id: true, name: true, userId: true }, orderBy: { name: 'asc' } });
+    res.json(options.map(option => ({ ...option, isCurrentUser: currentTech?.id === option.id })));
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || 'Unable to load technicians' }); }
+});
+
+router.post('/current-technician', authenticateToken, requireAnyPermission([servicePermission('work-orders', 'Create'), servicePermission('job-cards', 'Create')]), requireAnyFeature(['service.work_orders', 'service.job_cards']), async (req, res) => {
+  try {
+    const technician = await currentServiceTechnician(req, true);
+    res.json({ id: technician.id, userId: technician.userId, name: technician.name, isCurrentUser: true });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || 'Unable to link your technician profile' }); }
+});
+
+router.get('/employee-options', authenticateToken, requirePermission(servicePermission('technicians', 'Create')), requireFeature('service.technicians'), async (req, res) => {
+  try {
+    const employees = await prisma.employee.findMany({
+      where: { tenantId: t(req), status: { not: 'terminated' } },
+      select: { id: true, firstName: true, middleName: true, lastName: true, email: true, phone: true, position: true, jobTitle: true, hireDate: true, branchId: true },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+    res.json(employees.map(employee => ({
+      id: employee.id,
+      name: [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' '),
+      email: employee.email || '',
+      phone: employee.phone || '',
+      role: employee.jobTitle || employee.position || 'technician',
+      hireDate: employee.hireDate,
+      branchId: employee.branchId || null,
+    })));
+  } catch { res.status(500).json({ error: 'Unable to load employees' }); }
+});
+
+const validateReferences = tab => async (req, res, next) => {
+  try {
+    const linkError = await validateServiceLinks(t(req), req.body, req.body.productId);
+    if (linkError) return res.status(400).json({ error: linkError });
+    const references = { customerId: 'customer', productId: 'product', userId: 'user', attendantId: 'user', technicianId: tab === 'job-cards' ? 'serviceTechnician' : 'user' };
+    for (const [field, model] of Object.entries(references)) {
+      if (!req.body[field]) { if (req.body[field] === '') req.body[field] = null; continue; }
+      if (typeof req.body[field] !== 'string' || !await prisma[model].findFirst({ where: { id: req.body[field], tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid ' + field });
+    }
+    next();
+  } catch { res.status(400).json({ error: 'Unable to validate selected service records' }); }
+};
+
+// ===== APPOINTMENTS =====
+router.get("/appointments", authenticateToken, requirePermission(servicePermission('appointments', 'View')), requireAnyFeature(["service.appointments", "salon_spa"]), async (req, res) => {
+  try {
+    const appts = await prisma.appointment.findMany({ where: { tenantId: t(req) }, include: { customer: true, product: true, salonStylist: { select: { id: true, name: true } }, salonChair: { select: { id: true, name: true, code: true } }, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { scheduledDate: "desc" } });
+    res.json(appts);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/appointments/:id/salon-assignment', authenticateToken, requireAnyPermission(['canAssignSalonStylist', 'canAssignSalonChair']), requireAnyFeature(['service.appointments', 'salon_spa']), async (req, res) => {
+  try {
+    const hasField = key => Object.prototype.hasOwnProperty.call(req.body || {}, key);
+    const assignsStylist = hasField('salonStylistId');
+    const assignsChair = hasField('salonChairId');
+    const permissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+    const permissionRecord = req.userPermissions || {};
+    const permitted = key => req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role) || permissions.includes('*') || permissions.includes(key) || permissionRecord[key] === true;
+    if (!assignsStylist && !assignsChair) return res.status(400).json({ error: 'Choose a stylist or chair assignment to update.' });
+    if (assignsStylist && !permitted('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign Salon stylists.' });
+    if (assignsChair && !permitted('canAssignSalonChair')) return res.status(403).json({ error: 'You do not have permission to assign Salon chairs.' });
+
+    const tenant = t(req);
+    const features = await getTenantFeatures(tenant);
+    if (assignsStylist && !hasFeatureAccess(features, 'salon_spa')) return res.status(403).json({ error: 'Salon & Spa is not enabled for this business.' });
+    if (assignsChair && (!hasFeatureAccess(features, 'salon_spa') || !hasFeatureAccess(features, 'salon.chair_scheduling'))) return res.status(403).json({ error: 'Salon chair scheduling is not enabled for this business.' });
+
+    const appointment = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: tenant } });
+    if (!appointment) return res.status(404).json({ error: 'Appointment not found.' });
+    if (['completed', 'cancelled'].includes(appointment.status)) return res.status(409).json({ error: 'Assignments cannot be changed after an appointment is completed or cancelled.' });
+
+    const stylistId = assignsStylist ? String(req.body.salonStylistId || '').trim() || null : appointment.salonStylistId;
+    const chairId = assignsChair ? String(req.body.salonChairId || '').trim() || null : appointment.salonChairId;
+    const stylist = stylistId ? await prisma.serviceTechnician.findFirst({ where: { id: stylistId, tenantId: tenant, isActive: true }, select: { id: true, branchId: true } }) : null;
+    if (stylistId && !stylist) return res.status(400).json({ error: 'Choose an active stylist belonging to this business.' });
+    const chair = chairId ? await prisma.salonChair.findFirst({ where: { id: chairId, tenantId: tenant, isActive: true }, select: { id: true, branchId: true } }) : null;
+    if (chairId && !chair) return res.status(400).json({ error: 'Choose an active chair belonging to this business.' });
+    const assignmentBranchId = chair?.branchId || stylist?.branchId || appointment.branchId || null;
+    for (const resource of [stylist, chair]) {
+      if (resource?.branchId && appointment.branchId && resource.branchId !== appointment.branchId) return res.status(400).json({ error: 'The assigned stylist or chair belongs to a different branch.' });
+    }
+    const data = {
+      ...(assignsStylist ? { salonStylistId: stylistId } : {}),
+      ...(assignsChair ? { salonChairId: chairId } : {}),
+      ...(assignmentBranchId && !appointment.branchId ? { branchId: assignmentBranchId } : {}),
+    };
+    const updated = chairId
+      ? await prisma.$transaction(async tx => {
+          const dayKey = appointment.scheduledDate.toISOString().slice(0, 10);
+          await tx.$queryRawUnsafe('WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext($1))) SELECT 1 AS locked FROM lock', `${tenant}:${chairId}:${dayKey}`);
+          await validateChairSlot(tx, { tenantId: tenant, chairId, branchId: assignmentBranchId, date: appointment.scheduledDate, time: appointment.scheduledTime, endTime: appointment.endTime, duration: appointment.duration, excludeId: appointment.id });
+          return tx.appointment.update({ where: { id: appointment.id }, data });
+        })
+      : await prisma.appointment.update({ where: { id: appointment.id }, data });
+    res.json(updated);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Could not update Salon assignment.' });
+  }
+});
+
+router.post("/appointments", authenticateToken, requirePermission(servicePermission('appointments', 'Create')), requireServiceAssignment('appointments'), requireAnyFeature(["service.appointments", "salon_spa"]), validateReferences('appointments'), async (req, res) => {
+  try {
+    const { customerId, customerPhone, customerEmail, productId, technicianId, title, description, scheduledDate, scheduledTime, endTime, duration, price, branchId, notes } = req.body;
+    const bookingType = req.body.bookingType === 'walk_in' ? 'walk_in' : 'appointment';
+    const customerName = String(req.body.customerName || '').trim() || (bookingType === 'walk_in' ? 'Walk-in customer' : '');
+    const salonStylistId = req.body.salonStylistId || null;
+    const salonChairId = req.body.salonChairId || null;
+    const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+    const platformAdmin = req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role);
+    if (salonStylistId && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign a Salon stylist.' });
+    if (salonChairId && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonChair')) return res.status(403).json({ error: 'You do not have permission to assign a Salon chair.' });
+    if (!customerName) return res.status(400).json({ error: 'Customer name is required' });
+    if (!scheduledDate) return res.status(400).json({ error: 'Date is required' });
+    if (!scheduledTime) return res.status(400).json({ error: 'Time is required' });
+    if (salonStylistId && !await prisma.serviceTechnician.findFirst({ where: { id: salonStylistId, tenantId: t(req), isActive: true }, select: { id: true } })) return res.status(400).json({ error: 'Select an active stylist belonging to this business.' });
+    if (salonChairId) {
+      const salonFeatures = await getTenantFeatures(t(req));
+      if (!hasFeatureAccess(salonFeatures, 'salon_spa') || !hasFeatureAccess(salonFeatures, 'salon.chair_scheduling')) return res.status(403).json({ error: 'Chair scheduling is not enabled for this business.' });
+    }
+    const data = { customerId: customerId || null, customerName, customerPhone: customerPhone || null, customerEmail: customerEmail || null, productId: productId || null, technicianId: technicianId || null, salonStylistId, bookingType, title: String(title || (bookingType === 'walk_in' ? 'Walk-in service' : '')).trim(), description: description || null, scheduledDate: new Date(scheduledDate), scheduledTime, endTime: endTime || null, duration: duration || null, price: Number(price || 0), branchId: branchId || null, salonChairId, notes: notes || null, status: bookingType === 'walk_in' ? 'in_progress' : 'scheduled', tenantId: t(req) };
+    const appt = salonChairId
+      ? await prisma.$transaction(async tx => {
+          const dayKey = new Date(scheduledDate).toISOString().slice(0, 10);
+          await tx.$queryRawUnsafe('WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext($1))) SELECT 1 AS locked FROM lock', `${t(req)}:${salonChairId}:${dayKey}`);
+          await validateChairSlot(tx, { tenantId: t(req), chairId: salonChairId, branchId, date: scheduledDate, time: scheduledTime, endTime, duration });
+          return tx.appointment.create({ data });
+        })
+      : await prisma.appointment.create({ data });
+    res.status(201).json(appt);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appointments'), requireAnyFeature(["service.appointments", "salon_spa"]), validateReferences('appointments'), async (req, res) => {
+  try {
+    const existing = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
+    if (!existing) return res.status(404).json({ error: 'Appointment not found' });
+    const { status, technicianId, salonStylistId: requestedStylistId, scheduledDate, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason } = req.body;
+    if (existing.status === 'completed' && status !== undefined && status !== 'completed') return res.status(409).json({ error: 'Completed appointments are retained for reporting and cannot be reopened or cancelled.' });
+    const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
+    const platformAdmin = req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role);
+    if (requestedStylistId !== undefined && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign a Salon stylist.' });
+    if (req.body.salonChairId !== undefined && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonChair')) return res.status(403).json({ error: 'You do not have permission to assign a Salon chair.' });
+    const nextStylistId = requestedStylistId === undefined ? existing.salonStylistId : requestedStylistId || null;
+    if (nextStylistId && !await prisma.serviceTechnician.findFirst({ where: { id: nextStylistId, tenantId: t(req), isActive: true }, select: { id: true } })) return res.status(400).json({ error: 'Select an active stylist belonging to this business.' });
+    const salonChairId = req.body.salonChairId === undefined ? existing.salonChairId : req.body.salonChairId || null;
+    if (salonChairId) {
+      const salonFeatures = await getTenantFeatures(t(req));
+      if (!hasFeatureAccess(salonFeatures, 'salon_spa') || !hasFeatureAccess(salonFeatures, 'salon.chair_scheduling')) return res.status(403).json({ error: 'Chair scheduling is not enabled for this business.' });
+    }
+    const next = {
+      status: status ?? existing.status,
+      technicianId: technicianId === undefined ? existing.technicianId : technicianId || null,
+      salonStylistId: nextStylistId,
+      salonChairId,
+      scheduledDate: scheduledDate ? new Date(scheduledDate) : existing.scheduledDate,
+      scheduledTime: scheduledTime ?? existing.scheduledTime,
+      endTime: endTime === undefined ? existing.endTime : endTime,
+      duration: duration === undefined ? existing.duration : duration,
+      price: price === undefined ? existing.price : Number(price || 0),
+      actualPrice: actualPrice === undefined ? existing.actualPrice : Number(actualPrice || 0),
+      notes: notes === undefined ? existing.notes : notes,
+      cancelledReason: cancelledReason === undefined ? existing.cancelledReason : cancelledReason,
+    };
+    if (next.status === 'completed' && existing.status !== 'completed') next.completedAt = new Date();
+    const appt = salonChairId
+      ? await prisma.$transaction(async tx => {
+          const dayKey = next.scheduledDate.toISOString().slice(0, 10);
+          await tx.$queryRawUnsafe('WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtext($1))) SELECT 1 AS locked FROM lock', `${t(req)}:${salonChairId}:${dayKey}`);
+          await validateChairSlot(tx, { tenantId: t(req), chairId: salonChairId, branchId: existing.branchId, date: next.scheduledDate, time: next.scheduledTime, endTime: next.endTime, duration: next.duration, excludeId: existing.id });
+          return tx.appointment.update({ where: { id: existing.id }, data: next });
+        })
+      : await prisma.appointment.update({ where: { id: existing.id }, data: next });
+    await saveSalonCommission(appt);
+    res.json(appt);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.delete("/appointments/:id", authenticateToken, requirePermission(servicePermission('appointments', 'Delete')), requireAnyFeature(["service.appointments", "salon_spa"]), async (req, res) => {
+  try {
+    const existing = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: t(req) }, select: { id: true, status: true } });
+    if (!existing) return res.status(404).json({ error: 'Appointment not found' });
+    if (existing.status === 'completed') return res.status(409).json({ error: 'Completed appointments are retained for reporting and cannot be deleted.' });
+    const commission = await prisma.salonCommission.findUnique({ where: { appointmentId: req.params.id }, select: { id: true, status: true } });
+    if (commission) return res.status(409).json({ error: 'This appointment has a commission audit record. Cancel it to void an unclaimed commission; the appointment cannot be deleted.' });
+    const deleted = await deleteTenantRecord('appointment', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Appointment not found' });
+    res.json({ message: "Appointment deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== WORK ORDERS =====
+router.get("/work-orders", authenticateToken, requirePermission(servicePermission('work-orders', 'View')), requireFeature("service.work_orders"), async (req, res) => {
+  try {
+    const orders = await prisma.workOrder.findMany({ where: { tenantId: t(req), serviceKind: 'work_order' }, include: { customer: true, product: true, technician: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "desc" } });
+    res.json(orders);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/work-orders", authenticateToken, requirePermission(servicePermission('work-orders', 'Create')), requireServiceAssignment('work-orders'), requireFeature("service.work_orders"), validateReferences('work-orders'), async (req, res) => {
+  try {
+    const { orderNo, customerId, customerName, customerPhone, customerEmail, productId, technicianId, title, description, priority, serviceCategory, estimatedCost, branchId, notes } = req.body;
+    const currentTech = await currentServiceTechnician(req, true);
+    const finalTechnicianId = technicianId || currentTech?.userId || null;
+    if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
+    const service = await findServiceProduct(t(req), productId);
+    if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+    const orderTitle = title?.trim() || service.name;
+    const linkError = await validateServiceLinks(t(req), req.body, service.id);
+    if (linkError) return res.status(400).json({ error: linkError });
+    if (customerId && !await prisma.customer.findFirst({ where: { id: customerId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid customer' });
+    if (finalTechnicianId && !await prisma.user.findFirst({ where: { id: finalTechnicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
+    const cost = Number(estimatedCost ?? service.price ?? 0);
+    if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ error: 'Estimated cost must be a non-negative number' });
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'work_order', orderNo: orderNo || `WO-${Date.now()}`, customerId: customerId || null, customerName, customerPhone, customerEmail, productId: service.id, technicianId: finalTechnicianId, createdByUserId: userId(req) || null, createdByTechnicianId: currentTech?.id || null, title: orderTitle, description: description || service.description || null, priority: priority || "normal", serviceCategory: serviceCategory || service.serviceCategory || service.category?.name || null, estimatedCost: cost, branchId: branchId || null, notes, tenantId: t(req) } });
+    res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/work-orders/:id", authenticateToken, requireServiceUpdate('work-orders'), requireFeature("service.work_orders"), validateReferences('work-orders'), async (req, res) => {
+  try {
+    const { status, technicianId, priority, serviceCategory, estimatedCost, actualCost, laborCost, partsCost, startDate, endDate, diagnostics, warrantyInfo, notes } = req.body;
+    const data = { status, technicianId, priority, serviceCategory, estimatedCost, actualCost, laborCost, partsCost, diagnostics, warrantyInfo, notes };
+    if (startDate) data.startDate = new Date(startDate);
+    if (endDate) data.endDate = new Date(endDate);
+    const order = await updateTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' }, data);
+    if (!order) return res.status(404).json({ error: 'Work order not found' });
+    res.json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/work-orders/:id", authenticateToken, requirePermission(servicePermission('work-orders', 'Delete')), requireFeature("service.work_orders"), async (req, res) => {
+  try {
+    const existing = await prisma.workOrder.findFirst({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' }, select: { id: true, status: true } });
+    if (!existing) return res.status(404).json({ error: 'Work order not found' });
+    if (existing.status === 'completed') return res.status(409).json({ error: 'Completed work orders are retained for reporting and cannot be deleted.' });
+    const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' });
+    if (!deleted) return res.status(404).json({ error: 'Work order not found' });
+    res.json({ message: "Work order deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== SERVICE CONTRACTS =====
+router.get("/contracts", authenticateToken, requirePermission(servicePermission('contracts', 'View')), requireFeature("service.contracts"), async (req, res) => {
+  try {
+    const contracts = await prisma.serviceContract.findMany({ where: { tenantId: t(req) }, include: { customer: true }, orderBy: { createdAt: "desc" } });
+    res.json(contracts);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/contracts", authenticateToken, requirePermission(servicePermission('contracts', 'Create')), requireFeature("service.contracts"), validateReferences('contracts'), async (req, res) => {
+  try {
+    const { contractNo, customerId, title, description, serviceCategory, startDate, endDate, renewalDate, autoRenew, value, billingCycle, discountPercent, branchId, terms } = req.body;
+    if (!title?.trim()) return res.status(400).json({ error: 'Title is required' });
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' });
+    if (!startDate) return res.status(400).json({ error: 'Start date is required' });
+    const contract = await prisma.serviceContract.create({ data: { contractNo: contractNo || `CON-${Date.now()}`, customerId, title, description, serviceCategory, startDate: new Date(startDate), endDate: endDate ? new Date(endDate) : undefined, renewalDate: renewalDate ? new Date(renewalDate) : undefined, autoRenew: autoRenew || false, value: value || 0, billingCycle: billingCycle || "monthly", discountPercent: discountPercent || 0, branchId, terms, tenantId: t(req) } });
+    res.status(201).json(contract);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/contracts/:id", authenticateToken, requireServiceUpdate('contracts'), requireFeature("service.contracts"), validateReferences('contracts'), async (req, res) => {
+  try {
+    const { title, description, serviceCategory, endDate, renewalDate, autoRenew, nextBillingDate, value, billingCycle, discountPercent, status, terms } = req.body;
+    const data = { title, description, serviceCategory, autoRenew, value, billingCycle, discountPercent, status, terms };
+    if (endDate) data.endDate = new Date(endDate);
+    if (renewalDate) data.renewalDate = new Date(renewalDate);
+    if (nextBillingDate) data.nextBillingDate = new Date(nextBillingDate);
+    const contract = await updateTenantRecord('serviceContract', { id: req.params.id, tenantId: t(req) }, data);
+    if (!contract) return res.status(404).json({ error: 'Contract not found' });
+    res.json(contract);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/contracts/:id", authenticateToken, requirePermission(servicePermission('contracts', 'Delete')), requireFeature("service.contracts"), async (req, res) => {
+  try {
+    const deleted = await deleteTenantRecord('serviceContract', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Contract not found' });
+    res.json({ message: "Contract deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== SERVICE TECHNICIANS =====
+router.get("/technicians", authenticateToken, requirePermission(servicePermission('technicians', 'View')), requireFeature("service.technicians"), async (req, res) => {
+  try {
+    const techs = await prisma.serviceTechnician.findMany({ where: { tenantId: t(req) }, include: { branch: { select: { name: true } }, user: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "desc" } });
+    res.json(techs);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/technicians", authenticateToken, requirePermission(servicePermission('technicians', 'Create')), requireFeature("service.technicians"), validateReferences('technicians'), async (req, res) => {
+  try {
+    const { employeeId, name, email, phone, role, skills, specializations, hourlyRate, availability, branchId, userId, hireDate, notes } = req.body;
+    const { employee, userId: linkedUserId } = await technicianEmployeeLink(t(req), employeeId, userId);
+    const identifiers = [...(employee ? [{ employeeId: employee.id }] : []), ...(linkedUserId ? [{ userId: linkedUserId }] : [])];
+    if (identifiers.length && await prisma.serviceTechnician.findFirst({ where: { tenantId: t(req), OR: identifiers } })) return res.status(409).json({ error: 'This employee or login already has a technician profile. Edit the existing technician instead.' });
+    const finalName = name?.trim() || (employee ? [employee.firstName, employee.middleName, employee.lastName].filter(Boolean).join(' ') : '');
+    if (!finalName) return res.status(400).json({ error: 'Technician name is required' });
+    const tech = await prisma.serviceTechnician.create({ data: { employeeId: employee?.id || null, name: finalName, email: email || employee?.email || null, phone: phone || employee?.phone || null, role: role || employee?.jobTitle || employee?.position || "technician", skills: skills || [], specializations: specializations || [], hourlyRate: hourlyRate || 0, availability: availability || "full_time", branchId: branchId || employee?.branchId || null, userId: linkedUserId, hireDate: hireDate ? new Date(hireDate) : employee?.hireDate || undefined, notes, tenantId: t(req) } });
+    res.status(201).json(tech);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/technicians/:id", authenticateToken, requireServiceUpdate('technicians'), requireFeature("service.technicians"), validateReferences('technicians'), async (req, res) => {
+  try {
+    const { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes, hireDate } = req.body;
+    const tech = await updateTenantRecord('serviceTechnician', { id: req.params.id, tenantId: t(req) }, { name, email, phone, role, skills, specializations, hourlyRate, availability, isActive, notes, ...(hireDate !== undefined && { hireDate: hireDate ? new Date(hireDate) : null }) });
+    if (!tech) return res.status(404).json({ error: 'Technician not found' });
+    res.json(tech);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/technicians/:id", authenticateToken, requirePermission(servicePermission('technicians', 'Delete')), requireFeature("service.technicians"), async (req, res) => {
+  try {
+    const deleted = await deleteTenantRecord('serviceTechnician', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Technician not found' });
+    res.json({ message: "Technician deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== SERVICE JOB CARDS =====
+router.get("/job-cards", authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.tab === 'job-cards' && p.action !== 'Report').map(p => p.id)), requireFeature("service.job_cards"), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const where = scopedWhere(scope);
+    if (!hasSaleServicePermission(req, 'canViewServiceJobCard')) where.OR = [{ createdByUserId: userId(req) }, { technician: { userId: userId(req) } }];
+    const cards = await prisma.serviceJobCard.findMany({ where, include: { ...saleJobInclude, product: { select: { id: true, name: true, serviceCategory: true, duration: true } }, appointment: { select: { id: true, title: true, scheduledDate: true } }, workOrder: { select: { id: true, orderNo: true, title: true } } }, orderBy: { createdAt: "desc" } });
+    res.json(cards);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/job-cards", authenticateToken, requirePermission(servicePermission('job-cards', 'Create')), requireServiceAssignment('job-cards'), requireFeature("service.job_cards"), validateReferences('job-cards'), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const { cardNo, appointmentId, workOrderId, productId, technicianId, customerName, customerPhone, serviceTitle, serviceDescription, priority, scheduledStart, scheduledEnd, laborCost, partsCost, partsUsed, branchId } = req.body;
+    const currentTech = await currentServiceTechnician(req, true);
+    const finalTechnicianId = technicianId || currentTech?.id || null;
+    if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
+    const service = await findServiceProduct(t(req), productId);
+    if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+    const linkError = await validateServiceLinks(t(req), req.body, service.id);
+    if (linkError) return res.status(400).json({ error: linkError });
+    if (finalTechnicianId && !await prisma.serviceTechnician.findFirst({ where: { id: finalTechnicianId, tenantId: t(req) } })) return res.status(400).json({ error: 'Invalid technician' });
+    const finalLaborCost = Number(laborCost ?? service.price ?? 0);
+    const finalPartsCost = Number(partsCost ?? 0);
+    if (![finalLaborCost, finalPartsCost].every(value => Number.isFinite(value) && value >= 0)) return res.status(400).json({ error: 'Costs must be non-negative numbers' });
+    const totalCost = finalLaborCost + finalPartsCost;
+    const card = await prisma.serviceJobCard.create({ data: { cardNo: cardNo || `JC-${Date.now()}`, appointmentId: appointmentId || null, workOrderId: workOrderId || null, productId: service.id, technicianId: finalTechnicianId, createdByUserId: userId(req) || null, createdByTechnicianId: currentTech?.id || null, customerName, customerPhone, serviceTitle: serviceTitle?.trim() || service.name, serviceDescription: serviceDescription || service.description || null, priority: priority || "normal", scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined, scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined, laborCost: finalLaborCost, partsCost: finalPartsCost, totalCost, partsUsed, branchId: branchId || null, tenantId: t(req) } });
+    res.status(201).json(card);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/job-cards/:id", authenticateToken, requireServiceUpdate('job-cards'), requireFeature("service.job_cards"), validateReferences('job-cards'), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const { status, technicianId, priority, actualStart, actualEnd, laborHours, laborCost, partsCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature } = req.body;
+    const existing = await prisma.serviceJobCard.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
+    if (!existing) return res.status(404).json({ error: 'Job card not found' });
+    const saleLinked = ['included_service', 'paid_service'].includes(existing.serviceSource);
+    if (saleLinked && req.body.productId !== undefined && req.body.productId !== existing.productId) return res.status(400).json({ error: 'The service is linked to the original sale and cannot be replaced' });
+    if (technicianId && !await prisma.serviceTechnician.findFirst({ where: { id: technicianId, tenantId: t(req), isActive: true, OR: [{ branchId: existing.branchId }, { branchId: null }] } })) return res.status(400).json({ error: 'Select an active technician in this branch' });
+    if (saleLinked && ['in_progress', 'completed'].includes(status) && !(technicianId ?? existing.technicianId)) return res.status(400).json({ error: 'Assign a technician before starting or completing this job' });
+    if (status === 'completed' && saleLinked && !(completionNotes ?? existing.completionNotes)?.trim()) return res.status(400).json({ error: 'Enter completion notes before completing this service' });
+    if (status !== undefined && !['pending', 'in_progress', 'on_hold', 'completed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid job status' });
+    const totalCost = Number(laborCost ?? existing.laborCost) + Number(partsCost ?? existing.partsCost);
+    const data = { status, technicianId, priority, laborHours, laborCost, partsCost, totalCost, partsUsed, qualityCheckPassed, qualityNotes, completionNotes, customerSignature };
+    for (const field of ['customerName', 'customerPhone', 'serviceTitle', 'serviceDescription']) if (req.body[field] !== undefined) data[field] = req.body[field];
+    if (data.customerName !== undefined && !data.customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
+    for (const field of ['scheduledStart', 'scheduledEnd']) if (req.body[field] !== undefined) {
+      data[field] = req.body[field] ? new Date(req.body[field]) : null;
+      if (data[field] && !Number.isFinite(data[field].getTime())) return res.status(400).json({ error: 'Invalid scheduled date' });
+    }
+    if (status === 'in_progress' && !existing.actualStart && !actualStart) data.actualStart = new Date();
+    if (status === 'completed' && !actualEnd) data.actualEnd = new Date();
+    if (req.body.productId !== undefined) {
+      const service = await findServiceProduct(t(req), req.body.productId);
+      if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+      data.productId = service.id;
+      data.serviceTitle = req.body.serviceTitle?.trim() || service.name;
+      data.serviceDescription = req.body.serviceDescription || service.description || null;
+    }
+    if (actualStart) data.actualStart = new Date(actualStart);
+    if (actualEnd) data.actualEnd = new Date(actualEnd);
+    const card = await prisma.serviceJobCard.update({ where: { id: existing.id }, data });
+    res.json(card);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/job-cards/:id", authenticateToken, requirePermission(servicePermission('job-cards', 'Delete')), requireFeature("service.job_cards"), async (req, res) => {
+  try {
+    const existing = await prisma.serviceJobCard.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
+    if (!existing) return res.status(404).json({ error: 'Job card not found' });
+    if (existing.status === 'completed') return res.status(409).json({ error: 'Completed job cards are retained for reporting and cannot be deleted.' });
+    if (['included_service', 'paid_service'].includes(existing?.serviceSource)) return res.status(400).json({ error: 'Cancel this sale-linked job card to preserve its history' });
+    const deleted = await deleteTenantRecord('serviceJobCard', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Job card not found' });
+    res.json({ message: "Job card deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== SERVICE FEEDBACK =====
+router.get("/feedback", authenticateToken, requirePermission(servicePermission('feedback', 'View')), requireFeature("service"), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const feedback = await prisma.serviceFeedback.findMany({ where: { tenantId: t(req) }, include: { product: { select: { id: true, name: true, serviceCategory: true } }, customer: { select: { id: true, name: true } }, appointment: { select: { id: true, title: true } }, workOrder: { select: { id: true, orderNo: true } }, contract: { select: { id: true, contractNo: true } } }, orderBy: { createdAt: "desc" } });
+    res.json(feedback);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/feedback", authenticateToken, requirePermission(servicePermission('feedback', 'Create')), requireFeature("service"), validateReferences('feedback'), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const { appointmentId, workOrderId, contractId, productId, customerId, customerName, customerPhone, rating, serviceQuality, timeliness, professionalism, valueForMoney, comment, wouldRecommend, branchId } = req.body;
+    if (!customerName?.trim()) return res.status(400).json({ error: 'Customer name is required' });
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Rating must be 1-5' });
+    const service = productId ? await findServiceProduct(t(req), productId) : null;
+    const fb = await prisma.serviceFeedback.create({ data: { appointmentId, workOrderId, contractId, productId: service?.id || null, customerId, customerName, customerPhone, rating, serviceQuality: serviceQuality || 5, timeliness: timeliness || 5, professionalism: professionalism || 5, valueForMoney: valueForMoney || 5, comment, wouldRecommend: wouldRecommend !== false, branchId, tenantId: t(req) } });
+    res.status(201).json(fb);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put("/feedback/:id", authenticateToken, requireServiceUpdate('feedback'), requireFeature("service"), validateReferences('feedback'), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const { status, response } = req.body;
+    const data = { status };
+    if (response !== undefined) { data.response = response; data.respondedAt = new Date(); }
+    const fb = await updateTenantRecord('serviceFeedback', { id: req.params.id, tenantId: t(req) }, data);
+    if (!fb) return res.status(404).json({ error: 'Feedback not found' });
+    res.json(fb);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/feedback/:id", authenticateToken, requirePermission(servicePermission('feedback', 'Delete')), requireFeature("service"), async (req, res) => {
+  try {
+    const deleted = await deleteTenantRecord('serviceFeedback', { id: req.params.id, tenantId: t(req) });
+    if (!deleted) return res.status(404).json({ error: 'Feedback not found' });
+    res.json({ message: "Feedback deleted" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post("/feedback-link", authenticateToken, requirePermission('canGenerateServiceFeedbackQR'), requireFeature("service"), async (req, res) => {
+  try {
+    await ensureServiceFeedbackSchema();
+    const { productId, appointmentId, workOrderId, contractId, branchId } = req.body;
+    const tenantId = t(req);
+    const service = await findServiceProduct(tenantId, productId);
+    if (!service) return res.status(400).json({ error: 'Select a saved service from Inventory > Services' });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, logo: true } });
+    const linkError = await validateServiceLinks(tenantId, req.body, service.id);
+    if (linkError) return res.status(400).json({ error: linkError });
+    const token = crypto.randomBytes(32).toString("base64url");
+    await prisma.serviceFeedbackLink.create({ data: {
+      tenantId,
+      productId: service.id,
+      appointmentId: appointmentId || null,
+      workOrderId: workOrderId || null,
+      contractId: contractId || null,
+      branchId: branchId || null,
+      tokenHash: feedbackTokenHash(token),
+    } });
+    res.status(201).json({ path: '/service-feedback/' + encodeURIComponent(token), businessName: tenant?.name || 'Business', logo: tenant?.logo || null, service: publicService(service) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function findFeedbackLink(token) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token || '')) return null;
+  await ensureServiceFeedbackSchema();
+  const tokenHash = feedbackTokenHash(token);
+  const link = await prisma.serviceFeedbackLink.findUnique({ where: { tokenHash } });
+  if (!link || !link.isActive || (link.expiresAt && link.expiresAt < new Date())) return null;
+  const tenant = await prisma.tenant.findUnique({ where: { id: link.tenantId }, select: { status: true } });
+  if (!tenant || !['active', 'trial'].includes(tenant.status)) return null;
+  if (!hasFeatureAccess(await getTenantFeatures(link.tenantId), 'service')) return null;
+  return link;
+}
+
+router.get("/public-feedback/:token", async (req, res) => {
+  try {
+    const link = await findFeedbackLink(req.params.token);
+    if (!link) return res.status(404).json({ error: 'Feedback form not found' });
+    const [tenant, service] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id: link.tenantId }, select: { id: true, name: true, logo: true, status: true } }),
+      findServiceProduct(link.tenantId, link.productId),
+    ]);
+    if (!tenant || !service) return res.status(404).json({ error: 'Feedback form not found' });
+    res.json({ businessName: tenant.name, logo: tenant.logo || null, service: publicService(service) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/public-feedback/:token", async (req, res) => {
+  try {
+    const link = await findFeedbackLink(req.params.token);
+    if (!link) return res.status(404).json({ error: 'Feedback form not found' });
+    const service = await findServiceProduct(link.tenantId, link.productId);
+    if (!service) return res.status(404).json({ error: 'Feedback form not found' });
+    const { customerName, customerPhone, rating, serviceQuality, timeliness, professionalism, valueForMoney, comment, wouldRecommend } = req.body;
+    if (typeof customerName !== 'string' || !customerName.trim() || customerName.length > 120) return res.status(400).json({ error: 'Your name is required (up to 120 characters)' });
+    if (comment != null && (typeof comment !== 'string' || comment.length > 4000)) return res.status(400).json({ error: 'Comments must be 4000 characters or less' });
+    if (customerPhone != null && (typeof customerPhone !== 'string' || customerPhone.length > 40)) return res.status(400).json({ error: 'Invalid phone number' });
+    if (wouldRecommend !== undefined && typeof wouldRecommend !== 'boolean') return res.status(400).json({ error: 'Invalid recommendation' });
+    const finalRating = Number(rating);
+    if (![rating, serviceQuality ?? rating, timeliness ?? rating, professionalism ?? rating, valueForMoney ?? rating].every(value => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 5)) return res.status(400).json({ error: 'Ratings must be whole numbers from 1 to 5' });
+    const fb = await prisma.serviceFeedback.create({ data: {
+      tenantId: link.tenantId,
+      branchId: link.branchId || null,
+      appointmentId: link.appointmentId || null,
+      workOrderId: link.workOrderId || null,
+      contractId: link.contractId || null,
+      productId: service.id,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone || null,
+      rating: finalRating,
+      serviceQuality: Number(serviceQuality) || finalRating,
+      timeliness: Number(timeliness) || finalRating,
+      professionalism: Number(professionalism) || finalRating,
+      valueForMoney: Number(valueForMoney) || finalRating,
+      comment,
+      wouldRecommend: wouldRecommend !== false,
+    } });
+    res.status(201).json({ id: fb.id, message: 'Thank you for your feedback' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+async function serviceShareRecord(recordType, id, tenantId, db = prisma) {
+  if (recordType === 'work-order') return db.workOrder.findFirst({ where: { id, tenantId, serviceKind: 'work_order' } });
+  if (recordType === 'job-card') return db.serviceJobCard.findFirst({ where: { id, tenantId } });
+  return null;
+}
+
+async function applyApprovedServiceShare(recordType, record, targetTech, db) {
+  const model = recordType === 'work-order' ? 'workOrder' : 'serviceJobCard';
+  return db[model].update({ where: { id: record.id }, data: {
+    sharedWithTechnicianIds: arrayUnique([...(record.sharedWithTechnicianIds || []), targetTech.id]),
+    sharedWithUserIds: arrayUnique([...(record.sharedWithUserIds || []), targetTech.userId]),
+  } });
+}
+
+const shareError = (message, status = 400) => Object.assign(new Error(message), { status });
+const sharePermissions = tab => ['View', 'Create', 'Edit', 'Assign', 'UpdateStatus'].map(action => servicePermission(tab, action)).filter(Boolean);
+
+async function createServiceShareRequest(req, res, recordType) {
+  try {
+    if (!req.body.targetTechnicianId || typeof req.body.targetTechnicianId !== 'string') throw shareError('Select a technician to share with');
+    const currentTech = await currentServiceTechnician(req);
+    const id = userId(req);
+    const request = await prisma.$transaction(async db => {
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${t(req)}), hashtext(${req.params.id}))`;
+      const record = await serviceShareRecord(recordType, req.params.id, t(req), db);
+      if (!record) throw shareError('Service record not found', 404);
+      const isAssigned = recordType === 'work-order' ? record.technicianId === id : Boolean(currentTech && record.technicianId === currentTech.id);
+      if (!isAssigned && !canApproveServiceShare(record, currentTech, id)) throw shareError('Only the assigned or creator technician can share this record', 403);
+      if (!record.createdByUserId && !record.createdByTechnicianId) throw shareError('This older record has no recorded creator. An administrator must assign the work directly.');
+      const targetTech = await db.serviceTechnician.findFirst({ where: { id: req.body.targetTechnicianId, tenantId: t(req), isActive: true } });
+      if (!targetTech) throw shareError('Select an active technician from this business');
+      if (targetTech.id === currentTech?.id || (recordType === 'work-order' ? targetTech.userId && record.technicianId === targetTech.userId : record.technicianId === targetTech.id)) throw shareError('This technician is already assigned to this work');
+      if ((record.sharedWithTechnicianIds || []).includes(targetTech.id)) throw shareError('This work is already shared with that technician', 409);
+      const pending = await db.serviceShareRequest.findFirst({ where: { tenantId: t(req), recordType, recordId: record.id, targetTechnicianId: targetTech.id, status: 'pending' } });
+      if (pending) return pending;
+      const approved = canApproveServiceShare(record, currentTech, id);
+      const created = await db.serviceShareRequest.create({ data: {
+        tenantId: t(req), recordType, recordId: record.id, requesterUserId: id, requesterTechnicianId: currentTech?.id || null,
+        targetUserId: targetTech.userId || null, targetTechnicianId: targetTech.id, reason: req.body.reason || null,
+        status: approved ? 'approved' : 'pending', approvedByUserId: approved ? id : null,
+        approvedByTechnicianId: approved ? currentTech?.id || null : null, approvedAt: approved ? new Date() : null,
+      } });
+      if (approved) await applyApprovedServiceShare(recordType, record, targetTech, db);
+      return created;
+    });
+    res.status(201).json(request);
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || 'Unable to share service record' }); }
+}
+
+async function decideServiceShareRequest(req, res, recordType, decision) {
+  try {
+    const currentTech = await currentServiceTechnician(req);
+    const id = userId(req);
+    const request = await prisma.serviceShareRequest.findFirst({ where: { id: req.params.requestId, tenantId: t(req), recordType } });
+    if (!request) throw shareError('Share request not found', 404);
+    const updated = await prisma.$transaction(async db => {
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${t(req)}), hashtext(${request.recordId}))`;
+      const pending = await db.serviceShareRequest.findFirst({ where: { id: request.id, tenantId: t(req), status: 'pending' } });
+      if (!pending) throw shareError('This share request has already been resolved', 409);
+      const record = await serviceShareRecord(recordType, request.recordId, t(req), db);
+      if (!record) throw shareError('Service record not found', 404);
+      if (!canApproveServiceShare(record, currentTech, id)) throw shareError('Only the creator technician can approve or reject sharing', 403);
+      if (decision === 'approved') {
+        const targetTech = await db.serviceTechnician.findFirst({ where: { id: request.targetTechnicianId || '', tenantId: t(req), isActive: true } });
+        if (!targetTech) throw shareError('Target technician is no longer active');
+        await applyApprovedServiceShare(recordType, record, targetTech, db);
+      }
+      return db.serviceShareRequest.update({ where: { id: request.id }, data: { status: decision, approvedByUserId: id, approvedByTechnicianId: currentTech?.id || null, approvedAt: new Date() } });
+    });
+    res.json(updated);
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || 'Unable to resolve share request' }); }
+}
+
+async function listServiceShareRequests(req, res, recordType) {
+  try {
+    const currentTech = await currentServiceTechnician(req);
+    const id = userId(req);
+    const model = recordType === 'work-order' ? 'workOrder' : 'serviceJobCard';
+    const records = await prisma[model].findMany({ where: {
+      tenantId: t(req), ...(recordType === 'work-order' && { serviceKind: 'work_order' }),
+      OR: [{ createdByUserId: id }, ...(currentTech ? [{ createdByTechnicianId: currentTech.id }] : [])],
+    } });
+    const requests = await prisma.serviceShareRequest.findMany({ where: {
+      tenantId: t(req), recordType, status: 'pending',
+      OR: [{ requesterUserId: id }, { recordId: { in: records.map(record => record.id) } }],
+    }, orderBy: { createdAt: 'asc' } });
+    const technicianIds = arrayUnique(requests.flatMap(request => [request.targetTechnicianId, request.requesterTechnicianId]));
+    const technicians = await prisma.serviceTechnician.findMany({ where: { tenantId: t(req), id: { in: technicianIds } }, select: { id: true, name: true } });
+    const names = new Map(technicians.map(tech => [tech.id, tech.name]));
+    res.json(requests.map(request => {
+      const record = records.find(record => record.id === request.recordId);
+      return { ...request, recordLabel: record?.orderNo || record?.cardNo || 'Assigned work', requesterName: names.get(request.requesterTechnicianId) || 'Staff member', targetName: names.get(request.targetTechnicianId) || 'Technician', canApprove: Boolean(record) };
+    }));
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || 'Unable to load sharing requests' }); }
+}
+
+for (const [section, recordType, feature] of [['work-orders', 'work-order', 'service.work_orders'], ['job-cards', 'job-card', 'service.job_cards']]) {
+  const access = [authenticateToken, requireAnyPermission(sharePermissions(section)), requireFeature(feature)];
+  router.get('/' + section + '/share-requests', ...access, (req, res) => listServiceShareRequests(req, res, recordType));
+  router.post('/' + section + '/:id/share-requests', ...access, (req, res) => createServiceShareRequest(req, res, recordType));
+  router.post('/' + section + '/share-requests/:requestId/approve', ...access, (req, res) => decideServiceShareRequest(req, res, recordType, 'approved'));
+  router.post('/' + section + '/share-requests/:requestId/reject', ...access, (req, res) => decideServiceShareRequest(req, res, recordType, 'rejected'));
+}
+
+// ===== SERVICE CATEGORIES PRESETS =====
+router.get("/categories", authenticateToken, requireAnyPermission(SERVICE_PERMISSION_DEFINITIONS.filter(p => p.action !== 'Report').map(p => p.id)), async (req, res) => {
+  try {
+    const { getDefaultCategoryDefinitionsForBusinessType } = await import("../src/utils/categoryDefaults.js");
+    const businessType = req.query.businessType || 'service';
+    const categories = getDefaultCategoryDefinitionsForBusinessType(businessType).filter(category => category.categoryType === 'service');
+    res.json(categories);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+
+// ===== CAR WASH & GARAGE (simple work-order based entries) =====
+// These endpoints create lightweight work order records for car-wash and garage services
+// so the frontend can record and list services without a separate DB model.
+router.get('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+  try {
+    const where = { tenantId: t(req), serviceKind: 'car_wash' };
+    const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
+    // Filter client-side for car wash related entries (product slug or title/notes match)
+    const items = orders;
+    res.json(items);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/car-wash', authenticateToken, requirePermission(servicePermission('car-wash', 'Create')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
+  try {
+    const { date, vehicle, serviceType, amount, attendantId, branchId, notes } = req.body;
+    if (!serviceType || !vehicle) return res.status(400).json({ error: 'Vehicle and service type are required' });
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'car_wash',
+      orderNo: `CW-${Date.now()}`,
+      customerName: vehicle,
+      customerPhone: null,
+      productId: null,
+      technicianId: attendantId || null,
+      title: serviceType,
+      description: notes || null,
+      priority: 'normal',
+      estimatedCost: amount || 0,
+      actualCost: amount || 0,
+      branchId: branchId || null,
+      notes: JSON.stringify({ vehicle, serviceType, extra: notes || null }),
+      tenantId: t(req),
+    } });
+    // If dedicated CarWashRecord model exists in Prisma client, create a record there as well
+    try {
+      if (prisma.carWashRecord) {
+        await prisma.carWashRecord.create({ data: {
+          tenantId: t(req),
+          branchId: branchId || null,
+          vehicle,
+          serviceType,
+          amount: amount || 0,
+          attendantId: attendantId || null,
+          notes: notes || null,
+        } });
+      }
+    } catch (e) {
+      console.warn('CarWashRecord model write skipped or failed:', e.message || e);
+    }
+    res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'View')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+  try {
+    const order = await prisma.workOrder.findFirst({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' } });
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    res.json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/car-wash/:id', authenticateToken, requireServiceUpdate('car-wash'), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), validateReferences('car-wash'), async (req, res) => {
+  try {
+    const { vehicle, serviceType, amount, attendantId, notes } = req.body;
+    const data = {};
+    if (vehicle !== undefined) data.customerName = vehicle;
+    if (serviceType !== undefined) data.title = serviceType;
+    if (amount !== undefined) { data.estimatedCost = amount; data.actualCost = amount }
+    if (attendantId !== undefined) data.technicianId = attendantId;
+    if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
+    const updated = await updateTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' }, data);
+    if (!updated) return res.status(404).json({ error: 'Car wash record not found' });
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/car-wash/:id', authenticateToken, requirePermission(servicePermission('car-wash', 'Delete')), requireAnyFeature(['service','service.car_wash','service.car-wash','fuel_station.car_wash','fuel_station.car-wash']), async (req, res) => {
+  try {
+    const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'car_wash' });
+    if (!deleted) return res.status(404).json({ error: 'Car wash record not found' });
+    res.json({ message: 'Deleted' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/garage', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+  try {
+    const where = { tenantId: t(req), serviceKind: 'garage' };
+    const orders = await prisma.workOrder.findMany({ where, include: { product: true }, orderBy: { createdAt: 'desc' } });
+    const items = orders;
+    res.json(items);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/garage', authenticateToken, requirePermission(servicePermission('garage', 'Create')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
+  try {
+    const { date, vehicle, service, cost, attendantId, branchId, notes } = req.body;
+    if (!service || !vehicle) return res.status(400).json({ error: 'Vehicle and service description are required' });
+    const order = await prisma.workOrder.create({ data: { serviceKind: 'garage',
+      orderNo: `GR-${Date.now()}`,
+      customerName: vehicle,
+      customerPhone: null,
+      productId: null,
+      technicianId: attendantId || null,
+      title: service,
+      description: notes || null,
+      priority: 'normal',
+      estimatedCost: cost || 0,
+      actualCost: cost || 0,
+      branchId: branchId || null,
+      notes: JSON.stringify({ vehicle, service, extra: notes || null }),
+      tenantId: t(req),
+    } });
+    try {
+      if (prisma.garageService) {
+        await prisma.garageService.create({ data: {
+          tenantId: t(req),
+          branchId: branchId || null,
+          vehicle,
+          service,
+          cost: cost || 0,
+          attendantId: attendantId || null,
+          status: 'open',
+          notes: notes || null,
+        } });
+      }
+    } catch (e) {
+      console.warn('GarageService model write skipped or failed:', e.message || e);
+    }
+    res.status(201).json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'View')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+  try {
+    const order = await prisma.workOrder.findFirst({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'garage' } });
+    if (!order) return res.status(404).json({ error: 'Not found' });
+    res.json(order);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.put('/garage/:id', authenticateToken, requireServiceUpdate('garage'), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), validateReferences('garage'), async (req, res) => {
+  try {
+    const { vehicle, service, cost, attendantId, status, notes } = req.body;
+    const data = {};
+    if (vehicle !== undefined) data.customerName = vehicle;
+    if (service !== undefined) data.title = service;
+    if (cost !== undefined) { data.estimatedCost = cost; data.actualCost = cost }
+    if (attendantId !== undefined) data.technicianId = attendantId;
+    if (status !== undefined) data.status = status;
+    if (notes !== undefined) data.notes = typeof notes === 'string' ? notes : JSON.stringify(notes);
+    const updated = await updateTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'garage' }, data);
+    if (!updated) return res.status(404).json({ error: 'Garage service not found' });
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/garage/:id', authenticateToken, requirePermission(servicePermission('garage', 'Delete')), requireAnyFeature(['service','service.garage','service.auto_repair','service.auto-repair','auto-repair-services']), async (req, res) => {
+  try {
+    const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'garage' });
+    if (!deleted) return res.status(404).json({ error: 'Garage service not found' });
+    res.json({ message: 'Deleted' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+export default router;
+
+
+

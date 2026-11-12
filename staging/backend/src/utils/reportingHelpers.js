@@ -1,0 +1,96 @@
+export function buildSupplierStatementData(supplier, purchases = [], payments = []) {
+  const normalizedPurchases = Array.isArray(purchases) ? purchases : [];
+  const normalizedPayments = Array.isArray(payments) ? payments : [];
+
+  const openingBalance = Math.max(0, Number(supplier?.openingBalance || 0));
+  const openingBalanceDate = supplier?.openingBalanceDate || supplier?.createdAt || null;
+  const totalPurchases = normalizedPurchases.reduce((sum, purchase) => sum + Number(purchase?.total || 0), 0);
+  const totalPayments = normalizedPayments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0);
+  const openBalance = supplier?.balance != null
+    ? Math.max(0, Number(supplier.balance || 0))
+    : openingBalance + normalizedPurchases.reduce((sum, purchase) => sum + Math.max(0, Number(purchase?.balance || 0)), 0);
+  const openPurchases = normalizedPurchases.filter((purchase) => Number(purchase?.balance || 0) > 0);
+
+  return {
+    supplier: {
+      id: supplier?.id || null,
+      name: supplier?.name || 'Unknown supplier',
+    },
+    openingBalance: {
+      amount: openingBalance,
+      date: openingBalanceDate,
+      note: supplier?.openingBalanceNote || '',
+      type: 'Opening Balance',
+      isSystem: true,
+      systemTransaction: true,
+    },
+    summary: {
+      openingBalance,
+      totalPurchases,
+      totalPayments,
+      openBalance,
+      purchaseCount: normalizedPurchases.length,
+      paymentCount: normalizedPayments.length,
+    },
+    purchases: normalizedPurchases.map((purchase) => ({
+      id: purchase?.id,
+      refNo: purchase?.refNo || 'N/A',
+      total: Number(purchase?.total || 0),
+      balance: Number(purchase?.balance || 0),
+      createdAt: purchase?.createdAt,
+      description: purchase?.fuelDelivery
+        ? `${Number(purchase.fuelDelivery.litres || 0)} L ${purchase.fuelDelivery.tank?.fuelType || 'fuel'} - ${purchase.fuelDelivery.tank?.name || 'tank'}`
+        : `${purchase?.items?.length || 0} item${purchase?.items?.length === 1 ? '' : 's'}`,
+      fuelDelivery: purchase?.fuelDelivery ? {
+        invoiceNo: purchase.fuelDelivery.invoiceNo,
+        litres: Number(purchase.fuelDelivery.litres || 0),
+        unitCost: Number(purchase.fuelDelivery.unitCost || 0),
+        tank: purchase.fuelDelivery.tank,
+      } : null,
+    })),
+    payments: normalizedPayments.map((payment) => ({
+      id: payment?.id,
+      amount: Number(payment?.amount || 0),
+      paymentMethod: payment?.paymentMethod,
+      reference: payment?.reference,
+      createdAt: payment?.createdAt,
+    })),
+    openPurchases,
+  };
+}
+
+export function buildDecisionSupportSummary({ sales = [], purchases = [], products = [], expenses = [], suppliers = [], cogs = null }) {
+  const salesTotal = Array.isArray(sales)
+    ? sales.reduce((sum, item) => sum + Math.max(0, Number(item?.total || 0) - Number(item?.tax || 0)), 0)
+    : 0;
+  const purchasesTotal = Array.isArray(purchases) ? purchases.reduce((sum, item) => sum + Number(item?.total || 0), 0) : 0;
+  const expensesTotal = Array.isArray(expenses) ? expenses.reduce((sum, item) => sum + Number(item?.amount || 0), 0) : 0;
+  const supplierBalanceTotal = Array.isArray(suppliers) ? suppliers.reduce((sum, item) => sum + Number(item?.balance || 0), 0) : 0;
+  const actualCogs = cogs != null ? cogs : purchasesTotal;
+
+  const now = new Date();
+  const expiringSoonProducts = (Array.isArray(products) ? products : []).filter((product) => {
+    const expiryDate = product?.expiryDate ? new Date(product.expiryDate) : null;
+    if (!expiryDate || Number.isNaN(expiryDate.getTime())) return false;
+    const diffDays = Math.floor((expiryDate.getTime() - now.getTime()) / 86400000);
+    return diffDays <= 60;
+  }).length;
+
+  const lowStockProducts = (Array.isArray(products) ? products : []).filter((product) => {
+    const quantity = Number(product?.quantity || 0);
+    const minStock = Number(product?.minStock || 0);
+    return quantity <= minStock;
+  }).length;
+
+  return {
+    grossProfit: salesTotal - actualCogs,
+    netProfit: salesTotal - actualCogs - expensesTotal,
+    cogs: actualCogs,
+    lowStockProducts,
+    expiringSoonProducts,
+    supplierBalanceTotal,
+    salesTotal,
+    purchasesTotal,
+    expensesTotal,
+  };
+}

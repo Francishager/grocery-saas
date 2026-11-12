@@ -1,5 +1,5 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import prisma from '../src/db.js'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from '../middleware/auth.js'
@@ -7,7 +7,6 @@ import { filterPlanFeaturesByPlanList, invalidateFeatureCache, planFeatureIsAllo
 import { ensureTenantAccountingSetup } from '../src/services/tenantAccountingSetupService.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 const VALID_TENANT_STATUSES = new Set(['active', 'suspended', 'cancelled', 'trial'])
 
 // === FEATURE ACCESS CONTROL ===

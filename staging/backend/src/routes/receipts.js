@@ -1,0 +1,410 @@
+import { Router } from "express";
+import PDFDocument from "pdfkit";
+import prisma from "../db.js";
+import { authenticateToken } from "../../middleware/auth.js";
+import { auditLog } from "../utils/audit.js";
+import { handleBranchError, resolveBranchScope, scopedWhere } from "../utils/branchAccess.js";
+
+const router = Router();
+const receiptDateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatReceiptDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : receiptDateFormatter.format(date);
+}
+
+function authenticateReceipt(req, res, next) {
+  if (!req.headers.authorization && req.query?.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  return authenticateToken(req, res, next);
+}
+
+function requireReceiptAccess(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ message: "Authentication required" });
+  }
+
+  const permissions = req.user.permissions || [];
+  const allowedPermissions = ["canViewReceipt", "canCreateReceipt", "canCreateSale", "canViewSale"];
+  if (permissions.includes("*") || allowedPermissions.some((permission) => permissions.includes(permission))) {
+    return next();
+  }
+
+  return res.status(403).json({
+    message: "Permission denied",
+    required: allowedPermissions.join(" or "),
+  });
+}
+
+async function getReceiptData(req) {
+  const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+  const sale = await prisma.sale.findFirst({
+    where: scopedWhere(scope, { id: req.params.saleId }),
+    include: {
+      items: { include: { product: true } },
+      user: { select: { fname: true, lname: true } },
+      branch: { select: { id: true, name: true } },
+    },
+  });
+
+  if (!sale) return null;
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: sale.tenantId || scope.tenantId },
+    select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
+  });
+
+  return { scope, sale, tenant };
+}
+
+function receiptJson(data) {
+  const { sale, tenant } = data;
+  const cashier = `${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim();
+
+  return {
+    id: sale.id,
+    receiptNo: sale.receiptNo,
+    business: {
+      name: tenant?.name || "Business",
+      email: tenant?.email || null,
+      phone: tenant?.phone || null,
+      address: tenant?.address || null,
+      logo: tenant?.logo || null,
+      currency: tenant?.currency || "UGX",
+      dateFormat: "DD/MM/YY",
+      taxEnabled: tenant?.taxEnabled || false,
+      taxRate: tenant?.taxRate || 0,
+      taxId: tenant?.taxId || null,
+      receiptHeader: tenant?.receiptHeader || null,
+      receiptFooter: tenant?.receiptFooter || null,
+    },
+    branch: sale.branch || null,
+    cashier,
+    servedBy: sale.servedBy || null,
+    customerName: sale.customerName || null,
+    paymentMethod: sale.paymentMethod || "cash",
+    createdAt: sale.createdAt,
+    subtotal: sale.subtotal || 0,
+    discount: sale.discount || 0,
+    tax: sale.tax || 0,
+    total: sale.total || 0,
+    amountPaid: sale.amountPaid != null ? Number(sale.amountPaid) / (sale.exchangeRateToBase || 1) : null,
+    changeGiven: sale.changeGiven != null ? Number(sale.changeGiven) / (sale.exchangeRateToBase || 1) : null,
+    baseCurrency: tenant?.currency || "UGX",
+    transactionCurrency: sale.currency || tenant?.currency || "UGX",
+    exchangeRateToBase: sale.exchangeRateToBase || 1,
+    foreignTotal: sale.foreignTotal ?? sale.total ?? 0,
+    baseTotal: sale.total || 0,
+    exchangeRateAsOf: sale.exchangeRateAsOf || null,
+    exchangeRateSource: sale.exchangeRateSource || null,
+    transactionCurrency: sale.currency || tenant?.currency || "UGX",
+    exchangeRateToBase: sale.exchangeRateToBase || 1,
+    foreignTotal: sale.foreignTotal ?? sale.total ?? 0,
+    baseTotal: sale.total || 0,
+    exchangeRateAsOf: sale.exchangeRateAsOf || null,
+    exchangeRateSource: sale.exchangeRateSource || null,
+    items: sale.items.map((item) => ({
+      id: item.id,
+      name: item.product?.name || "Item",
+      sku: item.product?.sku || null,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+    })),
+  };
+}
+
+router.get("/:saleId", authenticateReceipt, requireReceiptAccess, async (req, res) => {
+  try {
+    const data = await getReceiptData(req);
+    if (!data) return res.status(404).json({ error: "Sale not found" });
+
+    res.json({ receipt: receiptJson(data) });
+
+    auditLog({
+      tenantId: data.scope.tenantId,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      action: "read",
+      model: "Receipt",
+      recordId: data.sale.id,
+      ip: req.ip,
+    });
+  } catch (err) {
+    console.error("Receipt data error:", err);
+    handleBranchError(res, err, "Failed to load receipt");
+  }
+});
+
+// Generate PDF receipt for a sale
+router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const sale = await prisma.sale.findFirst({
+      where: scopedWhere(scope, { id: req.params.saleId }),
+      include: {
+        items: { include: { product: true } },
+        user: { select: { fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!sale) return res.status(404).json({ error: "Sale not found" });
+
+    // Get tenant info for receipt header
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: sale.tenantId || scope.tenantId },
+      select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
+    });
+    const baseCurrency = tenant?.currency || "UGX";
+    const receiptCurrency = sale.currency || baseCurrency;
+    const receiptRateToBase = sale.exchangeRateToBase || 1;
+    const receiptAmount = (amount) => Number(amount || 0) / receiptRateToBase;
+
+    const doc = new PDFDocument({ size: [226.77, 600], margin: 10 }); // 80mm thermal width
+    doc.fillColor("black");
+    const chunks = [];
+
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => {
+      const pdf = Buffer.concat(chunks);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="receipt-${sale.receiptNo}.pdf"`);
+      res.send(pdf);
+    });
+
+    // Logo - positioned left side above business name
+    if (tenant?.logo) {
+      try {
+        const resp = await fetch(tenant.logo);
+        if (resp.ok) {
+          const imgBuf = Buffer.from(await resp.arrayBuffer());
+          // Logo on left side, max 50px wide, 35px tall
+          const logoWidth = 50;
+          const margin = 10;
+          doc.image(imgBuf, margin, undefined, { fit: [logoWidth, 35], align: "left" });
+          doc.moveDown(0.3);
+        } else {
+          console.error("Logo fetch failed:", resp.status, tenant.logo);
+        }
+      } catch (e) {
+        console.error("Logo render error:", e.message);
+      }
+    }
+
+    // Receipt Header
+    doc.fontSize(14).font("Helvetica-Bold").text(tenant?.name || "Business", { align: "center" });
+    doc.moveDown(0.3);
+    if (tenant?.address) doc.fontSize(9).font("Helvetica-Bold").text(tenant.address, { align: "center" });
+    // Phone + Email on same row
+    const contactParts = [tenant?.phone ? `Tel: ${tenant.phone}` : "", tenant?.email || ""].filter(Boolean).join(" | ");
+    if (contactParts) doc.fontSize(9).font("Helvetica-Bold").text(contactParts, { align: "center" });
+    // Branch on same row
+    if (sale.branch?.name) doc.fontSize(9).font("Helvetica-Bold").text(`Branch: ${sale.branch.name}`, { align: "center" });
+    doc.moveDown(0.3);
+
+    // Divider
+    doc.fontSize(9).font("Helvetica-Bold").text("-".repeat(40), { align: "center" });
+    doc.moveDown(0.2);
+
+    // Receipt info
+    doc.fontSize(9).font("Helvetica-Bold").text(`RECEIPT: ${sale.receiptNo}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Date: ${formatReceiptDate(sale.createdAt)}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim(), { align: "center" });
+    if (sale.servedBy) doc.fontSize(9).font("Helvetica-Bold").text(`Served by: ${sale.servedBy}`, { align: "center" });
+    if (sale.customerName) {
+      doc.fontSize(9).font("Helvetica-Bold").text(`Customer: ${sale.customerName}`, { align: "center" });
+    }
+    doc.fontSize(9).font("Helvetica-Bold").text(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`, { align: "center" });
+    doc.fontSize(9).font("Helvetica-Bold").text(`Currency: ${receiptCurrency}`, { align: "center" });
+    doc.moveDown(0.3);
+
+    // Divider
+    doc.text("-".repeat(40), { align: "center" });
+    doc.moveDown(0.2);
+
+    // Items
+    doc.fontSize(9).font("Helvetica-Bold");
+    doc.text("ITEM                    QTY   PRICE   TOTAL", { align: "left" });
+    doc.font("Helvetica-Bold");
+    doc.moveDown(0.1);
+
+    for (const item of sale.items) {
+      const name = (item.product?.name || "Item").substring(0, 20).padEnd(20);
+      const qty = String(item.quantity).padStart(4);
+      const price = formatNum(receiptAmount(item.price)).padStart(7);
+      const total = formatNum(receiptAmount(item.total)).padStart(8);
+      doc.fontSize(8.5).text(`${name}${qty}${price}${total}`);
+    }
+
+    doc.moveDown(0.2);
+    doc.text("-".repeat(40), { align: "center" });
+    doc.moveDown(0.2);
+
+    // Totals
+    doc.fontSize(9).font("Helvetica-Bold");
+    doc.text(`Subtotal:${formatNum(receiptAmount(sale.subtotal)).padStart(32)}`);
+    if (sale.discount > 0) doc.text(`Discount:${formatNum(receiptAmount(sale.discount)).padStart(31)}`);
+    if (tenant?.taxEnabled && sale.tax > 0) doc.text(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(receiptAmount(sale.tax)).padStart(28)}`);
+    else if (!tenant?.taxEnabled) doc.text(`Tax: 0.00`);
+    doc.fontSize(11).font("Helvetica-Bold").text(`TOTAL (${receiptCurrency}):${formatNum(sale.foreignTotal ?? receiptAmount(sale.total)).padStart(24)}`);
+    if (receiptCurrency !== baseCurrency) doc.fontSize(8).font("Helvetica-Bold").text(`Base equivalent (${baseCurrency}): ${formatNum(sale.total)}`);
+    if (sale.amountPaid != null) {
+      doc.fontSize(9).font("Helvetica-Bold").text(`Amount Paid:${formatNum(receiptAmount(sale.amountPaid)).padStart(26)}`);
+      doc.text(`Change:${formatNum(receiptAmount(sale.changeGiven || 0)).padStart(31)}`);
+    }
+    doc.moveDown(0.5);
+
+    // Footer
+    doc.fontSize(9).font("Helvetica-Bold");
+    if (tenant?.receiptHeader) doc.text(tenant.receiptHeader, { align: "center" });
+    doc.text(tenant?.receiptFooter?.trim() || "Thank you for your purchase!", { align: "center" });
+    doc.moveDown(0.2);
+    doc.text("Powered by JibuSales", { align: "center" });
+
+    doc.end();
+
+    // Audit
+    auditLog({
+      tenantId: scope.tenantId,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      action: "read",
+      model: "Receipt",
+      recordId: sale.id,
+      ip: req.ip,
+    });
+  } catch (err) {
+    console.error("Receipt PDF error:", err);
+    handleBranchError(res, err, "Failed to generate receipt");
+  }
+});
+
+// Get ESC/POS raw commands for thermal printing (sent via Web Serial API from frontend)
+router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "query", allowOwnerAll: true });
+    const sale = await prisma.sale.findFirst({
+      where: scopedWhere(scope, { id: req.params.saleId }),
+      include: {
+        items: { include: { product: true } },
+        user: { select: { fname: true, lname: true } },
+        branch: { select: { id: true, name: true } },
+      },
+    });
+    if (!sale) return res.status(404).json({ error: "Sale not found" });
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: sale.tenantId || scope.tenantId },
+      select: { name: true, email: true, phone: true, address: true, logo: true, currency: true, dateFormat: true, taxEnabled: true, taxRate: true, taxId: true, receiptHeader: true, receiptFooter: true },
+    });
+    const baseCurrency = tenant?.currency || "UGX";
+    const receiptCurrency = sale.currency || baseCurrency;
+    const receiptRateToBase = sale.exchangeRateToBase || 1;
+    const receiptAmount = (amount) => Number(amount || 0) / receiptRateToBase;
+
+    // Build ESC/POS command array (hex strings)
+    const cmds = [];
+
+    // Initialize printer
+    cmds.push("1B40"); // ESC @
+
+    // Center align
+    cmds.push("1B6101"); // ESC a 1
+
+    // Header
+    cmds.push(escText(tenant?.name || "Business", true));
+    if (tenant?.address) cmds.push(escText(tenant.address));
+    // Phone + Email on same row
+    const escContact = [tenant?.phone ? `Tel: ${tenant.phone}` : "", tenant?.email || ""].filter(Boolean).join(" | ");
+    if (escContact) cmds.push(escText(escContact));
+    if (sale.branch?.name) cmds.push(escText(`Branch: ${sale.branch.name}`));
+    cmds.push(escText(""));
+
+    // Left align
+    cmds.push("1B6100"); // ESC a 0
+
+    // Receipt info
+    cmds.push(escText(`Receipt: ${sale.receiptNo}`));
+    cmds.push(escText(`Date: ${formatReceiptDate(sale.createdAt)}`));
+    cmds.push(escText(`Cashier: ${sale.user?.fname || ""} ${sale.user?.lname || ""}`.trim()));
+    if (sale.servedBy) cmds.push(escText(`Served by: ${sale.servedBy}`));
+    if (sale.customerName) {
+      cmds.push(escText(`Customer: ${sale.customerName}`));
+    }
+    cmds.push(escText(`Payment: ${(sale.paymentMethod || "cash").toUpperCase()}`));
+    cmds.push(escText(`Currency: ${receiptCurrency}`));
+    cmds.push(escText(""));
+
+    // Separator
+    cmds.push(escText("--------------------------------"));
+
+    // Items header
+    cmds.push(escText("Item               Qty  Price  Total"));
+
+    for (const item of sale.items) {
+      const name = (item.product?.name || "Item").substring(0, 18).padEnd(18);
+      const qty = String(item.quantity).padStart(3);
+      const price = formatNum(receiptAmount(item.price)).padStart(6);
+      const total = formatNum(receiptAmount(item.total)).padStart(7);
+      cmds.push(escText(`${name}${qty}${price}${total}`));
+    }
+
+    cmds.push(escText("--------------------------------"));
+
+    // Totals
+    cmds.push(escText(`Subtotal:${formatNum(receiptAmount(sale.subtotal)).padStart(27)}`));
+    if (sale.discount > 0) cmds.push(escText(`Discount:${formatNum(receiptAmount(sale.discount)).padStart(26)}`));
+    if (tenant?.taxEnabled && sale.tax > 0) cmds.push(escText(`Tax${tenant.taxId ? ` (${tenant.taxId})` : ""}:${formatNum(receiptAmount(sale.tax)).padStart(24)}`));
+    else if (!tenant?.taxEnabled) cmds.push(escText(`Tax: 0.00`));
+    cmds.push(escDoubleText(`TOTAL ${receiptCurrency}:${formatNum(sale.foreignTotal ?? receiptAmount(sale.total)).padStart(20)}`));
+    if (receiptCurrency !== baseCurrency) cmds.push(escText(`Base equiv. ${baseCurrency}:${formatNum(sale.total).padStart(18)}`));
+    if (sale.amountPaid != null) {
+      cmds.push(escText(`Amount Paid:${formatNum(receiptAmount(sale.amountPaid)).padStart(22)}`));
+      cmds.push(escText(`Change:${formatNum(receiptAmount(sale.changeGiven || 0)).padStart(27)}`));
+    }
+
+    cmds.push(escText(""));
+    cmds.push("1B6101"); // Center
+    if (tenant?.receiptHeader) cmds.push(escText(tenant.receiptHeader));
+    cmds.push(escText(tenant?.receiptFooter?.trim() || "Thank you for your purchase!"));
+    cmds.push(escText("Powered by JibuSales"));
+
+    // Feed and cut
+    cmds.push("1B6100"); // Left align
+    cmds.push("0A0A0A0A"); // Feed 4 lines
+    cmds.push("1D564200"); // GS V 0 (full cut)
+
+    res.json({ commands: cmds, receiptNo: sale.receiptNo });
+  } catch (err) {
+    console.error("ESC/POS error:", err);
+    handleBranchError(res, err, "Failed to generate ESC/POS data");
+  }
+});
+
+// Helpers
+function formatNum(n) {
+  return (n || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function escText(text, bold = false) {
+  const prefix = bold ? "1B4501" : "1B4500"; // ESC E n (bold on/off)
+  const suffix = bold ? "1B4500" : "";
+  const hex = Buffer.from(text + "\n", "utf8").toString("hex");
+  return prefix + hex + suffix;
+}
+
+function escDoubleText(text) {
+  // Double height + bold
+  const hex = Buffer.from(text + "\n", "utf8").toString("hex");
+  return "1B2101" + "1B4501" + hex + "1B4500" + "1B2100"; // ESC ! double, ESC E bold, text, reset
+}
+
+export default router;
