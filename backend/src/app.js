@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import prisma from "./db.js";
+import { platformRuntimeMetricsMiddleware } from "./utils/platformRuntimeMetrics.js";
 import { verifyMailTransport } from "../mailer.js";
 
 import authRoutes from "./routes/auth.js";
@@ -183,6 +184,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true, parameterLimit: 1000 }));
 
 // Audit logging middleware (captures all mutating requests)
+app.use("/api", platformRuntimeMetricsMiddleware);
 app.use("/api", auditMiddleware());
 
 // Health check

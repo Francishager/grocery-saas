@@ -3,6 +3,9 @@ import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import hrFeatureService from "../services/hrFeatureService.js";
 import { summarizePlatformAudit } from "../utils/platformAuditInsights.js";
+import { platformRuntimeMetrics } from "../utils/platformRuntimeMetrics.js";
+import { performance } from "node:perf_hooks";
+import v8 from "node:v8";
 
 const router = express.Router();
 
@@ -16,6 +19,54 @@ const HR_FEATURE_CATALOG = [
 ];
 
 const MAX_AUDIT_PAGE_SIZE = 100;
+
+router.get('/runtime-health', authenticateToken, requirePlatformAdmin, async (_req, res) => {
+  const requestWindow = platformRuntimeMetrics.snapshot(Date.now(), 5);
+  let database = { status: 'unavailable', latencyMs: null };
+  const databaseStartedAt = performance.now();
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    database = { status: 'connected', latencyMs: Math.round(performance.now() - databaseStartedAt) };
+  } catch {
+    database = { status: 'unavailable', latencyMs: null };
+  }
+
+  const memory = process.memoryUsage();
+  const heapLimit = v8.getHeapStatistics().heap_size_limit;
+  const heapUsedPercent = heapLimit ? Number((memory.heapUsed / heapLimit * 100).toFixed(1)) : 0;
+  const eventLoop = performance.eventLoopUtilization();
+  const instanceId = process.env.RAILWAY_REPLICA_ID || process.env.HOSTNAME || `process-${process.pid}`;
+  const alerts = [];
+
+  if (database.status !== 'connected') alerts.push({ level: 'critical', key: 'database', message: 'Database health check failed.' });
+  if (requestWindow.requests >= 20 && requestWindow.serverErrorRatePercent >= 2) alerts.push({ level: 'critical', key: 'server-errors', message: 'API 5xx rate is at least 2% over the last five minutes.' });
+  if (requestWindow.requests >= 20 && requestWindow.p95Ms >= 2000) alerts.push({ level: 'warning', key: 'latency', message: 'API p95 response time is at least two seconds over the last five minutes.' });
+  if (heapUsedPercent >= 85) alerts.push({ level: 'warning', key: 'memory', message: 'Node.js heap usage is at least 85% of its configured limit.' });
+
+  return res.json({
+    sampledAt: new Date().toISOString(),
+    scope: 'single-api-instance',
+    instanceId,
+    nodeVersion: process.version,
+    uptimeSeconds: Math.floor(process.uptime()),
+    status: alerts.length ? 'degraded' : requestWindow.requests < 20 ? 'awaiting-traffic' : 'healthy',
+    database,
+    traffic: requestWindow,
+    process: {
+      rssMb: Number((memory.rss / 1024 / 1024).toFixed(1)),
+      heapUsedMb: Number((memory.heapUsed / 1024 / 1024).toFixed(1)),
+      heapLimitMb: Number((heapLimit / 1024 / 1024).toFixed(1)),
+      heapUsedPercent,
+      eventLoopUtilizationPercent: Number((eventLoop.utilization * 100).toFixed(1)),
+    },
+    alerts,
+    limitations: [
+      'Counters are in memory on this API instance and reset after restart.',
+      'With multiple API replicas, this endpoint reports only the instance that received this request.',
+      'Railway and Cloudflare infrastructure metrics are not included here.',
+    ],
+  });
+});
 
 function parsePositiveInt(value, fallback, max) {
   const parsed = Number.parseInt(String(value ?? ''), 10);

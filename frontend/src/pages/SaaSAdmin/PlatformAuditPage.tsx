@@ -1,7 +1,7 @@
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Activity, Search, Loader2, RefreshCw, ChevronLeft, ChevronRight, Clock3, Eye, ShieldCheck } from 'lucide-react'
+import { Activity, Search, Loader2, RefreshCw, ChevronLeft, ChevronRight, Clock3, Eye, ShieldCheck, Server, Database, Gauge, CircleAlert, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
 
 interface AuditLog {
   id: string
@@ -33,6 +33,20 @@ interface AuditInsights {
   refreshedAt: string
 }
 
+interface RuntimeHealth {
+  sampledAt: string
+  scope: string
+  instanceId: string
+  nodeVersion: string
+  uptimeSeconds: number
+  status: 'healthy' | 'degraded' | 'awaiting-traffic'
+  database: { status: string; latencyMs: number | null }
+  traffic: { requests: number; clientErrors: number; serverErrors: number; serverErrorRatePercent: number; averageMs: number; p95Ms: number; slowRoutes: Array<{ route: string; requests: number; averageMs: number; p95Ms: number }> }
+  process: { rssMb: number; heapUsedMb: number; heapLimitMb: number; heapUsedPercent: number; eventLoopUtilizationPercent: number }
+  alerts: Array<{ level: string; key: string; message: string }>
+  limitations: string[]
+}
+
 const emptyPagination: Pagination = { page: 1, limit: 25, total: 0, pages: 0 }
 
 export const PlatformAuditPage: React.FC = () => {
@@ -48,6 +62,19 @@ export const PlatformAuditPage: React.FC = () => {
   const [selectedHour, setSelectedHour] = useState<number | null>(null)
   const [filters, setFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
   const [appliedFilters, setAppliedFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
+  const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(null)
+  const [runtimeError, setRuntimeError] = useState('')
+
+  const fetchRuntimeHealth = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/platform/runtime-health')
+      if (!response.ok) throw new Error('Unable to load platform health')
+      setRuntimeHealth(await response.json())
+      setRuntimeError('')
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : 'Unable to load platform health')
+    }
+  }, [])
 
   const fetchLogs = useCallback(async () => {
     setLoading(true)
@@ -77,6 +104,13 @@ export const PlatformAuditPage: React.FC = () => {
   }, [page, appliedFilters, insightDays])
 
   useEffect(() => { void fetchLogs() }, [fetchLogs])
+  useEffect(() => {
+    void fetchRuntimeHealth()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void fetchRuntimeHealth()
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [fetchRuntimeHealth])
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void fetchLogs()
@@ -127,6 +161,12 @@ export const PlatformAuditPage: React.FC = () => {
   }
   const hourMetricLabel = 'Page opens'
   const formatHourValue = (item: AuditInsights['byHour'][number]) => `${hourValue(item).toLocaleString()} page opens`
+  const uptimeLabel = (seconds: number) => {
+    const days = Math.floor(seconds / 86400)
+    const hours = Math.floor((seconds % 86400) / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    return [days ? `${days}d` : '', `${hours}h`, `${minutes}m`].filter(Boolean).join(' ')
+  }
 
   return (
     <div className="space-y-5">
@@ -137,11 +177,58 @@ export const PlatformAuditPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           {refreshedAt && <span className="hidden text-xs text-gray-500 sm:inline">Updated {fmtDateTime(refreshedAt)}</span>}
-          <button onClick={() => { void fetchLogs() }} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-gray-50" title="Refresh activity">
+          <button onClick={() => { void fetchLogs(); void fetchRuntimeHealth() }} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-gray-50" title="Refresh activity and platform health">
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
       </header>
+
+      <section className="space-y-3" aria-label="Platform health and capacity">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div><h2 className="text-sm font-semibold">Platform health</h2><p className="mt-1 text-xs text-gray-500">API and database signals · refreshes every 15 seconds</p></div>
+          {runtimeHealth && <div className="text-right text-[11px] text-gray-500">Instance {runtimeHealth.instanceId} · up {uptimeLabel(runtimeHealth.uptimeSeconds)} · Node {runtimeHealth.nodeVersion}</div>}
+        </div>
+        {runtimeError && <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{runtimeError}</div>}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-md border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Server size={15} /> API status</div>
+            <div className={`mt-2 flex items-center gap-2 text-lg font-semibold ${runtimeHealth?.status === 'degraded' ? 'text-red-700' : runtimeHealth?.status === 'awaiting-traffic' ? 'text-amber-700' : 'text-emerald-700'}`}>{runtimeHealth ? runtimeHealth.status === 'degraded' ? <><CircleAlert size={17} /> Degraded</> : runtimeHealth.status === 'awaiting-traffic' ? 'Awaiting sample' : <><CheckCircle2 size={17} /> Healthy</> : 'Loading'}</div>
+            <div className="mt-1 text-xs text-gray-500">{runtimeHealth?.traffic.requests.toLocaleString() ?? '—'} API requests in 5 min</div>
+          </div>
+          <div className="rounded-md border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Gauge size={15} /> API latency · 5 min</div>
+            <div className="mt-2 text-lg font-semibold tabular-nums">{runtimeHealth && runtimeHealth.traffic.requests >= 20 ? `${runtimeHealth.traffic.p95Ms} ms` : '—'}</div>
+            <div className="mt-1 text-xs text-gray-500">p95 · average {runtimeHealth?.traffic.averageMs ?? '—'} ms</div>
+          </div>
+          <div className="rounded-md border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Activity size={15} /> API 5xx rate · 5 min</div>
+            <div className={`mt-2 text-lg font-semibold tabular-nums ${(runtimeHealth?.traffic.serverErrorRatePercent || 0) >= 2 ? 'text-red-700' : 'text-emerald-700'}`}>{runtimeHealth && runtimeHealth.traffic.requests >= 20 ? `${runtimeHealth.traffic.serverErrorRatePercent}%` : '—'}</div>
+            <div className="mt-1 text-xs text-gray-500">{runtimeHealth?.traffic.serverErrors ?? '—'} server errors · {runtimeHealth?.traffic.clientErrors ?? '—'} client errors</div>
+          </div>
+          <div className="rounded-md border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Database size={15} /> Database</div>
+            <div className={`mt-2 text-lg font-semibold ${runtimeHealth?.database.status === 'connected' ? 'text-emerald-700' : 'text-red-700'}`}>{runtimeHealth?.database.status === 'connected' ? 'Connected' : runtimeHealth ? 'Unavailable' : 'Loading'}</div>
+            <div className="mt-1 text-xs text-gray-500">Health query {runtimeHealth?.database.latencyMs == null ? '—' : `${runtimeHealth.database.latencyMs} ms`}</div>
+          </div>
+          <div className="rounded-md border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Server size={15} /> Process memory</div>
+            <div className="mt-2 text-lg font-semibold tabular-nums">{runtimeHealth ? `${runtimeHealth.process.heapUsedPercent}% heap` : '—'}</div>
+            <div className="mt-1 text-xs text-gray-500">{runtimeHealth ? `${runtimeHealth.process.rssMb} MB RSS · ${runtimeHealth.process.heapUsedMb}/${runtimeHealth.process.heapLimitMb} MB heap` : 'Node.js process'}</div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="rounded-md border bg-white p-4">
+            <h3 className="text-sm font-semibold">Signals</h3>
+            {runtimeHealth?.alerts.length ? <ul className="mt-2 space-y-2">{runtimeHealth.alerts.map(alert => <li key={alert.key} className={`flex items-start gap-2 text-sm ${alert.level === 'critical' ? 'text-red-700' : 'text-amber-800'}`}><CircleAlert size={15} className="mt-0.5 shrink-0" /><span>{alert.message}</span></li>)}</ul> : runtimeHealth?.status === 'awaiting-traffic' ? <p className="mt-2 text-sm text-amber-800">Not enough requests yet to assess API latency and error rates. Database connectivity is still checked.</p> : <p className="mt-2 flex items-center gap-2 text-sm text-emerald-700"><TrendingUp size={15} /> No current warning thresholds exceeded.</p>}
+            <p className="mt-3 text-[11px] text-gray-500">Event-loop utilization: {runtimeHealth ? `${runtimeHealth.process.eventLoopUtilizationPercent}% since process start` : '—'}</p>
+          </div>
+          <div className="rounded-md border bg-white p-4">
+            <h3 className="text-sm font-semibold">Slowest route templates · p95</h3>
+            {!runtimeHealth?.traffic.slowRoutes.length ? <p className="mt-2 text-sm text-gray-500">No API requests recorded in the last five minutes.</p> : <div className="mt-2 space-y-2">{runtimeHealth.traffic.slowRoutes.map(item => <div key={item.route} className="flex flex-wrap items-center justify-between gap-2 border-b pb-2 text-xs last:border-0 last:pb-0"><code className="min-w-0 break-all text-gray-700">{item.route}</code><span className="shrink-0 tabular-nums text-gray-600">{item.p95Ms} ms · {item.requests} req</span></div>)}</div>}
+          </div>
+        </div>
+        {runtimeHealth?.limitations.map((limitation, index) => <p key={index} className="flex items-start gap-2 text-[11px] text-gray-500"><TrendingDown size={13} className="mt-px shrink-0" />{limitation}</p>)}
+      </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-medium text-gray-700">Usage window</p>

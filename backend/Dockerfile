@@ -30,6 +30,7 @@ COPY start.sh ./
 COPY tests ./tests
 RUN npm run test:reports
 RUN npm run test:property
+RUN npm run test:platform-observability
 
 # Production stage
 FROM base AS runner
