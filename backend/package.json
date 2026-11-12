@@ -11,6 +11,7 @@
     "test:reports": "node --test tests/reportAccounting.test.js tests/reportingHelpers.test.js tests/daily-report.test.js tests/weeklySalesReport.test.js tests/saleTaxAllocation.test.js tests/report-contracts.test.js tests/dashboard.test.js tests/cogs.test.js tests/receivable-sales-view.test.js tests/accounting-sync.test.js tests/outstanding-receivables.test.js tests/transfers.test.js tests/aging-report.test.js tests/customer-receipt-allocation.test.js",
     "test:permissions": "node --test tests/manualJournalPolicy.test.js",
     "test:platform-observability": "node --test tests/platformRuntimeMetrics.test.js",
+    "test:scaling-safety": "node --test tests/postgresAdvisoryLock.test.js",
     "test:property": "node --test tests/propertyAccounting.test.js tests/propertyRentRateService.test.js tests/propertyRentPeriods.test.js tests/rentPaymentAllocation.test.js tests/rentPromiseProgress.test.js",
     "test:rentals": "node --test tests/rentalAccounting.test.js tests/rentalHistoricalEntry.test.js",
     "test:planner": "node --test tests/plannerReminders.test.js",

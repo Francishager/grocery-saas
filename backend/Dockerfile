@@ -31,6 +31,7 @@ COPY tests ./tests
 RUN npm run test:reports
 RUN npm run test:property
 RUN npm run test:platform-observability
+RUN npm run test:scaling-safety
 
 # Production stage
 FROM base AS runner

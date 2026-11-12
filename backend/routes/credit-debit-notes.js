@@ -1,6 +1,6 @@
 import express from 'express'
 import { randomUUID } from 'node:crypto'
-import { PrismaClient } from '@prisma/client'
+import prisma from '../src/db.js'
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js'
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../src/utils/customerBalance.js'
@@ -10,7 +10,6 @@ import { creditNoteRecognitionLines, customerRefundLines, getReceivablesAccounti
 import { getPayablesAccountingConfig, getSupplierDebitNoteStockCost, postPayablesJournal, reverseCurrentPayablesJournal, supplierDebitNoteLines } from '../src/services/payablesAccountingService.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 const tenantIdOf = (req) => req.user.tenantId || req.user.tenant_id || req.user.business_id
 const CREDIT_REASONS = new Set(['sales_return', 'price_adjustment', 'overcharge', 'cancellation', 'other'])

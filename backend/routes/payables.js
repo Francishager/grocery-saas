@@ -1,5 +1,5 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import prisma from '../src/db.js'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { authenticateToken, requirePermission, requireAnyPermission, requireTenant, requireCashAccount, canUsePaymentMethodOrAssignedCash, canUseTransactionAccountForPayment, loadUserPermissions } from '../middleware/auth.js'
@@ -13,7 +13,6 @@ import { createTenantNotification } from '../src/utils/notifications.js'
 import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 const toMoney = (value, fallback = 0) => {
   const num = Number(value)

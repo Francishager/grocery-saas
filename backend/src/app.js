@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import path from "path";
 import prisma from "./db.js";
 import { platformRuntimeMetricsMiddleware } from "./utils/platformRuntimeMetrics.js";
+import { withPostgresAdvisoryLock } from "./utils/postgresAdvisoryLock.js";
 import { verifyMailTransport } from "../mailer.js";
 
 import authRoutes from "./routes/auth.js";
@@ -225,18 +226,37 @@ app.use("/api/purchases", purchaseRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/trash", trashRoutes);
-const trashExpiryTimer = setInterval(() => { expireTrash().catch(error => console.error('Trash expiry failed:', error.code || error.message)); }, 60 * 60 * 1000);
+const scheduledTaskRuns = new Set();
+async function runSingletonScheduledTask(name, lockKey, task) {
+  const run = withPostgresAdvisoryLock({ key: lockKey, task });
+  scheduledTaskRuns.add(run);
+  try {
+    await run;
+  } catch (error) {
+    console.error(`${name} failed:`, error.code || error.message);
+  } finally {
+    scheduledTaskRuns.delete(run);
+  }
+}
+
+const trashExpiryTimer = setInterval(() => {
+  void runSingletonScheduledTask('Trash expiry', 73110403, expireTrash);
+}, 60 * 60 * 1000);
 trashExpiryTimer.unref();
 const propertyRentAutomationTimer = setInterval(() => {
-  runPropertyRentAutomation().catch(error => console.error('Property rent automation failed:', error.code || error.message));
+  void runSingletonScheduledTask('Property rent automation', 73110404, runPropertyRentAutomation);
 }, 6 * 60 * 60 * 1000);
 propertyRentAutomationTimer.unref();
-setTimeout(() => runPropertyRentAutomation().catch(error => console.error('Initial property rent automation failed:', error.code || error.message)), 30_000).unref();
+const propertyRentAutomationInitialTimeout = setTimeout(() => {
+  void runSingletonScheduledTask('Initial property rent automation', 73110404, runPropertyRentAutomation);
+}, 30_000).unref();
 const plannerReminderTimer = setInterval(() => {
-  deliverDuePlannerReminders().catch(error => console.error('Planner reminder check failed:', error.code || error.message));
+  void runSingletonScheduledTask('Planner reminder check', 73110405, deliverDuePlannerReminders);
 }, 60_000);
 plannerReminderTimer.unref();
-setTimeout(() => deliverDuePlannerReminders().catch(error => console.error('Initial planner reminder check failed:', error.code || error.message)), 20_000).unref();
+const plannerReminderInitialTimeout = setTimeout(() => {
+  void runSingletonScheduledTask('Initial planner reminder check', 73110405, deliverDuePlannerReminders);
+}, 20_000).unref();
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/ai", businessAdvisorRoutes);
 app.use("/api/ai-writing", aiWritingAssistRoutes);
@@ -326,12 +346,39 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
 
-// Graceful shutdown
-process.on("SIGINT", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
-process.on("SIGTERM", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
+let shutdownStarted = false;
+async function shutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  console.log(`${signal} received; draining HTTP requests.`);
+  clearInterval(trashExpiryTimer);
+  clearInterval(propertyRentAutomationTimer);
+  clearInterval(plannerReminderTimer);
+  clearTimeout(propertyRentAutomationInitialTimeout);
+  clearTimeout(plannerReminderInitialTimeout);
+
+  const forceExit = setTimeout(() => {
+    console.error('Graceful shutdown timed out.');
+    process.exit(1);
+  }, 25000);
+  forceExit.unref();
+
+  server.close(async (error) => {
+    clearTimeout(forceExit);
+    await Promise.allSettled([...scheduledTaskRuns]);
+    try {
+      await prisma.$disconnect();
+    } catch (disconnectError) {
+      console.error('Database disconnect failed:', disconnectError.message);
+    }
+    if (error) {
+      console.error('HTTP server shutdown failed:', error.message);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+  server.closeIdleConnections?.();
+}
+
+process.once('SIGINT', () => void shutdown('SIGINT'));
+process.once('SIGTERM', () => void shutdown('SIGTERM'));
