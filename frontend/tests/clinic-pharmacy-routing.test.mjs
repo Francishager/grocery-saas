@@ -49,3 +49,24 @@ test('clinic prescriptions support multiple medicines and row actions are permis
   assert.match(salon, /<DropdownMenuItem onClick=\{\(\) => \{ setEditingId/);
   assert.match(salon, /Deactivate stylist/);
 });
+
+test('salon, bar, clinic, and pharmacy record actions use three-dot menus', () => {
+  const service = readFileSync(sourceRoot + '/pages/ServiceBusinessPage.tsx', 'utf8');
+  const salon = readFileSync(sourceRoot + '/pages/SalonPage.tsx', 'utf8');
+  const salonTeam = readFileSync(sourceRoot + '/pages/SalonStylistsPage.tsx', 'utf8');
+  const restaurant = readFileSync(sourceRoot + '/pages/RestaurantPage.tsx', 'utf8');
+  const clinic = readFileSync(sourceRoot + '/pages/ClinicManagementPage.tsx', 'utf8');
+  const pharmacy = readFileSync(sourceRoot + '/pages/PharmacyManagementPage.tsx', 'utf8');
+
+  assert.match(service, /Appointment actions/);
+  assert.match(salon, /Chair actions/);
+  assert.match(salon, /commission.*DropdownMenu/s);
+  assert.match(salonTeam, /Stylist actions/);
+  assert.match(restaurant, /Order actions/);
+  assert.match(restaurant, /Reservation actions/);
+  assert.match(clinic, /Appointment actions/);
+  assert.match(clinic, /Patient actions/);
+  assert.match(pharmacy, /Medicine actions/);
+  assert.match(pharmacy, /Prescription actions/);
+  assert.match(pharmacy, /DropdownMenuItem disabled=\{saving\} onClick=\{\(\) => void dispense\(p\)\}>Save fulfillment/);
+});

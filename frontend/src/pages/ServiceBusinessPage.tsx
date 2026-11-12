@@ -12,7 +12,8 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit, QrCode, Printer, Copy, Share2 } from 'lucide-react'
+import { Wrench, Plus, Trash2, CalendarClock, ClipboardList, FileText, Droplet, Star, UserCog, ThumbsUp, Edit, QrCode, Printer, Copy, Share2, MoreHorizontal } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn, formatCurrency, formatDisplayDate } from '@/lib/utils'
 import QRCode from 'qrcode'
 
@@ -507,14 +508,7 @@ export default function ServiceBusinessPage({ initialTab }: { initialTab?: strin
                     {canAccessFeature('salon.chair_scheduling') && (hasPermission('canViewSalonChair') || hasPermission('canAssignSalonChair')) && <td className="p-2">{a.salonChair?.name || salonChairs.find(chair => chair.id === a.salonChairId)?.name || '—'}</td>}
                     <td className="p-2 text-right">{a.status === 'completed' ? (a.actualPrice || a.price).toFixed(0) : a.price.toFixed(0)}</td>
                     <td className="p-2"><Badge className={statusColors[a.status]}>{a.status}</Badge></td>
-                    <td className="p-2 space-x-1">
-                      {a.status !== 'completed' && a.status !== 'cancelled' && ((canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist')) || (canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair'))) && <Button size="sm" variant="outline" onClick={() => openSalonAssignment(a)}>Assign</Button>}
-                      {a.status === 'scheduled' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'confirmed')}>Confirm</Button>}
-                      {a.status === 'confirmed' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'in_progress')}>Start</Button>}
-                      {a.status === 'in_progress' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="outline" onClick={() => updateApptStatus(a.id, 'completed')}>Complete</Button>}
-                      {a.status !== 'completed' && a.status !== 'cancelled' && can('UpdateStatus', 'appointments') && <Button size="sm" variant="ghost" className="text-orange-500" onClick={() => updateApptStatus(a.id, 'cancelled')}>Cancel</Button>}
-                      {can('Delete', 'appointments') && <Button variant="ghost" size="sm" className="text-red-500" onClick={() => deleteAppt(a.id)}><Trash2 className="h-3 w-3" /></Button>}
-                    </td>
+                    <td className="p-2 text-right">{((a.status !== 'completed' && a.status !== 'cancelled' && ((canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist')) || (canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair')))) || (can('UpdateStatus', 'appointments') && a.status !== 'completed' && a.status !== 'cancelled') || can('Delete', 'appointments')) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${a.customerName}'s appointment`} title="Appointment actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{a.status !== 'completed' && a.status !== 'cancelled' && ((canAccessFeature('salon_spa') && hasPermission('canAssignSalonStylist')) || (canAccessFeature('salon.chair_scheduling') && hasPermission('canAssignSalonChair'))) && <DropdownMenuItem onClick={() => openSalonAssignment(a)}>Assign stylist / chair</DropdownMenuItem>}{a.status === 'scheduled' && can('UpdateStatus', 'appointments') && <DropdownMenuItem onClick={() => updateApptStatus(a.id, 'confirmed')}>Confirm</DropdownMenuItem>}{a.status === 'confirmed' && can('UpdateStatus', 'appointments') && <DropdownMenuItem onClick={() => updateApptStatus(a.id, 'in_progress')}>Start service</DropdownMenuItem>}{a.status === 'in_progress' && can('UpdateStatus', 'appointments') && <DropdownMenuItem onClick={() => updateApptStatus(a.id, 'completed')}>Complete</DropdownMenuItem>}{a.status !== 'completed' && a.status !== 'cancelled' && can('UpdateStatus', 'appointments') && <DropdownMenuItem onClick={() => updateApptStatus(a.id, 'cancelled')}>Cancel appointment</DropdownMenuItem>}{can('Delete', 'appointments') && <DropdownMenuItem onClick={() => deleteAppt(a.id)}>Delete appointment</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</td>
                   </tr>
                 ))}
               </tbody>

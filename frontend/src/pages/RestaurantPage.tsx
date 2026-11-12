@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
-import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye, ImagePlus, Printer, Package, RefreshCw } from 'lucide-react'
+import { UtensilsCrossed, Plus, Trash2, Users, Table2, ChefHat, CalendarClock, Beaker, Bike, Clock, TrendingUp, ArrowRightLeft, CheckCircle, XCircle, AlertCircle, Search, Pencil, Merge, Split, DollarSign, Star, Tag, Wine, Timer, Edit, Eye, ImagePlus, Printer, Package, RefreshCw, MoreHorizontal } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useOnlineStatus } from '@/db/hooks'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
@@ -920,10 +921,7 @@ export default function RestaurantPage() {
                 <CardContent>
                   <div className="text-sm text-muted-foreground">Capacity: {t.capacity} {t.area && `· ${t.area}`}</div>
                   <div className="text-xs text-muted-foreground mt-1">Orders: {t._count?.orders ?? 0}</div>
-                  <div className="flex gap-2 mt-3">
-                    {canEditRestaurant && <Button size="sm" variant="outline" onClick={() => openEditTable(t)}><Pencil className="h-3 w-3" /></Button>}
-                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteTable(t.id)}><Trash2 className="h-3 w-3" /></Button>}
-                  </div>
+                  {(canEditRestaurant || canDeleteRestaurant) && <div className="mt-3 flex justify-end"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${t.name}`} title="Table actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && <DropdownMenuItem onClick={() => openEditTable(t)}>Edit table</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteTable(t.id)}>Delete table</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                 </CardContent>
               </Card>
             ))}
@@ -954,9 +952,7 @@ export default function RestaurantPage() {
                       <ImagePlus className="h-3.5 w-3.5" /> {entry.product.image ? 'Change photo' : 'Add photo'}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(entry.productId, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
                     </label>}
-                    {canEditMenuItem && !waiterMode && <><Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit</Button>
-                    <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause' : 'Resume'}</Button></>}
-                    {canDeleteMenuItem && !waiterMode && <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs text-destructive" onClick={() => void deleteMenuEntry(entry)}>Remove</Button>}
+                    {(canEditMenuItem || canDeleteMenuItem) && !waiterMode && <div className="ml-auto"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${entry.product.name}`} title="Menu item actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditMenuItem && <DropdownMenuItem onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit menu item</DropdownMenuItem>}{canEditMenuItem && <DropdownMenuItem onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause item' : 'Resume item'}</DropdownMenuItem>}{canDeleteMenuItem && <DropdownMenuItem onClick={() => void deleteMenuEntry(entry)}>Remove from menu</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                   </div>
                 </CardContent>
               </Card>)}
@@ -998,15 +994,7 @@ export default function RestaurantPage() {
                   {o.discount > 0 && <div className="flex justify-between text-sm text-red-600"><span>Discount</span><span>-{o.discount.toLocaleString()}</span></div>}
                   {o.tipAmount > 0 && <div className="flex justify-between text-sm"><span>Tip</span><span>{o.tipAmount.toLocaleString()}</span></div>}
                   <div className="flex justify-between font-medium border-t pt-2 mt-1"><span>Total</span><span>{o.total.toLocaleString()}</span></div>
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {canUpdateOrder(o) && o.status === 'pending' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'preparing')}>Start Preparing</Button>}
-                    {canUpdateOrder(o) && o.status === 'preparing' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'ready')}>Mark Ready</Button>}
-                    {canUpdateOrder(o) && o.status === 'ready' && <Button size="sm" onClick={() => updateOrderStatus(o.id, 'served')}>Mark Served</Button>}
-                    {canEditRestaurant && o.status === 'served' && <Button size="sm" onClick={() => openCompleteModal(o)}><CheckCircle className="h-3 w-3 mr-1" /> Complete & Pay</Button>}
-                    {canEditRestaurant && hasFeature('restaurant.split_bills') && o.status === 'served' && <Button size="sm" variant="outline" onClick={() => openSplitModal(o)}><Split className="h-3 w-3 mr-1" /> Split Bill</Button>}
-                    {canEditRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && o.table && <Button size="sm" variant="outline" onClick={() => openMoveModal(o)}><ArrowRightLeft className="h-3 w-3 mr-1" /> Move Table</Button>}
-                    {canDeleteRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel</Button>}
-                  </div>
+                  {(canUpdateOrder(o) || canEditRestaurant || canDeleteRestaurant) && <div className="mt-3 flex justify-end"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for order ${o.orderNo}`} title="Order actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canUpdateOrder(o) && o.status === 'pending' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'preparing')}>Start preparing</DropdownMenuItem>}{canUpdateOrder(o) && o.status === 'preparing' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'ready')}>Mark ready</DropdownMenuItem>}{canUpdateOrder(o) && o.status === 'ready' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'served')}>Mark served</DropdownMenuItem>}{canEditRestaurant && o.status === 'served' && <DropdownMenuItem onClick={() => openCompleteModal(o)}>Complete and pay</DropdownMenuItem>}{canEditRestaurant && hasFeature('restaurant.split_bills') && o.status === 'served' && <DropdownMenuItem onClick={() => openSplitModal(o)}>Split bill</DropdownMenuItem>}{canEditRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && o.table && <DropdownMenuItem onClick={() => openMoveModal(o)}>Move table</DropdownMenuItem>}{canDeleteRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel order</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                 </CardContent>
               </Card>
             ))}
@@ -1031,14 +1019,9 @@ export default function RestaurantPage() {
                     <CardContent><div className="space-y-2">{o.items.map(i => (
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name} {i.specialInstructions && <span className="text-orange-600">⚠ {i.specialInstructions}</span>}</span>
-                        <div className="flex gap-1">
-                          {canEditRestaurant && i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
-                          {canEditRestaurant && i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
-                          {canEditRestaurant && i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
-                          <Badge className={statusColors[i.status]}>{i.status}</Badge>
-                        </div>
+                        <div className="flex items-center gap-2"><Badge className={statusColors[i.status]}>{i.status}</Badge>{canEditRestaurant && ['pending', 'preparing', 'ready'].includes(i.status) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${i.quantity} ${i.product.name}`} title="Kitchen item actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{i.status === 'pending' && <DropdownMenuItem onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start preparing</DropdownMenuItem>}{i.status === 'preparing' && <DropdownMenuItem onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Mark ready</DropdownMenuItem>}{i.status === 'ready' && <DropdownMenuItem onClick={() => updateItemStatus(o.id, i.id, 'served')}>Mark served</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
                       </div>
-                    ))}</div><div className="mt-3 border-t pt-3"><Button size="sm" variant="outline" onClick={() => printKitchenTicket(o, 'kitchen')} disabled={printingOrderId === `${o.id}:kitchen`}><Printer className="mr-2 h-4 w-4" />{printingOrderId === `${o.id}:kitchen` ? 'Sending…' : 'Print kitchen ticket'}</Button></div></CardContent>
+                    ))}</div><div className="mt-3 flex justify-end border-t pt-3"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for kitchen ticket ${o.orderNo}`} title="Kitchen ticket actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem disabled={printingOrderId === `${o.id}:kitchen`} onClick={() => void printKitchenTicket(o, 'kitchen')}>{printingOrderId === `${o.id}:kitchen` ? 'Sending ticket…' : 'Print kitchen ticket'}</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></CardContent>
                   </Card>
                 ))}
                 {kitchenOrders.length === 0 && <div className="text-center text-muted-foreground py-4">No kitchen orders.</div>}
@@ -1053,14 +1036,9 @@ export default function RestaurantPage() {
                     <CardContent><div className="space-y-2">{o.items.map(i => (
                       <div key={i.id} className="flex items-center justify-between text-sm">
                         <span>{i.quantity}× {i.product.name}</span>
-                        <div className="flex gap-1">
-                          {canUpdateBarQueue && i.status === 'pending' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start</Button>}
-                          {canUpdateBarQueue && i.status === 'preparing' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Ready</Button>}
-                          {canUpdateBarQueue && i.status === 'ready' && <Button size="sm" variant="outline" onClick={() => updateItemStatus(o.id, i.id, 'served')}>Served</Button>}
-                          <Badge className={statusColors[i.status]}>{i.status}</Badge>
-                        </div>
+                        <div className="flex items-center gap-2"><Badge className={statusColors[i.status]}>{i.status}</Badge>{canUpdateBarQueue && ['pending', 'preparing', 'ready'].includes(i.status) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${i.quantity} ${i.product.name}`} title="Bar item actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{i.status === 'pending' && <DropdownMenuItem onClick={() => updateItemStatus(o.id, i.id, 'preparing')}>Start preparing</DropdownMenuItem>}{i.status === 'preparing' && <DropdownMenuItem onClick={() => updateItemStatus(o.id, i.id, 'ready')}>Mark ready</DropdownMenuItem>}{i.status === 'ready' && <DropdownMenuItem onClick={() => updateItemStatus(o.id, i.id, 'served')}>Mark served</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
                       </div>
-                    ))}</div><div className="mt-3 border-t pt-3"><Button size="sm" variant="outline" onClick={() => printKitchenTicket(o, 'bar')} disabled={printingOrderId === `${o.id}:bar`}><Printer className="mr-2 h-4 w-4" />{printingOrderId === `${o.id}:bar` ? 'Sending…' : 'Print bar ticket'}</Button></div></CardContent>
+                    ))}</div><div className="mt-3 flex justify-end border-t pt-3"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for bar ticket ${o.orderNo}`} title="Bar ticket actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem disabled={printingOrderId === `${o.id}:bar`} onClick={() => void printKitchenTicket(o, 'bar')}>{printingOrderId === `${o.id}:bar` ? 'Sending ticket…' : 'Print bar ticket'}</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div></CardContent>
                   </Card>
                 ))}
                 {barOrders.length === 0 && <div className="text-center text-muted-foreground py-4">No bar orders.</div>}
@@ -1082,12 +1060,7 @@ export default function RestaurantPage() {
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between">
                     <div><div className="font-medium">{r.customerName} {r.customerPhone && <span className="text-muted-foreground">· {r.customerPhone}</span>}</div><div className="text-sm text-muted-foreground">{new Date(r.date).toLocaleDateString()} at {r.time} · {r.guests} guests {r.table && `· ${r.table.name}`}</div>{r.specialRequests && <div className="text-sm text-orange-600 mt-1">⚠ {r.specialRequests}</div>}</div>
-                    <div className="flex items-center gap-2"><Badge className={statusColors[r.status]}>{r.status}</Badge>
-                      {canEditRestaurant && r.status === 'reserved' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check In</Button>}
-                      {canEditRestaurant && r.status === 'checked_in' && <Button size="sm" onClick={() => updateReservationStatus(r.id, 'completed')}>Complete</Button>}
-                      {canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed' && <Button size="sm" variant="outline" onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel</Button>}
-                      {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteReservation(r.id)}><Trash2 className="h-3 w-3" /></Button>}
-                    </div>
+                    <div className="flex items-center gap-2"><Badge className={statusColors[r.status]}>{r.status}</Badge>{((canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed') || canDeleteRestaurant) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for reservation for ${r.customerName}`} title="Reservation actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && r.status === 'reserved' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check in</DropdownMenuItem>}{canEditRestaurant && r.status === 'checked_in' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'completed')}>Complete reservation</DropdownMenuItem>}{canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel reservation</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteReservation(r.id)}>Delete reservation</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
                   </div>
                 </CardContent>
               </Card>
@@ -1102,7 +1075,7 @@ export default function RestaurantPage() {
           <div className="space-y-3">
             {recipes.map(r => (
               <Card key={r.id}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2">{r.name} <Badge variant="outline">{r.product.name}</Badge>{!r.isActive && <Badge variant="secondary">Inactive</Badge>}</span><div className="flex gap-1">{canEditRestaurant && <Button size="sm" variant="ghost" onClick={() => openEditRecipe(r)}><Pencil className="h-3 w-3" /></Button>}{canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteRecipe(r.id)}><Trash2 className="h-3 w-3" /></Button>}</div></CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2">{r.name} <Badge variant="outline">{r.product.name}</Badge>{!r.isActive && <Badge variant="secondary">Inactive</Badge>}</span>{(canEditRestaurant || canDeleteRestaurant) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for recipe ${r.name}`} title="Recipe actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && <DropdownMenuItem onClick={() => openEditRecipe(r)}>Edit recipe</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteRecipe(r.id)}>Delete recipe</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</CardTitle></CardHeader>
                 <CardContent><div className="text-sm space-y-1">{r.ingredients.map(i => <div key={i.id} className="flex justify-between"><span>{i.product.name}</span><span className="text-muted-foreground">{i.quantity} {i.unit}</span></div>)}</div>{r.yield && <div className="text-xs text-muted-foreground mt-2">Yield: {r.yield}</div>}</CardContent>
               </Card>
             ))}
@@ -1121,8 +1094,7 @@ export default function RestaurantPage() {
                     <div><div className="font-medium">{d.customerName} · {d.customerPhone}</div><div className="text-sm text-muted-foreground">{d.address}</div><div className="text-sm mt-1">Rider: {d.riderName || 'Unassigned'} {d.riderPhone && `· ${d.riderPhone}`} · Fee: {d.deliveryFee.toLocaleString()}</div>{d.order && <Badge variant="outline" className="mt-1">{d.order.orderNo}</Badge>}</div>
                     <div className="flex items-center gap-2">
                       <Badge className={statusColors[d.status]}>{d.status}</Badge>
-                      {canEditRestaurant && d.status === 'pending' && <Button size="sm" onClick={() => updateDeliveryStatus(d.id, 'on_delivery')}>Dispatch</Button>}
-                      {canEditRestaurant && d.status === 'on_delivery' && <Button size="sm" onClick={() => updateDeliveryStatus(d.id, 'delivered')}>Delivered</Button>}
+                      {canEditRestaurant && ['pending', 'on_delivery'].includes(d.status) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for delivery to ${d.customerName}`} title="Delivery actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{d.status === 'pending' && <DropdownMenuItem onClick={() => updateDeliveryStatus(d.id, 'on_delivery')}>Dispatch</DropdownMenuItem>}{d.status === 'on_delivery' && <DropdownMenuItem onClick={() => updateDeliveryStatus(d.id, 'delivered')}>Mark delivered</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}
                     </div>
                   </div>
                 </CardContent>
@@ -1138,7 +1110,7 @@ export default function RestaurantPage() {
           <div className="grid gap-4 md:grid-cols-3">
             {waiters.map(w => (
               <Card key={w.id} className={w.isActive ? '' : 'opacity-50'}>
-                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}<Badge variant={w.hasPin ? 'secondary' : 'outline'}>{w.hasPin ? 'PIN set' : 'PIN needed'}</Badge></span><div className="flex gap-1">{canEditRestaurant && <Button size="sm" variant="ghost" onClick={() => openEditWaiter(w)}><Pencil className="h-3 w-3" /></Button>}{canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteWaiter(w.id)}><Trash2 className="h-3 w-3" /></Button>}</div></CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Users className="h-4 w-4" /> {w.name}<Badge variant={w.hasPin ? 'secondary' : 'outline'}>{w.hasPin ? 'PIN set' : 'PIN needed'}</Badge></span>{(canEditRestaurant || canDeleteRestaurant) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for waiter ${w.name}`} title="Waiter actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && <DropdownMenuItem onClick={() => openEditWaiter(w)}>Edit waiter</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteWaiter(w.id)}>Delete waiter</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</CardTitle></CardHeader>
                 <CardContent><div className="text-sm text-muted-foreground">{w.phone || 'No phone'} {w.code && `· Code: ${w.code}`}</div><div className="text-sm mt-1">Orders: {w._count?.orders ?? 0} · Tips: {w._count?.tips ?? 0}</div></CardContent>
               </Card>
             ))}
@@ -1155,10 +1127,7 @@ export default function RestaurantPage() {
                 <CardHeader className="pb-2"><CardTitle className="flex items-center justify-between text-sm"><span className="flex items-center gap-2"><Timer className="h-4 w-4" /> {h.name} <Badge variant="outline">{h.product.name}</Badge></span><Badge className={h.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100'}>{h.isActive ? 'Active' : 'Inactive'}</Badge></CardTitle></CardHeader>
                 <CardContent>
                   <div className="text-sm text-muted-foreground">{h.startTime} - {h.endTime} · Days: {h.daysOfWeek} · {h.discountType === 'percentage' ? `${h.discountValue}%` : h.discountValue} off</div>
-                  <div className="flex gap-2 mt-3">
-                    {canEditRestaurant && <Button size="sm" variant="outline" onClick={() => updateHappyHour(h.id, { isActive: !h.isActive })}>{h.isActive ? 'Disable' : 'Enable'}</Button>}
-                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteHappyHour(h.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>}
-                  </div>
+                  {(canEditRestaurant || canDeleteRestaurant) && <div className="mt-3 flex justify-end"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for happy hour ${h.name}`} title="Promotion actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && <DropdownMenuItem onClick={() => updateHappyHour(h.id, { isActive: !h.isActive })}>{h.isActive ? 'Disable rule' : 'Enable rule'}</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteHappyHour(h.id)}>Delete rule</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                 </CardContent>
               </Card>
             ))}
@@ -1177,10 +1146,7 @@ export default function RestaurantPage() {
                   {c.description && <p className="text-sm text-muted-foreground mb-2">{c.description}</p>}
                   <div className="text-sm space-y-1 mb-2">{c.items.map(i => <div key={i.id} className="flex justify-between"><span>{i.quantity}× {i.product.name}</span></div>)}</div>
                   <div className="flex justify-between font-medium border-t pt-2"><span>Combo Price</span><span>{c.price.toLocaleString()}</span></div>
-                  <div className="flex gap-2 mt-3">
-                    {canEditRestaurant && <Button size="sm" variant="outline" onClick={() => updateCombo(c.id, { isActive: !c.isActive, name: c.name, description: c.description, price: c.price, items: c.items.map(i => ({ productId: i.productId, quantity: i.quantity })) })}>{c.isActive ? 'Disable' : 'Enable'}</Button>}
-                    {canDeleteRestaurant && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCombo(c.id)}><Trash2 className="h-3 w-3 mr-1" /> Delete</Button>}
-                  </div>
+                  {(canEditRestaurant || canDeleteRestaurant) && <div className="mt-3 flex justify-end"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for combo ${c.name}`} title="Combo actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && <DropdownMenuItem onClick={() => updateCombo(c.id, { isActive: !c.isActive, name: c.name, description: c.description, price: c.price, items: c.items.map(i => ({ productId: i.productId, quantity: i.quantity })) })}>{c.isActive ? 'Disable combo' : 'Enable combo'}</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteCombo(c.id)}>Delete combo</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                 </CardContent>
               </Card>
             ))}
