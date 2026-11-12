@@ -52,6 +52,14 @@ test('expired access tokens are refreshed before the session is cleared and refr
   assert.match(context, /document\.addEventListener\('visibilitychange', refreshIfExpiring\)/);
 });
 
+test('oversized-header responses refresh the access token once and retry authenticated API requests', () => {
+  const api = readFileSync(sourceRoot + '/lib/api.ts', 'utf8');
+  assert.match(api, /response\.status === 431 && token && !skipAuth/);
+  assert.match(api, /res\.status === 431 && token/);
+  assert.match(api, /await tryRefreshToken\(\)/);
+  assert.match(api, /Authorization: `Bearer \$\{newToken\}`/);
+});
+
 test('transient working-hours verification failures do not log staff out', () => {
   const context = readFileSync(sourceRoot + '/contexts/JWTAuthContext.tsx', 'utf8');
   const accessCheck = context.match(/\/\/ Recheck live staff access[\s\S]*?\n  \/\/ Auto refresh tokens before expiry/);

@@ -94,13 +94,27 @@ async function request<T>(
     fetchHeaders['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(url, {
+  let response = await fetch(url, {
     method,
     cache,
     signal,
     headers: fetchHeaders,
     body: body ? JSON.stringify(body) : undefined,
   })
+
+  if (response.status === 431 && token && !skipAuth) {
+    const refreshedToken = await tryRefreshToken()
+    if (refreshedToken) {
+      fetchHeaders['Authorization'] = `Bearer ${refreshedToken}`
+      response = await fetch(url, {
+        method,
+        cache,
+        signal,
+        headers: fetchHeaders,
+        body: body ? JSON.stringify(body) : undefined,
+      })
+    }
+  }
 
   const contentType = response.headers.get('content-type') || ''
   const isJson = contentType.includes('application/json')
@@ -178,6 +192,12 @@ export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   if (init?.body && !isFormData && !headers['Content-Type']) headers['Content-Type'] = 'application/json'
   const url = path.startsWith('http') ? path : `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
   return fetch(url, { ...init, headers }).then(async (res) => {
+    if (res.status === 431 && token) {
+      const newToken = await tryRefreshToken()
+      if (newToken) {
+        return fetch(url, { ...init, headers: { ...headers, Authorization: `Bearer ${newToken}` } })
+      }
+    }
     if (res.status === 403) {
       const data = await res.clone().json().catch(() => ({}))
       if (isTenantAccountBlockedResponse(res.status, data)) {

@@ -160,15 +160,11 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
       });
     }
 
-    // Fetch granular permissions BEFORE signing JWT so they're included in the token
     const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: user.id } });
     const tenantFeatures = targetTenantId ? await getTenantFeatures(targetTenantId) : new Set();
 
-    // Build permissions list: saas_admin gets wildcard, owner gets feature-aware access, others get explicit permissions from UserPermission table
-    const jwtPermissions = resolveEffectivePermissions(context.sessionUser, userPerm, [], tenantFeatures);
-
     const tokens = createSessionTokens(
-      { id: user.id, email: user.email, role: context.sessionUser.role, tenantId: targetTenantId, activeTenantId: targetTenantId, branchId: context.crossTenantOwner ? null : primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: context.sessionUser.role, tenantId: targetTenantId, activeTenantId: targetTenantId, branchId: context.crossTenantOwner ? null : primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff" },
       getJwtSecret()
     );
 
@@ -225,12 +221,11 @@ router.post('/switch-business', authenticateToken, async (req, res) => {
     if (hoursBlock && !subscriptionPaymentAccess) return res.status(403).json(hoursBlock);
     const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: baseUser.id } });
     const tenantFeatures = await getTenantFeatures(targetTenantId);
-    const permissions = resolveEffectivePermissions(context.sessionUser, userPerm, [], tenantFeatures);
     const tokens = createSessionTokens({
       id: baseUser.id, email: baseUser.email, role: context.sessionUser.role,
       tenantId: targetTenantId, activeTenantId: targetTenantId,
       branchId: context.crossTenantOwner ? null : primaryBranchId(baseUser),
-      isPlatformUser: false, permissions,
+      isPlatformUser: false,
     }, getJwtSecret());
     const responseUser = {
       ...userPayload(context.sessionUser, userPerm, tenantFeatures),
@@ -290,11 +285,8 @@ router.post("/refresh", refreshLimiter, async (req, res) => {
     const userPerm = context.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: user.id } });
     const tenantFeatures = targetTenantId ? await getTenantFeatures(targetTenantId) : new Set();
 
-    // Build permissions list: saas_admin gets wildcard, owner gets feature-aware access, others get explicit permissions from UserPermission table
-    const jwtPermissions = resolveEffectivePermissions(context.sessionUser, userPerm, [], tenantFeatures);
-
     const tokens = createSessionTokens(
-      { id: user.id, email: user.email, role: context.sessionUser.role, tenantId: targetTenantId, activeTenantId: targetTenantId, branchId: context.crossTenantOwner ? null : primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff", permissions: jwtPermissions },
+      { id: user.id, email: user.email, role: context.sessionUser.role, tenantId: targetTenantId, activeTenantId: targetTenantId, branchId: context.crossTenantOwner ? null : primaryBranchId(user), isPlatformUser: user.role === "saas_admin" || user.role === "platform_staff" },
       getJwtSecret()
     );
 

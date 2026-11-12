@@ -49,7 +49,7 @@ test('Cloudflare Worker proxies API paths and leaves static assets on the asset 
     };
     const apiResponse = await worker.fetch(new Request('https://jibusales.jibusales00.workers.dev/api/auth/login?next=1', {
       method: 'POST',
-      headers: { Authorization: 'Bearer test-token' },
+      headers: { Authorization: 'Bearer test-token', Cookie: 'unneeded=browser-session' },
       body: JSON.stringify({ email: 'owner@example.test' }),
     }), {
       API_ORIGIN: 'https://grocery-saas-production-e339.up.railway.app',
@@ -59,6 +59,7 @@ test('Cloudflare Worker proxies API paths and leaves static assets on the asset 
     assert.equal(proxiedRequest.url, 'https://grocery-saas-production-e339.up.railway.app/api/auth/login?next=1');
     assert.equal(proxiedRequest.method, 'POST');
     assert.equal(proxiedRequest.headers.get('authorization'), 'Bearer test-token');
+    assert.equal(proxiedRequest.headers.get('cookie'), null);
     assert.equal(await proxiedRequest.text(), JSON.stringify({ email: 'owner@example.test' }));
 
     await worker.fetch(new Request('https://jibusales.jibusales00.workers.dev/assets/app.js'), {

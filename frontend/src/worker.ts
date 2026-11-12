@@ -22,7 +22,9 @@ export default {
 
     const apiUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, `${env.API_ORIGIN.replace(/\/$/, '')}/`)
     try {
-      return withSecurityHeaders(await fetch(new Request(apiUrl, request)))
+      const upstreamRequest = new Request(apiUrl, request)
+      upstreamRequest.headers.delete('cookie')
+      return withSecurityHeaders(await fetch(upstreamRequest))
     } catch (error) {
       console.error('API proxy upstream request failed', error)
       return withSecurityHeaders(Response.json(

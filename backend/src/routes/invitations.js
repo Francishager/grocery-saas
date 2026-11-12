@@ -2,7 +2,6 @@ import { Router } from "express";
 import crypto from "crypto";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
-import { permissionsForUser } from "../utils/permissions.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
@@ -55,7 +54,7 @@ function invitationPublicFields(inv, plan = null) {
 
 function createTokens(user) {
   return createSessionTokens(
-    { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin", permissions: permissionsForUser(user) },
+    { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, isPlatformUser: user.role === "saas_admin" },
     getJwtSecret()
   );
 }

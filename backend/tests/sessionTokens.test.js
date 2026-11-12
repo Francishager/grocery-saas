@@ -33,3 +33,17 @@ test('legacy sessions without a selected tenant remain compatible', () => {
   assert.equal(claims.tenantId, null)
   assert.equal(claims.activeTenantId, null)
 })
+
+test('access tokens omit the growing effective-permission catalog to stay within header limits', () => {
+  const secret = 'test-session-secret-with-enough-entropy'
+  const tokens = createSessionTokens({
+    id: 'user-1',
+    tenantId: 'tenant-1',
+    permissions: Array.from({ length: 4000 }, (_, index) => `canUseFeature${index}`),
+  }, secret)
+  const claims = jwt.verify(tokens.accessToken, secret)
+
+  assert.equal(claims.id, 'user-1')
+  assert.equal(claims.permissions, undefined)
+  assert.ok(tokens.accessToken.length < 1000)
+})
