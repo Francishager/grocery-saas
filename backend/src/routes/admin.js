@@ -1501,7 +1501,13 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
   } catch (err) {
     if (err?.code === "P2002") {
       const target = Array.isArray(err.meta?.target) ? err.meta.target.join(", ") : err.meta?.target;
-      return res.status(409).json({ error: `Duplicate value for ${target || "unique field"}` });
+      if (String(target || '').toLowerCase().includes('slug')) {
+        return res.status(409).json({ error: "That business URL is already in use. Choose a different business URL." });
+      }
+      if (err.meta?.modelName === 'User' || String(target || '').toLowerCase().includes('email')) {
+        return res.status(409).json({ error: "An owner login with this email already exists. Choose the existing owner login option to attach the business." });
+      }
+      return res.status(409).json({ error: `This business conflicts with an existing ${target || "unique value"}. Check the business details and try again.` });
     }
     console.error("Provision tenant error:", err);
     res.status(500).json({ error: "Internal server error" });

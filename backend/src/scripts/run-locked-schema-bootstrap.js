@@ -17,6 +17,7 @@ const requiredScripts = [
   'ensure-fractional-product-stock-schema.js',
   'ensure-salon-spa-schema.js',
   'ensure-tenant-memberships-schema.js',
+  'ensure-tenant-contact-email-nonunique.js',
   'ensure-bar-feature.js',
   'ensure-clinic-pharmacy-schema.js',
 ];
