@@ -1234,13 +1234,6 @@ export function TenantLayout() {
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-card/95 px-4 shadow-sm backdrop-blur lg:px-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(true)}><Menu className="h-5 w-5" /></Button>
-            {businesses.length > 1 && <label className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-sm">
-              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="sr-only">Switch business</span>
-              <select aria-label="Switch business" value={tenantId || ''} disabled={switchingBusiness} onChange={event => void handleBusinessSwitch(event.target.value)} className="max-w-[min(42vw,15rem)] bg-transparent text-foreground outline-none disabled:opacity-60">
-                {businesses.map(business => <option key={business.id} value={business.id}>{business.name}</option>)}
-              </select>
-            </label>}
           </div>
           <div className="flex-1" />
           {!waiterMode && <><SyncIndicator />
@@ -1282,6 +1275,15 @@ export function TenantLayout() {
                   <p className="text-xs capitalize text-muted-foreground">{user?.role || ''}</p>
                 </div>
               </div>
+              {businesses.length > 1 && <div className="mb-2 border-b pb-3">
+                <label className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-muted-foreground" htmlFor="profile-business-switcher">
+                  <Building2 className="h-4 w-4" /> Switch business
+                </label>
+                <select id="profile-business-switcher" aria-label="Switch business" value={tenantId || ''} disabled={switchingBusiness} onChange={event => void handleBusinessSwitch(event.target.value)} className="h-10 w-full rounded-md border bg-background px-2.5 text-sm text-foreground disabled:opacity-60">
+                  {businesses.map(business => <option key={business.id} value={business.id}>{business.name}</option>)}
+                </select>
+                {switchingBusiness && <p role="status" className="mt-1 text-xs text-muted-foreground">Switching business…</p>}
+              </div>}
               <div className="space-y-1 mb-2">
                 <Button variant="ghost" size="sm" className="h-9 w-full justify-start" onClick={() => navigate('/tenant/profile')}>
                   <Users className="mr-2 h-4 w-4" />

@@ -1356,10 +1356,9 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     if (!business?.businessType) return res.status(400).json({ error: "Business type is required" });
     if (!business?.planId) return res.status(400).json({ error: "Subscription plan is required" });
     const ownerEmail = String(owner?.email || '').trim().toLowerCase();
-    const reuseOwnerAccount = owner?.reuseExistingAccount === true;
+    const requestedOwnerReuse = owner?.reuseExistingAccount === true;
     if (!ownerEmail) return res.status(400).json({ error: "Owner email is required" });
-    if (!reuseOwnerAccount && !owner?.name?.trim()) return res.status(400).json({ error: "Owner name is required" });
-    if (!reuseOwnerAccount && owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
+    if (owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
     const startTrial = business.startTrial === true;
     const trialDays = startTrial ? Number(business.trialDays) : null;
@@ -1376,10 +1375,11 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       return res.status(400).json({ error: "Choose supplier, manufacturer, or both, and provide a marketplace category." });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email: ownerEmail } });
-    if (existingUser && !reuseOwnerAccount) return res.status(409).json({ error: "Owner email already exists. Select the existing owner login option to attach this business." });
+    const existingUser = await prisma.user.findFirst({ where: { email: { equals: ownerEmail, mode: 'insensitive' } } });
+    const reuseOwnerAccount = requestedOwnerReuse || Boolean(existingUser && existingUser.role === 'owner' && existingUser.isActive);
+    if (existingUser && !reuseOwnerAccount) return res.status(409).json({ error: "This email belongs to an existing non-owner or inactive account. Use an active business-owner login to attach this business." });
     if (reuseOwnerAccount && !existingUser) return res.status(404).json({ error: "No existing JibuSales login was found for that email." });
-    if (reuseOwnerAccount && (existingUser.role !== 'owner' || !existingUser.isActive)) return res.status(400).json({ error: "Only an active business-owner login can be reused." });
+    if (requestedOwnerReuse && existingUser && (existingUser.role !== 'owner' || !existingUser.isActive)) return res.status(400).json({ error: "Only an active business-owner login can be reused." });
 
     const slug = (business.slug || business.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
     const parsedName = splitName(owner.name || `${existingUser?.fname || ''} ${existingUser?.lname || ''}`);

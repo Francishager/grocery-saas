@@ -132,7 +132,6 @@ export const ProvisionPage: React.FC = () => {
     if (!form.businessName.trim()) { setError('Business name is required'); return }
     if (!form.businessType) { setError('Business type is required'); return }
     if (!form.planId) { setError('Subscription plan is required'); return }
-    if (!form.reuseExistingOwner && !form.ownerName.trim()) { setError('Owner name is required'); return }
     if (!form.ownerEmail.trim()) { setError('Owner email is required'); return }
     if (!form.reuseExistingOwner && (!form.ownerPassword || form.ownerPassword.length < 12)) { setError('Password must be at least 12 characters'); return }
     setLoading(true)
@@ -338,10 +337,10 @@ export const ProvisionPage: React.FC = () => {
           <h2 className="text-lg font-semibold flex items-center gap-2"><User className="w-5 h-5" /> Owner Account</h2>
           <label className="flex items-start gap-3 rounded-md border p-3">
             <input type="checkbox" checked={form.reuseExistingOwner} onChange={event => handleChange('reuseExistingOwner', event.target.checked)} className="mt-1 h-4 w-4" />
-            <span><span className="block text-sm font-medium">Use an existing owner login</span><span className="mt-1 block text-xs text-gray-500">Attach this new business to the same owner identity. No new password or user account is created.</span></span>
+            <span><span className="block text-sm font-medium">Use an existing owner login</span><span className="mt-1 block text-xs text-gray-500">Attach this business to an existing owner. Active owner emails are also linked automatically if this option is left unchecked.</span></span>
           </label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {!form.reuseExistingOwner && <div><label className="block text-sm font-medium mb-1">Owner Name *</label><input required value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="John Doe" /></div>}
+            {!form.reuseExistingOwner && <div><label className="block text-sm font-medium mb-1">Owner Name</label><input value={form.ownerName} onChange={(e) => handleChange('ownerName', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="Required for a new owner; ignored for an existing login" /></div>}
             <div><label className="block text-sm font-medium mb-1">Owner Email *</label><input required type="email" value={form.ownerEmail} onChange={(e) => handleChange('ownerEmail', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="john@freshmart.com" /></div>
             {!form.reuseExistingOwner && <div><label className="block text-sm font-medium mb-1">Owner Phone</label><input type="tel" value={form.ownerPhone} onChange={(e) => handleChange('ownerPhone', e.target.value)} className="w-full px-3 py-2 border rounded-lg" placeholder="+256 700 123 456" autoComplete="tel" /></div>}
             {!form.reuseExistingOwner && <div className="md:col-span-2">
