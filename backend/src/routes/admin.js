@@ -1502,6 +1502,12 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
   } catch (err) {
     if (err?.code === "P2002") {
       const target = Array.isArray(err.meta?.target) ? err.meta.target.join(", ") : err.meta?.target;
+      const conflictModel = String(err.meta?.modelName || "record");
+      console.warn("Provision tenant unique constraint conflict:", {
+        model: conflictModel,
+        fields: target || "unknown",
+        reusingOwnerLogin: requestedOwnerReuse,
+      });
       if (String(target || '').toLowerCase().includes('slug')) {
         return res.status(409).json({ error: "That business URL is already in use. Choose a different business URL." });
       }
@@ -1511,7 +1517,10 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
           : "An owner login with this email already exists. Choose the existing owner login option to attach the business." });
       }
       if (String(target || '').toLowerCase().includes('email')) {
-        return res.status(409).json({ error: "A business contact email conflicts with an existing record. Check the business email and try again; the owner login was not changed." });
+        if (conflictModel === 'Tenant') {
+          return res.status(409).json({ error: "The database still has a unique constraint on business contact email (Tenant.email). Restart the backend so its schema repair can remove it, then retry." });
+        }
+        return res.status(409).json({ error: `A unique email constraint on ${conflictModel}.${target} blocked provisioning. The owner login was not changed; check the backend conflict log for the exact field.` });
       }
       return res.status(409).json({ error: `This business conflicts with an existing ${target || "unique value"}. Check the business details and try again.` });
     }

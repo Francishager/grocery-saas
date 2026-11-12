@@ -12,6 +12,11 @@ try {
   `);
 
   if (tenantTable.length) {
+    // Prisma's conventional name is common on databases that were created before
+    // Tenant.email became a non-unique business contact field.
+    await prisma.$executeRawUnsafe('ALTER TABLE public."Tenant" DROP CONSTRAINT IF EXISTS "Tenant_email_key"');
+    await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS public."Tenant_email_key"');
+
     const uniqueConstraints = await prisma.$queryRawUnsafe(`
       SELECT con.conname AS name
       FROM pg_constraint con
