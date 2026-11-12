@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState, ReactNode } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from '@/components/ui/toaster'
 import { AppFeedback } from '@/lib/appFeedback'
@@ -7,9 +7,11 @@ import { RoleRoute } from '@/guard/RoleRoute'
 import { FeatureGuard } from '@/components/FeatureGuard'
 import { servicePagePermissions } from '@/lib/servicePermissions'
 import { PwaRefreshControl } from '@/components/PwaRefreshControl'
+import { getApiAuthEndpoint } from '@/lib/apiConfig'
  
 
 const LoginPage = lazy(() => import('@/pages/auth/LoginPage'))
+const SecurityEnrollmentPage = lazy(() => import('@/pages/auth/SecurityEnrollmentPage'))
 const SaaSAdminLoginPage = lazy(() => import('@/pages/auth/SaaSAdminLoginPage'))
 const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'))
 const ForgotPasswordPage = lazy(() => import('@/pages/auth/ForgotPasswordPage'))
@@ -108,19 +110,52 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
   return <>{children}</>
 }
 
-function App() {
-  const { isAuthenticated, isPlatformUser } = useJWTAuth()
+function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
+  const { isAuthenticated, tokens, updateUser } = useJWTAuth()
+  const [state, setState] = useState<'checking' | 'required' | 'ready' | 'error'>('checking')
+  const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
+
   useEffect(() => {
-    if (!isAuthenticated || isPlatformUser()) return
+    if (!isAuthenticated || !tokens?.accessToken) { setState('ready'); return }
+    let cancelled = false
+    setState('checking')
+    setError('')
+    fetch(`${getApiAuthEndpoint()}/security/status`, { headers: { Authorization: `Bearer ${tokens.accessToken}` } })
+      .then(async response => {
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data.error || data.message || 'Could not verify account security.')
+        if (cancelled) return
+        updateUser({ securitySetupRequired: Boolean(data.setupRequired), businessSwitchSecurityMethod: data.method || null })
+        setState(data.setupRequired ? 'required' : 'ready')
+      })
+      .catch(cause => {
+        if (cancelled) return
+        setError(cause instanceof Error ? cause.message : 'Account security could not be checked. Reconnect and retry.')
+        setState('error')
+      })
+    return () => { cancelled = true }
+  }, [isAuthenticated, tokens?.accessToken, attempt])
+
+  if (!isAuthenticated || state === 'ready') return <>{children}</>
+  if (state === 'required') return <SecurityEnrollmentPage onCompleted={() => setState('ready')} />
+  if (state === 'error') return <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground"><section role="alert" className="max-w-md rounded-lg border bg-card p-6 text-center"><h1 className="text-lg font-semibold">Security check unavailable</h1><p className="mt-2 text-sm text-muted-foreground">{error}</p><button onClick={() => setAttempt(value => value + 1)} className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Retry security check</button></section></main>
+  return <main className="flex min-h-screen items-center justify-center bg-background text-foreground"><span className="animate-pulse text-sm text-muted-foreground" role="status">Verifying account security…</span></main>
+}
+
+function App() {
+  const { isAuthenticated, isPlatformUser, user } = useJWTAuth()
+  useEffect(() => {
+    if (!isAuthenticated || user?.securitySetupRequired !== false || isPlatformUser()) return
     let cancelled = false
     void import('@/db/sync').then(({ initSync }) => {
       if (!cancelled) return initSync()
     }).catch((error) => console.error('Offline data sync could not start:', error))
     return () => { cancelled = true }
-  }, [isAuthenticated, isPlatformUser])
+  }, [isAuthenticated, isPlatformUser, user?.securitySetupRequired])
 
   return (
-    <>
+    <SecurityEnrollmentGate>
       <Suspense fallback={<div className="flex min-h-[40vh] items-center justify-center px-4 text-sm text-muted-foreground" role="status">Loading page...</div>}>
       <Routes>
         {/* ========== Public Routes ========== */}
@@ -300,7 +335,7 @@ function App() {
       <PwaRefreshControl />
       <Toaster />
       <AppFeedback />
-    </>
+    </SecurityEnrollmentGate>
   )
 }
 

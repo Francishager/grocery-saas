@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { withPostgresAdvisoryLock } from '../utils/postgresAdvisoryLock.js';
 
 const requiredScripts = [
+  'ensure-user-security-schema.js',
   'ensure-sale-tax-schema.js',
   'ensure-branch-attendance-schema.js',
   'ensure-trash-schema.js',

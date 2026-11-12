@@ -14,6 +14,7 @@ import { auditLog } from "../utils/audit.js";
 import { getJwtSecret } from "../utils/jwtSecret.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { createSessionTokens } from "../utils/sessionTokens.js";
+import { authenticationOptions, registrationOptions, verifyBusinessSwitch, verifyRegistration } from '../services/userSecurity.js';
 
 const router = Router();
 const ipKey = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
@@ -23,6 +24,7 @@ const loginIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 
 const refreshLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 100, keyGenerator: ipKey });
 const resetIpLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30, keyGenerator: ipKey });
 const resetIdentityLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 15, keyGenerator: identityKey });
+const securityActionLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 12, keyGenerator: (req) => `security:${req.user?.id || ipKey(req)}`, countStatusCodes: [400, 401], policyName: 'account-security' });
 
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -74,6 +76,8 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     cashAccountId: user.cashAccountId || null,
     cashAccount: user.cashAccount || null,
     isPlatformUser,
+    securitySetupRequired: !user.securitySetupCompletedAt,
+    businessSwitchSecurityMethod: user.businessSwitchSecurityMethod || null,
     permissions,
     workingHoursAccess: staffWorkingHoursAccess(user, user.tenant),
   };
@@ -181,6 +185,79 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
   }
 });
 
+router.get('/security/status', authenticateToken, async (req, res) => {
+  try {
+    const [user, passkeyCount] = await Promise.all([
+      prisma.user.findUnique({ where: { id: req.user.id }, select: { securitySetupCompletedAt: true, businessSwitchSecurityMethod: true } }),
+      prisma.securityPasskey.count({ where: { userId: req.user.id } }),
+    ])
+    res.json({
+      setupRequired: !user?.securitySetupCompletedAt,
+      method: user?.businessSwitchSecurityMethod || null,
+      passkeyCount,
+    })
+  } catch (error) {
+    console.error('Security status lookup failed:', error.code || error.message)
+    res.status(503).json({ error: 'Account security status could not be verified.' })
+  }
+})
+
+router.post('/security/password-method', authenticateToken, securityActionLimiter, async (req, res) => {
+  try {
+    const password = String(req.body?.password || '')
+    if (!password) return res.status(400).json({ error: 'Enter your account password to enable password confirmation.' })
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, password: true } })
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      await logAuthenticationEvent(req, 'security_setup_failed', { id: req.user.id, email: req.user.email, tenantId: req.user.tenantId }, 401)
+      return res.status(401).json({ error: 'Password confirmation failed.' })
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { securitySetupCompletedAt: new Date(), businessSwitchSecurityMethod: 'password' } })
+    await logAuthenticationEvent(req, 'security_setup_completed', { id: req.user.id, email: req.user.email, tenantId: req.user.tenantId })
+    res.json({ setupRequired: false, method: 'password', passkeyCount: await prisma.securityPasskey.count({ where: { userId: user.id } }) })
+  } catch (error) {
+    console.error('Password security setup failed:', error.code || error.message)
+    res.status(500).json({ error: 'Could not save your security choice.' })
+  }
+})
+
+router.post('/security/passkey/register/options', authenticateToken, securityActionLimiter, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, email: true, fname: true, lname: true, password: true } })
+    if (!user) return res.status(404).json({ error: 'User account not found.' })
+    if (!req.body?.password || !(await bcrypt.compare(String(req.body.password), user.password))) return res.status(401).json({ error: 'Confirm your account password before enrolling a passkey.' })
+    res.json(await registrationOptions(req, user))
+  } catch (error) {
+    console.error('Passkey registration options failed:', error.code || error.message)
+    res.status(400).json({ error: error.message || 'Could not start passkey setup.' })
+  }
+})
+
+router.post('/security/passkey/register/verify', authenticateToken, securityActionLimiter, async (req, res) => {
+  try {
+    const name = String(req.body?.name || 'This device')
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, email: true, fname: true, lname: true } })
+    if (!user) return res.status(404).json({ error: 'User account not found.' })
+    await verifyRegistration(req, user, req.body?.response, name)
+    await logAuthenticationEvent(req, 'security_passkey_registered', { id: user.id, email: user.email, tenantId: req.user.tenantId })
+    res.json({ setupRequired: false, method: 'passkey', passkeyCount: await prisma.securityPasskey.count({ where: { userId: user.id } }) })
+  } catch (error) {
+    console.error('Passkey registration verification failed:', error.code || error.message)
+    res.status(400).json({ error: error.message || 'Passkey registration failed.' })
+  }
+})
+
+router.post('/security/passkey/switch/options', authenticateToken, securityActionLimiter, async (req, res) => {
+  try {
+    if (req.user.businessSwitchSecurityMethod !== 'passkey') return res.status(409).json({ error: 'Passkey confirmation is not selected for this account.' })
+    const targetTenantId = String(req.body?.tenantId || '').trim()
+    if (!targetTenantId) return res.status(400).json({ error: 'Choose a business first.' })
+    res.json(await authenticationOptions(req, { id: req.user.id }, targetTenantId))
+  } catch (error) {
+    console.error('Passkey switch challenge failed:', error.code || error.message)
+    res.status(400).json({ error: error.message || 'Could not request passkey confirmation.' })
+  }
+})
+
 router.get('/businesses', authenticateToken, async (req, res) => {
   try {
     let memberships = []
@@ -203,7 +280,7 @@ router.get('/businesses', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/switch-business', authenticateToken, async (req, res) => {
+router.post('/switch-business', authenticateToken, securityActionLimiter, async (req, res) => {
   try {
     const targetTenantId = String(req.body?.tenantId || '').trim();
     if (!targetTenantId) return res.status(400).json({ error: 'Choose a business to switch to.' });
@@ -212,6 +289,26 @@ router.post('/switch-business', authenticateToken, async (req, res) => {
       include: { tenant: true, cashAccount: { select: { id: true, name: true, type: true } }, branches: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] } },
     });
     if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
+    try {
+      if (baseUser.businessSwitchSecurityMethod === 'passkey') {
+        if (req.body?.securityAssertion) {
+          await verifyBusinessSwitch(req, baseUser, targetTenantId, req.body.securityAssertion)
+        } else if (req.body?.confirmationPassword && await bcrypt.compare(String(req.body.confirmationPassword), baseUser.password)) {
+          await prisma.userSecurityChallenge.deleteMany({ where: { userId: baseUser.id, purpose: 'business-switch', targetTenantId } })
+        } else {
+          throw new Error('Passkey confirmation failed. Use your account password to recover this switch.')
+        }
+      } else if (baseUser.businessSwitchSecurityMethod === 'password') {
+        if (!req.body?.confirmationPassword || !(await bcrypt.compare(String(req.body.confirmationPassword), baseUser.password))) {
+          throw new Error('Password confirmation failed. The business was not switched.')
+        }
+      } else {
+        return res.status(428).json({ error: 'Complete account security setup before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
+      }
+    } catch (verificationError) {
+      await logAuthenticationEvent(req, 'business_switch_confirmation_failed', { ...baseUser, tenantId: targetTenantId }, 401)
+      return res.status(401).json({ error: verificationError.message || 'Identity confirmation failed.' })
+    }
     const context = await getTenantSessionContext(baseUser, targetTenantId);
     if (!context) return res.status(403).json({ error: 'You do not have access to that business.', code: 'TENANT_ACCESS_DENIED' });
     const tenantBlock = await enforceTenantSubscriptionAccess(context.tenant, context.sessionUser);

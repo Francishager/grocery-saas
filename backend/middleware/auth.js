@@ -153,9 +153,17 @@ export const authenticateToken = async (req, res, next) => {
     // - other roles: explicit grants from the UserPermission table plus any inherited permissions.
     const currentUser = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, email: true, role: true, tenantId: true, isActive: true, workingHours: true },
+      select: { id: true, email: true, role: true, tenantId: true, isActive: true, workingHours: true, securitySetupCompletedAt: true, businessSwitchSecurityMethod: true },
     });
     if (!currentUser?.isActive) return res.status(401).json({ message: 'User not found or inactive', code: 'USER_INACTIVE' });
+    const isSecurityEndpoint = req.baseUrl === '/api/auth' && String(req.path || '').startsWith('/security/');
+    if (!currentUser.securitySetupCompletedAt && !isSecurityEndpoint) {
+      return res.status(428).json({ message: 'Complete account security setup before using JibuSales.', code: 'SECURITY_SETUP_REQUIRED' });
+    }
+    if (isSecurityEndpoint) {
+      req.user = { ...decoded, ...currentUser, tenantId: decoded.activeTenantId || decoded.tenantId || currentUser.tenantId };
+      return next();
+    }
     const requestedTenantId = decoded.activeTenantId || decoded.tenantId || currentUser.tenantId;
     let effectiveRole = currentUser.role;
     let crossTenantOwner = false;

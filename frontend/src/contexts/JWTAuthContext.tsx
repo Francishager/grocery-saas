@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, ReactNode, use
 import { featureAccessService } from '@/services/featureAccessService'
 import { isLoginTransportError } from '@/lib/authNetworkError'
 import { getApiAuthEndpoint } from '@/lib/apiConfig'
+import { startAuthentication } from '@simplewebauthn/browser'
 
 export interface User {
   id: string
@@ -24,6 +25,8 @@ export interface User {
   /** Tenant ID for business users */
   tenantId?: string
   tenantStatus?: string | null
+  securitySetupRequired?: boolean
+  businessSwitchSecurityMethod?: 'passkey' | 'password' | null
   accessibleBusinesses?: Array<{ id: string; name: string; businessType?: string | null; status?: string; logo?: string | null }>
   cashAccountId?: string | null
   cashAccount?: { id: string; name: string; type: string } | null
@@ -64,7 +67,7 @@ export interface JWTAuthContextValue {
   /** Refresh tokens */
   refreshTokens: () => Promise<boolean>
   /** Switch to another SaaS-admin-authorized business */
-  switchBusiness: (tenantId: string) => Promise<void>
+  switchBusiness: (tenantId: string, confirmationPassword?: string) => Promise<void>
   /** Update user */
   updateUser: (updates: Partial<User>) => void
   /** Check if user has permission */
@@ -444,15 +447,36 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     }
   }, [resolvedApiEndpoint, onLogin])
 
-  const switchBusiness = useCallback(async (tenantId: string) => {
+  const switchBusiness = useCallback(async (tenantId: string, confirmationPassword?: string) => {
     if (!tokens?.accessToken) throw new Error('Sign in again to switch businesses.')
     setLoading(true)
     setError(null)
     try {
+      let confirmation: Record<string, unknown> = {}
+      if (user?.businessSwitchSecurityMethod === 'passkey') {
+        if (confirmationPassword) {
+          confirmation = { confirmationPassword }
+        } else {
+          const optionsResponse = await fetch(`${resolvedApiEndpoint}/security/passkey/switch/options`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokens.accessToken}` },
+            body: JSON.stringify({ tenantId }),
+          })
+          const options = await optionsResponse.json().catch(() => ({}))
+          if (!optionsResponse.ok) throw new Error(options.error || 'Could not request passkey confirmation.')
+          const securityAssertion = await startAuthentication({ optionsJSON: options })
+          confirmation = { securityAssertion }
+        }
+      } else if (user?.businessSwitchSecurityMethod === 'password') {
+        if (!confirmationPassword) throw new Error('Confirm your password before switching businesses.')
+        confirmation = { confirmationPassword }
+      } else {
+        throw new Error('Complete account security setup before switching businesses.')
+      }
       const response = await fetch(`${resolvedApiEndpoint}/switch-business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokens.accessToken}` },
-        body: JSON.stringify({ tenantId }),
+        body: JSON.stringify({ tenantId, ...confirmation }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || data.message || 'Could not switch business.')
@@ -470,7 +494,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     } finally {
       setLoading(false)
     }
-  }, [tokens?.accessToken, resolvedApiEndpoint, refreshOnboardingStatus, onLogin])
+  }, [tokens?.accessToken, user?.businessSwitchSecurityMethod, resolvedApiEndpoint, refreshOnboardingStatus, onLogin])
 
   const refreshTokens = useCallback(async () => {
     if (!tokens?.refreshToken) return false

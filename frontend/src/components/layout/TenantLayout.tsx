@@ -429,6 +429,9 @@ export function TenantLayout() {
   const tenantId = user?.tenantId || (user as any)?.tenant_id
   const [businesses, setBusinesses] = useState<Array<{ id: string; name: string; businessType?: string | null }>>([])
   const [switchingBusiness, setSwitchingBusiness] = useState(false)
+  const [pendingBusinessTarget, setPendingBusinessTarget] = useState('')
+  const [switchPassword, setSwitchPassword] = useState('')
+  const [switchError, setSwitchError] = useState('')
   const onboardingStorageKey = user?.id ? `jibu_sales_onboarding_seen_${user.id}` : 'jibu_sales_onboarding_seen_guest'
   const { theme, toggleTheme } = useTheme()
   const { canAccessFeature, loading } = useFeatureAccess()
@@ -443,14 +446,27 @@ export function TenantLayout() {
       .catch(() => {})
     return () => controller.abort()
   }, [tokens?.accessToken, tenantId, user?.isPlatformUser])
-  const handleBusinessSwitch = async (nextTenantId: string) => {
+  const handleBusinessSwitch = async (nextTenantId: string, confirmationPassword?: string) => {
     if (!nextTenantId || nextTenantId === tenantId) return
+    if (user?.businessSwitchSecurityMethod === 'password' && !confirmationPassword) {
+      setPendingBusinessTarget(nextTenantId)
+      setSwitchPassword('')
+      setSwitchError('')
+      return
+    }
     setSwitchingBusiness(true)
     try {
-      await switchBusiness(nextTenantId)
+      await switchBusiness(nextTenantId, confirmationPassword)
       navigate('/tenant/dashboard', { replace: true })
+      setPendingBusinessTarget('')
+      setSwitchPassword('')
     } catch (error) {
-      appNotify(error instanceof Error ? error.message : 'Could not switch business.')
+      if (confirmationPassword) setSwitchError(error instanceof Error ? error.message : 'Could not switch business.')
+      else if (user?.businessSwitchSecurityMethod === 'passkey') {
+        setPendingBusinessTarget(nextTenantId)
+        setSwitchPassword('')
+        setSwitchError('Passkey confirmation did not complete. Confirm your account password to continue.')
+      } else appNotify(error instanceof Error ? error.message : 'Could not switch business.')
     } finally {
       setSwitchingBusiness(false)
     }
@@ -1299,6 +1315,20 @@ export function TenantLayout() {
             </div>}
           </div>}
         </header>
+        {pendingBusinessTarget && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="business-switch-security-title" className="w-full max-w-sm rounded-lg border bg-card p-5 text-card-foreground shadow-xl">
+            <h2 id="business-switch-security-title" className="text-base font-semibold">Confirm business switch</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{user?.businessSwitchSecurityMethod === 'passkey' ? 'Use your account password if your passkey is unavailable.' : 'Enter your JibuSales password to open the selected business.'} {businesses.find(item => item.id === pendingBusinessTarget)?.name || ''}</p>
+            <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void handleBusinessSwitch(pendingBusinessTarget, switchPassword) }}>
+              <input type="password" autoComplete="current-password" autoFocus required value={switchPassword} onChange={event => setSwitchPassword(event.target.value)} className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="JibuSales password" />
+              {switchError && <p role="alert" className="text-sm text-destructive">{switchError}</p>}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => { setPendingBusinessTarget(''); setSwitchPassword(''); setSwitchError('') }}>Cancel</Button>
+                <Button type="submit" disabled={switchingBusiness || !switchPassword}>{switchingBusiness ? 'Verifying…' : 'Confirm'}</Button>
+              </div>
+            </form>
+          </section>
+        </div>}
         <main className="overflow-x-clip p-4 lg:p-6">
           {waiterMode && !['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(location.pathname)
             ? <p role="status" className="py-12 text-center text-sm text-muted-foreground">Opening the waiter order screen…</p>

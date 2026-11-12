@@ -507,6 +507,10 @@ model User {
   // =========================
   ownedTenants Tenant[] @relation("TenantOwner")
   tenantMemberships TenantMembership[]
+  securityPasskeys SecurityPasskey[]
+  securityChallenges UserSecurityChallenge[]
+  securitySetupCompletedAt DateTime?
+  businessSwitchSecurityMethod String?
 
   isActive                            Boolean                       @default(true)
   workingHours                        Json?
@@ -692,6 +696,41 @@ model TenantMembership {
   @@unique([userId, tenantId])
   @@index([tenantId, isActive])
   @@map("tenant_memberships")
+}
+
+model SecurityPasskey {
+  id              String   @id @default(cuid())
+  userId          String
+  credentialId    String   @unique
+  rpId            String   @default("")
+  publicKey       Bytes
+  counter         BigInt   @default(0)
+  transports      String[] @default([])
+  deviceType      String   @default("singleDevice")
+  backedUp        Boolean  @default(false)
+  name            String?
+  createdAt       DateTime @default(now())
+  lastUsedAt      DateTime?
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("security_passkeys")
+}
+
+model UserSecurityChallenge {
+  id             String   @id @default(cuid())
+  userId         String
+  challenge      String
+  purpose        String
+  targetTenantId String?
+  origin         String   @default("")
+  rpId           String   @default("")
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, expiresAt])
+  @@map("user_security_challenges")
 }
 
 enum UserRole {
