@@ -12,6 +12,7 @@
     "test:permissions": "node --test tests/manualJournalPolicy.test.js",
     "test:platform-observability": "node --test tests/platformRuntimeMetrics.test.js",
     "test:scaling-safety": "node --test tests/postgresAdvisoryLock.test.js",
+    "test:railway-status": "node --test tests/railwayStatusService.test.js",
     "test:property": "node --test tests/propertyAccounting.test.js tests/propertyRentRateService.test.js tests/propertyRentPeriods.test.js tests/rentPaymentAllocation.test.js tests/rentPromiseProgress.test.js",
     "test:rentals": "node --test tests/rentalAccounting.test.js tests/rentalHistoricalEntry.test.js",
     "test:planner": "node --test tests/plannerReminders.test.js",

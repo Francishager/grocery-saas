@@ -4,6 +4,7 @@ import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.j
 import hrFeatureService from "../services/hrFeatureService.js";
 import { summarizePlatformAudit } from "../utils/platformAuditInsights.js";
 import { platformRuntimeMetrics } from "../utils/platformRuntimeMetrics.js";
+import { getRailwayStatus } from "../services/railwayStatusService.js";
 import { performance } from "node:perf_hooks";
 import v8 from "node:v8";
 
@@ -66,6 +67,10 @@ router.get('/runtime-health', authenticateToken, requirePlatformAdmin, async (_r
       'Railway and Cloudflare infrastructure metrics are not included here.',
     ],
   });
+});
+
+router.get('/railway-status', authenticateToken, requirePlatformAdmin, async (_req, res) => {
+  return res.json(await getRailwayStatus());
 });
 
 function parsePositiveInt(value, fallback, max) {
