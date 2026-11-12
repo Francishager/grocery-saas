@@ -1350,13 +1350,14 @@ router.post("/reinvite-owner/:tenantId", authenticateToken, requirePlatformAdmin
 
 // Provision tenant (business + owner)
 router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requirePlatformAdmin, async (req, res) => {
+  let requestedOwnerReuse = false;
   try {
     const { business, owner } = req.body;
     if (!business?.name?.trim()) return res.status(400).json({ error: "Business name is required" });
     if (!business?.businessType) return res.status(400).json({ error: "Business type is required" });
     if (!business?.planId) return res.status(400).json({ error: "Subscription plan is required" });
     const ownerEmail = String(owner?.email || '').trim().toLowerCase();
-    const requestedOwnerReuse = owner?.reuseExistingAccount === true;
+    requestedOwnerReuse = owner?.reuseExistingAccount === true;
     if (!ownerEmail) return res.status(400).json({ error: "Owner email is required" });
     if (owner?.password && owner.password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
@@ -1504,8 +1505,13 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
       if (String(target || '').toLowerCase().includes('slug')) {
         return res.status(409).json({ error: "That business URL is already in use. Choose a different business URL." });
       }
-      if (err.meta?.modelName === 'User' || String(target || '').toLowerCase().includes('email')) {
-        return res.status(409).json({ error: "An owner login with this email already exists. Choose the existing owner login option to attach the business." });
+      if (err.meta?.modelName === 'User') {
+        return res.status(409).json({ error: requestedOwnerReuse
+          ? "The existing owner login could not be attached because it changed during provisioning. Refresh the owner details and try again."
+          : "An owner login with this email already exists. Choose the existing owner login option to attach the business." });
+      }
+      if (String(target || '').toLowerCase().includes('email')) {
+        return res.status(409).json({ error: "A business contact email conflicts with an existing record. Check the business email and try again; the owner login was not changed." });
       }
       return res.status(409).json({ error: `This business conflicts with an existing ${target || "unique value"}. Check the business details and try again.` });
     }

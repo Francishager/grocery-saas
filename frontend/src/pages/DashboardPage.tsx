@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown, ChevronDown, ChevronUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { RefreshCw } from 'lucide-react'
 import { useDashboardData } from '@/hooks/useDashboardData'
@@ -15,12 +15,29 @@ import { SupportContactLinks } from '@/components/SupportContactLinks'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
-function ModuleMetric({ label, value, detail }: { label: string; value: string | number; detail?: string }) {
-  return <Card className="h-full border-border/70 bg-card shadow-sm transition-shadow hover:shadow-md">
-    <CardContent className="p-4 sm:p-5">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-2 truncate text-xl font-semibold tabular-nums sm:text-2xl">{value ?? '—'}</p>
-      {detail && <p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p>}
+type ModuleDashboardMetric = { label: string; value: string | number; detail?: string }
+
+function ModuleSnapshotCard({ title, description, metrics, accent }: { title: string; description: string; metrics: ModuleDashboardMetric[]; accent: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const visibleMetrics = expanded ? metrics : metrics.slice(0, 2)
+
+  return <Card className={`h-full overflow-hidden border-t-2 ${accent} bg-card shadow-sm transition-shadow hover:shadow-md`}>
+    <CardHeader className="space-y-1 p-4 pb-2">
+      <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+      <CardDescription className="line-clamp-1 text-xs">{description}</CardDescription>
+    </CardHeader>
+    <CardContent className="px-4 pb-3 pt-1">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        {visibleMetrics.map(metric => <div key={metric.label} className="min-w-0">
+          <p className="truncate text-[11px] font-medium text-muted-foreground">{metric.label}</p>
+          <p className="mt-0.5 truncate text-lg font-semibold tabular-nums leading-tight">{metric.value ?? '—'}</p>
+          {metric.detail && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{metric.detail}</p>}
+        </div>)}
+      </div>
+      {metrics.length > 2 && <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded}
+        className="mt-3 inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-xs font-medium text-primary transition-colors hover:bg-primary/5">
+        {expanded ? <>Show less <ChevronUp className="h-3.5 w-3.5" /></> : <>All {metrics.length} indicators <ChevronDown className="h-3.5 w-3.5" /></>}
+      </button>}
     </CardContent>
   </Card>
 }
@@ -35,6 +52,7 @@ export default function DashboardPage() {
   const [billingForm, setBillingForm] = useState({ networkProvider: 'MTN', phoneNumber: user?.phone || '', email: user?.email || '', paymentMethod: 'mobile_money', gateway: 'pesapal' })
   const [billingPaymentState, setBillingPaymentState] = useState<'idle' | 'pending' | 'success' | 'failed'>('idle')
   const [billingPollRef, setBillingPollRef] = useState<string | null>(null)
+  const [showMoreInsights, setShowMoreInsights] = useState(false)
   const [moduleSnapshots, setModuleSnapshots] = useState<{ property: any; restaurant: any; hr: any; rentals: any; clinic: any; pharmacy: any }>({ property: null, restaurant: null, hr: null, rentals: null, clinic: null, pharmacy: null })
   const { toast } = useToast()
   const online = useOnlineStatus()
@@ -348,82 +366,60 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals || moduleSnapshots.clinic || moduleSnapshots.pharmacy) && <section className="space-y-5" aria-label="Module operations">
-        <div className="border-l-2 border-primary pl-3"><h2 className="text-lg font-semibold">Module activity</h2><p className="text-sm text-muted-foreground">Live operational indicators from your enabled business areas.</p></div>
-        {moduleSnapshots.property && <div className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div><h3 className="text-base font-semibold">{hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property portfolio'}</h3><p className="text-sm text-muted-foreground">Rent roll, occupancy, landlord clients, and managed-unit health.</p></div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {hasAgentWorkspace && <ModuleMetric label="Landlord clients" value={moduleSnapshots.property.landlordClients ?? '—'} />}
-            <ModuleMetric label={hasAgentWorkspace && !hasLandlordWorkspace ? 'Managed properties' : 'My properties'} value={hasAgentWorkspace && !hasLandlordWorkspace ? moduleSnapshots.property.managedProperties ?? '—' : moduleSnapshots.property.properties} />
-            <ModuleMetric label="Occupied units" value={`${Number(moduleSnapshots.property.occupied || 0).toLocaleString()} / ${Number(moduleSnapshots.property.units || 0).toLocaleString()}`} />
-            <ModuleMetric label="Active tenancies" value={moduleSnapshots.property.activeTenancies} />
-            <ModuleMetric label="Outstanding rent" value={formatCurrency(moduleSnapshots.property.outstandingRent || 0)} detail={`${Number(moduleSnapshots.property.vacant || 0).toLocaleString()} vacant units`} />
-            {(hasPermission('canViewPropertyCollections') || hasPermission('canViewPropertyReports')) && <ModuleMetric label="Collected this month" value={formatCurrency(moduleSnapshots.property.collectedThisMonth || 0)} detail={`${Number(moduleSnapshots.property.paymentCount || 0).toLocaleString()} payments`} />}
-            {hasPermission('canViewPropertyReports') && <ModuleMetric label="Overdue rent" value={formatCurrency(moduleSnapshots.property.arrears || 0)} />}
-          </div>
-        </div>}
-
-        {moduleSnapshots.restaurant && <div className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div><h3 className="text-base font-semibold">Restaurant &amp; bar</h3><p className="text-sm text-muted-foreground">Today&apos;s service activity and live queues.</p></div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ModuleMetric label="Orders today" value={moduleSnapshots.restaurant.ordersToday} />
-            <ModuleMetric label="Open tables" value={moduleSnapshots.restaurant.occupiedTables} detail={`${Number(moduleSnapshots.restaurant.openTables || 0).toLocaleString()} available`} />
-            <ModuleMetric label="Kitchen queue" value={moduleSnapshots.restaurant.kitchenOrders} />
-            <ModuleMetric label="Bar queue" value={moduleSnapshots.restaurant.barOrders} />
-            {moduleSnapshots.restaurant.todaySales != null && <ModuleMetric label="Sales today" value={formatCurrency(moduleSnapshots.restaurant.todaySales)} detail={`${Number(moduleSnapshots.restaurant.completedCount || 0).toLocaleString()} completed orders`} />}
-          </div>
-        </div>}
-
-        {moduleSnapshots.hr && <div className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div><h3 className="text-base font-semibold">People &amp; payroll</h3><p className="text-sm text-muted-foreground">Workforce, attendance, and payroll items needing attention.</p></div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ModuleMetric label="Active employees" value={moduleSnapshots.hr.stats?.activeEmployees} />
-            <ModuleMetric label="Present today" value={moduleSnapshots.hr.stats?.employeesPresentToday} detail={`${Number(moduleSnapshots.hr.stats?.employeesAbsentToday || 0).toLocaleString()} absent`} />
-            <ModuleMetric label="Salary payable" value={formatCurrency(moduleSnapshots.hr.stats?.salaryPayable || 0)} />
-            <ModuleMetric label="Pending approvals" value={Number(moduleSnapshots.hr.stats?.payrollAwaitingApproval || 0) + Number(moduleSnapshots.hr.stats?.leaveRequestsAwaitingApproval || 0)} detail="Payroll and leave" />
-          </div>
-        </div>}
-
-        {moduleSnapshots.rentals && <div className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div><h3 className="text-base font-semibold">Rental operations</h3><p className="text-sm text-muted-foreground">Assets out, return deadlines, collections, and deposits held.</p></div>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ModuleMetric label="Items checked out" value={moduleSnapshots.rentals.itemsOut ?? 0} detail={`${Number(moduleSnapshots.rentals.activeCount || 0).toLocaleString()} active hires`} />
-            <ModuleMetric label="Due back today" value={moduleSnapshots.rentals.dueTodayCount ?? 0} detail={`${Number(moduleSnapshots.rentals.reservationCount || 0).toLocaleString()} upcoming reservations`} />
-            <ModuleMetric label="Overdue rentals" value={moduleSnapshots.rentals.overdueCount ?? 0} detail={`Outstanding ${formatCurrency(moduleSnapshots.rentals.overdueBalance || 0)}`} />
-            <ModuleMetric label="Rental balance due" value={formatCurrency(moduleSnapshots.rentals.outstandingBalance || 0)} detail={`${formatCurrency(moduleSnapshots.rentals.depositsHeld || 0)} deposits held`} />
-            <ModuleMetric label="Collections this month" value={formatCurrency(moduleSnapshots.rentals.collectionsThisMonth || 0)} detail={`${Number(moduleSnapshots.rentals.receiptsThisMonth || 0).toLocaleString()} receipts`} />
-            <ModuleMetric label="Returns today" value={moduleSnapshots.rentals.returnsToday ?? 0} />
-          </div>
-        </div>}
-
-        {moduleSnapshots.clinic && <div className="space-y-3">
-          <div><h3 className="text-base font-semibold">Clinic activity</h3><p className="text-sm text-muted-foreground">Care operations at a glance. Financial performance remains in shared business reporting.</p></div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ModuleMetric label="Clinic patients" value={moduleSnapshots.clinic.patients ?? 0} />
-            <ModuleMetric label="Appointments today" value={moduleSnapshots.clinic.appointmentsToday ?? 0} />
-            <ModuleMetric label="Encounters today" value={moduleSnapshots.clinic.encountersToday ?? 0} />
-            <ModuleMetric label="Open prescriptions" value={moduleSnapshots.clinic.openPrescriptions ?? 0} />
-          </div>
-        </div>}
-
-        {moduleSnapshots.pharmacy && <div className="space-y-3">
-          <div><h3 className="text-base font-semibold">Pharmacy activity</h3><p className="text-sm text-muted-foreground">Medicine availability and prescription fulfillment. Financial results use shared business reporting.</p></div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <ModuleMetric label="Active batches" value={moduleSnapshots.pharmacy.batches ?? 0} />
-            <ModuleMetric label="Medicine units in batches" value={Number(moduleSnapshots.pharmacy.batchUnits || 0).toLocaleString()} />
-            <ModuleMetric label="Expiring within 90 days" value={moduleSnapshots.pharmacy.expiringWithin90Days ?? 0} />
-            <ModuleMetric label="Prescriptions to dispense" value={moduleSnapshots.pharmacy.prescriptionsToDispense ?? 0} />
-            <ModuleMetric label="Dispensed today" value={moduleSnapshots.pharmacy.dispensedToday ?? 0} />
-          </div>
-        </div>}
+      {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals || moduleSnapshots.clinic || moduleSnapshots.pharmacy) && <section className="space-y-3" aria-label="Module operations">
+        <div className="flex flex-wrap items-end justify-between gap-2 border-l-2 border-primary pl-3">
+          <div><h2 className="text-lg font-semibold">Module activity</h2><p className="text-sm text-muted-foreground">Live highlights from enabled business areas.</p></div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {moduleSnapshots.property && <ModuleSnapshotCard
+            title={hasAgentWorkspace && !hasLandlordWorkspace ? 'Property Agent Operations' : hasLandlordWorkspace && !hasAgentWorkspace ? 'Landlord Portfolio' : 'Property Management'}
+            description="Occupancy, rent roll, and portfolio health."
+            accent="border-t-sky-500"
+            metrics={[
+              ...(hasAgentWorkspace ? [{ label: 'Landlord clients', value: moduleSnapshots.property.landlordClients ?? '—' }] : []),
+              { label: hasAgentWorkspace && !hasLandlordWorkspace ? 'Managed properties' : 'Properties', value: hasAgentWorkspace && !hasLandlordWorkspace ? moduleSnapshots.property.managedProperties ?? '—' : moduleSnapshots.property.properties },
+              { label: 'Occupied units', value: `${Number(moduleSnapshots.property.occupied || 0).toLocaleString()} / ${Number(moduleSnapshots.property.units || 0).toLocaleString()}` },
+              { label: 'Active tenancies', value: moduleSnapshots.property.activeTenancies },
+              { label: 'Outstanding rent', value: formatCurrency(moduleSnapshots.property.outstandingRent || 0), detail: `${Number(moduleSnapshots.property.vacant || 0).toLocaleString()} vacant units` },
+              ...((hasPermission('canViewPropertyCollections') || hasPermission('canViewPropertyReports')) ? [{ label: 'Collected this month', value: formatCurrency(moduleSnapshots.property.collectedThisMonth || 0), detail: `${Number(moduleSnapshots.property.paymentCount || 0).toLocaleString()} payments` }] : []),
+              ...(hasPermission('canViewPropertyReports') ? [{ label: 'Overdue rent', value: formatCurrency(moduleSnapshots.property.arrears || 0) }] : []),
+            ]}
+          />}
+          {moduleSnapshots.restaurant && <ModuleSnapshotCard title="Restaurant & bar" description="Today’s service and live queues." accent="border-t-orange-500" metrics={[
+            { label: 'Orders today', value: moduleSnapshots.restaurant.ordersToday },
+            { label: 'Open tables', value: moduleSnapshots.restaurant.occupiedTables, detail: `${Number(moduleSnapshots.restaurant.openTables || 0).toLocaleString()} available` },
+            { label: 'Kitchen queue', value: moduleSnapshots.restaurant.kitchenOrders },
+            { label: 'Bar queue', value: moduleSnapshots.restaurant.barOrders },
+            ...(moduleSnapshots.restaurant.todaySales != null ? [{ label: 'Sales today', value: formatCurrency(moduleSnapshots.restaurant.todaySales), detail: `${Number(moduleSnapshots.restaurant.completedCount || 0).toLocaleString()} completed orders` }] : []),
+          ]} />}
+          {moduleSnapshots.hr && <ModuleSnapshotCard title="People & payroll" description="Workforce, attendance, and approvals." accent="border-t-violet-500" metrics={[
+            { label: 'Active employees', value: moduleSnapshots.hr.stats?.activeEmployees },
+            { label: 'Present today', value: moduleSnapshots.hr.stats?.employeesPresentToday, detail: `${Number(moduleSnapshots.hr.stats?.employeesAbsentToday || 0).toLocaleString()} absent` },
+            { label: 'Salary payable', value: formatCurrency(moduleSnapshots.hr.stats?.salaryPayable || 0) },
+            { label: 'Pending approvals', value: Number(moduleSnapshots.hr.stats?.payrollAwaitingApproval || 0) + Number(moduleSnapshots.hr.stats?.leaveRequestsAwaitingApproval || 0), detail: 'Payroll and leave' },
+          ]} />}
+          {moduleSnapshots.rentals && <ModuleSnapshotCard title="Rental operations" description="Assets, returns, and collections." accent="border-t-emerald-500" metrics={[
+            { label: 'Items checked out', value: moduleSnapshots.rentals.itemsOut ?? 0, detail: `${Number(moduleSnapshots.rentals.activeCount || 0).toLocaleString()} active hires` },
+            { label: 'Due back today', value: moduleSnapshots.rentals.dueTodayCount ?? 0, detail: `${Number(moduleSnapshots.rentals.reservationCount || 0).toLocaleString()} upcoming reservations` },
+            { label: 'Overdue rentals', value: moduleSnapshots.rentals.overdueCount ?? 0, detail: `Outstanding ${formatCurrency(moduleSnapshots.rentals.overdueBalance || 0)}` },
+            { label: 'Rental balance due', value: formatCurrency(moduleSnapshots.rentals.outstandingBalance || 0), detail: `${formatCurrency(moduleSnapshots.rentals.depositsHeld || 0)} deposits held` },
+            { label: 'Collections this month', value: formatCurrency(moduleSnapshots.rentals.collectionsThisMonth || 0), detail: `${Number(moduleSnapshots.rentals.receiptsThisMonth || 0).toLocaleString()} receipts` },
+            { label: 'Returns today', value: moduleSnapshots.rentals.returnsToday ?? 0 },
+          ]} />}
+          {moduleSnapshots.clinic && <ModuleSnapshotCard title="Clinic activity" description="Care operations at a glance." accent="border-t-rose-500" metrics={[
+            { label: 'Patients', value: moduleSnapshots.clinic.patients ?? 0 },
+            { label: 'Appointments today', value: moduleSnapshots.clinic.appointmentsToday ?? 0 },
+            { label: 'Encounters today', value: moduleSnapshots.clinic.encountersToday ?? 0 },
+            { label: 'Open prescriptions', value: moduleSnapshots.clinic.openPrescriptions ?? 0 },
+          ]} />}
+          {moduleSnapshots.pharmacy && <ModuleSnapshotCard title="Pharmacy activity" description="Medicine availability and fulfillment." accent="border-t-teal-500" metrics={[
+            { label: 'Active batches', value: moduleSnapshots.pharmacy.batches ?? 0 },
+            { label: 'Medicine units', value: Number(moduleSnapshots.pharmacy.batchUnits || 0).toLocaleString() },
+            { label: 'Expiring within 90 days', value: moduleSnapshots.pharmacy.expiringWithin90Days ?? 0 },
+            { label: 'Prescriptions to dispense', value: moduleSnapshots.pharmacy.prescriptionsToDispense ?? 0 },
+            { label: 'Dispensed today', value: moduleSnapshots.pharmacy.dispensedToday ?? 0 },
+          ]} />}
+        </div>
       </section>}
 
       {/* KPI Cards Row 1 — only show for enabled features */}
@@ -591,7 +587,7 @@ export default function DashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={230}>
             <BarChart data={dailyPerf.data}>
               <defs>
                 <linearGradient id="colorRevBar" x1="0" y1="0" x2="0" y2="1">
@@ -619,6 +615,14 @@ export default function DashboardPage() {
       </Card>
       )}
 
+      {(canViewSalesDashboard || canViewFinancialDashboard || hasFeature('sales') && hasPermission('canViewSale')) && <div className="flex justify-center pt-1">
+        <button type="button" onClick={() => setShowMoreInsights(value => !value)} aria-expanded={showMoreInsights}
+          className="inline-flex min-h-10 items-center gap-2 rounded-md border border-border bg-card px-4 text-sm font-medium shadow-sm transition-colors hover:border-primary/40 hover:bg-muted/60">
+          {showMoreInsights ? <>Show fewer insights <ChevronUp className="h-4 w-4" /></> : <>Explore more insights <ChevronDown className="h-4 w-4" /></>}
+        </button>
+      </div>}
+
+      {showMoreInsights && <div className="space-y-4">
       {/* Charts Row — only show for enabled features */}
       {(canViewSalesDashboard || canViewFinancialDashboard) && <section className="space-y-3" aria-label="Financial trends"><div className="border-l-2 border-primary pl-3"><h2 className="text-lg font-semibold">Trends &amp; mix</h2><p className="text-sm text-muted-foreground">Recent performance and how customers are paying.</p></div><div className="grid gap-4 xl:grid-cols-2">
         {/* Revenue vs Operating Expenses Chart */}
@@ -719,6 +723,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
         )}
+      </div>}
       </div>}
 
       {showBillingPrompt && billingReminder && !billingReminder.isTrial && (
