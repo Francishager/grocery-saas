@@ -58,6 +58,18 @@ interface RailwayStatus {
   sourceUrl: string
 }
 
+interface CloudflareStatus {
+  status: 'operational' | 'degraded' | 'unavailable'
+  description: string
+  checkedAt: string
+  stale: boolean
+  incidents: Array<{ name: string; status: string; impact: string; updatedAt: string | null; components: string[] }>
+  affectedComponents: Array<{ name: string; status: string }>
+  scheduledMaintenances: Array<{ name: string; status: string; startsAt: string | null; endsAt: string | null }>
+  frontend: { status: 'reachable' | 'unreachable'; httpStatus: number | null; latencyMs: number | null; url: string }
+  sourceUrl: string
+}
+
 const emptyPagination: Pagination = { page: 1, limit: 25, total: 0, pages: 0 }
 
 export const PlatformAuditPage: React.FC = () => {
@@ -76,6 +88,7 @@ export const PlatformAuditPage: React.FC = () => {
   const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(null)
   const [runtimeError, setRuntimeError] = useState('')
   const [railwayStatus, setRailwayStatus] = useState<RailwayStatus | null>(null)
+  const [cloudflareStatus, setCloudflareStatus] = useState<CloudflareStatus | null>(null)
 
   const fetchRuntimeHealth = useCallback(async () => {
     try {
@@ -98,6 +111,21 @@ export const PlatformAuditPage: React.FC = () => {
         status: 'unavailable', description: 'Railway status could not be checked right now.',
         checkedAt: new Date().toISOString(), stale: true, incidents: [], affectedComponents: [],
         scheduledMaintenances: [], sourceUrl: 'https://status.railway.com/',
+      })
+    }
+  }, [])
+
+  const fetchCloudflareStatus = useCallback(async () => {
+    try {
+      const response = await apiFetch('/api/platform/cloudflare-status')
+      if (!response.ok) throw new Error('Unable to load Cloudflare status')
+      setCloudflareStatus(await response.json())
+    } catch {
+      setCloudflareStatus(current => current || {
+        status: 'unavailable', description: 'Cloudflare status could not be checked right now.',
+        checkedAt: new Date().toISOString(), stale: true, incidents: [], affectedComponents: [],
+        scheduledMaintenances: [], frontend: { status: 'unreachable', httpStatus: null, latencyMs: null, url: '' },
+        sourceUrl: 'https://www.cloudflarestatus.com/',
       })
     }
   }, [])
@@ -144,6 +172,13 @@ export const PlatformAuditPage: React.FC = () => {
     }, 5 * 60 * 1000)
     return () => window.clearInterval(timer)
   }, [fetchRailwayStatus])
+  useEffect(() => {
+    void fetchCloudflareStatus()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void fetchCloudflareStatus()
+    }, 5 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [fetchCloudflareStatus])
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void fetchLogs()
@@ -210,7 +245,7 @@ export const PlatformAuditPage: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           {refreshedAt && <span className="hidden text-xs text-gray-500 sm:inline">Updated {fmtDateTime(refreshedAt)}</span>}
-          <button onClick={() => { void fetchLogs(); void fetchRuntimeHealth(); void fetchRailwayStatus() }} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-gray-50" title="Refresh activity and platform health">
+          <button onClick={() => { void fetchLogs(); void fetchRuntimeHealth(); void fetchRailwayStatus(); void fetchCloudflareStatus() }} className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-gray-50" title="Refresh activity and platform health">
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
@@ -222,7 +257,7 @@ export const PlatformAuditPage: React.FC = () => {
           {runtimeHealth && <div className="text-right text-[11px] text-gray-500">Instance {runtimeHealth.instanceId} · up {uptimeLabel(runtimeHealth.uptimeSeconds)} · Node {runtimeHealth.nodeVersion}</div>}
         </div>
         {runtimeError && <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{runtimeError}</div>}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           <div className="rounded-md border bg-white p-4">
             <div className="flex items-center gap-2 text-xs text-gray-500"><Server size={15} /> API status</div>
             <div className={`mt-2 flex items-center gap-2 text-lg font-semibold ${runtimeHealth?.status === 'degraded' ? 'text-red-700' : runtimeHealth?.status === 'awaiting-traffic' ? 'text-amber-700' : 'text-emerald-700'}`}>{runtimeHealth ? runtimeHealth.status === 'degraded' ? <><CircleAlert size={17} /> Degraded</> : runtimeHealth.status === 'awaiting-traffic' ? 'Awaiting sample' : <><CheckCircle2 size={17} /> Healthy</> : 'Loading'}</div>
@@ -251,7 +286,7 @@ export const PlatformAuditPage: React.FC = () => {
           <div className="rounded-md border bg-white p-4">
             <div className="flex items-center gap-2 text-xs text-gray-500"><Server size={15} /> Railway platform</div>
             <div className={`mt-2 flex items-center gap-2 text-lg font-semibold ${railwayStatus?.status === 'degraded' ? 'text-red-700' : railwayStatus?.status === 'unavailable' ? 'text-amber-700' : 'text-emerald-700'}`}>
-              {railwayStatus?.status === 'operational' ? <><CheckCircle2 size={17} /> Operational</> : railwayStatus?.status === 'degraded' ? <><CircleAlert size={17} /> Degraded</> : 'Checking status'}
+              {railwayStatus?.status === 'operational' ? <><CheckCircle2 size={17} /> Operational</> : railwayStatus?.status === 'degraded' ? <><CircleAlert size={17} /> Degraded</> : railwayStatus?.status === 'unavailable' ? 'Status unavailable' : 'Checking status'}
             </div>
             <div className="mt-1 text-xs text-gray-500">
               {railwayStatus?.incidents.length ? `${railwayStatus.incidents.length} active incident${railwayStatus.incidents.length === 1 ? '' : 's'}` : railwayStatus?.affectedComponents.length ? `${railwayStatus.affectedComponents.length} affected component${railwayStatus.affectedComponents.length === 1 ? '' : 's'}` : railwayStatus?.scheduledMaintenances.length ? `${railwayStatus.scheduledMaintenances.length} upcoming maintenance item${railwayStatus.scheduledMaintenances.length === 1 ? '' : 's'}` : railwayStatus?.description || 'Public platform status'}
@@ -260,6 +295,21 @@ export const PlatformAuditPage: React.FC = () => {
             {railwayStatus?.incidents.slice(0, 2).map((incident, index) => <div key={`${incident.name}-${index}`} className="mt-2 truncate text-xs text-gray-700" title={incident.name}>{incident.name}</div>)}
             {railwayStatus?.affectedComponents.slice(0, 2).map(component => <div key={component.name} className="mt-2 truncate text-xs text-amber-800" title={`${component.name}: ${component.status}`}>{component.name}: {component.status.replaceAll('_', ' ')}</div>)}
             <a href="https://status.railway.com/" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-teal-800 hover:underline">Railway status page <ExternalLink size={12} /></a>
+          </div>
+          <div className="rounded-md border bg-white p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Server size={15} /> Cloudflare frontend</div>
+            <div className={`mt-2 flex items-center gap-2 text-lg font-semibold ${cloudflareStatus?.status === 'degraded' ? 'text-red-700' : cloudflareStatus?.status === 'unavailable' ? 'text-amber-700' : 'text-emerald-700'}`}>
+              {cloudflareStatus?.status === 'operational' ? <><CheckCircle2 size={17} /> Operational</> : cloudflareStatus?.status === 'degraded' ? <><CircleAlert size={17} /> Degraded</> : cloudflareStatus?.status === 'unavailable' ? 'Status unavailable' : 'Checking status'}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              {cloudflareStatus?.frontend.status === 'reachable' ? `Frontend reachable · HTTP ${cloudflareStatus.frontend.httpStatus} · ${cloudflareStatus.frontend.latencyMs} ms` : cloudflareStatus?.frontend.status === 'unreachable' ? 'Frontend check failed' : cloudflareStatus?.description || 'Checking Cloudflare'}
+              {cloudflareStatus?.stale ? ' · last known status' : ''}
+            </div>
+            {cloudflareStatus && (cloudflareStatus.incidents.length || cloudflareStatus.affectedComponents.length) ? <div className="mt-2 space-y-1 text-xs text-amber-800">
+              {cloudflareStatus.incidents.slice(0, 2).map((incident, index) => <div key={`${incident.name}-${index}`} className="truncate" title={incident.name}>{incident.name}</div>)}
+              {cloudflareStatus.affectedComponents.slice(0, 2).map(component => <div key={component.name} className="truncate" title={`${component.name}: ${component.status}`}>{component.name}: {component.status.replaceAll('_', ' ')}</div>)}
+            </div> : <div className="mt-2 text-xs text-gray-500">{cloudflareStatus?.description || 'Cloudflare platform status'}</div>}
+            <a href="https://www.cloudflarestatus.com/" target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-teal-800 hover:underline">Cloudflare status page <ExternalLink size={12} /></a>
           </div>
         </div>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">

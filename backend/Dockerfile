@@ -33,6 +33,7 @@ RUN npm run test:property
 RUN npm run test:platform-observability
 RUN npm run test:scaling-safety
 RUN npm run test:railway-status
+RUN npm run test:cloudflare-status
 
 # Production stage
 FROM base AS runner
