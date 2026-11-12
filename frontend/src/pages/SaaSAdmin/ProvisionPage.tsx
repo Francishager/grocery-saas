@@ -23,6 +23,7 @@ interface ProvisionResult {
   tempPassword?: string
   otp?: string
   reusedOwnerAccount?: boolean
+  alreadyProvisioned?: boolean
 }
 
 function generatePassword(length = 14) {
@@ -181,8 +182,8 @@ export const ProvisionPage: React.FC = () => {
         <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <CheckCircle className="w-8 h-8 text-green-600" />
         </div>
-        <h2 className="text-xl font-semibold">Business Provisioned!</h2>
-        <p className="text-gray-500 mt-2">The business and owner account have been created successfully.</p>
+        <h2 className="text-xl font-semibold">{result?.alreadyProvisioned ? 'Business Already Provisioned' : 'Business Provisioned!'}</h2>
+        <p className="text-gray-500 mt-2">{result?.alreadyProvisioned ? 'This request matched the business already linked to this owner. No duplicate was created.' : 'The business and owner account have been created successfully.'}</p>
         {result?.status === 'trial' && result.trialEndsAt && (
           <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-left text-sm text-blue-900">
             <p className="font-medium">Trial activated for {result.trialDays} days</p>

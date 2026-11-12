@@ -1138,6 +1138,20 @@ router.get('/stats/detailed', authenticateToken, requirePlatformAdmin, async (re
         subscriptionEnd: { gte: new Date(), lte: sevenDaysFromNow }
       }
     })
+    const expiringTenants = await prisma.tenant.findMany({
+      where: {
+        status: 'active',
+        subscriptionEnd: { gte: new Date(), lte: sevenDaysFromNow },
+      },
+      orderBy: { subscriptionEnd: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        subscriptionEnd: true,
+        plan: { select: { name: true } },
+      },
+    })
 
     // Recent tenants
     const recentTenants = await prisma.tenant.findMany({
@@ -1178,6 +1192,13 @@ router.get('/stats/detailed', authenticateToken, requirePlatformAdmin, async (re
         expiringSubscriptions,
       },
       planDistribution: distribution,
+      expiringTenants: expiringTenants.map(tenant => ({
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        subscriptionEnd: tenant.subscriptionEnd,
+        planName: tenant.plan?.name || 'No Plan',
+      })),
       recentTenants: recentTenants.map(t => ({
         id: t.id,
         name: t.name,

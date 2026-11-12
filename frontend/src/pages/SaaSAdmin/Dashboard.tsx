@@ -20,6 +20,7 @@ interface DetailedStats {
     expiringSubscriptions: number
   }
   planDistribution: { planId: string; planName: string; count: number; price: number; currency: string }[]
+  expiringTenants?: { id: string; name: string; slug: string; subscriptionEnd: string; planName: string }[]
   recentTenants: { id: string; name: string; slug: string; status: string; planName: string; userCount: number; createdAt: string }[]
   recentActivity: { id: string; tenantId: string; userEmail: string; action: string; model: string; ip: string | null; createdAt: string }[]
   warnings?: string[]
@@ -149,6 +150,27 @@ export const SaaSAdminDashboard: React.FC = () => {
               <p className="text-sm text-yellow-700">Review and follow up with tenants before their subscription expires</p>
             </div>
           </div>
+          {stats.expiringTenants?.length ? (
+            <ul className="mt-3 divide-y divide-yellow-200 border-t border-yellow-200">
+              {stats.expiringTenants.map(tenant => (
+                <li key={tenant.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-sm">
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/saas/businesses/${tenant.id}`)}
+                      className="truncate text-left font-medium text-yellow-950 hover:underline"
+                    >
+                      {tenant.name}
+                    </button>
+                    <span className="ml-2 text-yellow-800">{tenant.planName}</span>
+                  </div>
+                  <span className="shrink-0 text-yellow-800">Expires {fmtDate(tenant.subscriptionEnd)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 border-t border-yellow-200 pt-3 text-sm text-yellow-800">Tenant expiry details are unavailable. Refresh the dashboard to try again.</p>
+          )}
         </div>
       )}
 

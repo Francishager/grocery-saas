@@ -82,6 +82,42 @@ function splitName(name = "") {
   };
 }
 
+async function findProvisionedTenantForOwner({ slug, businessName, ownerEmail }) {
+  if (!slug || !businessName || !ownerEmail) return null;
+  const tenant = await prisma.tenant.findUnique({
+    where: { slug },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      status: true,
+      trialEndsAt: true,
+      owner: { select: { email: true, role: true, isActive: true } },
+    },
+  });
+  const nameMatches = tenant?.name?.trim().toLowerCase() === String(businessName).trim().toLowerCase();
+  const ownerMatches = tenant?.owner?.email?.trim().toLowerCase() === String(ownerEmail).trim().toLowerCase()
+    && tenant.owner.role === 'owner'
+    && tenant.owner.isActive;
+  return nameMatches && ownerMatches ? tenant : null;
+}
+
+function alreadyProvisionedPayload(tenant, ownerEmail) {
+  return {
+    message: 'This business was already provisioned and linked to this owner. No duplicate was created.',
+    tenantId: tenant.id,
+    slug: tenant.slug,
+    status: tenant.status,
+    trialDays: null,
+    trialEndsAt: tenant.trialEndsAt,
+    ownerEmail,
+    reusedOwnerAccount: true,
+    alreadyProvisioned: true,
+    emailSent: null,
+    emailError: null,
+  };
+}
+
 function frontendOrigin() {
   return process.env.FRONTEND_ORIGIN || `http://localhost:${process.env.PORT || 3000}`;
 }
@@ -1351,6 +1387,7 @@ router.post("/reinvite-owner/:tenantId", authenticateToken, requirePlatformAdmin
 // Provision tenant (business + owner)
 router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requirePlatformAdmin, async (req, res) => {
   let requestedOwnerReuse = false;
+  let provisionIdentity = null;
   try {
     const { business, owner } = req.body;
     if (!business?.name?.trim()) return res.status(400).json({ error: "Business name is required" });
@@ -1383,6 +1420,10 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     if (requestedOwnerReuse && existingUser && (existingUser.role !== 'owner' || !existingUser.isActive)) return res.status(400).json({ error: "Only an active business-owner login can be reused." });
 
     const slug = (business.slug || business.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    provisionIdentity = { slug, businessName: business.name, ownerEmail };
+    const alreadyProvisioned = await findProvisionedTenantForOwner(provisionIdentity);
+    if (alreadyProvisioned) return res.status(200).json(alreadyProvisionedPayload(alreadyProvisioned, ownerEmail));
+
     const parsedName = splitName(owner.name || `${existingUser?.fname || ''} ${existingUser?.lname || ''}`);
     const ownerFname = existingUser?.fname || owner.fname || parsedName.fname || ownerEmail.split("@")[0];
     const ownerLname = existingUser?.lname || owner.lname || parsedName.lname || "";
@@ -1509,6 +1550,14 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
         reusingOwnerLogin: requestedOwnerReuse,
       });
       if (String(target || '').toLowerCase().includes('slug')) {
+        if (provisionIdentity) {
+          try {
+            const alreadyProvisioned = await findProvisionedTenantForOwner(provisionIdentity);
+            if (alreadyProvisioned) return res.status(200).json(alreadyProvisionedPayload(alreadyProvisioned, provisionIdentity.ownerEmail));
+          } catch (lookupError) {
+            console.error("Could not verify idempotent tenant provisioning retry:", lookupError?.code || lookupError?.message || "Unknown lookup error");
+          }
+        }
         return res.status(409).json({ error: "That business URL is already in use. Choose a different business URL." });
       }
       if (err.meta?.modelName === 'User') {
