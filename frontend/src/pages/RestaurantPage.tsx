@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, categoriesApi } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,7 @@ import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
 import { discoverPrintAgent, getPrintAgentPrinters, printReceiptViaAgent, type PrintAgentPrinter } from '@/lib/printAgent'
 import { hasNativePrinterBridge, listNativePrinters, printWithNativePrinter } from '@/lib/nativePrinter'
+import { FormSelectSearch } from '@/components/forms/FormSelectSearch'
 
 interface Table { id: string; name: string; capacity: number; status: string; area: string | null; isActive: boolean; _count?: { orders: number } }
 interface Waiter { id: string; name: string; phone: string | null; code: string | null; isActive: boolean; employeeId?: string | null; hasPin?: boolean; _count?: { orders: number; tips: number } }
@@ -67,7 +68,6 @@ export default function RestaurantPage() {
   const canCreateMenuItem = hasPermission('canCreateRestaurant') || (standaloneBar && hasPermission('canCreateBarMenu'))
   const canEditRestaurant = hasPermission('canEditRestaurant') || (standaloneBar && hasPermission('canEditBarOrders'))
   const canEditMenuItem = hasPermission('canEditRestaurant') || (standaloneBar && hasPermission('canEditBarMenu'))
-  const canDeleteMenuItem = hasPermission('canDeleteRestaurant') || (standaloneBar && hasPermission('canDeleteBarMenu'))
   const canDeleteRestaurant = hasPermission('canDeleteRestaurant') || (standaloneBar && hasPermission('canCancelBarOrders'))
   const canUpdateBarQueue = canEditRestaurant || hasPermission('canUpdateBarQueue')
   const canUpdateOrder = (order: Order) => canEditRestaurant || (hasPermission('canUpdateBarQueue') && order.items.length > 0 && order.items.every(item => item.station === 'bar'))
@@ -75,6 +75,7 @@ export default function RestaurantPage() {
   const canAdjustStock = canAdjustStockOut || hasPermission('canRecordStockIn')
   const canLinkWaiterToHr = canViewRestaurantOps && hasFeature('restaurant.waiters') && hasFeature('hr') && ['canViewHR', 'canCreateHREmployee', 'canEditHREmployee'].some(hasPermission)
   const [tab, setActiveTab] = useState(activeRouteTab || 'dashboard')
+  const barOrderFlow = standaloneBar || tab === 'bar' || (hasFeature('bar') && !hasPermission('canCreateRestaurant') && hasPermission('canCreateBarMenu'))
   const setTab = (nextTab: string) => {
     setActiveTab(nextTab)
     const basePath = standaloneBar ? '/tenant/bar' : '/tenant/restaurant'
@@ -91,6 +92,8 @@ export default function RestaurantPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [productCategories, setProductCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [categorySearch, setCategorySearch] = useState('')
   const [menuEntries, setMenuEntries] = useState<RestaurantMenuEntry[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [activeWaiterId, setActiveWaiterId] = useState(() => sessionStorage.getItem('restaurant.activeWaiterId') || '')
@@ -99,7 +102,11 @@ export default function RestaurantPage() {
   const requiresWaiterIdentity = waiters.some(waiter => waiter.isActive)
   const waiterIdentityConfirmed = Boolean(activeWaiterId && waiterSessionToken)
   const waiterMode = waiterKioskMode || waiterIdentityConfirmed
-  const canStartOrder = canCreateRestaurant && (waiterKioskMode ? waiterIdentityConfirmed : (!requiresWaiterIdentity || waiterIdentityConfirmed))
+  const canCreateOrder = canCreateRestaurant || (barOrderFlow && hasPermission('canCreateBarOrders'))
+  const canAddMenuEntry = canCreateMenuItem || (barOrderFlow && hasPermission('canCreateBarMenu'))
+  const canEditMenuEntry = (entry: RestaurantMenuEntry) => entry.station === 'bar' ? hasPermission('canEditBarMenu') : hasPermission('canEditRestaurant')
+  const canDeleteMenuEntry = (entry: RestaurantMenuEntry) => entry.station === 'bar' ? hasPermission('canDeleteBarMenu') : hasPermission('canDeleteRestaurant')
+  const canStartOrder = canCreateOrder && (waiterKioskMode ? waiterIdentityConfirmed : (!requiresWaiterIdentity || waiterIdentityConfirmed))
   const [pinWaiter, setPinWaiter] = useState<Waiter | null>(null)
   const [waiterPin, setWaiterPin] = useState('')
   const [showWaiterPinDialog, setShowWaiterPinDialog] = useState(false)
@@ -415,7 +422,7 @@ export default function RestaurantPage() {
         const menuEntry = menuEntries.find(entry => entry.productId === i.productId)
         return { productId: i.productId, quantity: i.quantity, price: menuEntry?.price || 0, station: menuEntry?.station || i.station }
       })
-      const res = await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(waiterSessionToken ? { 'X-Restaurant-Waiter-Session': waiterSessionToken } : {}) }, body: JSON.stringify({ ...orderForm, waiterId: activeWaiterId || null, items }) })
+      const res = await apiFetch('/api/restaurant/orders', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(waiterSessionToken ? { 'X-Restaurant-Waiter-Session': waiterSessionToken } : {}) }, body: JSON.stringify({ ...orderForm, orderType: barOrderFlow ? 'bar' : orderForm.orderType, waiterId: activeWaiterId || null, items }) })
       if (res.ok) {
         const createdOrder = await res.json()
         toast({ title: 'Order created' })
@@ -698,16 +705,42 @@ export default function RestaurantPage() {
     const price = Number(menuForm.price)
     if (!Number.isFinite(price) || price < 0) { toast({ variant: 'destructive', title: 'Enter a valid menu price' }); return }
     try {
-      const response = await apiFetch(editingMenuEntry ? `/api/restaurant/menu/${editingMenuEntry.id}` : '/api/restaurant/menu', { method: editingMenuEntry ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...menuForm, price }) })
+      const response = await apiFetch(editingMenuEntry ? `/api/restaurant/menu/${editingMenuEntry.id}` : '/api/restaurant/menu', { method: editingMenuEntry ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...menuForm, station: barOrderFlow ? 'bar' : menuForm.station, price }) })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error || 'Could not add menu item')
       setMenuEntries(current => editingMenuEntry ? current.map(entry => entry.id === editingMenuEntry.id ? data : entry) : [...current, data])
       setShowMenuEntryModal(false)
       setEditingMenuEntry(null)
-      setMenuForm({ productId: '', category: 'General', description: '', station: 'kitchen', price: '' })
+      setMenuForm({ productId: '', category: 'General', description: '', station: barOrderFlow ? 'bar' : 'kitchen', price: '' })
       toast({ title: editingMenuEntry ? 'Menu item updated' : 'Menu item added' })
     } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not add menu item' }) }
   }
+
+  const createMenuCategory = async () => {
+    const name = categorySearch.trim()
+    if (!name) return
+    try {
+      const result = await categoriesApi.create({ name, categoryType: 'product' })
+      const category = result.category
+      setProductCategories(current => current.some(item => item.id === category.id) ? current : [...current, category].sort((a, b) => a.name.localeCompare(b.name)))
+      setMenuForm(current => ({ ...current, category: category.name }))
+      setCategorySearch('')
+      toast({ title: 'Product category selected' })
+    } catch (error) {
+      toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not create category' })
+    }
+  }
+
+  useEffect(() => {
+    if (!showMenuEntryModal) return
+    let active = true
+    categoriesApi.list('product').then(categories => {
+      if (active) setProductCategories(categories)
+    }).catch(() => {
+      if (active) toast({ variant: 'destructive', title: 'Could not load product categories' })
+    })
+    return () => { active = false }
+  }, [showMenuEntryModal])
 
   const updateMenuEntry = async (entry: RestaurantMenuEntry, patch: Partial<RestaurantMenuEntry>) => {
     try {
@@ -768,7 +801,7 @@ export default function RestaurantPage() {
     })
   }
 
-  const addOrderItem = () => setOrderItems([...orderItems, { productId: '', quantity: 1, station: 'kitchen' }])
+  const addOrderItem = () => setOrderItems([...orderItems, { productId: '', quantity: 1, station: barOrderFlow ? 'bar' : 'kitchen' }])
   const updateOrderItem = (idx: number, field: string, value: string) => setOrderItems(orderItems.map((i, x) => x === idx ? { ...i, [field]: value } : i))
   const removeOrderItem = (idx: number) => setOrderItems(orderItems.filter((_, x) => x !== idx))
   const addRecipeIngredient = () => setRecipeForm({ ...recipeForm, ingredients: [...recipeForm.ingredients, { productId: '', quantity: 0, unit: 'Piece' }] })
@@ -825,7 +858,7 @@ export default function RestaurantPage() {
             <div className="flex flex-wrap gap-2">
               {canAccessTab('tables') && <Button variant="outline" onClick={() => setTab('tables')}><Table2 className="mr-2 h-4 w-4" /> Floor</Button>}
               {canAccessTab('kitchen') && <Button variant="outline" onClick={() => setTab('kitchen')}><ChefHat className="mr-2 h-4 w-4" /> Kitchen</Button>}
-              {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: standaloneBar ? 'takeaway' : 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
+              {canCreateOrder && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: barOrderFlow ? 'bar' : 'dine_in', specialInstructions: '' }); setOrderItems([]); setShowOrderModal(true) }}><Plus className="mr-2 h-4 w-4" /> Start order</Button>}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -932,7 +965,7 @@ export default function RestaurantPage() {
         <TabsContent value="menu">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div><h2 className="font-semibold">{standaloneBar ? 'Bar menu' : 'Restaurant menu'}</h2><p className="text-sm text-muted-foreground">Curate available items; menu entries stay linked to inventory and sales.</p></div>
-            {canCreateMenuItem && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: standaloneBar ? 'bar' : 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
+            {canAddMenuEntry && !waiterMode && <Button onClick={() => { setEditingMenuEntry(null); setMenuForm({ productId: '', category: 'General', description: '', station: barOrderFlow ? 'bar' : 'kitchen', price: '' }); setShowMenuEntryModal(true) }}><Plus className="mr-2 h-4 w-4" /> Add menu item</Button>}
           </div>
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search menu items" className="pl-9" /></div>
@@ -946,20 +979,20 @@ export default function RestaurantPage() {
                 </div>
                 <CardContent className="space-y-3 p-3">
                   <div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium" title={entry.product.name}>{entry.product.name}</p><p className="text-sm text-muted-foreground">{entry.category} · {entry.station === 'bar' ? 'Bar' : 'Kitchen'}</p>{entry.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{entry.description}</p>}</div><div className="flex flex-col items-end gap-1"><Badge variant="outline">{entry.product.quantity} in stock</Badge>{!entry.isAvailable && <Badge variant="secondary">Paused</Badge>}</div></div>
-                  <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span>{canCreateRestaurant && <Button size="sm" disabled={!entry.isAvailable || !canStartOrder} title={!canStartOrder ? 'Confirm Serving as before adding items to an order' : undefined} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button>}</div>
+                    <div className="flex items-center justify-between gap-2"><span className="font-semibold">{entry.price.toLocaleString()}</span>{canCreateOrder && <Button size="sm" disabled={!entry.isAvailable || !canStartOrder} title={!canStartOrder ? 'Confirm Serving as before adding items to an order' : undefined} onClick={() => addMenuEntryToCart(entry)}><Plus className="mr-1 h-4 w-4" /> Add</Button>}</div>
                   <div className="flex flex-wrap items-center gap-2 border-t pt-2">
                     {canEditMenuItem && !waiterMode && <label className="inline-flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium hover:bg-accent">
                       <ImagePlus className="h-3.5 w-3.5" /> {entry.product.image ? 'Change photo' : 'Add photo'}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => { void uploadMenuImage(entry.productId, event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
                     </label>}
-                    {(canEditMenuItem || canDeleteMenuItem) && !waiterMode && <div className="ml-auto"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${entry.product.name}`} title="Menu item actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditMenuItem && <DropdownMenuItem onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit menu item</DropdownMenuItem>}{canEditMenuItem && <DropdownMenuItem onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause item' : 'Resume item'}</DropdownMenuItem>}{canDeleteMenuItem && <DropdownMenuItem onClick={() => void deleteMenuEntry(entry)}>Remove from menu</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
+                    {(canEditMenuEntry(entry) || canDeleteMenuEntry(entry)) && !waiterMode && <div className="ml-auto"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for ${entry.product.name}`} title="Menu item actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditMenuEntry(entry) && <DropdownMenuItem onClick={() => { setEditingMenuEntry(entry); setMenuForm({ productId: entry.productId, category: entry.category, description: entry.description || '', station: entry.station, price: String(entry.price) }); setShowMenuEntryModal(true) }}>Edit menu item</DropdownMenuItem>}{canEditMenuEntry(entry) && <DropdownMenuItem onClick={() => void updateMenuEntry(entry, { isAvailable: !entry.isAvailable })}>{entry.isAvailable ? 'Pause item' : 'Resume item'}</DropdownMenuItem>}{canDeleteMenuEntry(entry) && <DropdownMenuItem onClick={() => void deleteMenuEntry(entry)}>Remove from menu</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                   </div>
                 </CardContent>
               </Card>)}
             </div>}
           {canCreateRestaurant && orderItems.length > 0 && <div className="sticky bottom-3 z-10 mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-3 shadow-lg">
             <div><p className="font-medium">Order cart · {orderItems.reduce((count, item) => count + item.quantity, 0)} items</p><p className="text-sm text-muted-foreground">Estimated total: {orderItems.reduce((sum, item) => sum + item.quantity * (menuEntries.find(entry => entry.productId === item.productId)?.price || 0), 0).toLocaleString()}</p></div>
-            <div className="flex gap-2"><Button variant="outline" onClick={() => setOrderItems([])}>Clear cart</Button><Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before continuing' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: 'takeaway', specialInstructions: '' }); setShowOrderModal(true) }}>Continue to order</Button></div>
+            <div className="flex gap-2"><Button variant="outline" onClick={() => setOrderItems([])}>Clear cart</Button><Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before continuing' : undefined} onClick={() => { setOrderForm({ tableId: '', waiterId: activeWaiterId, orderType: barOrderFlow ? 'bar' : 'takeaway', specialInstructions: '' }); setShowOrderModal(true) }}>Continue to order</Button></div>
           </div>}
         </TabsContent>
 
@@ -982,7 +1015,7 @@ export default function RestaurantPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
-            {canCreateRestaurant && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId, orderType: standaloneBar ? 'takeaway' : orderForm.orderType }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
+            {canCreateOrder && <Button disabled={!canStartOrder} title={!canStartOrder ? 'Confirm Serving as before starting an order' : undefined} onClick={() => { setOrderForm({ ...orderForm, waiterId: activeWaiterId, orderType: barOrderFlow ? 'bar' : orderForm.orderType }); setShowOrderModal(true) }}><Plus className="h-4 w-4 mr-1" /> New Order</Button>}
           </div>
           <div className="space-y-3">
             {paginatedOrders.map(o => (
@@ -994,13 +1027,13 @@ export default function RestaurantPage() {
                   {o.discount > 0 && <div className="flex justify-between text-sm text-red-600"><span>Discount</span><span>-{o.discount.toLocaleString()}</span></div>}
                   {o.tipAmount > 0 && <div className="flex justify-between text-sm"><span>Tip</span><span>{o.tipAmount.toLocaleString()}</span></div>}
                   <div className="flex justify-between font-medium border-t pt-2 mt-1"><span>Total</span><span>{o.total.toLocaleString()}</span></div>
-                  {(canUpdateOrder(o) || canEditRestaurant || canDeleteRestaurant) && <div className="mt-3 flex justify-end"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for order ${o.orderNo}`} title="Order actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canUpdateOrder(o) && o.status === 'pending' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'preparing')}>Start preparing</DropdownMenuItem>}{canUpdateOrder(o) && o.status === 'preparing' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'ready')}>Mark ready</DropdownMenuItem>}{canUpdateOrder(o) && o.status === 'ready' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'served')}>Mark served</DropdownMenuItem>}{canEditRestaurant && o.status === 'served' && <DropdownMenuItem onClick={() => openCompleteModal(o)}>Complete and pay</DropdownMenuItem>}{canEditRestaurant && hasFeature('restaurant.split_bills') && o.status === 'served' && <DropdownMenuItem onClick={() => openSplitModal(o)}>Split bill</DropdownMenuItem>}{canEditRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && o.table && <DropdownMenuItem onClick={() => openMoveModal(o)}>Move table</DropdownMenuItem>}{canDeleteRestaurant && o.status !== 'completed' && o.status !== 'cancelled' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel order</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
+                  {o.status !== 'completed' && o.status !== 'cancelled' && (canUpdateOrder(o) || canEditRestaurant || canDeleteRestaurant) && <div className="mt-3 flex justify-end"><DropdownMenu><DropdownMenuTrigger aria-label={`Actions for order ${o.orderNo}`} title="Order actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canUpdateOrder(o) && o.status === 'pending' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'preparing')}>Start preparing</DropdownMenuItem>}{canUpdateOrder(o) && o.status === 'preparing' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'ready')}>Mark ready</DropdownMenuItem>}{canUpdateOrder(o) && o.status === 'ready' && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'served')}>Mark served</DropdownMenuItem>}{canEditRestaurant && o.status === 'served' && <DropdownMenuItem onClick={() => openCompleteModal(o)}>Complete and pay</DropdownMenuItem>}{canEditRestaurant && hasFeature('restaurant.split_bills') && o.status === 'served' && <DropdownMenuItem onClick={() => openSplitModal(o)}>Split bill</DropdownMenuItem>}{canEditRestaurant && o.table && <DropdownMenuItem onClick={() => openMoveModal(o)}>Move table</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => updateOrderStatus(o.id, 'cancelled')}>Cancel order</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}
                 </CardContent>
               </Card>
             ))}
           </div>
           {filteredOrders.length === 0 && <div className="text-center text-muted-foreground py-8">No orders found.</div>}
-          {ordersTotal > 8 && <Pagination currentPage={ordersPage} totalPages={ordersTotalPages} onPageChange={ordersGoToPage} totalItems={ordersTotal} />}
+          {ordersTotal > 8 && <Pagination currentPage={ordersPage} totalPages={ordersTotalPages} pageSize={8} onPageChange={ordersGoToPage} totalItems={ordersTotal} />}
         </TabsContent>
 
         {/* Kitchen / Bar Display */}
@@ -1060,7 +1093,7 @@ export default function RestaurantPage() {
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between">
                     <div><div className="font-medium">{r.customerName} {r.customerPhone && <span className="text-muted-foreground">· {r.customerPhone}</span>}</div><div className="text-sm text-muted-foreground">{new Date(r.date).toLocaleDateString()} at {r.time} · {r.guests} guests {r.table && `· ${r.table.name}`}</div>{r.specialRequests && <div className="text-sm text-orange-600 mt-1">⚠ {r.specialRequests}</div>}</div>
-                    <div className="flex items-center gap-2"><Badge className={statusColors[r.status]}>{r.status}</Badge>{((canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed') || canDeleteRestaurant) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for reservation for ${r.customerName}`} title="Reservation actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && r.status === 'reserved' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check in</DropdownMenuItem>}{canEditRestaurant && r.status === 'checked_in' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'completed')}>Complete reservation</DropdownMenuItem>}{canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel reservation</DropdownMenuItem>}{canDeleteRestaurant && <DropdownMenuItem onClick={() => deleteReservation(r.id)}>Delete reservation</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
+                    <div className="flex items-center gap-2"><Badge className={statusColors[r.status]}>{r.status}</Badge>{((canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed') || (canDeleteRestaurant && r.status !== 'completed')) && <DropdownMenu><DropdownMenuTrigger aria-label={`Actions for reservation for ${r.customerName}`} title="Reservation actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent>{canEditRestaurant && r.status === 'reserved' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'checked_in')}>Check in</DropdownMenuItem>}{canEditRestaurant && r.status === 'checked_in' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'completed')}>Complete reservation</DropdownMenuItem>}{canEditRestaurant && r.status !== 'cancelled' && r.status !== 'completed' && <DropdownMenuItem onClick={() => updateReservationStatus(r.id, 'cancelled')}>Cancel reservation</DropdownMenuItem>}{canDeleteRestaurant && r.status !== 'completed' && <DropdownMenuItem onClick={() => deleteReservation(r.id)}>Delete reservation</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>}</div>
                   </div>
                 </CardContent>
               </Card>
@@ -1227,23 +1260,20 @@ export default function RestaurantPage() {
           <div className="space-y-3">
             <div>
               <Label>Tracked inventory item</Label>
-              <Select value={menuForm.productId} disabled={Boolean(editingMenuEntry)} onValueChange={value => {
+              <FormSelectSearch value={menuForm.productId} disabled={Boolean(editingMenuEntry)} onChange={value => {
                 const product = products.find(item => item.id === value)
-                setMenuForm(current => ({ ...current, productId: value, price: String(product?.price ?? '') }))
-              }}>
-                <SelectTrigger><SelectValue placeholder="Choose item linked to stock and cost" /></SelectTrigger>
-                <SelectContent>{products.filter(product => editingMenuEntry?.productId === product.id || !menuEntries.some(entry => entry.productId === product.id)).map(product => <SelectItem key={product.id} value={product.id}>{product.name} · stock {product.quantity}</SelectItem>)}</SelectContent>
-              </Select>
+                setMenuForm(current => ({ ...current, productId: String(value ?? ''), price: String(product?.price ?? '') }))
+              }} placeholder="Choose item linked to stock and cost" searchPlaceholder="Search inventory items..." options={products.filter(product => editingMenuEntry?.productId === product.id || !menuEntries.some(entry => entry.productId === product.id)).map(product => ({ value: product.id, label: `${product.name} · stock ${product.quantity}` }))} />
               <p className="mt-1 text-xs text-muted-foreground">Menu pricing and availability are managed here. Stock and recipe ingredients remain linked to inventory.</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <div><Label>Menu price</Label><Input type="number" min="0" step="0.01" value={menuForm.price} onChange={event => setMenuForm(current => ({ ...current, price: event.target.value }))} /></div>
-              <div><Label>Menu category</Label><Input value={menuForm.category} onChange={event => setMenuForm(current => ({ ...current, category: event.target.value }))} placeholder="Meals, Drinks, Sides" /></div>
-              {!standaloneBar && <div><Label>Preparation station</Label><Select value={menuForm.station} onValueChange={station => setMenuForm(current => ({ ...current, station }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>}
+              <div><Label>Menu price</Label><Input type="number" min="0" step="0.01" value={menuForm.price} disabled={editingMenuEntry ? !canEditMenuEntry(editingMenuEntry) : !canAddMenuEntry} onChange={event => setMenuForm(current => ({ ...current, price: event.target.value }))} /><p className="mt-1 text-xs text-muted-foreground">Only staff with menu edit access can change saved menu prices. Order takers use this price.</p></div>
+              <div><Label>Menu category</Label><FormSelectSearch value={menuForm.category} onChange={value => setMenuForm(current => ({ ...current, category: String(value ?? '') }))} searchValue={categorySearch} onSearchChange={setCategorySearch} placeholder="Select a product category" searchPlaceholder="Search categories..." options={[...new Set([...productCategories.map(category => category.name), menuForm.category].filter(Boolean))].map(name => ({ value: name, label: name }))} listFooter={categorySearch.trim() && !productCategories.some(category => category.name.toLowerCase() === categorySearch.trim().toLowerCase()) && canAddMenuEntry ? <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => void createMenuCategory()}><Plus className="mr-2 h-4 w-4" />Create “{categorySearch.trim()}”</Button> : undefined} /></div>
+              {!barOrderFlow && <div><Label>Preparation station</Label><Select value={menuForm.station} onValueChange={station => setMenuForm(current => ({ ...current, station }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>}
             </div>
             <div><Label>Description</Label><Input value={menuForm.description} onChange={event => setMenuForm(current => ({ ...current, description: event.target.value }))} placeholder="Menu description or serving notes" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry} disabled={editingMenuEntry ? !canEditMenuItem : !canCreateMenuItem}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowMenuEntryModal(false)}>Cancel</Button><Button onClick={saveMenuEntry} disabled={editingMenuEntry ? !canEditMenuEntry(editingMenuEntry) : !canAddMenuEntry}>{editingMenuEntry ? 'Save changes' : 'Add to menu'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1252,17 +1282,17 @@ export default function RestaurantPage() {
         <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>New Order</DialogTitle></DialogHeader>
           <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {!standaloneBar && <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>}
+              {!barOrderFlow && <div><Label>Table</Label><Select value={orderForm.tableId} onValueChange={v => setOrderForm({ ...orderForm, tableId: v })}><SelectTrigger><SelectValue placeholder="Select table" /></SelectTrigger><SelectContent>{tables.filter(t => t.isActive && t.status === 'available').map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></div>}
               {!standaloneBar && <div><Label>Serving as</Label>{waiters.some(waiter => waiter.isActive) ? <Select value={activeWaiterId || 'unassigned'} onValueChange={requestWaiterIdentity}><SelectTrigger disabled={waiterIdentityConfirmed} aria-label={waiterIdentityConfirmed ? 'Serving waiter is locked until sign out' : 'Select serving waiter'}><SelectValue placeholder="Select waiter" /></SelectTrigger><SelectContent>{!waiterKioskMode && <SelectItem value="unassigned">Select waiter</SelectItem>}{waiters.filter(waiter => waiter.isActive).map(waiter => <SelectItem key={waiter.id} value={waiter.id}>{waiter.name}{waiter.hasPin ? '' : ' · PIN not set'}</SelectItem>)}</SelectContent></Select> : <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Signed-in cashier</div>}</div>}
-              <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{!standaloneBar && <SelectItem value="dine_in">Dine In</SelectItem>}<SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>
+              {barOrderFlow ? <div><Label>Order Type</Label><div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm">Bar service</div></div> : <div><Label>Order Type</Label><Select value={orderForm.orderType} onValueChange={v => setOrderForm({ ...orderForm, orderType: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="dine_in">Dine In</SelectItem><SelectItem value="takeaway">Takeaway</SelectItem><SelectItem value="delivery">Delivery</SelectItem></SelectContent></Select></div>}
             </div>
             <div><Label>Items</Label>
               <Input value={menuSearchQuery} onChange={event => setMenuSearchQuery(event.target.value)} placeholder="Search food and drinks" className="mb-2" />
               <div className="space-y-2">{orderItems.map((item, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-6"><Select value={item.productId} onValueChange={v => updateOrderItem(idx, 'productId', v)}><SelectTrigger><SelectValue placeholder="Select menu item" /></SelectTrigger><SelectContent>{menuEntries.filter(entry => entry.isAvailable && entry.product.name.toLowerCase().includes(menuSearchQuery.toLowerCase())).map(entry => <SelectItem key={entry.productId} value={entry.productId}>{entry.product.name} · {entry.price.toLocaleString()}</SelectItem>)}</SelectContent></Select></div>
+                  <div className={barOrderFlow ? 'col-span-9' : 'col-span-6'}><Select value={item.productId} onValueChange={v => updateOrderItem(idx, 'productId', v)}><SelectTrigger><SelectValue placeholder="Select menu item" /></SelectTrigger><SelectContent>{menuEntries.filter(entry => entry.isAvailable && entry.product.name.toLowerCase().includes(menuSearchQuery.toLowerCase()) && (!barOrderFlow || entry.station === 'bar')).map(entry => <SelectItem key={entry.productId} value={entry.productId}>{entry.product.name} · {entry.price.toLocaleString()}</SelectItem>)}</SelectContent></Select></div>
                   <div className="col-span-2"><Input type="number" min={1} value={item.quantity} onChange={e => updateOrderItem(idx, 'quantity', e.target.value)} /></div>
-                  <div className="col-span-3"><Select value={item.station} onValueChange={v => updateOrderItem(idx, 'station', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>
+                  {!barOrderFlow && <div className="col-span-3"><Select value={item.station} onValueChange={v => updateOrderItem(idx, 'station', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="kitchen">Kitchen</SelectItem><SelectItem value="bar">Bar</SelectItem></SelectContent></Select></div>}
                   <div className="col-span-1"><Button size="sm" variant="ghost" onClick={() => removeOrderItem(idx)}>✕</Button></div>
                 </div>
               ))}</div>

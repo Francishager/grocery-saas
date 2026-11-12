@@ -4599,6 +4599,7 @@ enum OrderType {
   dine_in
   takeaway
   delivery
+  bar
 }
 
 enum OrderStatus {

@@ -287,6 +287,7 @@ router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appoint
     const existing = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
     if (!existing) return res.status(404).json({ error: 'Appointment not found' });
     const { status, technicianId, salonStylistId: requestedStylistId, scheduledDate, scheduledTime, endTime, duration, price, actualPrice, notes, cancelledReason } = req.body;
+    if (existing.status === 'completed' && status !== undefined && status !== 'completed') return res.status(409).json({ error: 'Completed appointments are retained for reporting and cannot be reopened or cancelled.' });
     const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : [];
     const platformAdmin = req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role);
     if (requestedStylistId !== undefined && !platformAdmin && !effectivePermissions.includes('*') && !effectivePermissions.includes('canAssignSalonStylist')) return res.status(403).json({ error: 'You do not have permission to assign a Salon stylist.' });
@@ -328,6 +329,9 @@ router.put("/appointments/:id", authenticateToken, requireServiceUpdate('appoint
 
 router.delete("/appointments/:id", authenticateToken, requirePermission(servicePermission('appointments', 'Delete')), requireAnyFeature(["service.appointments", "salon_spa"]), async (req, res) => {
   try {
+    const existing = await prisma.appointment.findFirst({ where: { id: req.params.id, tenantId: t(req) }, select: { id: true, status: true } });
+    if (!existing) return res.status(404).json({ error: 'Appointment not found' });
+    if (existing.status === 'completed') return res.status(409).json({ error: 'Completed appointments are retained for reporting and cannot be deleted.' });
     const commission = await prisma.salonCommission.findUnique({ where: { appointmentId: req.params.id }, select: { id: true, status: true } });
     if (commission) return res.status(409).json({ error: 'This appointment has a commission audit record. Cancel it to void an unclaimed commission; the appointment cannot be deleted.' });
     const deleted = await deleteTenantRecord('appointment', { id: req.params.id, tenantId: t(req) });
@@ -378,6 +382,9 @@ router.put("/work-orders/:id", authenticateToken, requireServiceUpdate('work-ord
 
 router.delete("/work-orders/:id", authenticateToken, requirePermission(servicePermission('work-orders', 'Delete')), requireFeature("service.work_orders"), async (req, res) => {
   try {
+    const existing = await prisma.workOrder.findFirst({ where: { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' }, select: { id: true, status: true } });
+    if (!existing) return res.status(404).json({ error: 'Work order not found' });
+    if (existing.status === 'completed') return res.status(409).json({ error: 'Completed work orders are retained for reporting and cannot be deleted.' });
     const deleted = await deleteTenantRecord('workOrder', { id: req.params.id, tenantId: t(req), serviceKind: 'work_order' });
     if (!deleted) return res.status(404).json({ error: 'Work order not found' });
     res.json({ message: "Work order deleted" });
@@ -534,6 +541,8 @@ router.put("/job-cards/:id", authenticateToken, requireServiceUpdate('job-cards'
 router.delete("/job-cards/:id", authenticateToken, requirePermission(servicePermission('job-cards', 'Delete')), requireFeature("service.job_cards"), async (req, res) => {
   try {
     const existing = await prisma.serviceJobCard.findFirst({ where: { id: req.params.id, tenantId: t(req) } });
+    if (!existing) return res.status(404).json({ error: 'Job card not found' });
+    if (existing.status === 'completed') return res.status(409).json({ error: 'Completed job cards are retained for reporting and cannot be deleted.' });
     if (['included_service', 'paid_service'].includes(existing?.serviceSource)) return res.status(400).json({ error: 'Cancel this sale-linked job card to preserve its history' });
     const deleted = await deleteTenantRecord('serviceJobCard', { id: req.params.id, tenantId: t(req) });
     if (!deleted) return res.status(404).json({ error: 'Job card not found' });

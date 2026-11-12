@@ -2,6 +2,13 @@ import prisma from '../db.js';
 import { readFile } from 'node:fs/promises';
 
 try {
+  const orderTypeEnum = await prisma.$queryRawUnsafe(`
+    SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'OrderType') AS exists;
+  `);
+  if (orderTypeEnum[0]?.exists) {
+    await prisma.$executeRawUnsafe(`ALTER TYPE "OrderType" ADD VALUE IF NOT EXISTS 'bar'`);
+  }
+
   // Check if table already exists
   const existingTable = await prisma.$queryRawUnsafe(`
     SELECT EXISTS (

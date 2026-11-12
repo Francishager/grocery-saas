@@ -342,7 +342,8 @@ router.put('/menu/:id', authenticateToken, requireAnyPermission(['canEditRestaur
     const standaloneBar = hasBarOnlyAccess(req)
     if (standaloneBar && current.station !== 'bar') return res.status(404).json({ error: 'Bar menu entry not found.' })
     const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
-    if (!granted.includes('*') && !granted.includes('canEditRestaurant') && !(current.station === 'bar' && granted.includes('canEditBarMenu'))) return res.status(403).json({ error: 'You do not have permission to edit this menu item.' })
+    const platformAdmin = req.user?.isPlatformUser || ['saas_admin', 'platform_admin', 'super_admin'].includes(req.user?.role)
+    if (!platformAdmin && !granted.includes('*') && (current.station === 'bar' ? !granted.includes('canEditBarMenu') : !granted.includes('canEditRestaurant'))) return res.status(403).json({ error: 'You do not have permission to edit this menu item.' })
     if (standaloneBar && req.body?.station && req.body.station !== 'bar') return res.status(400).json({ error: 'Standalone Bar menus can only use the bar service station.' })
     const price = req.body?.price === undefined ? current.price : Number(req.body.price)
     if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'Enter a valid non-negative menu price.' })
@@ -422,8 +423,11 @@ router.post('/orders', authenticateToken, requireAnyPermission(['canCreateRestau
   try {
     const scope = await resolveBranchScope(prisma, req)
     const { tableId, waiterId, customerId, orderType, items, specialInstructions } = req.body
-    if (!orderType) return res.status(400).json({ error: 'Order type is required' })
-    if (orderType === 'dine_in' && !tableId) return res.status(400).json({ error: 'Table is required for dine-in orders' })
+    const standaloneBar = hasBarOnlyAccess(req)
+    const effectiveOrderType = standaloneBar ? 'bar' : orderType
+    if (!effectiveOrderType || !['dine_in', 'takeaway', 'delivery', 'bar'].includes(effectiveOrderType)) return res.status(400).json({ error: 'Choose a valid order type.' })
+    if (effectiveOrderType === 'dine_in' && !tableId) return res.status(400).json({ error: 'Table is required for dine-in orders' })
+    if (effectiveOrderType === 'bar' && !hasFeatureAccess(req.tenantFeatures || new Set(), 'bar')) return res.status(403).json({ error: 'Bar service is not enabled for this business.' })
     if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'At least one item is required' })
     if (items.some(i => !i.productId || i.quantity < 1)) return res.status(400).json({ error: 'All items must have a product and quantity >= 1' })
     const menuProductIds = [...new Set(items.map(item => item.productId))]
@@ -433,8 +437,8 @@ router.post('/orders', authenticateToken, requireAnyPermission(['canCreateRestau
     })
     const menuByProductId = new Map(menuEntries.map(entry => [entry.productId, entry]))
     if (menuEntries.length !== menuProductIds.length) return res.status(400).json({ error: 'One or more selected items are unavailable or not on the restaurant menu.' })
-    const standaloneBar = hasBarOnlyAccess(req)
     if (standaloneBar && menuEntries.some(entry => entry.station !== 'bar')) return res.status(403).json({ error: 'Standalone Bar orders can only include items assigned to the bar station.' })
+    if (effectiveOrderType === 'bar' && menuEntries.some(entry => entry.station !== 'bar')) return res.status(400).json({ error: 'Bar service orders can only include bar menu items.' })
     const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
     if (menuEntries.some(entry => entry.station === 'bar') && !granted.includes('*') && !granted.includes('canCreateRestaurant') && !granted.includes('canCreateBarOrders')) return res.status(403).json({ error: 'You do not have permission to create bar orders.' })
     if (menuEntries.some(entry => entry.station !== 'bar') && !granted.includes('*') && !granted.includes('canCreateRestaurant')) return res.status(403).json({ error: 'You do not have permission to create restaurant orders.' })
@@ -480,7 +484,7 @@ router.post('/orders', authenticateToken, requireAnyPermission(['canCreateRestau
       data: {
         orderNo, tenantId: scope.tenantId, branchId: scope.branchId,
         tableId, waiterId, customerId, userId: req.user.id,
-        orderType: orderType || 'dine_in',
+        orderType: effectiveOrderType,
         status: 'pending',
         subtotal,
         total: subtotal,
@@ -511,6 +515,7 @@ router.put('/orders/:id/status', authenticateToken, requireAnyPermission(['canEd
     const standaloneBar = hasBarOnlyAccess(req)
     const existingOrder = await prisma.restaurantOrder.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true } })
     if (!existingOrder || (standaloneBar && existingOrder.items.some(item => item.station !== 'bar'))) return res.status(404).json({ message: 'Order not found' })
+    if (existingOrder.status === 'completed' && status !== 'completed') return res.status(409).json({ error: 'Completed orders are retained for reporting and audit. They cannot be changed or cancelled.' })
     if (standaloneBar && !granted.includes('*') && !granted.includes('canEditRestaurant') && !granted.includes('canEditBarOrders') && !granted.includes('canUpdateBarQueue')) return res.status(403).json({ error: 'You do not have permission to update bar orders.' })
     const order = await prisma.restaurantOrder.update({
       where: { id: existingOrder.id },
@@ -787,7 +792,12 @@ router.post('/reservations', authenticateToken, requirePermission('canCreateRest
 router.put('/reservations/:id/status', authenticateToken, requirePermission('canEditRestaurant'), requireFeature('restaurant.reservations'), async (req, res) => {
   try {
     const { status } = req.body
-    const reservation = await prisma.reservation.update({ where: { id: req.params.id }, data: { status } })
+    if (!['reserved', 'checked_in', 'completed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid reservation status.' })
+    const scope = await resolveBranchScope(prisma, req)
+    const existing = await prisma.reservation.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
+    if (!existing) return res.status(404).json({ error: 'Reservation not found.' })
+    if (existing.status === 'completed' && status !== 'completed') return res.status(409).json({ error: 'Completed reservations are retained for reporting and cannot be reopened or cancelled.' })
+    const reservation = await prisma.reservation.update({ where: { id: existing.id }, data: { status } })
     if (status === 'checked_in' && reservation.tableId) {
       await prisma.restaurantTable.update({ where: { id: reservation.tableId }, data: { status: 'occupied' } })
     }
@@ -800,7 +810,11 @@ router.put('/reservations/:id/status', authenticateToken, requirePermission('can
 
 router.delete('/reservations/:id', authenticateToken, requirePermission('canDeleteRestaurant'), requireFeature('restaurant.reservations'), async (req, res) => {
   try {
-    await prisma.reservation.delete({ where: { id: req.params.id } })
+    const scope = await resolveBranchScope(prisma, req)
+    const reservation = await prisma.reservation.findFirst({ where: scopedWhere(scope, { id: req.params.id }), select: { id: true, status: true } })
+    if (!reservation) return res.status(404).json({ error: 'Reservation not found.' })
+    if (reservation.status === 'completed') return res.status(409).json({ error: 'Completed reservations are retained for reporting and cannot be deleted.' })
+    await prisma.reservation.delete({ where: { id: reservation.id } })
     res.json({ message: 'Reservation deleted' })
   } catch (error) { handleBranchError(res, error) }
 })

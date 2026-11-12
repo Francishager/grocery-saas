@@ -3,7 +3,7 @@ import multer from 'multer';
 import { moveToTrash, assertOutsideTrash } from '../services/trashService.js';
 import { createHash, randomInt } from "node:crypto";
 import prisma from "../db.js";
-import { authenticateToken, requirePermission, requireFeature } from "../../middleware/auth.js";
+import { authenticateToken, requirePermission, requireAnyPermission, requireFeature } from "../../middleware/auth.js";
 import { getTenantFeatures, hasFeatureAccess } from '../../middleware/featureCheck.js';
 import { attachProductServiceLinks, saveProductServiceLinks } from '../services/saleServiceJobs.js';
 import {
@@ -931,9 +931,12 @@ router.get("/categories", authenticateToken, async (req, res) => {
 
 router.post("/categories", authenticateToken, (req, res, next) => {
   const categoryType = req.body?.categoryType || 'product';
-  const permissions = { product: 'canCreateProduct', service: 'canCreateService', rental: 'canCreateRental' };
-  if (typeof categoryType !== 'string' || !Object.hasOwn(permissions, categoryType)) return res.status(400).json({ error: "Invalid category type" });
-  return requirePermission(permissions[categoryType])(req, res, () => categoryType === 'rental' ? requireFeature('rentals')(req, res, next) : next());
+  const permissions = { service: 'canCreateService', rental: 'canCreateRental' };
+  if (!['product', ...Object.keys(permissions)].includes(categoryType)) return res.status(400).json({ error: "Invalid category type" });
+  const permissionGate = categoryType === 'product'
+    ? requireAnyPermission(['canCreateProduct', 'canCreateRestaurant', 'canCreateBarMenu'])
+    : requirePermission(permissions[categoryType]);
+  return permissionGate(req, res, () => categoryType === 'rental' ? requireFeature('rentals')(req, res, next) : next());
 }, async (req, res) => {
   try {
     const tenantId = tenantIdFromUser(req.user);
