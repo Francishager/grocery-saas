@@ -292,7 +292,9 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
       include: { tenant: true, cashAccount: { select: { id: true, name: true, type: true } }, branches: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] } },
     });
     if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
-    const securityRequired = targetTenantId !== baseUser.tenantId && await requiresBusinessSwitchSecurity(baseUser)
+    // A valid cross-tenant owner switch necessarily means this login owns multiple businesses.
+    // Enforce verification here directly so stale/missing membership rows cannot bypass it.
+    const securityRequired = targetTenantId !== baseUser.tenantId && baseUser.role === 'owner'
     try {
       if (securityRequired && !hasBusinessSwitchSecuritySetup(baseUser)) {
         return res.status(428).json({ error: 'Set up business-switch security before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })

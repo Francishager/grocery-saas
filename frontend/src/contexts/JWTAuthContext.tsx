@@ -511,7 +511,15 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
         body: JSON.stringify({ tenantId, ...confirmation }),
       })
       const data = await response.json().catch(() => ({}))
-      if (!response.ok) throw new Error(data.error || data.message || 'Could not switch business.')
+      if (!response.ok) {
+        if (data.code === 'SECURITY_SETUP_REQUIRED') {
+          updateUser({ securitySetupRequired: true, securityScopeVersion: 1 })
+          const setupError = new Error(data.error || data.message || 'Set up business-switch security before switching businesses.') as Error & { code?: string }
+          setupError.code = 'SECURITY_SETUP_REQUIRED'
+          throw setupError
+        }
+        throw new Error(data.error || data.message || 'Could not switch business.')
+      }
       setUser(data.user)
       setTokens(data.tokens)
       persistAuth(data.user, data.tokens)
