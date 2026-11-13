@@ -33,7 +33,8 @@ test('business switch obtains a passkey assertion and exposes a password recover
   assert.match(auth, /const statusResponse = await fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
   assert.match(auth, /Confirm your account password to switch businesses in the mobile app/)
   assert.match(layout, /JibuSales needs to verify it’s you/)
-  assert.match(layout, /Use your account password if your passkey is unavailable/)
+  assert.match(layout, /Enter your JibuSales password to open/)
+  assert.match(layout, /if \(!confirmationPassword\) \{\s*setPendingBusinessTarget\(nextTenantId\)/)
   assert.doesNotMatch(auth, /Complete account security setup before switching businesses\./)
 })
 
