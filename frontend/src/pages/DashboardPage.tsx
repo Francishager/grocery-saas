@@ -319,9 +319,7 @@ export default function DashboardPage() {
     <div className="mx-auto w-full max-w-[1600px] space-y-7 pb-8">
       <div className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="mb-1 text-xs font-semibold uppercase text-primary">Business overview</p>
           <h1 className="text-2xl font-semibold sm:text-3xl">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}{user?.name ? `, ${user.name.split(' ')[0]}` : ''}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Key financial and trading indicators for this month.</p>
           {isOfflineData && (
             <p className="mt-2 flex items-center gap-1 text-xs text-orange-600"><WifiOff className="h-3 w-3" /> Showing offline data</p>
           )}
