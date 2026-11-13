@@ -448,6 +448,15 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     }
   }, [resolvedApiEndpoint, onLogin])
 
+  const updateUser = useCallback((updates: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return prev
+      const updated = { ...prev, ...updates }
+      persistAuth(updated, tokens)
+      return updated
+    })
+  }, [tokens])
+
   const switchBusiness = useCallback(async (tenantId: string, confirmationPassword?: string) => {
     if (!tokens?.accessToken) throw new Error('Sign in again to switch businesses.')
     setLoading(true)
@@ -566,15 +575,6 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       return false
     }
   }, [resolvedApiEndpoint, tokens, user, logout, onTokenRefresh])
-
-  const updateUser = useCallback((updates: Partial<User>) => {
-    setUser((prev) => {
-      if (!prev) return prev
-      const updated = { ...prev, ...updates }
-      persistAuth(updated, tokens)
-      return updated
-    })
-  }, [tokens])
 
   const hasPermission = useCallback((permission: string): boolean => {
     if (!user) return false

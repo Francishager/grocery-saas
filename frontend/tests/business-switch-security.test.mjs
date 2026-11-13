@@ -51,4 +51,5 @@ test('fresh server-scoped security status avoids a verification screen for singl
   assert.match(auth, /securityScopeVersion\?: number/)
   assert.match(app, /user\.securityScopeVersion === 1/)
   assert.match(app, /if \(!user\.securitySetupRequired\) return <>{children}<\/>/)
+  assert.ok(auth.indexOf('const updateUser = useCallback') < auth.indexOf('const switchBusiness = useCallback'))
 })
