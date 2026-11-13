@@ -1,5 +1,6 @@
 import { appNotify, appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
+import { applyFeatureBranchSelection, buildFeatureEntitlementTree, FeatureEntitlementTree } from '@/components/FeatureEntitlementTree'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
@@ -59,7 +60,6 @@ export const TenantDetailPage: React.FC = () => {
   const [editInfo, setEditInfo] = useState(searchParams.get('edit') === '1')
   const [infoForm, setInfoForm] = useState({ name: '', email: '', phone: '', address: '', businessType: '', status: '', currency: 'UGX', timezone: 'Africa/Kampala', taxRate: 0, taxEnabled: false, taxId: '' })
   const [limitsForm, setLimitsForm] = useState({ maxProducts: 100, maxUsers: 5, maxBranches: 1, maxCustomers: 100, maxSuppliers: 50 })
-  const [featureOverrides, setFeatureOverrides] = useState<Record<string, boolean>>({})
   const [savingFeatures, setSavingFeatures] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
@@ -106,11 +106,6 @@ export const TenantDetailPage: React.FC = () => {
           taxEnabled: normalizedTenant.taxEnabled || false,
           taxId: normalizedTenant.taxId || '',
         })
-        const overrides: Record<string, boolean> = {}
-        Object.entries(normalizedTenant.allFeatures).forEach(([name, info]: [string, any]) => {
-          if (info?.source === 'override') overrides[name] = Boolean(info?.enabled)
-        })
-        setFeatureOverrides(overrides)
       } else {
         const errData = await res.json().catch(() => ({}))
         setFetchError(errData.message || errData.error || `Failed to load tenant (${res.status})`)
@@ -168,17 +163,29 @@ export const TenantDetailPage: React.FC = () => {
     setSavingInfo(false)
   }
 
-  const handleToggleFeature = async (featureName: string, enabled: boolean) => {
-    if (!tenantId) return
+  const handleToggleFeatureBranch = async (names: string[], enabled: boolean) => {
+    if (!tenantId || !detail) return
+    const allNames = Object.keys(detail.allFeatures || {})
+    const selected = applyFeatureBranchSelection(
+      allNames,
+      allNames.filter(name => detail.allFeatures[name]?.enabled),
+      names,
+      enabled,
+    )
+    const changed = allNames.filter(name => selected.has(name) !== Boolean(detail.allFeatures[name]?.enabled))
+    if (!changed.length) return
     setSavingFeatures(true)
     try {
-      const res = await apiFetch(`/api/platform/tenant/${tenantId}/features/${featureName}`, {
-        method: 'POST', body: JSON.stringify({ enabled })
+      const res = await apiFetch(`/api/platform/tenant/${tenantId}/features`, {
+        method: 'POST',
+        body: JSON.stringify({ features: changed.map(name => ({ name, enabled: selected.has(name) })) }),
       })
       if (res.ok) {
-        setFeatureOverrides(prev => ({ ...prev, [featureName]: enabled }))
-        fetchDetail()
-      } else { appNotify('Failed to update feature') }
+        await fetchDetail()
+      } else {
+        const error = await res.json().catch(() => ({}))
+        appNotify(error.error || 'Failed to update feature access')
+      }
     } catch { appNotify('Request failed') }
     setSavingFeatures(false)
   }
@@ -451,36 +458,30 @@ export const TenantDetailPage: React.FC = () => {
               <div className="max-h-96 overflow-y-auto space-y-4">
                 {Object.entries(
                   Object.entries(detail.allFeatures || {}).reduce<Record<string, Array<[string, { enabled: boolean; source: string; displayName: string; category: string }]>>>((groups, [name, info]) => {
-                    const cat = info.category || 'other'
+                    const cat = name.split('.')[0] || info.category || 'other'
                     groups[cat] = groups[cat] || []
                     groups[cat].push([name, info])
                     return groups
                   }, {})
-                ).map(([category, features]) => (
-                  <div key={category}>
-                    <p className="text-xs font-semibold uppercase text-gray-500 mb-2">{category.replace(/_/g, ' ')}</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {features.map(([name, info]) => {
-                        const isOverride = info.source === 'override'
-                        const isPlanEnabled = info.source === 'plan'
-                        const isChecked = isOverride ? featureOverrides[name] ?? info.enabled : info.enabled
-                        return (
-                          <label key={name} className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer ${isOverride ? 'border-purple-300 bg-purple-50' : isPlanEnabled ? 'border-blue-200 bg-blue-50' : 'border-gray-200'}`}>
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              disabled={savingFeatures}
-                              onChange={e => handleToggleFeature(name, e.target.checked)}
-                            />
-                            <span className="flex-1">{info.displayName || name}</span>
-                            {isOverride && <span className="text-xs text-purple-600">override</span>}
-                            {isPlanEnabled && !isOverride && <span className="text-xs text-blue-600">plan</span>}
-                          </label>
-                        )
-                      })}
+                ).map(([category, features]) => {
+                  const tree = buildFeatureEntitlementTree(features.map(([name, info]) => ({
+                    name,
+                    displayName: info.displayName,
+                    enabled: info.enabled,
+                    source: info.source === 'override' ? 'override' : info.source === 'plan' ? 'plan' : undefined,
+                  })))
+                  return (
+                    <div key={category}>
+                      <p className="text-xs font-semibold uppercase text-gray-500 mb-2">{category.replace(/_/g, ' ')}</p>
+                      <FeatureEntitlementTree
+                        nodes={tree}
+                        onToggle={handleToggleFeatureBranch}
+                        disabled={savingFeatures}
+                        getClassName={item => item.source === 'override' ? 'border-purple-300 bg-purple-50' : item.source === 'plan' ? 'border-blue-200 bg-blue-50' : 'border-gray-200'}
+                      />
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </div>

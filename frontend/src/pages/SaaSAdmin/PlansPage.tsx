@@ -3,6 +3,7 @@ import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
+import { applyFeatureBranchSelection, buildFeatureEntitlementTree, FeatureEntitlementTree } from '@/components/FeatureEntitlementTree'
 import { CreditCard, Plus, Edit, Trash2, Loader2, RefreshCw, Save, X, LayoutDashboard, ShoppingCart, Package, Users, Building2, DollarSign, FileText, Briefcase, BarChart3, Clock, Wrench, GitBranch, MessageSquare, Settings, ClipboardList, UtensilsCrossed } from 'lucide-react'
 
 interface PlanFeatureRow {
@@ -425,29 +426,41 @@ export const PlansPage: React.FC = () => {
   const selectedFeatureNames = form.features.split(',').map((f: string) => f.trim()).filter(Boolean)
   const featureLabel = (name: string) => featureOptions.find(f => f.name === name)?.displayName || name
   const featureGroups = featureOptions.reduce<Record<string, Feature[]>>((groups, feature) => {
-    const category = feature.module || feature.category || 'other'
+    const category = feature.name.split('.')[0] || feature.module || feature.category || 'other'
     groups[category] = groups[category] || []
     groups[category].push(feature)
     return groups
   }, {})
-  const toggleFeature = (name: string, checked: boolean) => {
-    setForm(p => {
-      const current = new Set(p.features.split(',').map((f: string) => f.trim()).filter(Boolean))
-      if (checked) current.add(name)
-      else current.delete(name)
-      return { ...p, features: Array.from(current).join(', ') }
+  const toggleFeatureBranch = (names: string[], checked: boolean) => {
+    setForm(current => {
+      const selected = new Set(current.features.split(',').map((name: string) => name.trim()).filter(Boolean))
+      const allowedNames = featureOptions
+        .filter(feature => !isLegacyFeature(feature.name) || (editingId && selected.has(feature.name)))
+        .map(feature => feature.name)
+      const next = applyFeatureBranchSelection(allowedNames, selected, names, checked)
+      return { ...current, features: Array.from(next).join(', ') }
     })
   }
   const toggleModule = (group: Feature[], checked: boolean) => {
     setForm(current => {
       const selected = new Set(current.features.split(',').map((name: string) => name.trim()).filter(Boolean))
       for (const feature of group) {
+        const lockedLegacy = isLegacyFeature(feature.name) && (!editingId || !selected.has(feature.name))
+        if (lockedLegacy) continue
         if (checked) selected.add(feature.name)
         else selected.delete(feature.name)
       }
       return { ...current, features: Array.from(selected).join(', ') }
     })
   }
+  const featureTrees = Object.fromEntries(Object.entries(featureGroups).map(([category, group]) => [
+    category,
+    buildFeatureEntitlementTree(group.map(feature => ({
+      name: feature.name,
+      displayName: feature.displayName,
+      enabled: selectedFeatureNames.includes(feature.name),
+    }))),
+  ]))
 
   return (
     <div className="space-y-6">
@@ -539,19 +552,11 @@ export const PlansPage: React.FC = () => {
                           <span>{(moduleGroupLabels[category] || category).replace(/_/g, ' ')}</span>
                           <span className="font-normal normal-case text-gray-500">{group.filter(feature => selectedFeatureNames.includes(feature.name)).length}/{group.length}</span>
                         </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {group.map(feature => (
-                            <label key={feature.id} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={selectedFeatureNames.includes(feature.name)}
-                                disabled={isLegacyFeature(feature.name) && (!editingId || !selectedFeatureNames.includes(feature.name))}
-                                onChange={e => toggleFeature(feature.name, e.target.checked)}
-                              />
-                              <span>{feature.displayName || feature.name}</span>
-                            </label>
-                          ))}
-                        </div>
+                        <FeatureEntitlementTree
+                          nodes={featureTrees[category] || []}
+                          onToggle={toggleFeatureBranch}
+                          canToggle={item => !(isLegacyFeature(item.name) && (!editingId || !selectedFeatureNames.includes(item.name)))}
+                        />
                       </div>
                     ))}
                   </div>

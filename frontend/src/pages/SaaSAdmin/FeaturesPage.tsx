@@ -1,6 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
+import { applyFeatureBranchSelection, buildFeatureEntitlementTree, FeatureEntitlementTree } from '@/components/FeatureEntitlementTree'
 import { ToggleLeft, ToggleRight, Loader2, RefreshCw, Plus, Trash2, DollarSign, Package, ShoppingCart, Briefcase, BarChart3, Save, X, Users, Building2, CreditCard, FileText, ClipboardList, Clock, Wrench, GitBranch, MessageSquare, Settings, LayoutDashboard, UtensilsCrossed, Wine, Fuel, Factory, Sprout, Database, Code, Gift, Store, Search } from 'lucide-react'
 
 interface Feature { id: string; name: string; displayName: string; slug: string; category: string; module: string; description: string; isActive: boolean }
@@ -367,24 +368,38 @@ export const FeaturesPage: React.FC = () => {
 
   const toFeatureName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
-  const handleTenantToggle = async (mf: { name: string; displayName: string }, enabled: boolean) => {
+  const handleTenantToggleBranch = async (names: string[], enabled: boolean) => {
     if (!selectedTenant) { setError('Select a tenant first'); return }
     setSaving(true); setError('')
     try {
-      // Auto-create feature in DB if it doesn't exist yet
-      if (!features.find(ef => ef.name === mf.name)) {
-        const mod = MODULES.find(m => m.features.some(f => f.name === mf.name))
-        await apiFetch('/api/platform/features', {
+      const allCatalogItems = MODULES.flatMap(module => module.features.map(feature => ({ ...feature, module })))
+      const allNames = [...new Set([...features.map(feature => feature.name), ...allCatalogItems.map(feature => feature.name)])]
+      const selectedNow = allNames.filter(name => getTenantFeatureState(name) === 'enabled')
+      const selectedNext = applyFeatureBranchSelection(allNames, selectedNow, names, enabled)
+      const changedNames = allNames.filter(name => selectedNext.has(name) !== selectedNow.includes(name))
+      if (!changedNames.length) { setSaving(false); return }
+      const catalogItems = changedNames.map(name => {
+        const module = MODULES.find(item => item.features.some(feature => feature.name === name))
+        const feature = module?.features.find(item => item.name === name)
+        return { name, displayName: feature?.displayName || features.find(item => item.name === name)?.displayName || name, module }
+      })
+      for (const item of catalogItems) {
+        if (features.some(feature => feature.name === item.name)) continue
+        const createRes = await apiFetch('/api/platform/features', {
           method: 'POST',
-          body: JSON.stringify({ name: mf.name, displayName: mf.displayName, category: mod?.id || 'other', module: mod?.id || 'other', description: mf.displayName, isActive: true, slug: mf.name })
+          body: JSON.stringify({ name: item.name, displayName: item.displayName, category: item.module?.id || item.name.split('.')[0] || 'other', module: item.module?.id || item.name.split('.')[0] || 'other', description: item.displayName, isActive: true, slug: item.name })
         })
-        await fetchData()
+        if (!createRes.ok) {
+          const error = await createRes.json().catch(() => ({}))
+          throw new Error(error.error || error.message || `Could not create feature ${item.displayName}`)
+        }
       }
-      const res = await apiFetch(`/api/platform/tenant/${selectedTenant}/features/${mf.name}`, {
+      const res = await apiFetch(`/api/platform/tenant/${selectedTenant}/features`, {
         method: 'POST',
-        body: JSON.stringify({ enabled })
+        body: JSON.stringify({ features: changedNames.map(name => ({ name, enabled: selectedNext.has(name) })) })
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Failed to update tenant feature') }
+      await fetchData()
       await fetchTenantFeatures(selectedTenant)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong')
@@ -515,34 +530,28 @@ export const FeaturesPage: React.FC = () => {
             <div><h2 className="text-lg font-semibold text-white">{section.title}</h2><p className="text-sm text-slate-400">{section.description}</p></div>
             <div className="space-y-4">{section.moduleItems.map(mod => {
             const ModIcon = mod.icon
+            const featureTree = buildFeatureEntitlementTree(mod.features.map(feature => {
+              const state = getTenantFeatureState(feature.name)
+              return {
+                name: feature.name,
+                displayName: feature.displayName,
+                enabled: state === 'enabled',
+                source: state === 'enabled' || state === 'disabled' ? 'override' : undefined,
+              }
+            }))
             return (
               <div key={mod.id} className="bg-slate-900 rounded-lg border border-slate-800 overflow-hidden">
                 <div className="p-4 border-b border-slate-800 flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${mod.color}`}><ModIcon className="w-5 h-5" /></div>
                   <div><h2 className="font-semibold text-white">{mod.name}</h2><p className="text-xs text-slate-400">{mod.features.length} features</p></div>
                 </div>
-                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                  {mod.features.map(mf => {
-                    const state = getTenantFeatureState(mf.name)
-                    const isOn = state === 'enabled'
-                    const isOverride = state === 'enabled' || state === 'disabled'
-                    return (
-                      <div key={mf.name} className={`flex items-center justify-between rounded-lg px-3 py-2 ${isOverride ? 'bg-slate-700 ring-1 ring-blue-500/30' : 'bg-slate-800'}`}>
-                        <div className="flex flex-col">
-                          <span className="text-sm text-slate-200">{mf.displayName}</span>
-                          {isOverride && <span className="text-[10px] text-blue-400">custom override</span>}
-                        </div>
-                        <button
-                          onClick={() => handleTenantToggle(mf, !isOn)}
-                          disabled={saving}
-                          className="flex items-center gap-1"
-                          title={isOverride ? 'Click to remove override' : 'Click to override plan setting'}
-                        >
-                          {isOn ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className={`w-5 h-5 ${state === 'disabled' ? 'text-red-500' : 'text-slate-500'}`} />}
-                        </button>
-                      </div>
-                    )
-                  })}
+                <div className="p-4">
+                  <FeatureEntitlementTree
+                    nodes={featureTree}
+                    onToggle={handleTenantToggleBranch}
+                    disabled={saving}
+                    getClassName={item => item.source === 'override' ? 'border-blue-500/40 bg-slate-700 text-slate-200' : 'border-slate-700 bg-slate-800 text-slate-200'}
+                  />
                 </div>
               </div>
             )
@@ -564,7 +573,7 @@ export const FeaturesPage: React.FC = () => {
                         <p className="text-xs text-slate-400">{f.category}{isOverride && ' · custom override'}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => handleTenantToggle({ name: f.name, displayName: f.displayName || f.name }, !isOn)} disabled={saving}>
+                        <button onClick={() => handleTenantToggleBranch([f.name], !isOn)} disabled={saving}>
                           {isOn ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className={`w-5 h-5 ${state === 'disabled' ? 'text-red-500' : 'text-slate-500'}`} />}
                         </button>
                         <button onClick={() => handleDeleteFeature(f.id)} className="p-1 hover:bg-red-900 text-red-400 rounded"><Trash2 size={14} /></button>

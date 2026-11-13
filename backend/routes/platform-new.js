@@ -149,6 +149,42 @@ router.get('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin
 })
 
 // Update tenant feature override
+router.post('/tenant/:tenantId/features', authenticateToken, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params
+    const requested = Array.isArray(req.body?.features) ? req.body.features : []
+    if (!requested.length || requested.some(item => !item || typeof item.name !== 'string' || typeof item.enabled !== 'boolean')) {
+      return res.status(400).json({ error: 'features must contain feature names and enabled values' })
+    }
+
+    const overrides = [...new Map(requested.map(item => [item.name, { name: item.name, enabled: item.enabled }])).values()]
+    const [tenant, catalog] = await Promise.all([
+      prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true } }),
+      prisma.feature.findMany({
+        where: { name: { in: overrides.map(item => item.name) }, isActive: true },
+        select: { id: true, name: true },
+      }),
+    ])
+    if (!tenant) return res.status(404).json({ error: 'Tenant not found' })
+    if (catalog.length !== overrides.length) return res.status(404).json({ error: 'One or more features were not found' })
+
+    const featureByName = new Map(catalog.map(feature => [feature.name, feature]))
+    await prisma.$transaction(overrides.map(item => {
+      const feature = featureByName.get(item.name)
+      return prisma.tenantFeature.upsert({
+        where: { tenantId_featureId: { tenantId, featureId: feature.id } },
+        update: { enabled: item.enabled },
+        create: { tenantId, featureId: feature.id, enabled: item.enabled },
+      })
+    }))
+    invalidateFeatureCache(tenantId)
+    res.json({ message: 'Tenant feature overrides saved', updated: overrides.length })
+  } catch (error) {
+    console.error('Bulk tenant feature override error:', error)
+    res.status(500).json({ error: 'Failed to update tenant features' })
+  }
+})
+
 router.post('/tenant/:tenantId/features/:featureName', authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const { tenantId, featureName } = req.params
