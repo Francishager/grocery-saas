@@ -4,13 +4,12 @@ import { isLoginTransportError } from '@/lib/authNetworkError'
 import { getApiAuthEndpoint } from '@/lib/apiConfig'
 import { startAuthentication } from '@simplewebauthn/browser'
 
-function isMobilePasskeyContext() {
-  if (typeof window === 'undefined') return false
-  const mobileWindow = window as Window & { ReactNativeWebView?: unknown; JibuNativePrinter?: unknown }
-  const { userAgent, platform, maxTouchPoints } = window.navigator
-  return Boolean(mobileWindow.ReactNativeWebView || mobileWindow.JibuNativePrinter) ||
-    /android|iphone|ipad|ipod|mobile/i.test(userAgent) ||
-    (platform === 'MacIntel' && maxTouchPoints > 1)
+async function authenticateWithBusinessPasskey(options: Record<string, unknown>) {
+  if (typeof window !== 'undefined') {
+    const nativeWindow = window as Window & { JibuNativePasskey?: { get?: (request: Record<string, unknown>) => Promise<Record<string, unknown>> } }
+    if (nativeWindow.JibuNativePasskey?.get) return nativeWindow.JibuNativePasskey.get(options)
+  }
+  return startAuthentication({ optionsJSON: options as Parameters<typeof startAuthentication>[0]['optionsJSON'] })
 }
 
 export interface User {
@@ -503,10 +502,6 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       if (securityMethod === 'passkey') {
         if (confirmationPassword) {
           confirmation = { confirmationPassword }
-        } else if (isMobilePasskeyContext()) {
-          const confirmationError = new Error('Confirm your account password to switch businesses in the mobile app.') as Error & { code?: string }
-          confirmationError.code = 'SECURITY_CONFIRMATION_REQUIRED'
-          throw confirmationError
         } else {
           const optionsResponse = await fetch(`${resolvedApiEndpoint}/security/passkey/switch/options`, {
             method: 'POST',
@@ -515,7 +510,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           })
           const options = await optionsResponse.json().catch(() => ({}))
           if (!optionsResponse.ok) throw new Error(options.error || 'Could not request passkey confirmation.')
-          const securityAssertion = await startAuthentication({ optionsJSON: options })
+          const securityAssertion = await authenticateWithBusinessPasskey(options)
           confirmation = { securityAssertion }
         }
       } else if (securityMethod === 'password') {

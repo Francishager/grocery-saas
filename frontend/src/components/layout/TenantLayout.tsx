@@ -1,7 +1,7 @@
 import { servicePagePermissions, serviceReportPermissions, serviceReportIds } from '@/lib/servicePermissions'
 import { canViewReportItem, GRANULAR_REPORT_PERMISSION_KEYS } from '@/lib/reportPermissions'
 import { Outlet, NavLink, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
-import { MessageSquare, Trash2 } from 'lucide-react'
+import { Fingerprint, MessageSquare, Trash2 } from 'lucide-react'
 import { trashPermissions } from '@/lib/trashPermissions'
 import { LayoutDashboard, ShoppingCart, Package, TrendingUp, LogOut, Menu, Users, ClipboardList, CreditCard, Building2, Wallet, GitBranch, ChevronDown, ChevronRight, DollarSign, FileText, BarChart3, Settings, Shield, Upload, Clock, Wrench, RotateCcw, Calculator, ArrowRightLeft, Bell, Plug, UtensilsCrossed, Sun, Moon, Gift, Fuel, Factory, Sprout, FileSpreadsheet, Gauge, Truck, TrendingUp as TrendingUpIcon, ClipboardList as ClipboardIcon, BadgeDollarSign, CreditCard as CardIcon, Droplet, ClipboardCheck, UserCog, Tags, Award, Leaf, ShoppingBag, Wrench as WrenchIcon, Receipt, CalendarClock, Star, Badge, Calendar, Store, Handshake, Table2, Beaker, ChefHat, Wine, Home, Activity } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
@@ -447,9 +447,9 @@ export function TenantLayout() {
       .catch(() => {})
     return () => controller.abort()
   }, [tokens?.accessToken, tenantId, user?.isPlatformUser])
-  const handleBusinessSwitch = async (nextTenantId: string, confirmationPassword?: string) => {
+  const handleBusinessSwitch = async (nextTenantId: string, confirmationPassword?: string, usePasskey = false) => {
     if (!nextTenantId || nextTenantId === tenantId) return
-    if (!confirmationPassword) {
+    if (!confirmationPassword && !usePasskey) {
       setPendingBusinessTarget(nextTenantId)
       setSwitchPassword('')
       setSwitchError('')
@@ -1327,7 +1327,8 @@ export function TenantLayout() {
         {pendingBusinessTarget && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="presentation">
           <section role="dialog" aria-modal="true" aria-labelledby="business-switch-security-title" className="w-full max-w-sm rounded-lg border bg-card p-5 text-card-foreground shadow-xl">
             <h2 id="business-switch-security-title" className="text-base font-semibold">JibuSales needs to verify it’s you</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Enter your JibuSales password to open {businesses.find(item => item.id === pendingBusinessTarget)?.name || 'the selected business'}.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Verify it’s you to open {businesses.find(item => item.id === pendingBusinessTarget)?.name || 'the selected business'}.</p>
+            {user?.businessSwitchSecurityMethod === 'passkey' && <Button type="button" variant="outline" className="mt-4 w-full" disabled={switchingBusiness} onClick={() => void handleBusinessSwitch(pendingBusinessTarget, undefined, true)}><Fingerprint className="mr-2 h-4 w-4" />{switchingBusiness ? 'Verifying…' : 'Use fingerprint or device unlock'}</Button>}
             <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void handleBusinessSwitch(pendingBusinessTarget, switchPassword) }}>
               <input type="password" autoComplete="current-password" autoFocus required value={switchPassword} onChange={event => setSwitchPassword(event.target.value)} className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="JibuSales password" />
               {switchError && <p role="alert" className="text-sm text-destructive">{switchError}</p>}

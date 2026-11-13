@@ -57,9 +57,13 @@ export default function SecurityEnrollmentPage({ onCompleted }: { onCompleted?: 
     setWorking(true)
     setError('')
     try {
-      if (!window.isSecureContext || !('PublicKeyCredential' in window)) throw new Error('Passkeys are unavailable in this browser. Use a supported HTTPS browser or choose password confirmation.')
+      const nativeWindow = window as Window & { JibuNativePasskey?: { create?: (request: Record<string, unknown>) => Promise<Record<string, unknown>> } }
+      const nativeCreate = nativeWindow.JibuNativePasskey?.create
+      if (!nativeCreate && (!window.isSecureContext || !('PublicKeyCredential' in window))) throw new Error('Passkeys are unavailable in this browser. Use a supported HTTPS browser or choose password confirmation.')
       const options = await authRequest('/security/passkey/register/options', { password })
-      const response = await startRegistration({ optionsJSON: options })
+      const response = nativeCreate
+        ? await nativeCreate(options as Record<string, unknown>)
+        : await startRegistration({ optionsJSON: options })
       const result = await authRequest('/security/passkey/register/verify', { response, name: passkeyName })
       setPassword('')
       completeSetup('passkey', Number(result.passkeyCount || 1))

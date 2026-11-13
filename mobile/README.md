@@ -8,6 +8,12 @@ The mobile receipt flow uses a restricted WebView-to-native bridge for ESC/POS r
 
 Native printer code and permissions are included in the app binary. After changing it, create a new EAS build; an OTA update or Cloudflare/Railway deployment cannot add native code to an already-installed app.
 
+## Business-switch passkeys
+
+The app can enroll and use passkeys through Android Credential Manager and the iOS passkey APIs. The Android association is included at `frontend/public/.well-known/assetlinks.json` for package `com.jibusales.app` and the current EAS preview/production signing certificate. Deploy the frontend so `https://jibusales.jibusales00.workers.dev/.well-known/assetlinks.json` is live before testing Android passkeys. iOS passkeys still require an Apple Associated Domains entitlement and an `apple-app-site-association` file for the app's Apple team and bundle ID.
+
+Passkey changes include native code. Build and install the new app version (`1.0.4`) before testing fingerprint/passkey switching. Password confirmation remains available as the fallback.
+
 ## Run locally
 
 ```powershell

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.get_login_creds"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.jibusales.app",
+      "sha256_cert_fingerprints": [
+        "8F:9F:AC:5C:60:51:B4:7A:C5:10:23:CC:15:1A:FC:2D:4C:FC:F8:E4:39:5D:C7:1B:AA:D7:D1:64:2A:B8:1C:01"
+      ]
+    }
+  }
+]

@@ -16,6 +16,7 @@ import * as Notifications from 'expo-notifications';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
 import { Directory } from 'expo-file-system';
+import { Passkey, type PasskeyCreateRequest, type PasskeyGetRequest } from 'react-native-passkey';
 import NativeThermalPrinter from '../../modules/thermal-printer/src';
 
 const DEFAULT_WEB_APP_URL = 'https://jibusales.jibusales00.workers.dev';
@@ -26,7 +27,7 @@ const BRIDGE_ORIGIN = APP_ORIGIN;
 const brandGreen = '#16764a';
 // WebView's published declaration currently conflicts with this Expo/RN type set.
 const NativeWebView = WebView as any;
-const NATIVE_BRIDGE_SCRIPT = `(function(){if(window.JibuNativeFile&&window.JibuNativePrinter&&window.JibuNativePush)return true;var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};if(!window.ReactNativeWebView){delete pending[id];reject(new Error('Native app bridge is unavailable. Update JibuSales and try again.'));return;}window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},30000);});}function reply(id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply(id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply(id,response,'Native notification setup failed.');};window.__jibuNativeFileReply=function(id,response){reply(id,response,'Could not save the receipt PDF.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};window.JibuNativeFile={savePdf:function(filename,base64){return request({type:'file.savePdf',filename:filename,base64:base64},'Receipt save timed out.');}};return true;})();true;`;
+const NATIVE_BRIDGE_SCRIPT = `(function(){if(window.JibuNativeFile&&window.JibuNativePrinter&&window.JibuNativePush&&window.JibuNativePasskey)return true;var seq=0,pending={};function request(payload,errorText){return new Promise(function(resolve,reject){var id='n'+Date.now()+'_'+(++seq);pending[id]={resolve:resolve,reject:reject};if(!window.ReactNativeWebView){delete pending[id];reject(new Error('Native app bridge is unavailable. Update JibuSales and try again.'));return;}window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({},payload,{id:id})));setTimeout(function(){if(pending[id]){delete pending[id];reject(new Error(errorText));}},120000);});}function reply(id,response,fallback){var p=pending[id];if(!p)return;delete pending[id];response&&response.ok?p.resolve(response.result):p.reject(new Error(response&&response.error||fallback));}window.__jibuNativePrinterReply=function(id,response){reply(id,response,'Native printer operation failed.');};window.__jibuNativePushReply=function(id,response){reply(id,response,'Native notification setup failed.');};window.__jibuNativeFileReply=function(id,response){reply(id,response,'Could not save the receipt PDF.');};window.__jibuNativePasskeyReply=function(id,response){reply(id,response,'Passkey verification failed.');};window.JibuNativePrinter={request:function(payload){return request(payload,'Printer request timed out.');}};window.JibuNativePush={permission:function(){return request({type:'push.permission'},'Notification permission check timed out.').then(function(r){return r.permission||'default';});},register:function(userInitiated){return request({type:'push.register',userInitiated:!!userInitiated},'Notification setup timed out.');}};window.JibuNativeFile={savePdf:function(filename,base64){return request({type:'file.savePdf',filename:filename,base64:base64},'Receipt save timed out.');}};window.JibuNativePasskey={get:function(options){return request({type:'passkey.get',options:options},'Fingerprint/passkey verification timed out.');},create:function(options){return request({type:'passkey.create',options:options},'Passkey setup timed out.');}};return true;})();true;`;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -125,12 +126,18 @@ export default function HomeScreen() {
 
   const handleNativeMessage = async ({ nativeEvent }: { nativeEvent: { data: string; url?: string } }) => {
     if (nativeEvent.url && getOrigin(nativeEvent.url) !== BRIDGE_ORIGIN) return;
-    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[]; userInitiated?: boolean; filename?: string; base64?: string };
+    let request: { id?: string; type?: string; transport?: 'usb' | 'bluetooth'; deviceId?: string; commands?: string[]; userInitiated?: boolean; filename?: string; base64?: string; options?: Record<string, unknown> };
     try { request = JSON.parse(nativeEvent.data); } catch { return; }
-    if (!request.id || !['printer.list', 'printer.print', 'push.permission', 'push.register', 'file.savePdf'].includes(request.type || '')) return;
+    if (!request.id || !['printer.list', 'printer.print', 'push.permission', 'push.register', 'file.savePdf', 'passkey.get', 'passkey.create'].includes(request.type || '')) return;
     let response: { ok: boolean; result?: unknown; error?: string };
     try {
-      if (request.type === 'file.savePdf') {
+      if (request.type === 'passkey.get') {
+        if (!request.options) throw new Error('Passkey challenge is missing.');
+        response = { ok: true, result: await Passkey.get(request.options as unknown as PasskeyGetRequest) };
+      } else if (request.type === 'passkey.create') {
+        if (!request.options) throw new Error('Passkey setup challenge is missing.');
+        response = { ok: true, result: await Passkey.create(request.options as unknown as PasskeyCreateRequest) };
+      } else if (request.type === 'file.savePdf') {
         if (!request.filename || !request.base64) throw new Error('Receipt PDF data is missing.');
         const safeFilename = request.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
         const directory = await Directory.pickDirectoryAsync();
@@ -196,7 +203,7 @@ export default function HomeScreen() {
     } catch (error) {
       response = { ok: false, error: error instanceof Error ? error.message : 'Native printer operation failed.' };
     }
-    const reply = request.type?.startsWith('push.') ? '__jibuNativePushReply' : request.type?.startsWith('file.') ? '__jibuNativeFileReply' : '__jibuNativePrinterReply';
+    const reply = request.type?.startsWith('push.') ? '__jibuNativePushReply' : request.type?.startsWith('file.') ? '__jibuNativeFileReply' : request.type?.startsWith('passkey.') ? '__jibuNativePasskeyReply' : '__jibuNativePrinterReply';
     webView.current?.injectJavaScript(`window.${reply}(${JSON.stringify(request.id)}, ${JSON.stringify(response)}); true;`);
   };
 

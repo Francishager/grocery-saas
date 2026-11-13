@@ -22,19 +22,36 @@ test('security setup offers server-verified passkey enrollment and password-conf
   assert.match(page, /autoComplete="current-password"/)
 })
 
-test('business switch obtains a passkey assertion and exposes a password recovery prompt', async () => {
+test('Android app bridges passkey enrollment and authentication to native Credential Manager', async () => {
+  const app = await read('../../mobile/src/app/index.tsx')
+  assert.match(app, /type:'passkey\.get'/)
+  assert.match(app, /type:'passkey\.create'/)
+  assert.match(app, /Passkey\.get\(request\.options as unknown as PasskeyGetRequest\)/)
+  assert.match(app, /Passkey\.create\(request\.options as unknown as PasskeyCreateRequest\)/)
+})
+
+test('Android Digital Asset Links associates the app with the JibuSales passkey origin', async () => {
+  const links = JSON.parse(await read('../public/.well-known/assetlinks.json'))
+  assert.ok(links.some((entry) =>
+    entry.relation.includes('delegate_permission/common.get_login_creds') &&
+    entry.target.namespace === 'android_app' &&
+    entry.target.package_name === 'com.jibusales.app' &&
+    entry.target.sha256_cert_fingerprints.includes('8F:9F:AC:5C:60:51:B4:7A:C5:10:23:CC:15:1A:FC:2D:4C:FC:F8:E4:39:5D:C7:1B:AA:D7:D1:64:2A:B8:1C:01')
+  ))
+})
+
+test('business switch offers native passkey verification and a password fallback', async () => {
   const auth = await read('../src/contexts/JWTAuthContext.tsx')
   const layout = await read('../src/components/layout/TenantLayout.tsx')
-  assert.match(auth, /startAuthentication\(\{ optionsJSON: options \}\)/)
+  assert.match(auth, /startAuthentication\(\{ optionsJSON: options as Parameters/)
   assert.match(auth, /securityAssertion/)
-  assert.match(auth, /ReactNativeWebView/)
-  assert.match(auth, /JibuNativePrinter/)
-  assert.match(auth, /android\|iphone\|ipad\|ipod\|mobile/i)
+  assert.match(auth, /JibuNativePasskey\?\.get/)
+  assert.match(auth, /authenticateWithBusinessPasskey\(options\)/)
   assert.match(auth, /const statusResponse = await fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
-  assert.match(auth, /Confirm your account password to switch businesses in the mobile app/)
   assert.match(layout, /JibuSales needs to verify it’s you/)
-  assert.match(layout, /Enter your JibuSales password to open/)
-  assert.match(layout, /if \(!confirmationPassword\) \{\s*setPendingBusinessTarget\(nextTenantId\)/)
+  assert.match(layout, /Verify it’s you to open/)
+  assert.match(layout, /Use fingerprint or device unlock/)
+  assert.match(layout, /if \(!confirmationPassword && !usePasskey\) \{\s*setPendingBusinessTarget\(nextTenantId\)/)
   assert.doesNotMatch(auth, /Complete account security setup before switching businesses\./)
 })
 
@@ -54,6 +71,9 @@ test('security enrollment is server-scoped to owners with multiple businesses an
   assert.match(route, /const securityRequired = targetTenantId !== \(req\.user\.activeTenantId \|\| req\.user\.tenantId\)/)
   assert.match(auth, /fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
   assert.match(auth, /requireVerification && !securityMethod/)
+  const enrollment = await read('../src/pages/auth/SecurityEnrollmentPage.tsx')
+  assert.match(enrollment, /JibuNativePasskey\?\.create/)
+  assert.match(enrollment, /nativeCreate\(options as Record<string, unknown>\)/)
   assert.match(auth, /if \(data\.code === 'SECURITY_SETUP_REQUIRED'\)/)
 })
 
