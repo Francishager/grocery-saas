@@ -70,7 +70,7 @@ export default function DashboardPage() {
   }
   const scopeKey = [user?.tenantId, user?.id, user?.branchId].join(':')
   const { kpis, salesChart, profitLoss, topProducts, paymentMethods, dailyPerf,
-    loading, refreshing, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey, dashboardAccess)
+    loading, isOfflineData, error: dashboardError, refresh } = useDashboardData(dashboardEnabled, online, scopeKey, dashboardAccess)
 
   const canViewProperty = hasAnyFeature(['property_management.landlord', 'property_management.agent']) && hasPermission('canViewPropertyPortfolio')
   const canViewRestaurant = hasFeature('restaurant') && hasPermission('canViewRestaurant')
@@ -321,17 +321,13 @@ export default function DashboardPage() {
         <div>
           <p className="mb-1 text-xs font-semibold uppercase text-primary">Business overview</p>
           <h1 className="text-2xl font-semibold sm:text-3xl">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}{user?.name ? `, ${user.name.split(' ')[0]}` : ''}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Shared business performance and enabled operations, together.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Key financial and trading indicators for this month.</p>
           {isOfflineData && (
             <p className="mt-2 flex items-center gap-1 text-xs text-orange-600"><WifiOff className="h-3 w-3" /> Showing offline data</p>
           )}
         </div>
         <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
           <p className="text-sm text-muted-foreground">{formatDisplayDate(new Date())}</p>
-          <button type="button" onClick={() => void refresh()} aria-label="Refresh dashboard" title="Refresh dashboard"
-            className="flex h-10 w-10 items-center justify-center rounded-md border bg-card shadow-sm transition-colors hover:bg-muted">
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          </button>
         </div>
       </div>
       {dashboardModules.length > 0 && <div className="flex flex-wrap items-center gap-2" aria-label="Enabled business areas">
@@ -368,7 +364,7 @@ export default function DashboardPage() {
 
       {(moduleSnapshots.property || moduleSnapshots.restaurant || moduleSnapshots.hr || moduleSnapshots.rentals || moduleSnapshots.clinic || moduleSnapshots.pharmacy) && <section className="space-y-3" aria-label="Module operations">
         <div className="flex flex-wrap items-end justify-between gap-2 border-l-2 border-primary pl-3">
-          <div><h2 className="text-lg font-semibold">Module activity</h2><p className="text-sm text-muted-foreground">Live highlights from enabled business areas.</p></div>
+          <div><h2 className="text-lg font-semibold">Operational performance</h2><p className="text-sm text-muted-foreground">Current activity across your business areas.</p></div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {moduleSnapshots.property && <ModuleSnapshotCard
