@@ -111,13 +111,13 @@ function PublicRoute({ children, redirectTo = '/tenant/dashboard' }: { children:
 }
 
 function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
-  const { isAuthenticated, tokens, updateUser } = useJWTAuth()
+  const { isAuthenticated, isPlatformUser, tokens, updateUser, user } = useJWTAuth()
   const [state, setState] = useState<'checking' | 'required' | 'ready' | 'error'>('checking')
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    if (!isAuthenticated || !tokens?.accessToken) { setState('ready'); return }
+    if (!isAuthenticated || !tokens?.accessToken || user?.role !== 'owner' || isPlatformUser()) { setState('ready'); return }
     let cancelled = false
     setState('checking')
     setError('')
@@ -135,7 +135,7 @@ function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
         setState('error')
       })
     return () => { cancelled = true }
-  }, [isAuthenticated, tokens?.accessToken, attempt])
+  }, [isAuthenticated, isPlatformUser, tokens?.accessToken, user?.role, attempt])
 
   if (!isAuthenticated || state === 'ready') return <>{children}</>
   if (state === 'required') return <SecurityEnrollmentPage onCompleted={() => setState('ready')} />

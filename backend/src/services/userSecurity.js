@@ -9,6 +9,17 @@ import prisma from '../db.js'
 
 const challengeTtlMs = 5 * 60 * 1000
 
+export async function requiresBusinessSwitchSecurity({ id, role, tenantId }) {
+  if (!id || role !== 'owner') return false
+  const memberships = await prisma.tenantMembership.findMany({
+    where: { userId: id, role: 'owner', isActive: true },
+    select: { tenantId: true },
+  })
+  const businessIds = new Set(memberships.map(({ tenantId: membershipTenantId }) => membershipTenantId))
+  if (tenantId) businessIds.add(tenantId)
+  return businessIds.size > 1
+}
+
 export function webAuthnContext(req) {
   const origin = String(req.headers.origin || '').replace(/\/$/, '')
   const configuredOrigins = [process.env.WEBAUTHN_ORIGIN, process.env.FRONTEND_ORIGIN, process.env.ALLOWED_ORIGINS]

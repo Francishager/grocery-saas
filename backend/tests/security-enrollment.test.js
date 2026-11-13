@@ -4,18 +4,23 @@ import { readFile } from 'node:fs/promises'
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8')
 
-test('unenrolled users are blocked from normal authenticated APIs, while only auth security endpoints bypass the gate', async () => {
+test('only multi-business owners are gated from normal authenticated APIs, while security endpoints bypass the gate', async () => {
   const source = await read('../middleware/auth.js')
+  const service = await read('../src/services/userSecurity.js')
   assert.match(source, /req\.baseUrl === '\/api\/auth' && String\(req\.path \|\| ''\)\.startsWith\('\/security\/'\)/)
-  assert.match(source, /!currentUser\.securitySetupCompletedAt && !isSecurityEndpoint/)
+  assert.match(source, /!currentUser\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(currentUser\)/)
+  assert.match(source, /securityRequired && !isSecurityEndpoint/)
   assert.match(source, /SECURITY_SETUP_REQUIRED/)
+  assert.match(service, /role !== 'owner'/)
+  assert.match(service, /businessIds\.size > 1/)
 })
 
-test('business switching requires passkey assertion or password confirmation before issuing a new session', async () => {
+test('only eligible multi-business owners need passkey assertion or password confirmation to switch', async () => {
   const source = await read('../src/routes/auth.js')
   assert.match(source, /router\.post\('\/switch-business', authenticateToken, securityActionLimiter/)
   assert.match(source, /verifyBusinessSwitch\(req, baseUser, targetTenantId, req\.body\.securityAssertion\)/)
   assert.match(source, /bcrypt\.compare\(String\(req\.body\.confirmationPassword\), baseUser\.password\)/)
+  assert.match(source, /targetTenantId !== baseUser\.tenantId && await requiresBusinessSwitchSecurity\(baseUser\)/)
 })
 
 test('passkey assertions verify the challenge, exact origin, relying-party ID, user verification, and consume the challenge once', async () => {

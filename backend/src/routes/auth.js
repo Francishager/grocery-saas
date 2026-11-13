@@ -14,7 +14,7 @@ import { auditLog } from "../utils/audit.js";
 import { getJwtSecret } from "../utils/jwtSecret.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { createSessionTokens } from "../utils/sessionTokens.js";
-import { authenticationOptions, registrationOptions, verifyBusinessSwitch, verifyRegistration } from '../services/userSecurity.js';
+import { authenticationOptions, registrationOptions, requiresBusinessSwitchSecurity, verifyBusinessSwitch, verifyRegistration } from '../services/userSecurity.js';
 
 const router = Router();
 const ipKey = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
@@ -76,7 +76,7 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     cashAccountId: user.cashAccountId || null,
     cashAccount: user.cashAccount || null,
     isPlatformUser,
-    securitySetupRequired: !user.securitySetupCompletedAt,
+    securitySetupRequired: user.role === 'owner' && !user.securitySetupCompletedAt ? null : false,
     businessSwitchSecurityMethod: user.businessSwitchSecurityMethod || null,
     permissions,
     workingHoursAccess: staffWorkingHoursAccess(user, user.tenant),
@@ -191,8 +191,9 @@ router.get('/security/status', authenticateToken, async (req, res) => {
       prisma.user.findUnique({ where: { id: req.user.id }, select: { securitySetupCompletedAt: true, businessSwitchSecurityMethod: true } }),
       prisma.securityPasskey.count({ where: { userId: req.user.id } }),
     ])
+    const setupRequired = Boolean(await requiresBusinessSwitchSecurity(req.user) && !user?.securitySetupCompletedAt)
     res.json({
-      setupRequired: !user?.securitySetupCompletedAt,
+      setupRequired,
       method: user?.businessSwitchSecurityMethod || null,
       passkeyCount,
     })
@@ -289,21 +290,27 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
       include: { tenant: true, cashAccount: { select: { id: true, name: true, type: true } }, branches: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] } },
     });
     if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
+    const securityRequired = targetTenantId !== baseUser.tenantId && await requiresBusinessSwitchSecurity(baseUser)
     try {
-      if (baseUser.businessSwitchSecurityMethod === 'passkey') {
-        if (req.body?.securityAssertion) {
-          await verifyBusinessSwitch(req, baseUser, targetTenantId, req.body.securityAssertion)
-        } else if (req.body?.confirmationPassword && await bcrypt.compare(String(req.body.confirmationPassword), baseUser.password)) {
-          await prisma.userSecurityChallenge.deleteMany({ where: { userId: baseUser.id, purpose: 'business-switch', targetTenantId } })
+      if (securityRequired && !baseUser.securitySetupCompletedAt) {
+        return res.status(428).json({ error: 'Set up business-switch security before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
+      }
+      if (securityRequired) {
+        if (baseUser.businessSwitchSecurityMethod === 'passkey') {
+          if (req.body?.securityAssertion) {
+            await verifyBusinessSwitch(req, baseUser, targetTenantId, req.body.securityAssertion)
+          } else if (req.body?.confirmationPassword && await bcrypt.compare(String(req.body.confirmationPassword), baseUser.password)) {
+            await prisma.userSecurityChallenge.deleteMany({ where: { userId: baseUser.id, purpose: 'business-switch', targetTenantId } })
+          } else {
+            throw new Error('Passkey confirmation failed. Use your account password to recover this switch.')
+          }
+        } else if (baseUser.businessSwitchSecurityMethod === 'password') {
+          if (!req.body?.confirmationPassword || !(await bcrypt.compare(String(req.body.confirmationPassword), baseUser.password))) {
+            throw new Error('Password confirmation failed. The business was not switched.')
+          }
         } else {
-          throw new Error('Passkey confirmation failed. Use your account password to recover this switch.')
+          return res.status(428).json({ error: 'Complete account security setup before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
         }
-      } else if (baseUser.businessSwitchSecurityMethod === 'password') {
-        if (!req.body?.confirmationPassword || !(await bcrypt.compare(String(req.body.confirmationPassword), baseUser.password))) {
-          throw new Error('Password confirmation failed. The business was not switched.')
-        }
-      } else {
-        return res.status(428).json({ error: 'Complete account security setup before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
       }
     } catch (verificationError) {
       await logAuthenticationEvent(req, 'business_switch_confirmation_failed', { ...baseUser, tenantId: targetTenantId }, 401)

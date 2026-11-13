@@ -470,8 +470,6 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       } else if (user?.businessSwitchSecurityMethod === 'password') {
         if (!confirmationPassword) throw new Error('Confirm your password before switching businesses.')
         confirmation = { confirmationPassword }
-      } else {
-        throw new Error('Complete account security setup before switching businesses.')
       }
       const response = await fetch(`${resolvedApiEndpoint}/switch-business`, {
         method: 'POST',

@@ -10,6 +10,7 @@ test('app verifies server enrollment status before rendering authenticated route
   assert.match(app, /\/security\/status/)
   assert.match(app, /state === 'error'/)
   assert.match(app, /<SecurityEnrollmentPage onCompleted=/)
+  assert.match(app, /user\?\.role !== 'owner' \|\| isPlatformUser\(\)/)
 })
 
 test('security setup offers server-verified passkey enrollment and password-confirmation fallback', async () => {
@@ -27,4 +28,15 @@ test('business switch obtains a passkey assertion and exposes a password recover
   assert.match(auth, /securityAssertion/)
   assert.match(layout, /Confirm business switch/)
   assert.match(layout, /Use your account password if your passkey is unavailable/)
+  assert.doesNotMatch(auth, /Complete account security setup before switching businesses\./)
+})
+
+test('security enrollment is server-scoped to owners with multiple active business memberships', async () => {
+  const service = await read('../../backend/src/services/userSecurity.js')
+  const middleware = await read('../../backend/middleware/auth.js')
+  assert.match(service, /requiresBusinessSwitchSecurity/)
+  assert.match(service, /role !== 'owner'/)
+  assert.match(service, /businessIds\.size > 1/)
+  assert.match(middleware, /!currentUser\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(currentUser\)/)
+  assert.match(middleware, /securityRequired && !isSecurityEndpoint/)
 })

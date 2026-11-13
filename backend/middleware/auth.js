@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../src/db.js';
+import { requiresBusinessSwitchSecurity } from '../src/services/userSecurity.js';
 import { resolveEffectivePermissions, ROLE_DEFAULTS } from '../src/utils/permissions.js';
 import { platformPermissionForRequest } from '../src/utils/platformPermissions.js';
 import { getTenantFeatures, hasFeatureAccess } from './featureCheck.js';
@@ -157,7 +158,8 @@ export const authenticateToken = async (req, res, next) => {
     });
     if (!currentUser?.isActive) return res.status(401).json({ message: 'User not found or inactive', code: 'USER_INACTIVE' });
     const isSecurityEndpoint = req.baseUrl === '/api/auth' && String(req.path || '').startsWith('/security/');
-    if (!currentUser.securitySetupCompletedAt && !isSecurityEndpoint) {
+    const securityRequired = !currentUser.securitySetupCompletedAt && await requiresBusinessSwitchSecurity(currentUser);
+    if (securityRequired && !isSecurityEndpoint) {
       return res.status(428).json({ message: 'Complete account security setup before using JibuSales.', code: 'SECURITY_SETUP_REQUIRED' });
     }
     if (isSecurityEndpoint) {

@@ -1,10 +1,10 @@
 # Account Security Enrollment
 
-JibuSales requires every signed-in account, including existing users and SaaS Admins, to choose a business-switch confirmation method before authenticated pages or APIs are available.
+JibuSales requires only business-owner accounts with access to more than one business to choose a business-switch confirmation method. Single-business owners, staff, and SaaS Admins are not blocked by this setup.
 
 ## User Setup
 
-On the next sign-in, the user must either register a passkey or explicitly enable password confirmation. A passkey can prompt for a fingerprint, face recognition, device PIN, or security key, depending on the device. Biometric information remains on the device; JibuSales stores the passkey public key and credential metadata only. When a user switches businesses, the server verifies the passkey assertion or re-checks the account password before issuing the new business session.
+On sign-in, an eligible multi-business owner must either register a passkey or explicitly enable password confirmation before accessing business pages or APIs. A passkey can prompt for a fingerprint, face recognition, device PIN, or security key, depending on the device. Biometric information remains on the device; JibuSales stores the passkey public key and credential metadata only. When that owner switches businesses, the server verifies the passkey assertion or re-checks the account password before issuing the new business session.
 
 If a passkey is unavailable or the user cancels its prompt, they can confirm with their account password. A passkey user can use that same recovery path for a business switch.
 
