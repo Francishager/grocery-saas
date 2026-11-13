@@ -28,6 +28,8 @@ test('business switch obtains a passkey assertion and exposes a password recover
   assert.match(auth, /securityAssertion/)
   assert.match(auth, /ReactNativeWebView/)
   assert.match(auth, /JibuNativePrinter/)
+  assert.match(auth, /android\|iphone\|ipad\|ipod\|mobile/i)
+  assert.match(auth, /const statusResponse = await fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
   assert.match(auth, /Confirm your account password to switch businesses in the mobile app/)
   assert.match(layout, /JibuSales needs to verify it’s you/)
   assert.match(layout, /Use your account password if your passkey is unavailable/)
