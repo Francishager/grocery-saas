@@ -294,8 +294,8 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
     if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
     const context = await getTenantSessionContext(baseUser, targetTenantId);
     if (!context) return res.status(403).json({ error: 'You do not have access to that business.', code: 'TENANT_ACCESS_DENIED' });
-    // A validated owner membership, not the user's primary role field, defines a cross-business switch.
-    const securityRequired = context.crossTenantOwner
+    // Compare with the active session tenant, not the user's primary tenant: returning home is also a switch.
+    const securityRequired = targetTenantId !== (req.user.activeTenantId || req.user.tenantId)
     try {
       if (securityRequired && !hasBusinessSwitchSecuritySetup(baseUser)) {
         return res.status(428).json({ error: 'Set up business-switch security before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
