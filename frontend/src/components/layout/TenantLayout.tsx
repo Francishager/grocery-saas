@@ -451,7 +451,7 @@ export function TenantLayout() {
     if (!nextTenantId || nextTenantId === tenantId) return
     setSwitchingBusiness(true)
     try {
-      await switchBusiness(nextTenantId, confirmationPassword)
+      await switchBusiness(nextTenantId, confirmationPassword, businesses.length > 1)
       navigate('/tenant/dashboard', { replace: true })
       setPendingBusinessTarget('')
       setSwitchPassword('')

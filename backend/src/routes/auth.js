@@ -292,9 +292,10 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
       include: { tenant: true, cashAccount: { select: { id: true, name: true, type: true } }, branches: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] } },
     });
     if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
-    // A valid cross-tenant owner switch necessarily means this login owns multiple businesses.
-    // Enforce verification here directly so stale/missing membership rows cannot bypass it.
-    const securityRequired = targetTenantId !== req.user.tenantId && baseUser.role === 'owner'
+    const context = await getTenantSessionContext(baseUser, targetTenantId);
+    if (!context) return res.status(403).json({ error: 'You do not have access to that business.', code: 'TENANT_ACCESS_DENIED' });
+    // A validated owner membership, not the user's primary role field, defines a cross-business switch.
+    const securityRequired = context.crossTenantOwner
     try {
       if (securityRequired && !hasBusinessSwitchSecuritySetup(baseUser)) {
         return res.status(428).json({ error: 'Set up business-switch security before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
@@ -320,8 +321,6 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
       await logAuthenticationEvent(req, 'business_switch_confirmation_failed', { ...baseUser, tenantId: targetTenantId }, 401)
       return res.status(401).json({ error: verificationError.message || 'Identity confirmation failed.' })
     }
-    const context = await getTenantSessionContext(baseUser, targetTenantId);
-    if (!context) return res.status(403).json({ error: 'You do not have access to that business.', code: 'TENANT_ACCESS_DENIED' });
     const tenantBlock = await enforceTenantSubscriptionAccess(context.tenant, context.sessionUser);
     const subscriptionPaymentAccess = tenantBlock?.code === 'SUBSCRIPTION_PAYMENT_REQUIRED';
     if (tenantBlock && !subscriptionPaymentAccess) return res.status(403).json(tenantBlock);

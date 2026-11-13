@@ -117,7 +117,8 @@ function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    if (!isAuthenticated || !tokens?.accessToken || user?.role !== 'owner' || isPlatformUser()) { setState('ready'); return }
+    const shouldCheckSecurity = user?.role === 'owner' || Boolean(user?.securitySetupRequired)
+    if (!isAuthenticated || !tokens?.accessToken || !shouldCheckSecurity || isPlatformUser()) { setState('ready'); return }
     if (user.securityScopeVersion === 1) {
       setState(user.securitySetupRequired ? 'required' : 'ready')
       return
@@ -141,7 +142,8 @@ function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
     return () => { cancelled = true }
   }, [isAuthenticated, isPlatformUser, tokens?.accessToken, user?.role, user?.securityScopeVersion, user?.securitySetupRequired, attempt])
 
-  if (!isAuthenticated || user?.role !== 'owner' || isPlatformUser()) return <>{children}</>
+  const shouldCheckSecurity = user?.role === 'owner' || Boolean(user?.securitySetupRequired)
+  if (!isAuthenticated || !shouldCheckSecurity || isPlatformUser()) return <>{children}</>
   if (user.securityScopeVersion === 1) {
     if (!user.securitySetupRequired) return <>{children}</>
     return <SecurityEnrollmentPage onCompleted={() => setState('ready')} />

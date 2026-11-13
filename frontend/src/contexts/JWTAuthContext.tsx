@@ -77,7 +77,7 @@ export interface JWTAuthContextValue {
   /** Refresh tokens */
   refreshTokens: () => Promise<boolean>
   /** Switch to another SaaS-admin-authorized business */
-  switchBusiness: (tenantId: string, confirmationPassword?: string) => Promise<void>
+  switchBusiness: (tenantId: string, confirmationPassword?: string, requireVerification?: boolean) => Promise<void>
   /** Update user */
   updateUser: (updates: Partial<User>) => void
   /** Check if user has permission */
@@ -466,7 +466,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     })
   }, [tokens])
 
-  const switchBusiness = useCallback(async (tenantId: string, confirmationPassword?: string) => {
+  const switchBusiness = useCallback(async (tenantId: string, confirmationPassword?: string, requireVerification = false) => {
     if (!tokens?.accessToken) throw new Error('Sign in again to switch businesses.')
     setLoading(true)
     setError(null)
@@ -486,6 +486,12 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       })
       if (securityStatus.setupRequired) {
         const setupError = new Error('Set up business-switch security before switching businesses.') as Error & { code?: string }
+        setupError.code = 'SECURITY_SETUP_REQUIRED'
+        throw setupError
+      }
+      if (requireVerification && !securityMethod) {
+        updateUser({ securitySetupRequired: true, securityScopeVersion: 1 })
+        const setupError = new Error('Set up account security before switching businesses.') as Error & { code?: string }
         setupError.code = 'SECURITY_SETUP_REQUIRED'
         throw setupError
       }

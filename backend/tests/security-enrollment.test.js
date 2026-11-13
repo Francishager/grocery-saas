@@ -11,7 +11,7 @@ test('only multi-business owners are gated from normal authenticated APIs, while
   assert.match(source, /await requiresBusinessSwitchSecurity\(currentUser\) && !hasBusinessSwitchSecuritySetup\(currentUser\)/)
   assert.match(source, /securityRequired && !isSecurityEndpoint/)
   assert.match(source, /SECURITY_SETUP_REQUIRED/)
-  assert.match(service, /role !== 'owner'/)
+  assert.match(service, /hasOwnerRelationship = role === 'owner' \|\| memberships\.length > 0 \|\| ownedTenants\.length > 0/)
   assert.match(service, /prisma\.tenant\.findMany\(\{ where: \{ ownerId: id \}/)
   assert.match(service, /businessIds\.size > 1/)
   assert.match(service, /hasBusinessSwitchSecuritySetup/)
@@ -30,7 +30,8 @@ test('every cross-business owner switch compares against the active tenant, incl
   assert.match(source, /router\.post\('\/switch-business', authenticateToken, securityActionLimiter/)
   assert.match(source, /verifyBusinessSwitch\(req, baseUser, targetTenantId, req\.body\.securityAssertion\)/)
   assert.match(source, /bcrypt\.compare\(String\(req\.body\.confirmationPassword\), baseUser\.password\)/)
-  assert.match(source, /targetTenantId !== req\.user\.tenantId && baseUser\.role === 'owner'/)
+  assert.match(source, /const context = await getTenantSessionContext\(baseUser, targetTenantId\)/)
+  assert.match(source, /const securityRequired = context\.crossTenantOwner/)
 })
 
 test('passkey assertions verify the challenge, exact origin, relying-party ID, user verification, and consume the challenge once', async () => {

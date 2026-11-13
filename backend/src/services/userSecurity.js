@@ -10,7 +10,7 @@ import prisma from '../db.js'
 const challengeTtlMs = 5 * 60 * 1000
 
 export async function requiresBusinessSwitchSecurity({ id, role, tenantId }) {
-  if (!id || role !== 'owner') return false
+  if (!id) return false
   const [memberships, ownedTenants] = await Promise.all([
     prisma.tenantMembership.findMany({
       where: { userId: id, role: 'owner', isActive: true },
@@ -22,6 +22,8 @@ export async function requiresBusinessSwitchSecurity({ id, role, tenantId }) {
     ...memberships.map(({ tenantId: membershipTenantId }) => membershipTenantId),
     ...ownedTenants.map(({ id: ownedTenantId }) => ownedTenantId),
   ])
+  const hasOwnerRelationship = role === 'owner' || memberships.length > 0 || ownedTenants.length > 0
+  if (!hasOwnerRelationship) return false
   if (tenantId) businessIds.add(tenantId)
   return businessIds.size > 1
 }
