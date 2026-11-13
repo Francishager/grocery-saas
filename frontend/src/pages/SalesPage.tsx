@@ -523,7 +523,7 @@ export default function SalesPage() {
       changeGiven: changeGivenValue,
       items: cart.map((item) => ({
         id: String(item.id),
-        name: item.product_name || item.name || 'Item',
+        name: `${item.product_name || item.name || 'Item'}${item.unitName ? ` (${item.unitName})` : ''}`,
         quantity: item.qty,
         price: item.selling_price,
         total: item.selling_price * item.qty - (item.cashDiscount || 0),
@@ -599,6 +599,7 @@ export default function SalesPage() {
           items: cart.map(c => ({
             productId: c.productId,
             quantity: c.qty,
+            unitName: c.unitName || null,
             price: c.selling_price,
             discount: c.cashDiscount || 0,
             total: c.selling_price * c.qty - (c.cashDiscount || 0),

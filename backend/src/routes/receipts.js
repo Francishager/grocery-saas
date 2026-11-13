@@ -19,6 +19,11 @@ function formatReceiptDate(value) {
   return Number.isNaN(date.getTime()) ? "" : receiptDateFormatter.format(date);
 }
 
+function receiptItemName(item) {
+  const productName = item.product?.name || "Item";
+  return item.unitName ? `${productName} (${item.unitName})` : productName;
+}
+
 function authenticateReceipt(req, res, next) {
   if (!req.headers.authorization && req.query?.token) {
     req.headers.authorization = `Bearer ${req.query.token}`;
@@ -112,7 +117,7 @@ function receiptJson(data) {
     exchangeRateSource: sale.exchangeRateSource || null,
     items: sale.items.map((item) => ({
       id: item.id,
-      name: item.product?.name || "Item",
+      name: receiptItemName(item),
       sku: item.product?.sku || null,
       quantity: item.quantity,
       price: item.price,
@@ -230,18 +235,16 @@ router.get("/:saleId/pdf", authenticateReceipt, requireReceiptAccess, async (req
     doc.text("-".repeat(40), { align: "center" });
     doc.moveDown(0.2);
 
-    // Items
+    // Keep the complete product and selling-unit label visible on narrow receipts.
     doc.fontSize(9).font("Helvetica-Bold");
-    doc.text("ITEM                    QTY   PRICE   TOTAL", { align: "left" });
+    doc.text("ITEM");
+    doc.text("QTY x UNIT PRICE = LINE TOTAL");
     doc.font("Helvetica-Bold");
     doc.moveDown(0.1);
 
     for (const item of sale.items) {
-      const name = (item.product?.name || "Item").substring(0, 20).padEnd(20);
-      const qty = String(item.quantity).padStart(4);
-      const price = formatNum(receiptAmount(item.price)).padStart(7);
-      const total = formatNum(receiptAmount(item.total)).padStart(8);
-      doc.fontSize(8.5).text(`${name}${qty}${price}${total}`);
+      doc.fontSize(8.5).text(receiptItemName(item), { width: 206 });
+      doc.fontSize(8).text(`${item.quantity} x ${formatNum(receiptAmount(item.price))}    ${formatNum(receiptAmount(item.total))}`);
     }
 
     doc.moveDown(0.2);
@@ -350,11 +353,8 @@ router.get("/:saleId/escpos", authenticateReceipt, requireReceiptAccess, async (
     cmds.push(escText("Item               Qty  Price  Total"));
 
     for (const item of sale.items) {
-      const name = (item.product?.name || "Item").substring(0, 18).padEnd(18);
-      const qty = String(item.quantity).padStart(3);
-      const price = formatNum(receiptAmount(item.price)).padStart(6);
-      const total = formatNum(receiptAmount(item.total)).padStart(7);
-      cmds.push(escText(`${name}${qty}${price}${total}`));
+      cmds.push(escText(receiptItemName(item)));
+      cmds.push(escText(`${item.quantity} x ${formatNum(receiptAmount(item.price))} = ${formatNum(receiptAmount(item.total))}`));
     }
 
     cmds.push(escText("--------------------------------"));

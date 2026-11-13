@@ -12,8 +12,12 @@ export function sellingUnitConversionLabel(
   const base = baseUnit?.trim() || 'base unit'
   const inner = contentsUnit?.trim() || ''
   const contents = Number(contentsPerBaseUnit || 0)
-  if (inner && contents > 0 && normalizeUnit(unitName) === normalizeUnit(inner)) {
-    return `1 ${base} = ${formatQuantity(contents)} ${inner}`
+  const normalizedName = normalizeUnit(unitName)
+  const normalizedInner = normalizeUnit(inner)
+  if (inner && contents > 0) {
+    if (normalizedName === normalizedInner) return `1 ${base} = ${formatQuantity(contents)} ${inner}`
+    if (normalizedName === `half ${normalizedInner}`) return `1 ${unitName} = 0.5 ${inner}`
+    if (normalizedName === `quarter ${normalizedInner}`) return `1 ${unitName} = 0.25 ${inner}`
   }
   return `1 ${unitName} = ${formatQuantity(conversionFactor)} ${base}`
 }

@@ -258,6 +258,7 @@ export default function InventoryPage() {
   const [showUncategorizedOnly, setShowUncategorizedOnly] = useState(false)
   const [sellingUnits, setSellingUnits] = useState<SellingUnit[]>([])
   const [newUnit, setNewUnit] = useState<SellingUnit>({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+  const [newUnitOption, setNewUnitOption] = useState('custom')
   const [openingStockUnitName, setOpeningStockUnitName] = useState('')
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false)
   const [scannerFailed, setScannerFailed] = useState(false)
@@ -961,6 +962,8 @@ export default function InventoryPage() {
     // Load selling units for this product
     const units = (item as any).units || []
     setSellingUnits(units.map((u: any) => ({ id: u.id, unitName: u.unitName, conversionFactor: u.conversionFactor, sellingPrice: u.sellingPrice, isDefault: u.isDefault })))
+    setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setNewUnitOption('custom')
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
@@ -994,6 +997,7 @@ export default function InventoryPage() {
     setSellingUnits([])
     setOpeningStockUnitName('')
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setNewUnitOption('custom')
     setCategoryOpen(false)
     setCategoryQuery('')
     setShowForm(true)
@@ -1007,6 +1011,7 @@ export default function InventoryPage() {
     setSellingUnits([])
     setOpeningStockUnitName('')
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setNewUnitOption('custom')
     setShowBarcodeScanner(false)
     setScannerFailed(false)
     setCategoryOpen(false)
@@ -1016,8 +1021,34 @@ export default function InventoryPage() {
   const addSellingUnit = () => {
     if (!newUnit.unitName || newUnit.conversionFactor <= 0) return
     const packageFactor = unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))
-    setSellingUnits(prev => [...prev, { ...newUnit, conversionFactor: packageFactor || newUnit.conversionFactor }])
+    const multiplier = newUnitOption === 'half' ? 0.5 : newUnitOption === 'quarter' ? 0.25 : 1
+    const presetFactor = newUnitOption !== 'custom' && Number(formData.contentsPerBaseUnit) > 0
+      ? multiplier / Number(formData.contentsPerBaseUnit)
+      : null
+    setSellingUnits(prev => [...prev, { ...newUnit, conversionFactor: presetFactor || packageFactor || newUnit.conversionFactor }])
     setNewUnit({ unitName: '', conversionFactor: 1, sellingPrice: 0, isDefault: false })
+    setNewUnitOption('custom')
+  }
+
+  const innerUnitLabel = formData.contentsUnit.trim().replace(/s$/i, '')
+  const hasPackageContents = Boolean(innerUnitLabel && Number(formData.contentsPerBaseUnit) > 0)
+  const presetMultiplier = newUnitOption === 'half' ? 0.5 : newUnitOption === 'quarter' ? 0.25 : 1
+  const selectedSellingFactor = hasPackageContents && newUnitOption !== 'custom'
+    ? presetMultiplier / Number(formData.contentsPerBaseUnit)
+    : unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor
+
+  const handleUnitOptionChange = (option: string) => {
+    setNewUnitOption(option)
+    if (option === 'custom') {
+      setNewUnit(prev => ({ ...prev, unitName: '', conversionFactor: 1 }))
+      return
+    }
+    const multiplier = option === 'half' ? 0.5 : option === 'quarter' ? 0.25 : 1
+    setNewUnit(prev => ({
+      ...prev,
+      unitName: option === 'half' ? `Half ${innerUnitLabel}` : option === 'quarter' ? `Quarter ${innerUnitLabel}` : innerUnitLabel,
+      conversionFactor: multiplier / Number(formData.contentsPerBaseUnit),
+    }))
   }
 
   const removeSellingUnit = (idx: number) => {
@@ -1791,8 +1822,20 @@ export default function InventoryPage() {
                     : `Optional: define the smaller unit contained in one ${formData.baseUnit}. Enter the actual package contents; JibuSales will not assume a count.`}
                 </p>
                 <div className="grid grid-cols-[minmax(0,1fr)_minmax(120px,0.8fr)] gap-2">
-                  <Input type="number" min="0.000001" step="any" value={formData.contentsPerBaseUnit} onChange={event => setFormData(prev => ({ ...prev, contentsPerBaseUnit: event.target.value === '' ? '' : Number(event.target.value) }))} placeholder="Number inside" aria-label={`Number of inner units per ${formData.baseUnit}`}/>
-                  <Input value={formData.contentsUnit} onChange={event => setFormData(prev => ({ ...prev, contentsUnit: event.target.value }))} placeholder="Inner unit, e.g. Piece" aria-label="Inner unit name"/>
+                  <Input type="number" min="0.000001" step="any" value={formData.contentsPerBaseUnit} onChange={event => {
+                    setFormData(prev => ({ ...prev, contentsPerBaseUnit: event.target.value === '' ? '' : Number(event.target.value) }))
+                    if (event.target.value === '' && newUnitOption !== 'custom') {
+                      setNewUnitOption('custom')
+                      setNewUnit(prev => ({ ...prev, unitName: '', conversionFactor: 1 }))
+                    }
+                  }} placeholder="Number inside" aria-label={`Number of inner units per ${formData.baseUnit}`}/>
+                  <Input value={formData.contentsUnit} onChange={event => {
+                    setFormData(prev => ({ ...prev, contentsUnit: event.target.value }))
+                    if (newUnitOption !== 'custom') {
+                      setNewUnitOption('custom')
+                      setNewUnit(prev => ({ ...prev, unitName: '', conversionFactor: 1 }))
+                    }
+                  }} placeholder="Inner unit, e.g. Piece, kg, Litre" aria-label="Inner unit name"/>
                 </div>
               </div>}
                 </>
@@ -1803,7 +1846,11 @@ export default function InventoryPage() {
               <div className="sm:col-span-2 space-y-3 border rounded-lg p-4">
                 <Label className="text-base font-semibold">Selling Units (Multi-UOM)</Label>
                 <p className="text-xs text-muted-foreground">Add the unit customers buy, such as a piece, litre, or kilogram, and its price. Stock remains tracked in {formData.baseUnit || 'Piece'}; the conversion is applied automatically.</p>
-                <p className="text-xs text-muted-foreground">Factor means base units per 1 selling unit. Examples: with kg as the base, Half kg = 0.5 and Quarter kg = 0.25. With Piece as the base, if one Dose contains 12 pieces, Dose = 12 and Half dose = 6. These conversions are used for stock and cost.</p>
+                <p className="text-xs text-muted-foreground">
+                  {hasPackageContents
+                    ? `1 ${formData.baseUnit} contains ${formatQty(Number(formData.contentsPerBaseUnit))} ${formData.contentsUnit}. Choose the full inner unit, half, quarter, or a custom selling unit.`
+                    : 'Set a selling unit name and its base-unit quantity. Stock deductions convert to the inventory base unit.'}
+                </p>
                 {sellingUnits.length > 0 && (
                   <div className="space-y-2">
                     {sellingUnits.map((u, idx) => (
@@ -1819,31 +1866,48 @@ export default function InventoryPage() {
                     ))}
                   </div>
                 )}
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="flex-1 min-w-[120px]">
-                    <Label className="text-xs">Unit Name</Label>
-                    <Input value={newUnit.unitName} onChange={e => setNewUnit(prev => ({ ...prev, unitName: e.target.value }))} placeholder="e.g. Half KG" className="h-8 text-sm" />
-                    {formData.contentsUnit && Number(formData.contentsPerBaseUnit) > 0 && (
-                      <button type="button" className="mt-1 text-xs text-primary hover:underline" onClick={() => setNewUnit(prev => ({ ...prev, unitName: formData.contentsUnit, conversionFactor: 1 / Number(formData.contentsPerBaseUnit) }))}>
-                        Use inner unit: {formData.contentsUnit}
-                      </button>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(110px,0.7fr)_auto_auto] items-end">
+                  {hasPackageContents && (
+                    <div className="space-y-1">
+                      <Label htmlFor="sellingUnitPreset" className="text-xs">Selling unit</Label>
+                      <select id="sellingUnitPreset" value={newUnitOption} onChange={event => handleUnitOptionChange(event.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
+                        <option value="inner">{innerUnitLabel}</option>
+                        <option value="half">Half {innerUnitLabel}</option>
+                        <option value="quarter">Quarter {innerUnitLabel}</option>
+                        <option value="custom">Custom unit...</option>
+                      </select>
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <Label htmlFor="sellingUnitName" className="text-xs">Unit name</Label>
+                    <Input id="sellingUnitName" value={newUnit.unitName} onChange={event => setNewUnit(prev => ({ ...prev, unitName: event.target.value }))} placeholder="e.g. Half kg, Dose" className="h-9 text-sm" readOnly={hasPackageContents && newUnitOption !== 'custom'} />
+                  </div>
+                  <div className="space-y-1">
+                    {hasPackageContents && newUnitOption !== 'custom' ? (
+                      <>
+                        <Label className="text-xs">Stock conversion</Label>
+                        <div className="flex h-9 items-center rounded-md border bg-muted/30 px-2 text-xs text-muted-foreground">
+                          {sellingUnitConversionLabel(newUnit.unitName, selectedSellingFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <Label htmlFor="sellingUnitFactor" className="text-xs">Base units per selling unit</Label>
+                        <Input id="sellingUnitFactor" type="number" step="any" min="0.000001" value={selectedSellingFactor} onChange={event => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(event.target.value) || 0 }))} className="h-9 text-sm" readOnly={Boolean(unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)))} />
+                        {newUnit.unitName && <p className="text-[11px] text-muted-foreground">{sellingUnitConversionLabel(newUnit.unitName, selectedSellingFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}</p>}
+                      </>
                     )}
                   </div>
-                  <div className="w-36">
-                    <Label className="text-xs">Base units per selling unit</Label>
-                    <Input type="number" step="any" min="0.000001" value={unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" readOnly={Boolean(unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)))} />
-                    {newUnit.unitName && <p className="mt-1 text-[11px] text-muted-foreground">{sellingUnitConversionLabel(newUnit.unitName, unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}</p>}
+                  <div className="space-y-1">
+                    <Label htmlFor="sellingUnitPrice" className="text-xs">Price</Label>
+                    <Input id="sellingUnitPrice" type="number" step="any" min="0" value={newUnit.sellingPrice} onChange={event => setNewUnit(prev => ({ ...prev, sellingPrice: parseFloat(event.target.value) || 0 }))} className="h-9 text-sm" />
                   </div>
-                  <div className="w-28">
-                    <Label className="text-xs">Price</Label>
-                    <Input type="number" step="any" min="0" value={newUnit.sellingPrice} onChange={e => setNewUnit(prev => ({ ...prev, sellingPrice: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" />
-                  </div>
-                  <label className="flex items-center gap-1 text-xs h-8">
-                    <input type="checkbox" checked={newUnit.isDefault} onChange={e => setNewUnit(prev => ({ ...prev, isDefault: e.target.checked }))} className="rounded" />
+                  <label className="flex h-9 items-center gap-1 text-xs">
+                    <input type="checkbox" checked={newUnit.isDefault} onChange={event => setNewUnit(prev => ({ ...prev, isDefault: event.target.checked }))} className="rounded" />
                     Default
                   </label>
-                  <Button type="button" variant="secondary" size="sm" onClick={addSellingUnit} className="h-8" disabled={!newUnit.unitName || newUnit.conversionFactor <= 0}>
-                    <Plus className="h-3 w-3 mr-1" />Add
+                  <Button type="button" variant="secondary" onClick={addSellingUnit} className="h-9" disabled={!newUnit.unitName || selectedSellingFactor <= 0}>
+                    <Plus className="mr-1 h-3 w-3" />Add unit
                   </Button>
                 </div>
               </div>
