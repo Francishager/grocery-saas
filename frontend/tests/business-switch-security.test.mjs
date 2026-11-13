@@ -26,6 +26,8 @@ test('business switch obtains a passkey assertion and exposes a password recover
   const layout = await read('../src/components/layout/TenantLayout.tsx')
   assert.match(auth, /startAuthentication\(\{ optionsJSON: options \}\)/)
   assert.match(auth, /securityAssertion/)
+  assert.match(auth, /ReactNativeWebView/)
+  assert.match(auth, /Confirm your account password to switch businesses in the mobile app/)
   assert.match(layout, /Confirm business switch/)
   assert.match(layout, /Use your account password if your passkey is unavailable/)
   assert.doesNotMatch(auth, /Complete account security setup before switching businesses\./)

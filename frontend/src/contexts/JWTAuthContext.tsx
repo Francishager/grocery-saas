@@ -490,6 +490,10 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
       if (securityMethod === 'passkey') {
         if (confirmationPassword) {
           confirmation = { confirmationPassword }
+        } else if (typeof window !== 'undefined' && Boolean((window as Window & { ReactNativeWebView?: unknown }).ReactNativeWebView)) {
+          const confirmationError = new Error('Confirm your account password to switch businesses in the mobile app.') as Error & { code?: string }
+          confirmationError.code = 'SECURITY_CONFIRMATION_REQUIRED'
+          throw confirmationError
         } else {
           const optionsResponse = await fetch(`${resolvedApiEndpoint}/security/passkey/switch/options`, {
             method: 'POST',
