@@ -15,6 +15,14 @@ test('only multi-business owners are gated from normal authenticated APIs, while
   assert.match(service, /businessIds\.size > 1/)
 })
 
+test('login and session user payloads include the server-computed security requirement', async () => {
+  const source = await read('../src/routes/auth.js')
+  assert.match(source, /async function userPayload/)
+  assert.match(source, /const securitySetupRequired = !user\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(user\)/)
+  assert.match(source, /securityScopeVersion: 1/)
+  assert.match(source, /user: await userPayload\(context\.sessionUser, userPerm, tenantFeatures\)/)
+})
+
 test('only eligible multi-business owners need passkey assertion or password confirmation to switch', async () => {
   const source = await read('../src/routes/auth.js')
   assert.match(source, /router\.post\('\/switch-business', authenticateToken, securityActionLimiter/)

@@ -118,6 +118,10 @@ function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isAuthenticated || !tokens?.accessToken || user?.role !== 'owner' || isPlatformUser()) { setState('ready'); return }
+    if (user.securityScopeVersion === 1) {
+      setState(user.securitySetupRequired ? 'required' : 'ready')
+      return
+    }
     let cancelled = false
     setState('checking')
     setError('')
@@ -126,7 +130,7 @@ function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
         const data = await response.json().catch(() => ({}))
         if (!response.ok) throw new Error(data.error || data.message || 'Could not verify account security.')
         if (cancelled) return
-        updateUser({ securitySetupRequired: Boolean(data.setupRequired), businessSwitchSecurityMethod: data.method || null })
+        updateUser({ securitySetupRequired: Boolean(data.setupRequired), businessSwitchSecurityMethod: data.method || null, securityScopeVersion: 1 })
         setState(data.setupRequired ? 'required' : 'ready')
       })
       .catch(cause => {
@@ -135,9 +139,14 @@ function SecurityEnrollmentGate({ children }: { children: ReactNode }) {
         setState('error')
       })
     return () => { cancelled = true }
-  }, [isAuthenticated, isPlatformUser, tokens?.accessToken, user?.role, attempt])
+  }, [isAuthenticated, isPlatformUser, tokens?.accessToken, user?.role, user?.securityScopeVersion, user?.securitySetupRequired, attempt])
 
-  if (!isAuthenticated || state === 'ready') return <>{children}</>
+  if (!isAuthenticated || user?.role !== 'owner' || isPlatformUser()) return <>{children}</>
+  if (user.securityScopeVersion === 1) {
+    if (!user.securitySetupRequired) return <>{children}</>
+    return <SecurityEnrollmentPage onCompleted={() => setState('ready')} />
+  }
+  if (state === 'ready') return <>{children}</>
   if (state === 'required') return <SecurityEnrollmentPage onCompleted={() => setState('ready')} />
   if (state === 'error') return <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground"><section role="alert" className="max-w-md rounded-lg border bg-card p-6 text-center"><h1 className="text-lg font-semibold">Security check unavailable</h1><p className="mt-2 text-sm text-muted-foreground">{error}</p><button onClick={() => setAttempt(value => value + 1)} className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Retry security check</button></section></main>
   return <main className="flex min-h-screen items-center justify-center bg-background text-foreground"><span className="animate-pulse text-sm text-muted-foreground" role="status">Verifying account security…</span></main>

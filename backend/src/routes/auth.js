@@ -56,9 +56,10 @@ function primaryBranchId(user) {
   return primary?.branchId || null;
 }
 
-function userPayload(user, userPerm, tenantFeatures = null) {
+async function userPayload(user, userPerm, tenantFeatures = null) {
   const isPlatformUser = user.role === "saas_admin" || user.role === "platform_staff";
   const permissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
+  const securitySetupRequired = !user.securitySetupCompletedAt && await requiresBusinessSwitchSecurity(user);
 
   return {
     id: user.id,
@@ -76,7 +77,8 @@ function userPayload(user, userPerm, tenantFeatures = null) {
     cashAccountId: user.cashAccountId || null,
     cashAccount: user.cashAccount || null,
     isPlatformUser,
-    securitySetupRequired: user.role === 'owner' && !user.securitySetupCompletedAt ? null : false,
+    securitySetupRequired,
+    securityScopeVersion: 1,
     businessSwitchSecurityMethod: user.businessSwitchSecurityMethod || null,
     permissions,
     workingHoursAccess: staffWorkingHoursAccess(user, user.tenant),
@@ -176,7 +178,7 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
     await logAuthenticationEvent(req, "login", user);
 
     res.json({
-      user: userPayload(context.sessionUser, userPerm, tenantFeatures),
+      user: await userPayload(context.sessionUser, userPerm, tenantFeatures),
       tokens,
     });
   } catch (err) {
@@ -332,7 +334,7 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
       isPlatformUser: false,
     }, getJwtSecret());
     const responseUser = {
-      ...userPayload(context.sessionUser, userPerm, tenantFeatures),
+      ...(await userPayload(context.sessionUser, userPerm, tenantFeatures)),
       accessibleBusinesses: undefined,
     };
     await logAuthenticationEvent(req, 'business_switched', { ...baseUser, tenantId: targetTenantId });
@@ -395,7 +397,7 @@ router.post("/refresh", refreshLimiter, async (req, res) => {
     );
 
     res.json({
-      user: userPayload(context.sessionUser, userPerm, tenantFeatures),
+      user: await userPayload(context.sessionUser, userPerm, tenantFeatures),
       tokens,
     });
   } catch (err) {
@@ -422,7 +424,7 @@ router.get("/me", authenticateToken, async (req, res) => {
     const tenantFeatures = context.sessionUser.tenantId ? await getTenantFeatures(context.sessionUser.tenantId) : new Set();
     const { password: _, ...safe } = user;
     const { password: __, ...safeContextUser } = context.sessionUser;
-    res.json({ user: { ...safe, ...safeContextUser, ...userPayload(context.sessionUser, userPerm, tenantFeatures) } });
+    res.json({ user: { ...safe, ...safeContextUser, ...(await userPayload(context.sessionUser, userPerm, tenantFeatures)) } });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -513,7 +515,7 @@ router.put("/profile", authenticateToken, async (req, res) => {
     const context = await getTenantSessionContext(user, req.user.tenantId || user.tenantId);
     const userPerm = context?.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
     const tenantFeatures = context?.sessionUser.tenantId ? await getTenantFeatures(context.sessionUser.tenantId) : new Set();
-    res.json({ message: "Profile updated", user: userPayload(context?.sessionUser || user, userPerm, tenantFeatures) });
+    res.json({ message: "Profile updated", user: await userPayload(context?.sessionUser || user, userPerm, tenantFeatures) });
   } catch (err) {
     console.error("Update profile error:", err);
     res.status(500).json({ error: "Failed to update profile" });
@@ -564,7 +566,7 @@ router.post("/avatar", authenticateToken, upload.single("avatar"), async (req, r
         const context = await getTenantSessionContext(user, req.user.tenantId || user.tenantId);
         const userPerm = context?.crossTenantOwner ? null : await prisma.userPermission.findUnique({ where: { userId: req.user.id } });
         const tenantFeatures = context?.sessionUser.tenantId ? await getTenantFeatures(context.sessionUser.tenantId) : new Set();
-        res.json({ message: "Avatar uploaded", avatar: avatarUrl, user: userPayload(context?.sessionUser || user, userPerm, tenantFeatures) });
+        res.json({ message: "Avatar uploaded", avatar: avatarUrl, user: await userPayload(context?.sessionUser || user, userPerm, tenantFeatures) });
       }
     );
     stream.end(req.file.buffer);

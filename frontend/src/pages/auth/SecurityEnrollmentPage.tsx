@@ -34,7 +34,7 @@ export default function SecurityEnrollmentPage({ onCompleted }: { onCompleted?: 
       const result = await authRequest('/security/status') as SecurityStatus
       setStatus(result)
       if (!result.setupRequired) {
-        updateUser({ securitySetupRequired: false, businessSwitchSecurityMethod: result.method })
+        updateUser({ securitySetupRequired: false, securityScopeVersion: 1, businessSwitchSecurityMethod: result.method })
         onCompleted?.()
       }
     } catch (cause) {
@@ -47,7 +47,7 @@ export default function SecurityEnrollmentPage({ onCompleted }: { onCompleted?: 
   useEffect(() => { void loadStatus() }, [])
 
   const completeSetup = (method: 'passkey' | 'password', passkeyCount: number) => {
-    updateUser({ securitySetupRequired: false, businessSwitchSecurityMethod: method })
+    updateUser({ securitySetupRequired: false, securityScopeVersion: 1, businessSwitchSecurityMethod: method })
     setStatus({ setupRequired: false, method, passkeyCount })
     onCompleted?.()
   }

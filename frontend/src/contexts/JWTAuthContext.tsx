@@ -26,6 +26,7 @@ export interface User {
   tenantId?: string
   tenantStatus?: string | null
   securitySetupRequired?: boolean
+  securityScopeVersion?: number
   businessSwitchSecurityMethod?: 'passkey' | 'password' | null
   accessibleBusinesses?: Array<{ id: string; name: string; businessType?: string | null; status?: string; logo?: string | null }>
   cashAccountId?: string | null

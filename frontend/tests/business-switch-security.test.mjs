@@ -40,3 +40,11 @@ test('security enrollment is server-scoped to owners with multiple active busine
   assert.match(middleware, /!currentUser\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(currentUser\)/)
   assert.match(middleware, /securityRequired && !isSecurityEndpoint/)
 })
+
+test('fresh server-scoped security status avoids a verification screen for single-business users', async () => {
+  const app = await read('../src/App.tsx')
+  const auth = await read('../src/contexts/JWTAuthContext.tsx')
+  assert.match(auth, /securityScopeVersion\?: number/)
+  assert.match(app, /user\.securityScopeVersion === 1/)
+  assert.match(app, /if \(!user\.securitySetupRequired\) return <>{children}<\/>/)
+})
