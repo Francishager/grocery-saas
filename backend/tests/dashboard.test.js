@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 const prisma = {};
+prisma.tenant = { findUnique: async () => ({ planId: null, plan: { features: [] } }) };
+prisma.planFeature = { findMany: async () => [] };
+prisma.tenantFeature = { findMany: async () => [
+  'reports.financial', 'sales', 'inventory', 'customers', 'receivables', 'expenses', 'settings.taxes',
+].map((name) => ({ enabled: true, feature: { name } })) };
 for (const model of ['sale', 'saleRecord', 'creditNote', 'customer', 'customerPayment',
   'customerPaymentAllocation', 'customerCreditApplication', 'customerWithdrawal', 'saleReturn', 'purchase', 'supplierPurchase', 'expense', 'journalEntry', 'product']) {
   prisma[model] = Object.fromEntries(['aggregate', 'findMany', 'groupBy', 'count'].map((method) =>
