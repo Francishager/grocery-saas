@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { LayoutDashboard, Building2, CreditCard, Settings, Mail, Users, Wallet, LogOut, Menu, Shield, Activity, Sun, Moon, Gift, BookOpen, Factory, Store, Fuel, KeyRound, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { SyncIndicator } from '@/components/SyncIndicator'
 import { apiFetch } from '@/lib/api'
 import { appNotify } from '@/lib/appFeedback'
+import { AppErrorBoundary } from '@/components/AppErrorBoundary'
 
 const navItems: Array<{ to: string; label: string; icon: typeof LayoutDashboard; permission: string; permissions?: string[] }> = [
   { to: '/saas/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'view_platform_analytics' },
@@ -32,6 +33,7 @@ export function SaaSAdminLayout() {
   const { user, logout } = useJWTAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const location = useLocation()
   const [testingEmail, setTestingEmail] = useState(false)
   const handleLogout = () => { logout(); navigate('/saas/login') }
   const handleTestEmail = async () => {
@@ -148,7 +150,7 @@ export function SaaSAdminLayout() {
             </div>
           </div>
         </header>
-        <main className="overflow-x-hidden p-4 lg:p-6"><Outlet /></main>
+        <main className="overflow-x-hidden p-4 lg:p-6"><AppErrorBoundary resetKey={location.pathname}><Outlet /></AppErrorBoundary></main>
       </div>
     </div>
   )

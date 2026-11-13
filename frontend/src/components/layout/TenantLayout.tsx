@@ -23,6 +23,7 @@ import OnboardingGuideModal from '@/components/OnboardingGuideModal'
 import UserGuideMenu from '@/components/UserGuideMenu'
 import { SubscriptionBillingReminder } from '@/components/layout/SubscriptionBillingReminder'
 import { BusinessChatWidget } from '@/components/BusinessChatWidget'
+import { AppErrorBoundary } from '@/components/AppErrorBoundary'
 
 const inventorySubItems = [
   { to: '/tenant/inventory/products', label: 'Products', icon: Package, permission: 'canViewProduct', feature: 'inventory.products' },
@@ -1332,7 +1333,7 @@ export function TenantLayout() {
         <main className="overflow-x-clip p-4 lg:p-6">
           {waiterMode && !['/tenant/restaurant/orders', '/tenant/restaurant/menu'].includes(location.pathname)
             ? <p role="status" className="py-12 text-center text-sm text-muted-foreground">Opening the waiter order screen…</p>
-            : <Outlet />}
+            : <AppErrorBoundary resetKey={location.pathname}><Outlet /></AppErrorBoundary>}
         </main>
       </div>
       {!waiterMode && <OnboardingGuideModal

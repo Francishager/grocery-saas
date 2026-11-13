@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { cn, formatCurrency } from '@/lib/utils'
-import { sellingUnitConversionLabel } from '@/lib/unitDisplay'
+import { sellingUnitConversionLabel, sellingUnitDisplayName } from '@/lib/unitDisplay'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
@@ -1023,10 +1023,10 @@ export default function SalesPage() {
                                       key={u.id}
                                       onClick={() => !isUncategorized && addToCart(item, u.unitName, u.conversionFactor, u.sellingPrice)}
                                       disabled={isUncategorized}
-                                      aria-label={`${u.unitName}, ${sellingUnitConversionLabel(u.unitName, u.conversionFactor, item.baseUnit, item.contentsUnit, item.contentsPerBaseUnit)}`}
+                                      aria-label={`${sellingUnitDisplayName(item.product_name, u.unitName)}, ${sellingUnitConversionLabel(u.unitName, u.conversionFactor, item.baseUnit, item.contentsUnit, item.contentsPerBaseUnit)}`}
                                       className={`rounded border px-2 py-1 text-left text-xs whitespace-normal break-words transition-colors ${isUncategorized ? 'opacity-50 cursor-not-allowed bg-gray-100 text-gray-500' : 'hover:bg-primary hover:text-primary-foreground'}`}
                                     >
-                                      <span className="block font-medium">{u.unitName}</span>
+                                      <span className="block font-medium">{sellingUnitDisplayName(item.product_name, u.unitName)}</span>
                                       <span className="block text-[10px] opacity-75">{sellingUnitConversionLabel(u.unitName, u.conversionFactor, item.baseUnit, item.contentsUnit, item.contentsPerBaseUnit)}</span>
                                     </button>
                                   ))}

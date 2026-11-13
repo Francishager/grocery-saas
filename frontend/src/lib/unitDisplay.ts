@@ -2,6 +2,14 @@ const normalizeUnit = (value: string) => value.trim().toLocaleLowerCase().replac
 
 const formatQuantity = (value: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(value)
 
+export function sellingUnitDisplayName(productName: string, unitName: string): string {
+  const product = productName.trim()
+  const unit = unitName.trim()
+  if (!product) return unit
+  if (!unit) return product
+  return `${product} (${unit})`
+}
+
 export function sellingUnitConversionLabel(
   unitName: string,
   conversionFactor: number,
@@ -15,7 +23,7 @@ export function sellingUnitConversionLabel(
   const normalizedName = normalizeUnit(unitName)
   const normalizedInner = normalizeUnit(inner)
   if (inner && contents > 0) {
-    if (normalizedName === normalizedInner) return `1 ${base} = ${formatQuantity(contents)} ${inner}`
+    if (normalizedName === normalizedInner) return `Each ${base} contains ${formatQuantity(contents)} ${inner}`
     if (normalizedName === `half ${normalizedInner}`) return `1 ${unitName} = 0.5 ${inner}`
     if (normalizedName === `quarter ${normalizedInner}`) return `1 ${unitName} = 0.25 ${inner}`
   }

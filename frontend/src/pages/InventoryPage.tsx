@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
-import { sellingUnitConversionLabel } from '@/lib/unitDisplay'
+import { sellingUnitConversionLabel, sellingUnitDisplayName } from '@/lib/unitDisplay'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
@@ -227,7 +227,7 @@ const requiresPackageContents = (unitName: string) => ['box', 'carton', 'dose', 
 const canDefinePackageContents = (unitName: string) => requiresPackageContents(unitName) || normalizeUnitKey(unitName) !== 'piece'
 
 export default function InventoryPage() {
-  const { hasFeature } = useFeatureAccess()
+  const { hasFeature, usageLimits } = useFeatureAccess()
   const restaurantFeatureEnabled = hasFeature('restaurant')
   const multiUnitEnabled = hasFeature('inventory.multi_unit')
   const [categoryOpen, setCategoryOpen] = useState(false)
@@ -249,6 +249,8 @@ export default function InventoryPage() {
   const inventoryRequestRef = useRef(0)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [tenantProductCount, setTenantProductCount] = useState<number | null>(null)
+  const [tenantProductLimit, setTenantProductLimit] = useState<number | null>(null)
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null)
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
   const [productAttributeOptions, setProductAttributeOptions] = useState<ProductAttributeOptions>(emptyProductAttributeOptions)
@@ -343,6 +345,26 @@ export default function InventoryPage() {
   const canManageInventory = canCreateCurrent || canEditCurrent
   const categoryType = lockedType || formData.itemType
   const canCreateCategory = hasPermission(categoryType === 'service' ? 'canCreateService' : categoryType === 'rental' ? 'canCreateRental' : 'canCreateProduct')
+  const effectiveProductLimit = tenantProductLimit ?? usageLimits?.maxProducts ?? null
+  const productLimitReached = tenantProductCount !== null && effectiveProductLimit !== null && tenantProductCount >= effectiveProductLimit
+
+  useEffect(() => {
+    let active = true
+    apiFetch('/api/tenants/me/limits')
+      .then(async response => response.ok ? response.json() : null)
+      .then(data => {
+        const usage = data?.usage?.products
+        if (!active || !usage) return
+        setTenantProductCount(Number(usage.count))
+        setTenantProductLimit(Number(usage.limit))
+      })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [user?.tenantId])
+
+  useEffect(() => {
+    if (productLimitReached && showForm && !editingItem) setShowForm(false)
+  }, [productLimitReached, showForm, editingItem])
 
   const filteredItems = useMemo(() => {
     let result = items
@@ -710,6 +732,11 @@ export default function InventoryPage() {
           toast({ variant: 'destructive', title: `You do not have permission to create ${isServicesPage ? 'services' : 'products'}` })
           return
         }
+        if (productLimitReached) {
+          toast({ variant: 'destructive', title: 'Product limit reached', description: 'Your plan limit has been reached. Contact JibuSales Support to request an increase.' })
+          setShowForm(false)
+          return
+        }
         let printableProduct: Pick<InventoryItem, 'product_name' | 'barcode' | 'size' | 'brand' | 'design'> | null = null
         if (online) {
           const result = await inventoryApi.create({ ...formData, quantity: openingStockBaseQuantity, linkedItemIds: hasFeature('service.job_cards') ? formData.linkedItemIds : undefined })
@@ -986,6 +1013,10 @@ export default function InventoryPage() {
   }
 
   const openNewForm = () => {
+    if (productLimitReached) {
+      toast({ variant: 'destructive', title: 'Product limit reached', description: 'Your plan limit has been reached. Contact JibuSales Support to request an increase.' })
+      return
+    }
     void loadProductAttributeOptions()
     setEditingItem(null)
     setFormData({
@@ -1292,7 +1323,7 @@ export default function InventoryPage() {
              'Manage your products'}
           </p>
         </div>
-        {canCreateCurrent && (
+        {canCreateCurrent && !productLimitReached && (
           <Button onClick={openNewForm}>
             <Plus className="mr-2 h-4 w-4" />
             {isServicesPage ? 'Add Service' : showHospitalityInventory ? 'Add Stock Item' : lockedType === 'product' ? 'Add Product' : 'Add Item'}
@@ -1855,7 +1886,7 @@ export default function InventoryPage() {
                   <div className="space-y-2">
                     {sellingUnits.map((u, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
-                        <span className="flex-1 text-sm font-medium">{u.unitName}</span>
+                        <span className="flex-1 text-sm font-medium">{sellingUnitDisplayName(formData.product_name, u.unitName)}</span>
                         <span className="text-xs text-muted-foreground" title={`${u.conversionFactor} ${formData.baseUnit || 'base unit'} per ${u.unitName}`}>
                           {sellingUnitConversionLabel(u.unitName, unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) || u.conversionFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}
                         </span>
@@ -1881,6 +1912,7 @@ export default function InventoryPage() {
                   <div className="space-y-1">
                     <Label htmlFor="sellingUnitName" className="text-xs">Unit name</Label>
                     <Input id="sellingUnitName" value={newUnit.unitName} onChange={event => setNewUnit(prev => ({ ...prev, unitName: event.target.value }))} placeholder="e.g. Half kg, Dose" className="h-9 text-sm" readOnly={hasPackageContents && newUnitOption !== 'custom'} />
+                    {newUnit.unitName && formData.product_name.trim() && <p className="text-[11px] text-muted-foreground">Receipt name: {sellingUnitDisplayName(formData.product_name, newUnit.unitName)}</p>}
                   </div>
                   <div className="space-y-1">
                     {hasPackageContents && newUnitOption !== 'custom' ? (
@@ -1947,7 +1979,7 @@ export default function InventoryPage() {
           ) : totalItems === 0 ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground mb-4">No items found</p>
-              {canCreateCurrent && !searching && !showUncategorizedOnly && <Button onClick={openNewForm}>
+              {canCreateCurrent && !productLimitReached && !searching && !showUncategorizedOnly && <Button onClick={openNewForm}>
                 <Plus className="mr-2 h-4 w-4" />
                 {isServicesPage ? 'Add First Service' : lockedType === 'product' ? 'Add First Product' : 'Add First Item'}
               </Button>}
