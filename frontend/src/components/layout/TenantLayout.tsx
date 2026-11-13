@@ -449,12 +449,6 @@ export function TenantLayout() {
   }, [tokens?.accessToken, tenantId, user?.isPlatformUser])
   const handleBusinessSwitch = async (nextTenantId: string, confirmationPassword?: string) => {
     if (!nextTenantId || nextTenantId === tenantId) return
-    if (user?.businessSwitchSecurityMethod === 'password' && !confirmationPassword) {
-      setPendingBusinessTarget(nextTenantId)
-      setSwitchPassword('')
-      setSwitchError('')
-      return
-    }
     setSwitchingBusiness(true)
     try {
       await switchBusiness(nextTenantId, confirmationPassword)
@@ -462,7 +456,15 @@ export function TenantLayout() {
       setPendingBusinessTarget('')
       setSwitchPassword('')
     } catch (error) {
-      if (confirmationPassword) setSwitchError(error instanceof Error ? error.message : 'Could not switch business.')
+      const code = (error as Error & { code?: string })?.code
+      if (code === 'SECURITY_SETUP_REQUIRED') {
+        setPendingBusinessTarget('')
+        appNotify('Set up account security before switching businesses.')
+      } else if (code === 'SECURITY_CONFIRMATION_REQUIRED' || confirmationPassword) {
+        setPendingBusinessTarget(nextTenantId)
+        setSwitchPassword('')
+        setSwitchError(confirmationPassword ? (error instanceof Error ? error.message : 'Could not switch business.') : '')
+      }
       else if (user?.businessSwitchSecurityMethod === 'passkey') {
         setPendingBusinessTarget(nextTenantId)
         setSwitchPassword('')

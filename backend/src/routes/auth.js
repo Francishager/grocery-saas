@@ -14,7 +14,7 @@ import { auditLog } from "../utils/audit.js";
 import { getJwtSecret } from "../utils/jwtSecret.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { createSessionTokens } from "../utils/sessionTokens.js";
-import { authenticationOptions, registrationOptions, requiresBusinessSwitchSecurity, verifyBusinessSwitch, verifyRegistration } from '../services/userSecurity.js';
+import { authenticationOptions, hasBusinessSwitchSecuritySetup, registrationOptions, requiresBusinessSwitchSecurity, verifyBusinessSwitch, verifyRegistration } from '../services/userSecurity.js';
 
 const router = Router();
 const ipKey = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
@@ -59,7 +59,7 @@ function primaryBranchId(user) {
 async function userPayload(user, userPerm, tenantFeatures = null) {
   const isPlatformUser = user.role === "saas_admin" || user.role === "platform_staff";
   const permissions = resolveEffectivePermissions(user, userPerm, [], tenantFeatures);
-  const securitySetupRequired = !user.securitySetupCompletedAt && await requiresBusinessSwitchSecurity(user);
+  const securitySetupRequired = await requiresBusinessSwitchSecurity(user) && !hasBusinessSwitchSecuritySetup(user);
 
   return {
     id: user.id,
@@ -193,7 +193,7 @@ router.get('/security/status', authenticateToken, async (req, res) => {
       prisma.user.findUnique({ where: { id: req.user.id }, select: { securitySetupCompletedAt: true, businessSwitchSecurityMethod: true } }),
       prisma.securityPasskey.count({ where: { userId: req.user.id } }),
     ])
-    const setupRequired = Boolean(await requiresBusinessSwitchSecurity(req.user) && !user?.securitySetupCompletedAt)
+    const setupRequired = Boolean(await requiresBusinessSwitchSecurity(req.user) && !hasBusinessSwitchSecuritySetup(user))
     res.json({
       setupRequired,
       method: user?.businessSwitchSecurityMethod || null,
@@ -294,7 +294,7 @@ router.post('/switch-business', authenticateToken, securityActionLimiter, async 
     if (!baseUser?.isActive) return res.status(401).json({ error: 'User account is inactive.' });
     const securityRequired = targetTenantId !== baseUser.tenantId && await requiresBusinessSwitchSecurity(baseUser)
     try {
-      if (securityRequired && !baseUser.securitySetupCompletedAt) {
+      if (securityRequired && !hasBusinessSwitchSecuritySetup(baseUser)) {
         return res.status(428).json({ error: 'Set up business-switch security before switching businesses.', code: 'SECURITY_SETUP_REQUIRED' })
       }
       if (securityRequired) {

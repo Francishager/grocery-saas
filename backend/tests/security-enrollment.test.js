@@ -8,27 +8,33 @@ test('only multi-business owners are gated from normal authenticated APIs, while
   const source = await read('../middleware/auth.js')
   const service = await read('../src/services/userSecurity.js')
   assert.match(source, /req\.baseUrl === '\/api\/auth' && String\(req\.path \|\| ''\)\.startsWith\('\/security\/'\)/)
-  assert.match(source, /!currentUser\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(currentUser\)/)
+  assert.match(source, /await requiresBusinessSwitchSecurity\(currentUser\) && !hasBusinessSwitchSecuritySetup\(currentUser\)/)
   assert.match(source, /securityRequired && !isSecurityEndpoint/)
   assert.match(source, /SECURITY_SETUP_REQUIRED/)
   assert.match(service, /role !== 'owner'/)
+  assert.match(service, /prisma\.tenant\.findMany\(\{ where: \{ ownerId: id \}/)
   assert.match(service, /businessIds\.size > 1/)
+  assert.match(service, /hasBusinessSwitchSecuritySetup/)
 })
 
 test('login and session user payloads include the server-computed security requirement', async () => {
   const source = await read('../src/routes/auth.js')
   assert.match(source, /async function userPayload/)
-  assert.match(source, /const securitySetupRequired = !user\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(user\)/)
+  assert.match(source, /const securitySetupRequired = await requiresBusinessSwitchSecurity\(user\) && !hasBusinessSwitchSecuritySetup\(user\)/)
   assert.match(source, /securityScopeVersion: 1/)
   assert.match(source, /user: await userPayload\(context\.sessionUser, userPerm, tenantFeatures\)/)
 })
 
 test('only eligible multi-business owners need passkey assertion or password confirmation to switch', async () => {
   const source = await read('../src/routes/auth.js')
+  const client = await read('../../frontend/src/contexts/JWTAuthContext.tsx')
   assert.match(source, /router\.post\('\/switch-business', authenticateToken, securityActionLimiter/)
   assert.match(source, /verifyBusinessSwitch\(req, baseUser, targetTenantId, req\.body\.securityAssertion\)/)
   assert.match(source, /bcrypt\.compare\(String\(req\.body\.confirmationPassword\), baseUser\.password\)/)
   assert.match(source, /targetTenantId !== baseUser\.tenantId && await requiresBusinessSwitchSecurity\(baseUser\)/)
+  assert.match(client, /fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
+  assert.match(client, /SECURITY_SETUP_REQUIRED/)
+  assert.match(client, /SECURITY_CONFIRMATION_REQUIRED/)
 })
 
 test('passkey assertions verify the challenge, exact origin, relying-party ID, user verification, and consume the challenge once', async () => {

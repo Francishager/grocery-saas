@@ -31,14 +31,18 @@ test('business switch obtains a passkey assertion and exposes a password recover
   assert.doesNotMatch(auth, /Complete account security setup before switching businesses\./)
 })
 
-test('security enrollment is server-scoped to owners with multiple active business memberships', async () => {
+test('security enrollment is server-scoped to owners with multiple businesses and requires a configured method', async () => {
   const service = await read('../../backend/src/services/userSecurity.js')
   const middleware = await read('../../backend/middleware/auth.js')
+  const auth = await read('../src/contexts/JWTAuthContext.tsx')
   assert.match(service, /requiresBusinessSwitchSecurity/)
   assert.match(service, /role !== 'owner'/)
+  assert.match(service, /prisma\.tenant\.findMany\(\{ where: \{ ownerId: id \}/)
   assert.match(service, /businessIds\.size > 1/)
-  assert.match(middleware, /!currentUser\.securitySetupCompletedAt && await requiresBusinessSwitchSecurity\(currentUser\)/)
+  assert.match(service, /hasBusinessSwitchSecuritySetup/)
+  assert.match(middleware, /await requiresBusinessSwitchSecurity\(currentUser\) && !hasBusinessSwitchSecuritySetup\(currentUser\)/)
   assert.match(middleware, /securityRequired && !isSecurityEndpoint/)
+  assert.match(auth, /fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
 })
 
 test('fresh server-scoped security status avoids a verification screen for single-business users', async () => {

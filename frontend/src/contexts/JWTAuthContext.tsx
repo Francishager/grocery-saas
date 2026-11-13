@@ -454,7 +454,31 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     setError(null)
     try {
       let confirmation: Record<string, unknown> = {}
-      if (user?.businessSwitchSecurityMethod === 'passkey') {
+      let securityMethod = user?.businessSwitchSecurityMethod || null
+      if (user?.role === 'owner' && !user?.isPlatformUser) {
+        const statusResponse = await fetch(`${resolvedApiEndpoint}/security/status`, {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        })
+        const securityStatus = await statusResponse.json().catch(() => ({}))
+        if (!statusResponse.ok) throw new Error(securityStatus.error || 'Could not verify account security.')
+        securityMethod = securityStatus.method || null
+        updateUser({
+          securitySetupRequired: Boolean(securityStatus.setupRequired),
+          businessSwitchSecurityMethod: securityMethod,
+          securityScopeVersion: 1,
+        })
+        if (securityStatus.setupRequired) {
+          const setupError = new Error('Set up business-switch security before switching businesses.') as Error & { code?: string }
+          setupError.code = 'SECURITY_SETUP_REQUIRED'
+          throw setupError
+        }
+        if (securityMethod === 'password' && !confirmationPassword) {
+          const confirmationError = new Error('Confirm your account password before switching businesses.') as Error & { code?: string }
+          confirmationError.code = 'SECURITY_CONFIRMATION_REQUIRED'
+          throw confirmationError
+        }
+      }
+      if (securityMethod === 'passkey') {
         if (confirmationPassword) {
           confirmation = { confirmationPassword }
         } else {
@@ -468,7 +492,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           const securityAssertion = await startAuthentication({ optionsJSON: options })
           confirmation = { securityAssertion }
         }
-      } else if (user?.businessSwitchSecurityMethod === 'password') {
+      } else if (securityMethod === 'password') {
         if (!confirmationPassword) throw new Error('Confirm your password before switching businesses.')
         confirmation = { confirmationPassword }
       }
@@ -493,7 +517,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     } finally {
       setLoading(false)
     }
-  }, [tokens?.accessToken, user?.businessSwitchSecurityMethod, resolvedApiEndpoint, refreshOnboardingStatus, onLogin])
+  }, [tokens?.accessToken, user?.businessSwitchSecurityMethod, user?.role, user?.isPlatformUser, resolvedApiEndpoint, refreshOnboardingStatus, onLogin, updateUser])
 
   const refreshTokens = useCallback(async () => {
     if (!tokens?.refreshToken) return false

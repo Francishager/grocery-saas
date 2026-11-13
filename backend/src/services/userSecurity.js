@@ -11,13 +11,23 @@ const challengeTtlMs = 5 * 60 * 1000
 
 export async function requiresBusinessSwitchSecurity({ id, role, tenantId }) {
   if (!id || role !== 'owner') return false
-  const memberships = await prisma.tenantMembership.findMany({
-    where: { userId: id, role: 'owner', isActive: true },
-    select: { tenantId: true },
-  })
-  const businessIds = new Set(memberships.map(({ tenantId: membershipTenantId }) => membershipTenantId))
+  const [memberships, ownedTenants] = await Promise.all([
+    prisma.tenantMembership.findMany({
+      where: { userId: id, role: 'owner', isActive: true },
+      select: { tenantId: true },
+    }),
+    prisma.tenant.findMany({ where: { ownerId: id }, select: { id: true } }),
+  ])
+  const businessIds = new Set([
+    ...memberships.map(({ tenantId: membershipTenantId }) => membershipTenantId),
+    ...ownedTenants.map(({ id: ownedTenantId }) => ownedTenantId),
+  ])
   if (tenantId) businessIds.add(tenantId)
   return businessIds.size > 1
+}
+
+export function hasBusinessSwitchSecuritySetup(user) {
+  return Boolean(user?.securitySetupCompletedAt && ['passkey', 'password'].includes(user?.businessSwitchSecurityMethod))
 }
 
 export function webAuthnContext(req) {
