@@ -3,6 +3,7 @@ import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
 import { branchAttendanceUpdates } from "../utils/attendanceLocation.js";
+import { requireFeature } from "../../middleware/featureCheck.js";
 
 const router = Router();
 
@@ -68,6 +69,7 @@ async function findTenantBranch(req, res) {
 router.get(
   "/",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canViewBranch"),
   requireTenantUser,
   async (req, res) => {
@@ -94,6 +96,7 @@ router.get(
 router.get(
   "/active",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canViewBranch"),
   requireTenantUser,
   async (req, res) => {
@@ -133,6 +136,7 @@ router.get('/options', authenticateToken, requireTenantUser, async (req, res) =>
 router.get(
   "/:id",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canViewBranch"),
   requireTenantUser,
   async (req, res) => {
@@ -150,6 +154,7 @@ router.get(
 router.post(
   "/",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canCreateBranch"),
   requireTenantUser,
   async (req, res) => {
@@ -157,15 +162,17 @@ router.post(
       const data = cleanBranchPayload(req.body);
       if (!data.name) return res.status(400).json({ error: "Branch name required" });
 
-      await checkUsageLimit(req.tenantId, 'branches');
-
-      const branch = await prisma.branch.create({
-        data: {
-          ...data,
-          isActive: data.isActive ?? true,
-          tenantId: req.tenantId,
-        },
-        include: { _count: { select: { users: true } } },
+      const branch = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.tenantId}), hashtext('branch-create'))`;
+        await checkUsageLimit(req.tenantId, 'branches', tx);
+        return tx.branch.create({
+          data: {
+            ...data,
+            isActive: data.isActive ?? true,
+            tenantId: req.tenantId,
+          },
+          include: { _count: { select: { users: true } } },
+        });
       });
 
       res.status(201).json({ message: "Branch created", branch: branchResponse(branch) });
@@ -184,6 +191,7 @@ router.post(
 router.put(
   "/:id",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canEditBranch"),
   requireTenantUser,
   async (req, res) => {
@@ -217,6 +225,7 @@ router.put(
 router.patch(
   "/:id",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canEditBranch"),
   requireTenantUser,
   async (req, res) => {
@@ -250,6 +259,7 @@ router.patch(
 router.delete(
   "/:id",
   authenticateToken,
+  requireFeature("multi_branch"),
   requirePermission("canDeleteBranch"),
   requireTenantUser,
   async (req, res) => {

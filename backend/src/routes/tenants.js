@@ -7,6 +7,7 @@ import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateAnnualPartialPaymentReminderWindow } from "../utils/subscriptionPricing.js";
 import { buildBillingPaymentRequest, getBillingGatewaySummary, processTenantBillingPayment, normalizeRelworxStatus, verifyRelworxWebhookSignature } from "../services/paymentGateway.js";
 import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
+import { getTenantLimits } from "../utils/usageLimits.js";
 import { getPesapalCallbackUrl, getPesapalTransactionStatus, normalizePesapalStatus, submitPesapalOrder } from "../services/pesapal.js";
 import { extendSettledSubscriptionTerm, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 
@@ -706,18 +707,12 @@ router.get("/:id/limits", authenticateToken, async (req, res) => {
       prisma.supplier.count({ where: { tenantId } }),
     ]);
 
-    const limits = {
-      maxUsers: tenant.usageLimit?.maxUsers || tenant.plan?.maxUsers || 5,
-      maxProducts: tenant.usageLimit?.maxProducts ?? tenant.plan?.maxProducts ?? 100,
-      maxBranches: tenant.usageLimit?.maxBranches || 3,
-      maxCustomers: tenant.usageLimit?.maxCustomers || 100,
-      maxSuppliers: tenant.usageLimit?.maxSuppliers || 50,
-    };
+    const limits = await getTenantLimits(tenantId);
 
     const usage = {
-      users: { count: userCount, limit: limits.maxUsers, percentage: Math.round((userCount / limits.maxUsers) * 100) },
+      users: { count: userCount, limit: limits.maxUsers, percentage: limits.maxUsers > 0 ? Math.round((userCount / limits.maxUsers) * 100) : 0 },
       products: { count: productCount, limit: limits.maxProducts, percentage: limits.maxProducts > 0 ? Math.round((productCount / limits.maxProducts) * 100) : 0 },
-      branches: { count: branchCount, limit: limits.maxBranches, percentage: Math.round((branchCount / limits.maxBranches) * 100) },
+      branches: { count: branchCount, limit: limits.maxBranches, percentage: limits.maxBranches > 0 ? Math.round((branchCount / limits.maxBranches) * 100) : 0 },
       customers: { count: customerCount, limit: limits.maxCustomers, percentage: Math.round((customerCount / limits.maxCustomers) * 100) },
       suppliers: { count: supplierCount, limit: limits.maxSuppliers, percentage: Math.round((supplierCount / limits.maxSuppliers) * 100) },
     };

@@ -155,6 +155,8 @@ router.use((req, res, next) => {
   next();
 });
 router.use('/rentals', requireFeature('reports.rentals'));
+router.use('/financial', requireFeature('reports.financial'));
+router.use('/audit', requireFeature('reports.audit'));
 
 function df(req, field = "createdAt") {
   const { from, to } = req.query;

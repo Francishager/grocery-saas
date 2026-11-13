@@ -4,7 +4,7 @@ import { randomBytes, randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin, tenantAccountAccessPayload } from "../../middleware/auth.js";
-import { planFeatureIsAllowedByPlanList } from "../../middleware/featureCheck.js";
+import { getTenantFeatures, invalidateFeatureCache } from "../../middleware/featureCheck.js";
 import { sendMail } from "../../mailer.js";
 import { auditLog } from "../utils/audit.js";
 import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSubscriptionEndDate } from "../utils/subscriptionPricing.js";
@@ -422,6 +422,7 @@ async function updateSubscription(req, res) {
       data,
       include: { plan: true },
     });
+    invalidateFeatureCache(updatedTenant.id);
 
     const blockPayload = tenantAccountAccessPayload(updatedTenant, { role: "owner" });
 
@@ -737,6 +738,7 @@ router.post("/subscription/upgrade", authenticateToken, requirePlatformAdmin, as
     
     const oldTenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
     await prisma.tenant.update({ where: { id: tenantId }, data: { planId, status: "active" } });
+    invalidateFeatureCache(tenantId);
 
     // Audit log: subscription upgrade - track which tenant was upgraded
     auditLog({
@@ -765,6 +767,7 @@ router.post("/subscription/downgrade", authenticateToken, requirePlatformAdmin, 
     const { tenantId, planId } = req.body;
     if (!tenantId || !planId) return res.status(400).json({ error: "tenantId and planId required" });
     await prisma.tenant.update({ where: { id: tenantId }, data: { planId } });
+    invalidateFeatureCache(tenantId);
     res.json({ message: "Subscription downgraded" });
   } catch (err) {
     console.error("Downgrade error:", err);
@@ -787,6 +790,7 @@ router.post("/subscription/edit", authenticateToken, requirePlatformAdmin, async
       data.status = normalizedStatus;
     }
     await prisma.tenant.update({ where: { id: tenantId }, data });
+    invalidateFeatureCache(tenantId);
     res.json({ message: "Subscription updated" });
   } catch (err) {
     console.error("Edit subscription error:", err);
@@ -1575,52 +1579,30 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
 router.get("/me/features", authenticateToken, async (req, res) => {
   try {
     const role = req.user?.role;
-    if (role === "saas_admin") return res.json({ features: [] });
+    if (role === "saas_admin") {
+      res.set("Cache-Control", "private, no-store");
+      return res.json({ features: [] });
+    }
 
     const tenantId = req.user?.tenantId;
     const featureMap = {};
 
     if (tenantId) {
-      // 1. Plan-level features (primary source)
-      const tenant = await prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: {
-          planId: true,
-          plan: {
-            select: {
-              features: true,
-            },
-          },
-        },
-      });
-
-      if (tenant?.planId) {
-        const planFeatures = await prisma.planFeature.findMany({
-          where: { planId: tenant.planId, enabled: true, feature: { isActive: true } },
-          include: { feature: true },
-        });
-        planFeatures.forEach((pf) => {
-          if (pf.feature?.name && planFeatureIsAllowedByPlanList(tenant.plan, pf.feature.name)) {
-            featureMap[pf.feature.name] = { enabled: true, source: "plan" };
-          }
-        });
-      }
-
-      // 2. Tenant-level overrides (can enable/disable plan features or add extras)
-      const tenantFeatures = await prisma.tenantFeature.findMany({
-        where: { tenantId, feature: { isActive: true } },
-        include: { feature: true },
-      });
-      tenantFeatures.forEach((tf) => {
-        if (tf.feature?.name) {
-          featureMap[tf.feature.name] = {
-            enabled: tf.enabled,
-            source: "override",
-          };
-        }
+      const [effective, catalog, overrides] = await Promise.all([
+        getTenantFeatures(tenantId),
+        prisma.feature.findMany({ where: { isActive: true }, select: { name: true } }),
+        prisma.tenantFeature.findMany({ where: { tenantId }, include: { feature: { select: { name: true } } } }),
+      ]);
+      const overrideNames = new Set(overrides.map((row) => row.feature?.name).filter(Boolean));
+      catalog.forEach(({ name }) => {
+        featureMap[name] = {
+          enabled: effective.has(name),
+          source: overrideNames.has(name) ? "override" : "plan",
+        };
       });
     }
 
+    res.set("Cache-Control", "private, no-store");
     res.json({ features: featureMap });
   } catch (err) {
     console.error("Me/features error:", err);

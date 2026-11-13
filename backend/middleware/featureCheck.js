@@ -4,7 +4,8 @@ const PLATFORM_ROLES = ['saas_admin', 'platform_admin', 'super_admin'];
 
 // Cache tenant features in-memory for 60 seconds to avoid DB hit on every request
 const featureCache = new Map(); // tenantId -> { features: Set, expiresAt: number }
-const CACHE_TTL = 60_000;
+// Keep stale entitlement windows short across multiple backend replicas.
+const CACHE_TTL = 5_000;
 const FEATURE_KEY_PATTERN = /^[a-z][a-z0-9_-]*(\.[a-z0-9_-]+)*$/i;
 
 function featureAliases(featureName) {

@@ -15,7 +15,7 @@ export async function getTenantLimits(tenantId, client = prisma) {
   return {
     maxUsers: tenant.usageLimit?.maxUsers ?? tenant.plan?.maxUsers ?? 5,
     maxProducts: tenant.usageLimit?.maxProducts ?? tenant.plan?.maxProducts ?? 100,
-    maxBranches: tenant.usageLimit?.maxBranches ?? tenant.plan?.maxBranches ?? 3,
+    maxBranches: tenant.usageLimit?.maxBranches ?? tenant.plan?.maxBranches ?? 1,
     maxCustomers: tenant.usageLimit?.maxCustomers ?? tenant.plan?.maxCustomers ?? 100,
     maxSuppliers: tenant.usageLimit?.maxSuppliers ?? tenant.plan?.maxSuppliers ?? 50,
   }
@@ -38,7 +38,7 @@ export async function checkUsageLimit(tenantId, resource, client = prisma) {
     : resource === 'suppliers' ? 'maxSuppliers'
     : null]
 
-  if (!limit || limit <= 0) return
+  if (limit === null || limit === undefined || limit < 0) return
 
   let count
   switch (resource) {

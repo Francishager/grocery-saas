@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
+import { invalidateFeatureCache } from "../../middleware/featureCheck.js";
 
 const router = Router();
 
@@ -47,6 +48,7 @@ router.post("/plans", authenticateToken, requirePlatformAdmin, async (req, res) 
 router.put("/plans/:id", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
     const plan = await prisma.plan.update({ where: { id: req.params.id }, data: req.body });
+    invalidateFeatureCache();
     res.json({ message: "Plan updated", plan });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -125,6 +127,8 @@ router.post("/plan-features", authenticateToken, requirePlatformAdmin, async (re
     const { planId, featureId, enabled = true } = req.body;
     if (!planId || !featureId) return res.status(400).json({ error: "planId and featureId required" });
     const pf = await prisma.planFeature.upsert({ where: { planId_featureId: { planId, featureId } }, update: { enabled }, create: { planId, featureId, enabled } });
+    const tenants = await prisma.tenant.findMany({ where: { planId }, select: { id: true } });
+    tenants.forEach(({ id }) => invalidateFeatureCache(id));
     res.status(201).json({ message: "Feature assigned to plan", planFeature: pf });
   } catch (err) {
     console.error("Assign feature error:", err);
@@ -138,6 +142,7 @@ router.post("/tenant-features", authenticateToken, requirePlatformAdmin, async (
     const { tenantId, featureId, enabled = true } = req.body;
     if (!tenantId || !featureId) return res.status(400).json({ error: "tenantId and featureId required" });
     const tf = await prisma.tenantFeature.upsert({ where: { tenantId_featureId: { tenantId, featureId } }, update: { enabled }, create: { tenantId, featureId, enabled } });
+    invalidateFeatureCache(tenantId);
     res.json({ message: "Tenant feature override saved", tenantFeature: tf });
   } catch (err) {
     console.error("Override feature error:", err);
