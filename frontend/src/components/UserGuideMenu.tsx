@@ -34,7 +34,7 @@ const guideSections: GuideSection[] = [
       { label: 'Rentals', detail: 'Track rental items with hire charges, deposits, and replacement values.' },
       { label: 'Categories', detail: 'Organize items into categories for easier management and reporting.' },
       { label: 'Stock Transfers', detail: 'Move inventory between branches. Track transfer status and quantities.' },
-      { label: 'Multi-UOM', detail: 'Add selling units (e.g. Box, Carton, Dozen) with conversion factors for flexible pricing.' },
+      { label: 'Multi-UOM', detail: 'Set a package base unit and its inner contents (for example, 1 carton = 24 pieces), then add customer-facing selling units such as pieces, litres, or kilograms. Stock deductions convert back to the base unit.' },
       { label: 'Low Stock Alerts', detail: 'Items below reorder level are flagged. Set minStock per product.' },
       { label: 'Bulk Import', detail: 'Import products from Excel. Go to Inventory > Import, upload your file with columns: name, price, cost, quantity, category, itemType.' },
     ],

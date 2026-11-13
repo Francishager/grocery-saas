@@ -15,6 +15,7 @@ import { apiFetch, inventoryApi, type InventoryItem } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { formatCurrency, cn, formatDisplayDate, getTenantCurrency } from '@/lib/utils'
 import { displayReference } from '@/lib/displayReference'
+import { sellingUnitConversionLabel } from '@/lib/unitDisplay'
 import CreateCustomerModal from '@/components/modals/CreateCustomerModal'
 import TransactionReceiptButton from '@/components/TransactionReceiptButton'
 import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
@@ -2260,7 +2261,7 @@ export default function ReceivablesPage() {
                           </SelectItem>
                           {sellingUnits.map((unit: any) => (
                             <SelectItem key={unit.id || unit.unitName} value={unit.unitName}>
-                              {unit.unitName} ({unit.conversionFactor} {selectedItem?.baseUnit || 'Piece'}) · {formatCurrency(unit.sellingPrice || 0)}
+                              {unit.unitName} · {sellingUnitConversionLabel(unit.unitName, Number(unit.conversionFactor), selectedItem?.baseUnit, selectedItem?.contentsUnit, selectedItem?.contentsPerBaseUnit)} · {formatCurrency(unit.sellingPrice || 0)}
                             </SelectItem>
                           ))}
                         </SelectContent>

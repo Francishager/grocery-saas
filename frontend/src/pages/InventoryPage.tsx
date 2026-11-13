@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn, formatCurrency } from '@/lib/utils'
+import { sellingUnitConversionLabel } from '@/lib/unitDisplay'
 import { useToast } from '@/hooks/use-toast'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { defaultBranchId } from '@/lib/branchSelection'
@@ -1734,7 +1735,7 @@ export default function InventoryPage() {
                     </select>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {openingStockUnitName ? `1 ${openingStockUnitName} = ${openingStockFactor} ${formData.baseUnit || 'Piece'}. ` : ''}
+                    {openingStockUnitName ? `${sellingUnitConversionLabel(openingStockUnitName, openingStockFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}. ` : ''}
                     Inventory is stored as {formatQty(openingStockBaseQuantity)} {formData.baseUnit || 'Piece'}.
                   </p>
                 </div>
@@ -1801,14 +1802,16 @@ export default function InventoryPage() {
               {formData.itemType === 'product' && (
               <div className="sm:col-span-2 space-y-3 border rounded-lg p-4">
                 <Label className="text-base font-semibold">Selling Units (Multi-UOM)</Label>
-                <p className="text-xs text-muted-foreground">Add different selling units with conversion factors and prices. Stock is tracked in the base unit ({formData.baseUnit || 'Piece'}).</p>
+                <p className="text-xs text-muted-foreground">Add the unit customers buy, such as a piece, litre, or kilogram, and its price. Stock remains tracked in {formData.baseUnit || 'Piece'}; the conversion is applied automatically.</p>
                 <p className="text-xs text-muted-foreground">Factor means base units per 1 selling unit. Examples: with kg as the base, Half kg = 0.5 and Quarter kg = 0.25. With Piece as the base, if one Dose contains 12 pieces, Dose = 12 and Half dose = 6. These conversions are used for stock and cost.</p>
                 {sellingUnits.length > 0 && (
                   <div className="space-y-2">
                     {sellingUnits.map((u, idx) => (
                       <div key={idx} className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
                         <span className="flex-1 text-sm font-medium">{u.unitName}</span>
-                        <span className="text-xs text-muted-foreground">{unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) || u.conversionFactor} {formData.baseUnit}</span>
+                        <span className="text-xs text-muted-foreground" title={`${u.conversionFactor} ${formData.baseUnit || 'base unit'} per ${u.unitName}`}>
+                          {sellingUnitConversionLabel(u.unitName, unitFactorFromPackageContents(u.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) || u.conversionFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}
+                        </span>
                         <span className="text-sm">{formatCurrency(u.sellingPrice)}</span>
                         {u.isDefault && <span className="text-xs text-primary font-medium">Default</span>}
                         <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeSellingUnit(idx)}><Trash2 className="h-3 w-3" /></Button>
@@ -1820,10 +1823,16 @@ export default function InventoryPage() {
                   <div className="flex-1 min-w-[120px]">
                     <Label className="text-xs">Unit Name</Label>
                     <Input value={newUnit.unitName} onChange={e => setNewUnit(prev => ({ ...prev, unitName: e.target.value }))} placeholder="e.g. Half KG" className="h-8 text-sm" />
+                    {formData.contentsUnit && Number(formData.contentsPerBaseUnit) > 0 && (
+                      <button type="button" className="mt-1 text-xs text-primary hover:underline" onClick={() => setNewUnit(prev => ({ ...prev, unitName: formData.contentsUnit, conversionFactor: 1 / Number(formData.contentsPerBaseUnit) }))}>
+                        Use inner unit: {formData.contentsUnit}
+                      </button>
+                    )}
                   </div>
                   <div className="w-36">
                     <Label className="text-xs">Base units per selling unit</Label>
                     <Input type="number" step="any" min="0.000001" value={unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor} onChange={e => setNewUnit(prev => ({ ...prev, conversionFactor: parseFloat(e.target.value) || 0 }))} className="h-8 text-sm" readOnly={Boolean(unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)))} />
+                    {newUnit.unitName && <p className="mt-1 text-[11px] text-muted-foreground">{sellingUnitConversionLabel(newUnit.unitName, unitFactorFromPackageContents(newUnit.unitName, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0)) ?? newUnit.conversionFactor, formData.baseUnit, formData.contentsUnit, Number(formData.contentsPerBaseUnit || 0))}</p>}
                   </div>
                   <div className="w-28">
                     <Label className="text-xs">Price</Label>
@@ -2409,8 +2418,8 @@ export default function InventoryPage() {
                     <Label htmlFor="stockAdjustUnit">Count stock as</Label>
                     <select id="stockAdjustUnit" value={stockAdjust.unitId} onChange={event => setStockAdjust(prev => prev ? { ...prev, unitId: event.target.value } : prev)} className="h-10 w-full rounded-md border bg-background px-3 text-sm">
                       <option value="">{stockAdjust.item.baseUnit || 'Piece'} (base)</option>
-                      {(stockAdjust.item as any).units.map((unit: any) => <option key={unit.id} value={unit.id}>{unit.unitName} · {unitFactorFromPackageContents(unit.unitName, (stockAdjust.item as any).contentsUnit || '', Number((stockAdjust.item as any).contentsPerBaseUnit || 0)) || unit.conversionFactor} {stockAdjust.item.baseUnit || 'Piece'}</option>)}
-                      {stockAdjustHasContentsUnit && <option value="__contents_unit__">{(stockAdjust.item as any).contentsUnit} · {formatQty(1 / Number((stockAdjust.item as any).contentsPerBaseUnit))} {stockAdjust.item.baseUnit || 'Piece'}</option>}
+                      {(stockAdjust.item as any).units.map((unit: any) => <option key={unit.id} value={unit.id}>{unit.unitName} · {sellingUnitConversionLabel(unit.unitName, unitFactorFromPackageContents(unit.unitName, (stockAdjust.item as any).contentsUnit || '', Number((stockAdjust.item as any).contentsPerBaseUnit || 0)) || unit.conversionFactor, stockAdjust.item.baseUnit, (stockAdjust.item as any).contentsUnit, Number((stockAdjust.item as any).contentsPerBaseUnit || 0))}</option>)}
+                      {stockAdjustHasContentsUnit && <option value="__contents_unit__">{(stockAdjust.item as any).contentsUnit} · {sellingUnitConversionLabel((stockAdjust.item as any).contentsUnit, 1 / Number((stockAdjust.item as any).contentsPerBaseUnit), stockAdjust.item.baseUnit, (stockAdjust.item as any).contentsUnit, Number((stockAdjust.item as any).contentsPerBaseUnit))}</option>}
                     </select>
                   </div>}
                   <Label htmlFor="stockAdjustQuantity">{stockAdjust.adjustmentType === 'stock_in' ? 'Quantity received' : 'Quantity adjusted'}</Label>
