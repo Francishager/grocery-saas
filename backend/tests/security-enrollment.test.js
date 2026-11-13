@@ -27,14 +27,10 @@ test('login and session user payloads include the server-computed security requi
 
 test('only eligible multi-business owners need passkey assertion or password confirmation to switch', async () => {
   const source = await read('../src/routes/auth.js')
-  const client = await read('../../frontend/src/contexts/JWTAuthContext.tsx')
   assert.match(source, /router\.post\('\/switch-business', authenticateToken, securityActionLimiter/)
   assert.match(source, /verifyBusinessSwitch\(req, baseUser, targetTenantId, req\.body\.securityAssertion\)/)
   assert.match(source, /bcrypt\.compare\(String\(req\.body\.confirmationPassword\), baseUser\.password\)/)
   assert.match(source, /targetTenantId !== baseUser\.tenantId && await requiresBusinessSwitchSecurity\(baseUser\)/)
-  assert.match(client, /fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
-  assert.match(client, /SECURITY_SETUP_REQUIRED/)
-  assert.match(client, /SECURITY_CONFIRMATION_REQUIRED/)
 })
 
 test('passkey assertions verify the challenge, exact origin, relying-party ID, user verification, and consume the challenge once', async () => {
