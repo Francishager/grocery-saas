@@ -25,12 +25,12 @@ test('login and session user payloads include the server-computed security requi
   assert.match(source, /user: await userPayload\(context\.sessionUser, userPerm, tenantFeatures\)/)
 })
 
-test('only eligible multi-business owners need passkey assertion or password confirmation to switch', async () => {
+test('every cross-business owner switch compares against the active tenant, including switching back home', async () => {
   const source = await read('../src/routes/auth.js')
   assert.match(source, /router\.post\('\/switch-business', authenticateToken, securityActionLimiter/)
   assert.match(source, /verifyBusinessSwitch\(req, baseUser, targetTenantId, req\.body\.securityAssertion\)/)
   assert.match(source, /bcrypt\.compare\(String\(req\.body\.confirmationPassword\), baseUser\.password\)/)
-  assert.match(source, /targetTenantId !== baseUser\.tenantId && baseUser\.role === 'owner'/)
+  assert.match(source, /targetTenantId !== req\.user\.tenantId && baseUser\.role === 'owner'/)
 })
 
 test('passkey assertions verify the challenge, exact origin, relying-party ID, user verification, and consume the challenge once', async () => {

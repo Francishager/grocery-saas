@@ -43,7 +43,7 @@ test('security enrollment is server-scoped to owners with multiple businesses an
   assert.match(middleware, /await requiresBusinessSwitchSecurity\(currentUser\) && !hasBusinessSwitchSecuritySetup\(currentUser\)/)
   assert.match(middleware, /securityRequired && !isSecurityEndpoint/)
   const route = await read('../../backend/src/routes/auth.js')
-  assert.match(route, /targetTenantId !== baseUser\.tenantId && baseUser\.role === 'owner'/)
+  assert.match(route, /targetTenantId !== req\.user\.tenantId && baseUser\.role === 'owner'/)
   assert.match(auth, /fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
   assert.match(auth, /if \(data\.code === 'SECURITY_SETUP_REQUIRED'\)/)
 })
