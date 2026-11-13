@@ -30,6 +30,7 @@ COPY start.sh ./
 COPY tests ./tests
 RUN npm run test:reports
 RUN npm run test:security
+RUN npm run test:owner-welcome
 RUN npm run test:provisioning
 RUN npm run test:property
 RUN npm run test:platform-observability

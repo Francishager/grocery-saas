@@ -11,6 +11,7 @@ import { resolveSubscriptionCharge, calculateBillingReminder, calculateDefaultSu
 import { getPesapalCallbackUrl, getPesapalIpnUrl, getPesapalTransactionStatus, registerPesapalIpn, submitPesapalOrder } from "../services/pesapal.js";
 import { cancelManualSubscriptionPayment, extendSettledSubscriptionTerm, getRefundableSubscriptionPaymentAmount, getSubscriptionPaymentProgress, normalizeSubscriptionPaymentAmount, recordSubscriptionPaymentRefund, refreshSubscriptionPaymentStatus, syncPesapalSubscriptionPayment } from "../utils/subscriptionPayments.js";
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
+import { buildOwnerWelcomeEmail } from "../services/ownerWelcomeEmail.js";
 import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
 
 const router = Router();
@@ -468,20 +469,6 @@ router.get("/subscriptions/:id/reminder", authenticateToken, async (req, res) =>
   }
 });
 
-// Helper: email content
-function getEmailContent(locale, { ownerFname, businessName, businessId, tempPassword, otp, loginUrl }) {
-  const subject = `Your business account is ready - ${businessName}`;
-  const html = `
-    <p>Hello ${ownerFname},</p>
-    <p>Your business <b>${businessName}</b> has been provisioned.</p>
-    <p><b>Business ID:</b> ${businessId}</p>
-    <p><b>Temporary Password:</b> ${tempPassword}</p>
-    <p>Use this OTP to set your password before first login: <b>${otp}</b> (expires in 24 hours).</p>
-    <p>Account link: <a href="${loginUrl}">${loginUrl}</a></p>
-    <p>Regards,<br/>JibuSales Admin</p>`;
-  return { subject, html };
-}
-
 // List businesses
 router.get("/businesses", authenticateToken, requirePlatformAdmin, async (req, res) => {
   try {
@@ -672,7 +659,7 @@ router.post("/owners", authenticateToken, requirePlatformAdmin, async (req, res)
     let emailSent = false;
     let emailError = null;
     try {
-      const { subject, html } = getEmailContent(locale, {
+      const { subject, html } = buildOwnerWelcomeEmail({
         ownerFname,
         businessName: tenant.name,
         businessId: tenantId,
@@ -1333,7 +1320,7 @@ router.post("/invite-owner", authenticateToken, requirePlatformAdmin, async (req
 
     let emailError = null;
     try {
-      const { subject, html } = getEmailContent(locale, { ownerFname: fname, businessName: tenant.name, businessId: tenantId, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      const { subject, html } = buildOwnerWelcomeEmail({ ownerFname: fname, businessName: tenant.name, businessId: tenantId, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
       await sendMail(email, subject, html);
       await prisma.tenant.update({ where: { id: tenantId }, data: { ownerId: user.id } });
       return res.status(201).json({ message: "Owner invited and email sent", email, tenantId, emailSent: true });
@@ -1513,9 +1500,15 @@ router.post(["/create-tenant", "/provision-tenant"], authenticateToken, requireP
     let emailMessageId = null;
     let emailError = null;
     try {
-      const emailContent = reuseOwnerAccount
-        ? { subject: `${business.name} added to your JibuSales login`, html: `<p>Hello ${ownerFname},</p><p><b>${business.name}</b> has been added to your existing JibuSales owner login.</p><p>Sign in with your existing credentials and use the business switcher to open its separate account.</p><p><a href="${frontendOrigin()}/login">Open JibuSales</a></p>` }
-        : getEmailContent(owner.locale, { ownerFname, businessName: business.name, businessId: tenant.id, tempPassword, otp, loginUrl: `${frontendOrigin()}/login` });
+      const emailContent = buildOwnerWelcomeEmail({
+        ownerFname,
+        businessName: business.name,
+        businessId: tenant.id,
+        tempPassword,
+        otp,
+        loginUrl: `${frontendOrigin()}/login`,
+        existingAccount: reuseOwnerAccount,
+      });
       const delivery = await sendMail(ownerEmail, emailContent.subject, emailContent.html);
       emailSent = true;
       emailMessageId = delivery?.messageId || null;
