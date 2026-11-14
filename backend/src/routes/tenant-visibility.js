@@ -2,7 +2,7 @@ import express from "express";
 import prisma from "../db.js";
 import { authenticateToken, requirePlatformAdmin } from "../../middleware/auth.js";
 import hrFeatureService from "../services/hrFeatureService.js";
-import { summarizePlatformAudit } from "../utils/platformAuditInsights.js";
+import { attributeAuditBranches, summarizePlatformAudit } from "../utils/platformAuditInsights.js";
 import { platformRuntimeMetrics } from "../utils/platformRuntimeMetrics.js";
 import { getRailwayStatus } from "../services/railwayStatusService.js";
 import { getCloudflareStatus } from "../services/cloudflareStatusService.js";
@@ -208,7 +208,17 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
       take: 20000,
       select: { tenantId: true, userId: true, branchId: true, branchName: true, model: true, action: true, changes: true, createdAt: true },
     });
-    const usageSummary = summarizePlatformAudit(logs);
+    const missingBranchUserIds = [...new Set(logs.filter(log => !log.branchId && log.userId && !log.userId.startsWith('system')).map(log => log.userId))];
+    const tenantIds = [...new Set(logs.map(log => log.tenantId).filter(Boolean))];
+    const branchAssignments = missingBranchUserIds.length && tenantIds.length
+      ? await prisma.userBranch.findMany({
+          where: { userId: { in: missingBranchUserIds }, branch: { tenantId: { in: tenantIds }, isActive: true } },
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+          select: { userId: true, branchId: true, isPrimary: true, branch: { select: { tenantId: true, name: true } } },
+        })
+      : [];
+    const attributedLogs = attributeAuditBranches(logs, branchAssignments);
+    const usageSummary = summarizePlatformAudit(attributedLogs);
     const usageTenantIds = usageSummary.byBusiness.map(item => item.tenantId);
     const usageTenants = usageTenantIds.length
       ? await prisma.tenant.findMany({ where: { id: { in: usageTenantIds } }, select: { id: true, name: true } })
@@ -222,7 +232,7 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
     const branchNames = new Map(branches.map(branch => [branch.id, branch.name]));
     usageSummary.byBranch = usageSummary.byBranch.map(item => ({
       ...item,
-      branchName: item.branchName || branchNames.get(item.branchId) || (item.branchId ? 'Branch unavailable' : 'Unassigned / tenant-wide'),
+      branchName: item.branchName || branchNames.get(item.branchId) || (item.branchId ? 'Branch unavailable' : 'Tenant-wide / no branch context'),
       tenantName: usageTenantNames.get(item.tenantId) || 'Business unavailable',
     }));
     const totalEvents = await prisma.auditLog.count({ where });

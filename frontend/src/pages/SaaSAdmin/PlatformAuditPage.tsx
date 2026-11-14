@@ -25,7 +25,7 @@ interface Pagination { page: number; limit: number; total: number; pages: number
 interface AuditInsights {
   totalEvents: number
   sampledEvents?: number
-  byBranch: Array<{ tenantId: string; tenantName: string; branchId: string | null; branchName: string; eventCount: number; pageViews: number; activeMs: number; interactionCount: number }>
+  byBranch: Array<{ tenantId: string; tenantName: string; branchId: string | null; branchName: string; eventCount: number; pageViews: number; activeMs: number; interactionCount: number; inferredEventCount: number }>
   byFeature: Array<{ feature: string; count: number; activeMs: number; interactionCount: number; maxScrollDepth: number }>
   byHour: Array<{ hour: number; count: number; pageViews: number; activeMs: number; interactionCount: number; topPages: Array<{ page: string; views: number }> }>
   byPage: Array<{ page: string; views: number }>
@@ -360,7 +360,7 @@ export const PlatformAuditPage: React.FC = () => {
 
       <section className="rounded-md border bg-white p-4" aria-label="Branch activity summary">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-          <div><h2 className="text-sm font-semibold">Activity by business branch</h2><p className="mt-1 text-xs text-gray-500">Branch-tagged events are separated from tenant-wide or unassigned activity.</p></div>
+          <div><h2 className="text-sm font-semibold">Activity by business branch</h2><p className="mt-1 text-xs text-gray-500">Missing branch IDs are matched to the actor’s primary or sole assigned branch when possible.</p></div>
           {insights?.truncated && <span className="text-xs text-amber-800">Latest {insights.sampledEvents?.toLocaleString()} events only</span>}
         </div>
         {!insights?.byBranch?.length ? <p className="text-sm text-gray-500">No business activity recorded in this period.</p> : <div className="overflow-x-auto">
@@ -368,7 +368,7 @@ export const PlatformAuditPage: React.FC = () => {
             <thead className="border-b text-xs text-gray-500"><tr><th className="py-2 pr-3 font-medium">Business</th><th className="py-2 pr-3 font-medium">Branch</th><th className="py-2 pr-3 text-right font-medium">Events</th><th className="py-2 pr-3 text-right font-medium">Page opens</th><th className="py-2 text-right font-medium">Active time</th></tr></thead>
             <tbody className="divide-y">{insights.byBranch.slice(0, 100).map(item => <tr key={`${item.tenantId}-${item.branchId || 'unassigned'}`}>
               <td className="py-2 pr-3 text-sm">{item.tenantName}</td>
-              <td className="py-2 pr-3 text-sm">{item.branchName}{item.branchId && <span className="ml-2 font-mono text-[10px] text-gray-500">{item.branchId}</span>}</td>
+              <td className="py-2 pr-3 text-sm">{item.branchName}{item.branchId && <span className="ml-2 font-mono text-[10px] text-gray-500">{item.branchId}</span>}{item.inferredEventCount > 0 && <div className="text-[10px] text-gray-500">{item.inferredEventCount.toLocaleString()} matched to actor’s assigned branch</div>}</td>
               <td className="py-2 pr-3 text-right text-sm tabular-nums">{item.eventCount.toLocaleString()}</td>
               <td className="py-2 pr-3 text-right text-sm tabular-nums">{item.pageViews.toLocaleString()}</td>
               <td className="py-2 text-right text-sm tabular-nums">{formatDuration(item.activeMs)}</td>

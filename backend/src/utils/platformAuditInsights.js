@@ -7,6 +7,32 @@ const KAMPALA_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   hourCycle: 'h23',
 });
 
+export function attributeAuditBranches(logs, assignments) {
+  const assignedByActor = new Map();
+  for (const assignment of assignments) {
+    const key = `${assignment.branch?.tenantId || ''}:${assignment.userId}`;
+    const rows = assignedByActor.get(key) || [];
+    rows.push(assignment);
+    assignedByActor.set(key, rows);
+  }
+
+  return logs.map(log => {
+    if (log.branchId || !log.userId || !log.tenantId || log.tenantId === 'platform') {
+      return { ...log, branchAttribution: log.branchId ? 'recorded' : 'no-branch-context' };
+    }
+    const candidates = assignedByActor.get(`${log.tenantId}:${log.userId}`) || [];
+    const primary = candidates.find(item => item.isPrimary);
+    const assignment = primary || (candidates.length === 1 ? candidates[0] : null);
+    if (!assignment) return { ...log, branchAttribution: 'no-branch-context' };
+    return {
+      ...log,
+      branchId: assignment.branchId,
+      branchName: log.branchName || assignment.branch?.name || null,
+      branchAttribution: primary ? 'actor-primary-branch' : 'actor-only-branch',
+    };
+  });
+}
+
 export function summarizePlatformAudit(logs) {
   const featureVisits = new Set();
   const featureStats = new Map();
@@ -32,8 +58,10 @@ export function summarizePlatformAudit(logs) {
       pageViews: 0,
       activeMs: 0,
       interactionCount: 0,
+      inferredEventCount: 0,
     };
     branch.eventCount += 1;
+    if (log.branchAttribution === 'actor-primary-branch' || log.branchAttribution === 'actor-only-branch') branch.inferredEventCount += 1;
     if (isFeatureUsage) {
       const metrics = log.changes && typeof log.changes === 'object' ? log.changes : {};
       branch.pageViews += log.action === 'view' ? 1 : 0;
