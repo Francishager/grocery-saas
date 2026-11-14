@@ -4,7 +4,7 @@ Deploy both backend and frontend. The backend's existing `npm start` prestart st
 
 Backend environment:
 
-- `NVIDIA_API_KEY`: required for replies, summaries and creative copy. Never set this as a frontend/VITE variable. The visual studio uses stored product photographs or external photographs; it does not call the legacy illustration endpoint.
+- `NVIDIA_API_KEY`: required for replies, summaries, creative copy and AI-generated daily Advisor tips. Never set this as a frontend/VITE variable. Daily tips use only the tenant business type, startup stage and a curated topic; they do not send customer, employee, transaction or financial records. If the key/provider is unavailable, the scheduled tip falls back to the type-specific curated guidance. The visual studio uses stored product photographs or external photographs; it does not call the legacy illustration endpoint.
 - `NVIDIA_MODEL`: optional override of the tested default model.
 - `BRAVE_SEARCH_API_KEY`: optional for broader public web-search results. Without it, research fetches live business reference extracts from the public MediaWiki API. Reference extracts are not current news or authoritative local law.
 
@@ -14,6 +14,7 @@ Search queries use public business-topic keywords, never customer names, balance
 
 - Collections, conversations and turns are private to the authenticated tenant and user. Projects can sit inside folders; conversations can be moved between projects/folders.
 - AI access requires `canUseBusinessAI` and the Dashboard feature. Business snapshots remain subject to the user's existing data permissions and branch scope.
+- Daily tips use an accountant-style, SME growth and investor-readiness lens, but do not invent business figures or offer personalized securities advice. One generated tip per tenant and time slot is cached and delivered as separate per-user notifications; tenant users do not trigger repeated provider calls for the same slot. New businesses receive a type-specific first-week welcome track.
 - Customer context selects only names, reconciled balances and repayment amounts/dates/totals. Customer contact details, payment references and bank/account numbers are excluded.
 - HR context uses workforce, attendance and payroll aggregates gated by their separate existing view permissions and subscription features. Employee personal/contact/bank details are excluded.
 - Chat access is fingerprinted by current role, permissions, features and branch. Changed access blocks reopening the older conversation and prevents recall of its content; users can start a new chat. Owners do not receive access to another staff user's chats.
@@ -24,7 +25,7 @@ Search queries use public business-topic keywords, never customer names, balance
 
 ## Verification
 
-`node --test tests/business-advisor.test.js tests/advisor-memory-api.test.js tests/advisor-people-research.test.js tests/advisor-artifacts.test.js tests/advisor-external-photos.test.js`
+`node --test tests/business-advisor.test.js tests/advisorDailyTips.test.js tests/advisor-memory-api.test.js tests/advisor-people-research.test.js tests/advisor-artifacts.test.js tests/advisor-external-photos.test.js`
 
 Frontend: `npm run build`, plus `node --test tests/business-advisor-memory.test.mjs` with Playwright installed or `PLAYWRIGHT_MODULE_PATH` pointing to it. API tests use isolated database/provider fixtures, never production data.
 

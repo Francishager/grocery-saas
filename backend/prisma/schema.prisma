@@ -139,7 +139,7 @@ model Tenant {
   // =====================
   // USERS (1-MANY)
   // =====================
-  users User[] @relation("TenantUsers")
+  users       User[]             @relation("TenantUsers")
   memberships TenantMembership[]
 
   // =====================
@@ -356,8 +356,9 @@ model Tenant {
   creditNotes       CreditNote[]
   debitNotes        DebitNote[]
 
-  advisorCollections   AdvisorCollection[]
-  advisorConversations AdvisorConversation[]
+  advisorCollections      AdvisorCollection[]
+  advisorConversations    AdvisorConversation[]
+  advisorDailyTipContents AdvisorDailyTipContent[]
 
   @@map("tenants")
 }
@@ -505,11 +506,11 @@ model User {
   // =========================
   // TENANT OWNERSHIP (1 user owns 1 tenant)
   // =========================
-  ownedTenants Tenant[] @relation("TenantOwner")
-  tenantMemberships TenantMembership[]
-  securityPasskeys SecurityPasskey[]
-  securityChallenges UserSecurityChallenge[]
-  securitySetupCompletedAt DateTime?
+  ownedTenants                 Tenant[]                @relation("TenantOwner")
+  tenantMemberships            TenantMembership[]
+  securityPasskeys             SecurityPasskey[]
+  securityChallenges           UserSecurityChallenge[]
+  securitySetupCompletedAt     DateTime?
   businessSwitchSecurityMethod String?
 
   isActive                            Boolean                       @default(true)
@@ -679,6 +680,22 @@ model AdvisorArtifact {
   @@map("advisor_artifacts")
 }
 
+model AdvisorDailyTipContent {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tipDate      String
+  slot         String
+  businessType String?
+  title        String
+  message      String
+  createdAt    DateTime @default(now())
+
+  @@unique([tenantId, tipDate, slot])
+  @@index([tenantId, createdAt])
+  @@map("advisor_daily_tip_contents")
+}
+
 // Explicit cross-business access for a shared login. Membership grants owner-level
 // access only; staff permissions remain tenant-local and are never reused here.
 model TenantMembership {
@@ -699,19 +716,19 @@ model TenantMembership {
 }
 
 model SecurityPasskey {
-  id              String   @id @default(cuid())
-  userId          String
-  credentialId    String   @unique
-  rpId            String   @default("")
-  publicKey       Bytes
-  counter         BigInt   @default(0)
-  transports      String[] @default([])
-  deviceType      String   @default("singleDevice")
-  backedUp        Boolean  @default(false)
-  name            String?
-  createdAt       DateTime @default(now())
-  lastUsedAt      DateTime?
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  userId       String
+  credentialId String    @unique
+  rpId         String    @default("")
+  publicKey    Bytes
+  counter      BigInt    @default(0)
+  transports   String[]  @default([])
+  deviceType   String    @default("singleDevice")
+  backedUp     Boolean   @default(false)
+  name         String?
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
   @@map("security_passkeys")
@@ -1125,35 +1142,35 @@ model UserPermission {
   canDeleteRestaurant                    Boolean  @default(false)
   canViewRestaurantReport                Boolean  @default(false)
   // Clinic Management
-  canViewClinic                           Boolean  @default(false)
-  canViewClinicPatients                   Boolean  @default(false)
-  canViewClinicAppointments               Boolean  @default(false)
-  canViewClinicEncounters                 Boolean  @default(false)
-  canViewClinicPrescriptions               Boolean  @default(false)
-  canCreateClinicPatients                 Boolean  @default(false)
-  canEditClinicPatients                   Boolean  @default(false)
-  canCreateClinicAppointments             Boolean  @default(false)
-  canEditClinicAppointments               Boolean  @default(false)
-  canCreateClinicEncounters               Boolean  @default(false)
-  canCreateClinicPrescriptions            Boolean  @default(false)
-  canManageClinicPatients                 Boolean  @default(false)
-  canManageClinicAppointments             Boolean  @default(false)
-  canManageClinicEncounters               Boolean  @default(false)
-  canManageClinicPrescriptions             Boolean  @default(false)
-  canViewClinicReports                    Boolean  @default(false)
+  canViewClinic                          Boolean  @default(false)
+  canViewClinicPatients                  Boolean  @default(false)
+  canViewClinicAppointments              Boolean  @default(false)
+  canViewClinicEncounters                Boolean  @default(false)
+  canViewClinicPrescriptions             Boolean  @default(false)
+  canCreateClinicPatients                Boolean  @default(false)
+  canEditClinicPatients                  Boolean  @default(false)
+  canCreateClinicAppointments            Boolean  @default(false)
+  canEditClinicAppointments              Boolean  @default(false)
+  canCreateClinicEncounters              Boolean  @default(false)
+  canCreateClinicPrescriptions           Boolean  @default(false)
+  canManageClinicPatients                Boolean  @default(false)
+  canManageClinicAppointments            Boolean  @default(false)
+  canManageClinicEncounters              Boolean  @default(false)
+  canManageClinicPrescriptions           Boolean  @default(false)
+  canViewClinicReports                   Boolean  @default(false)
   // Pharmacy Management
-  canViewPharmacy                          Boolean  @default(false)
-  canViewPharmacyCatalogue                 Boolean  @default(false)
-  canCreatePharmacyCatalogue              Boolean  @default(false)
-  canEditPharmacyCatalogue                Boolean  @default(false)
-  canViewPharmacyBatches                   Boolean  @default(false)
-  canCreatePharmacyBatches                Boolean  @default(false)
-  canViewPharmacyPrescriptions             Boolean  @default(false)
-  canViewPharmacyDispenses                 Boolean  @default(false)
-  canManagePharmacyCatalogue               Boolean  @default(false)
-  canManagePharmacyBatches                 Boolean  @default(false)
-  canDispensePharmacyPrescriptions         Boolean  @default(false)
-  canViewPharmacyReports                   Boolean  @default(false)
+  canViewPharmacy                        Boolean  @default(false)
+  canViewPharmacyCatalogue               Boolean  @default(false)
+  canCreatePharmacyCatalogue             Boolean  @default(false)
+  canEditPharmacyCatalogue               Boolean  @default(false)
+  canViewPharmacyBatches                 Boolean  @default(false)
+  canCreatePharmacyBatches               Boolean  @default(false)
+  canViewPharmacyPrescriptions           Boolean  @default(false)
+  canViewPharmacyDispenses               Boolean  @default(false)
+  canManagePharmacyCatalogue             Boolean  @default(false)
+  canManagePharmacyBatches               Boolean  @default(false)
+  canDispensePharmacyPrescriptions       Boolean  @default(false)
+  canViewPharmacyReports                 Boolean  @default(false)
   // Fuel Station
   canViewFuelStation                     Boolean  @default(false)
   canCreateFuelStation                   Boolean  @default(false)
@@ -1224,25 +1241,25 @@ model UserPermission {
   canDeactivateSalonChair                Boolean  @default(false)
   canViewSalonCommission                 Boolean  @default(false)
   canConfigureSalonCommission            Boolean  @default(false)
-  canApproveSalonCommission               Boolean  @default(false)
-  canIncludeSalonCommissionInPayroll      Boolean  @default(false)
-  canPaySalonCommission                   Boolean  @default(false)
-  canAssignSalonStylist                   Boolean  @default(false)
-  canAssignSalonChair                     Boolean  @default(false)
-  canViewSalonStylist                     Boolean  @default(false)
-  canCreateSalonStylist                   Boolean  @default(false)
-  canEditSalonStylist                     Boolean  @default(false)
-  canDeactivateSalonStylist               Boolean  @default(false)
-  canViewBarQueue                         Boolean  @default(false)
-  canUpdateBarQueue                       Boolean  @default(false)
-  canViewBarMenu                          Boolean  @default(false)
-  canCreateBarMenu                        Boolean  @default(false)
-  canEditBarMenu                          Boolean  @default(false)
-  canDeleteBarMenu                        Boolean  @default(false)
-  canViewBarOrders                        Boolean  @default(false)
-  canCreateBarOrders                      Boolean  @default(false)
-  canEditBarOrders                        Boolean  @default(false)
-  canCancelBarOrders                      Boolean  @default(false)
+  canApproveSalonCommission              Boolean  @default(false)
+  canIncludeSalonCommissionInPayroll     Boolean  @default(false)
+  canPaySalonCommission                  Boolean  @default(false)
+  canAssignSalonStylist                  Boolean  @default(false)
+  canAssignSalonChair                    Boolean  @default(false)
+  canViewSalonStylist                    Boolean  @default(false)
+  canCreateSalonStylist                  Boolean  @default(false)
+  canEditSalonStylist                    Boolean  @default(false)
+  canDeactivateSalonStylist              Boolean  @default(false)
+  canViewBarQueue                        Boolean  @default(false)
+  canUpdateBarQueue                      Boolean  @default(false)
+  canViewBarMenu                         Boolean  @default(false)
+  canCreateBarMenu                       Boolean  @default(false)
+  canEditBarMenu                         Boolean  @default(false)
+  canDeleteBarMenu                       Boolean  @default(false)
+  canViewBarOrders                       Boolean  @default(false)
+  canCreateBarOrders                     Boolean  @default(false)
+  canEditBarOrders                       Boolean  @default(false)
+  canCancelBarOrders                     Boolean  @default(false)
   canGenerateServiceFeedbackQR           Boolean  @default(false)
   canViewServiceFeedbackReport           Boolean  @default(false)
   canViewServiceCarWash                  Boolean  @default(false)
@@ -5454,41 +5471,41 @@ model FarmExpense {
 // =====================================================
 
 model Appointment {
-  id              String    @id @default(cuid())
+  id              String             @id @default(cuid())
   tenantId        String
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branchId        String?
-  branch          Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branch          Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId      String?
-  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer        Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
   customerName    String
   customerPhone   String?
   customerEmail   String?
   productId       String? // service item
-  product         Product?  @relation(fields: [productId], references: [id])
+  product         Product?           @relation(fields: [productId], references: [id])
   technicianId    String? // assigned user/staff
-  technician      User?     @relation("AppointmentTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  technician      User?              @relation("AppointmentTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
   salonStylistId  String?
   salonStylist    ServiceTechnician? @relation("SalonAppointmentStylist", fields: [salonStylistId], references: [id], onDelete: SetNull)
   salonChairId    String?
-  salonChair      SalonChair? @relation(fields: [salonChairId], references: [id], onDelete: SetNull)
-  bookingType     String    @default("appointment") // appointment, walk_in
+  salonChair      SalonChair?        @relation(fields: [salonChairId], references: [id], onDelete: SetNull)
+  bookingType     String             @default("appointment") // appointment, walk_in
   title           String
   description     String?
   scheduledDate   DateTime
   scheduledTime   String // "09:30"
   endTime         String? // "10:30"
   duration        String? // "1 hour", "30 min"
-  status          String    @default("scheduled") // scheduled, confirmed, in_progress, completed, cancelled, no_show
-  price           Float     @default(0)
-  actualPrice     Float     @default(0) // final price after completion
+  status          String             @default("scheduled") // scheduled, confirmed, in_progress, completed, cancelled, no_show
+  price           Float              @default(0)
+  actualPrice     Float              @default(0) // final price after completion
   notes           String?
-  reminderSent    Boolean   @default(false) // SMS/email reminder sent
+  reminderSent    Boolean            @default(false) // SMS/email reminder sent
   completedAt     DateTime?
   cancelledReason String?
   commission      SalonCommission?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   jobCards ServiceJobCard[]
   feedback ServiceFeedback[]
@@ -5647,9 +5664,9 @@ model ServiceTechnician {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  jobCards ServiceJobCard[]
-  salonCommissions SalonCommission[]
-  salonAppointments Appointment[] @relation("SalonAppointmentStylist")
+  jobCards          ServiceJobCard[]
+  salonCommissions  SalonCommission[]
+  salonAppointments Appointment[]     @relation("SalonAppointmentStylist")
 
   @@index([tenantId, branchId])
   @@index([tenantId, isActive])
@@ -5678,30 +5695,30 @@ model SalonChair {
 }
 
 model SalonCommission {
-  id               String            @id @default(cuid())
-  tenantId         String
-  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  appointmentId    String            @unique
-  appointment      Appointment       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-  stylistId        String?
-  stylist          ServiceTechnician? @relation(fields: [stylistId], references: [id], onDelete: SetNull)
-  stylistName      String
-  serviceName      String
-  serviceRevenue   Float
-  commissionType   String
-  commissionValue  Float
-  commissionAmount Float
-  status           String            @default("pending") // pending, approved, voided, included_in_payroll
-  completedAt      DateTime
-  payrollReference String?
-  paymentJournalEntryId String? @unique
-  paidAt           DateTime?
-  paidByUserId     String?
-  paymentAccountId String?
-  paymentMethod    String?
-  paymentReference String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                    String             @id @default(cuid())
+  tenantId              String
+  tenant                Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appointmentId         String             @unique
+  appointment           Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  stylistId             String?
+  stylist               ServiceTechnician? @relation(fields: [stylistId], references: [id], onDelete: SetNull)
+  stylistName           String
+  serviceName           String
+  serviceRevenue        Float
+  commissionType        String
+  commissionValue       Float
+  commissionAmount      Float
+  status                String             @default("pending") // pending, approved, voided, included_in_payroll
+  completedAt           DateTime
+  payrollReference      String?
+  paymentJournalEntryId String?            @unique
+  paidAt                DateTime?
+  paidByUserId          String?
+  paymentAccountId      String?
+  paymentMethod         String?
+  paymentReference      String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   @@index([tenantId, completedAt, status])
   @@index([tenantId, stylistId, status])
