@@ -241,9 +241,9 @@ export const aiWritingApi = {
 
 // Auth endpoints
 export const authApi = {
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, portal: 'tenant' | 'saas_admin' = 'tenant') =>
     api.post<{ message: string; tokens: { accessToken: string }; user: User }>('/api/auth/login', {
-      body: { email, password },
+      body: { email, password, portal },
       skipAuth: true,
     }),
 

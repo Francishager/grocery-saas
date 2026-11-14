@@ -76,7 +76,7 @@ export interface JWTAuthContextValue {
   /** Error state */
   error: string | null
   /** Login */
-  login: (email: string, password: string) => Promise<LoginResult>
+  login: (email: string, password: string, portal?: 'tenant' | 'saas_admin') => Promise<LoginResult>
   /** Logout */
   logout: () => Promise<void>
   /** Register */
@@ -216,7 +216,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
     }
   }
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, portal: 'tenant' | 'saas_admin' = 'tenant') => {
     setLoading(true)
     setError(null)
     let loginResponseReceived = false
@@ -230,7 +230,7 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
           return await fetch(`${resolvedApiEndpoint}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password }),
+            body: JSON.stringify({ email, password, portal }),
             signal: controller.signal,
           })
         } finally {
@@ -264,6 +264,11 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
 
       const { user: userData, tokens: tokenData } = data
 
+      const isPlatformAccount = userData?.isPlatformUser || ['saas_admin', 'platform_staff', 'platform_admin', 'super_admin'].includes(userData?.role)
+      if ((portal === 'saas_admin') !== Boolean(isPlatformAccount) || (portal === 'tenant' && !userData?.tenantId)) {
+        throw new Error('These credentials cannot sign in to this portal.')
+      }
+
       setUser(userData)
       setTokens(tokenData)
       persistAuth(userData, tokenData)
@@ -294,6 +299,10 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cachedTokens = cache.tokens
             // Silent
             if (cachedUser?.email?.toLowerCase() === email.toLowerCase()) {
+              const cachedPlatformAccount = cachedUser?.isPlatformUser || ['saas_admin', 'platform_staff', 'platform_admin', 'super_admin'].includes(cachedUser?.role)
+              if ((portal === 'saas_admin') !== Boolean(cachedPlatformAccount) || (portal === 'tenant' && !cachedUser?.tenantId)) {
+                throw new Error('These credentials cannot sign in to this portal.')
+              }
               if (cachedUser.tenantId && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(cachedUser.role)) {
                 return Promise.reject(new Error('Staff sign-in requires an internet connection to verify working hours.'))
               }
@@ -320,6 +329,10 @@ export const JWTAuthProvider: React.FC<JWTAuthProviderProps> = ({
             const cachedTokens = JSON.parse(cachedTokensStr)
             // Silent
             if (cachedUser.email?.toLowerCase() === email.toLowerCase()) {
+              const cachedPlatformAccount = cachedUser?.isPlatformUser || ['saas_admin', 'platform_staff', 'platform_admin', 'super_admin'].includes(cachedUser?.role)
+              if ((portal === 'saas_admin') !== Boolean(cachedPlatformAccount) || (portal === 'tenant' && !cachedUser?.tenantId)) {
+                throw new Error('These credentials cannot sign in to this portal.')
+              }
               if (cachedUser.tenantId && !['owner', 'saas_admin', 'platform_admin', 'super_admin'].includes(cachedUser.role)) {
                 return Promise.reject(new Error('Staff sign-in requires an internet connection to verify working hours.'))
               }

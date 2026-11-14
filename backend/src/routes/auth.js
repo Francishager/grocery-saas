@@ -15,6 +15,7 @@ import { getJwtSecret } from "../utils/jwtSecret.js";
 import { createRateLimiter } from "../middleware/rateLimit.js";
 import { createSessionTokens } from "../utils/sessionTokens.js";
 import { authenticationOptions, hasBusinessSwitchSecuritySetup, registrationOptions, requiresBusinessSwitchSecurity, verifyBusinessSwitch, verifyRegistration } from '../services/userSecurity.js';
+import { loginPortalMatchesUser } from '../utils/loginPortal.js';
 
 const router = Router();
 const ipKey = (req) => req.headers?.['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
@@ -117,6 +118,10 @@ async function getTenantSessionContext(user, tenantId) {
 router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
+    const portal = req.body?.portal || 'tenant';
+    if (!['tenant', 'saas_admin'].includes(portal)) {
+      return res.status(400).json({ message: 'Choose a valid sign-in portal.' });
+    }
     if (!email || !password) {
       await logAuthenticationEvent(req, "login_failed", null, 400);
       return res.status(400).json({ message: "Email and password required" });
@@ -139,6 +144,11 @@ router.post("/login", loginIpLimiter, loginIdentityLimiter, async (req, res) => 
     if (!match) {
       await logAuthenticationEvent(req, "login_failed", user, 401);
       return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    if (!loginPortalMatchesUser(user, portal)) {
+      await logAuthenticationEvent(req, 'login_failed_portal', user, 401);
+      return res.status(401).json({ message: 'These credentials cannot sign in to this portal.' });
     }
 
     const targetTenantId = user.tenantId;

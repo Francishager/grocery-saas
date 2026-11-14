@@ -11,6 +11,7 @@
     "test:reports": "node --test tests/reportAccounting.test.js tests/reportingHelpers.test.js tests/daily-report.test.js tests/weeklySalesReport.test.js tests/saleTaxAllocation.test.js tests/report-contracts.test.js tests/dashboard.test.js tests/cogs.test.js tests/receivable-sales-view.test.js tests/accounting-sync.test.js tests/outstanding-receivables.test.js tests/transfers.test.js tests/aging-report.test.js tests/customer-receipt-allocation.test.js tests/inventoryReportHelpers.test.js",
     "test:advisor": "node --test tests/business-advisor.test.js tests/advisorDailyTips.test.js",
     "test:security": "node --test tests/security-enrollment.test.js",
+    "test:login-portal": "node --test tests/loginPortal.test.js",
     "test:owner-welcome": "node --test tests/ownerWelcomeEmail.test.js",
     "test:provisioning": "node --test tests/tenantProvisioning.test.js",
     "test:permissions": "node --test tests/manualJournalPolicy.test.js",

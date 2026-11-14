@@ -33,7 +33,7 @@ export default function SaaSAdminLoginPage() {
     setLoading(true)
 
     try {
-      const result = await login(email, password)
+      const result = await login(email, password, 'saas_admin')
 
       if (result.forceReset) {
         toast({ title: 'Password Reset Required', description: result.message || 'Please reset your password' })

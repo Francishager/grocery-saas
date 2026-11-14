@@ -57,7 +57,7 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const result = await login(email, password)
+      const result = await login(email, password, 'tenant')
 
       // Handle force-reset from backend
       if (result.forceReset) {
