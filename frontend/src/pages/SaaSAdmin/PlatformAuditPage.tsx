@@ -24,6 +24,8 @@ interface AuditLog {
 interface Pagination { page: number; limit: number; total: number; pages: number }
 interface AuditInsights {
   totalEvents: number
+  sampledEvents?: number
+  byBranch: Array<{ tenantId: string; tenantName: string; branchId: string | null; branchName: string; eventCount: number; pageViews: number; activeMs: number; interactionCount: number }>
   byFeature: Array<{ feature: string; count: number; activeMs: number; interactionCount: number; maxScrollDepth: number }>
   byHour: Array<{ hour: number; count: number; pageViews: number; activeMs: number; interactionCount: number; topPages: Array<{ page: string; views: number }> }>
   byPage: Array<{ page: string; views: number }>
@@ -83,8 +85,8 @@ export const PlatformAuditPage: React.FC = () => {
   const [page, setPage] = useState(1)
   const [insightDays, setInsightDays] = useState(30)
   const [selectedHour, setSelectedHour] = useState<number | null>(null)
-  const [filters, setFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
-  const [appliedFilters, setAppliedFilters] = useState({ search: '', tenantId: '', action: '', model: '' })
+  const [filters, setFilters] = useState({ search: '', tenantId: '', branchId: '', action: '', model: '' })
+  const [appliedFilters, setAppliedFilters] = useState({ search: '', tenantId: '', branchId: '', action: '', model: '' })
   const [runtimeHealth, setRuntimeHealth] = useState<RuntimeHealth | null>(null)
   const [runtimeError, setRuntimeError] = useState('')
   const [railwayStatus, setRailwayStatus] = useState<RailwayStatus | null>(null)
@@ -136,6 +138,7 @@ export const PlatformAuditPage: React.FC = () => {
       const params = new URLSearchParams({ page: String(page), limit: '25' })
       if (appliedFilters.search) params.set('search', appliedFilters.search)
       if (appliedFilters.tenantId) params.set('tenantId', appliedFilters.tenantId)
+      if (appliedFilters.branchId) params.set('branchId', appliedFilters.branchId)
       if (appliedFilters.action) params.set('action', appliedFilters.action)
       if (appliedFilters.model) params.set('model', appliedFilters.model)
 
@@ -192,7 +195,7 @@ export const PlatformAuditPage: React.FC = () => {
   }
 
   const handleClear = () => {
-    const cleared = { search: '', tenantId: '', action: '', model: '' }
+    const cleared = { search: '', tenantId: '', branchId: '', action: '', model: '' }
     setFilters(cleared)
     setAppliedFilters(cleared)
     setPage(1)
@@ -339,6 +342,7 @@ export const PlatformAuditPage: React.FC = () => {
         <div className="rounded-md border bg-white p-4">
           <div className="flex items-center gap-2 text-xs text-gray-500"><Activity size={15} /> Recorded events · {insightDays} days</div>
           <div className="mt-2 text-2xl font-semibold tabular-nums">{insights?.totalEvents?.toLocaleString() ?? '—'}</div>
+          {insights?.truncated && <p className="mt-1 text-xs text-amber-800">Usage breakdown uses the latest {insights.sampledEvents?.toLocaleString()} events.</p>}
         </div>
         <div className="rounded-md border bg-white p-4">
           <div className="flex items-center gap-2 text-xs text-gray-500"><Eye size={15} /> Most-used feature · {insightDays} days</div>
@@ -352,6 +356,26 @@ export const PlatformAuditPage: React.FC = () => {
           {busiestHour?.topPages?.length ? <div className="mt-2 space-y-1 text-xs text-gray-600">{busiestHour.topPages.slice(0, 3).map(item => <div key={item.page} className="flex justify-between gap-3"><span className="truncate">{item.page}</span><span className="shrink-0 tabular-nums">{item.views} opens</span></div>)}</div> : null}
           {peakHourCount > 0 && <div className="mt-1 text-[11px] text-teal-800">Open this hour in the chart</div>}
         </button>
+      </section>
+
+      <section className="rounded-md border bg-white p-4" aria-label="Branch activity summary">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div><h2 className="text-sm font-semibold">Activity by business branch</h2><p className="mt-1 text-xs text-gray-500">Branch-tagged events are separated from tenant-wide or unassigned activity.</p></div>
+          {insights?.truncated && <span className="text-xs text-amber-800">Latest {insights.sampledEvents?.toLocaleString()} events only</span>}
+        </div>
+        {!insights?.byBranch?.length ? <p className="text-sm text-gray-500">No business activity recorded in this period.</p> : <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-left">
+            <thead className="border-b text-xs text-gray-500"><tr><th className="py-2 pr-3 font-medium">Business</th><th className="py-2 pr-3 font-medium">Branch</th><th className="py-2 pr-3 text-right font-medium">Events</th><th className="py-2 pr-3 text-right font-medium">Page opens</th><th className="py-2 text-right font-medium">Active time</th></tr></thead>
+            <tbody className="divide-y">{insights.byBranch.slice(0, 100).map(item => <tr key={`${item.tenantId}-${item.branchId || 'unassigned'}`}>
+              <td className="py-2 pr-3 text-sm">{item.tenantName}</td>
+              <td className="py-2 pr-3 text-sm">{item.branchName}{item.branchId && <span className="ml-2 font-mono text-[10px] text-gray-500">{item.branchId}</span>}</td>
+              <td className="py-2 pr-3 text-right text-sm tabular-nums">{item.eventCount.toLocaleString()}</td>
+              <td className="py-2 pr-3 text-right text-sm tabular-nums">{item.pageViews.toLocaleString()}</td>
+              <td className="py-2 text-right text-sm tabular-nums">{formatDuration(item.activeMs)}</td>
+            </tr>)}</tbody>
+          </table>
+          {insights.byBranch.length > 100 && <p className="mt-2 text-xs text-gray-500">Showing the 100 most active business-branch pairs.</p>}
+        </div>}
       </section>
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-label="Feature usage analysis">
@@ -389,12 +413,15 @@ export const PlatformAuditPage: React.FC = () => {
       </section>
 
       <section className="rounded-md border bg-white p-4" aria-label="Activity filters">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
           <label className="text-xs font-medium text-gray-500">Search
             <input value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Business, email, IP, feature, action" className="mt-1 w-full rounded-md border px-3 py-2 text-sm text-gray-900" />
           </label>
           <label className="text-xs font-medium text-gray-500">Tenant ID
             <input value={filters.tenantId} onChange={e => setFilters(p => ({ ...p, tenantId: e.target.value }))} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Filter by tenant ID" className="mt-1 w-full rounded-md border px-3 py-2 text-sm text-gray-900" />
+          </label>
+          <label className="text-xs font-medium text-gray-500">Branch ID
+            <input value={filters.branchId} onChange={e => setFilters(p => ({ ...p, branchId: e.target.value }))} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Filter by branch ID" className="mt-1 w-full rounded-md border px-3 py-2 text-sm text-gray-900" />
           </label>
           <label className="text-xs font-medium text-gray-500">Action
             <select value={filters.action} onChange={e => setFilters(p => ({ ...p, action: e.target.value }))} className="mt-1 w-full rounded-md border px-3 py-2 text-sm text-gray-900">
@@ -424,7 +451,7 @@ export const PlatformAuditPage: React.FC = () => {
                   <td className="px-4 py-3"><span className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-800">{actionLabel(log.action)}</span></td>
                   <td className="px-4 py-3 text-sm text-gray-700">{log.model || 'Other'}</td>
                   <td className="max-w-[220px] break-all px-4 py-3 text-sm text-gray-700">{log.userEmail || log.actor || (log.action === 'login_failed' ? 'Unidentified sign-in attempt' : 'Email not captured')}</td>
-                  <td className="max-w-[240px] break-all px-4 py-3 text-sm text-gray-700">{log.subjectEmail || log.branchName ? <><div>{log.subjectEmail || '—'}</div>{log.branchName && <div className="mt-0.5 text-xs text-gray-500">{log.branchName}</div>}</> : '—'}</td>
+                  <td className="max-w-[240px] break-all px-4 py-3 text-sm text-gray-700">{log.subjectEmail || log.branchName || log.branchId ? <><div>{log.subjectEmail || '—'}</div>{(log.branchName || log.branchId) && <div className="mt-0.5 text-xs text-gray-500">{log.branchName || 'Branch'}{log.branchId ? ` · ${log.branchId}` : ''}</div>}</> : '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-gray-700">{log.ip || 'IP not captured'}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">{log.engagement ? <span>{formatDuration(log.engagement.activeMs)} active · {log.engagement.interactionCount.toLocaleString()} interactions · {log.engagement.maxScrollDepth}% scroll</span> : '—'}</td>
                   <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 text-xs ${log.statusCode >= 400 ? 'text-red-700' : 'text-emerald-700'}`}><ShieldCheck size={13} />{log.statusCode >= 400 ? `Failed (${log.statusCode})` : 'Success'}</span></td>

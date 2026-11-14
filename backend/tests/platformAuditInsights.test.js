@@ -48,3 +48,17 @@ test('peak-hour pages and feature rankings are grouped by business', () => {
   assert.equal(shopA.features[0].activeMs, 40_000);
   assert(summary.byBusiness.some(item => item.tenantId === 'shop-b' && item.features[0].feature === 'Reports'));
 });
+
+test('branch analytics keeps branch events separate and discloses unassigned activity', () => {
+  const summary = summarizePlatformAudit([
+    { tenantId: 'shop-a', branchId: 'branch-1', branchName: 'Main', userId: 'u1', model: 'Sale', action: 'create', createdAt: new Date('2026-10-17T10:00:00Z') },
+    { tenantId: 'shop-a', branchId: 'branch-2', branchName: 'Kampala Road', userId: 'u2', model: 'Inventory', action: 'update', createdAt: new Date('2026-10-17T10:01:00Z') },
+    { tenantId: 'shop-a', userId: 'u1', model: 'Reports', action: 'view', changes: { activeMs: 5000 }, createdAt: new Date('2026-10-17T10:02:00Z') },
+  ]);
+
+  assert.equal(summary.byBranch.length, 3);
+  assert.deepEqual(summary.byBranch.map(({ branchId, eventCount }) => [branchId, eventCount]).sort(), [
+    ['branch-1', 1], ['branch-2', 1], [null, 1],
+  ].sort());
+  assert.equal(summary.byBranch.find(item => item.branchId === 'branch-2').branchName, 'Kampala Road');
+});

@@ -252,7 +252,7 @@ async function generateProfessionalTip({ businessType, welcome, fallback }, gene
 async function getOrCreateTipContent(db, params, generateTip) {
   return db.$transaction(async (tx) => {
     const lockKey = `advisor-tip:${params.tenantId}:${params.day}:${params.slot}`;
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    await tx.$queryRaw`WITH lock AS MATERIALIZED (SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))) SELECT 1 AS locked FROM lock`;
     const where = { tenantId_tipDate_slot: { tenantId: params.tenantId, tipDate: params.day, slot: params.slot } };
     const existing = await tx.advisorDailyTipContent.findUnique({ where });
     if (existing) return existing;

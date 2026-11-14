@@ -116,6 +116,7 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
     const limit = parsePositiveInt(req.query.limit, 25, MAX_AUDIT_PAGE_SIZE);
     const where = {};
     const tenantId = String(req.query.tenantId || '').trim();
+    const branchId = String(req.query.branchId || '').trim();
     const action = String(req.query.action || '').trim().toLowerCase();
     const model = String(req.query.model || '').trim().slice(0, 80);
     const search = String(req.query.search || '').trim().slice(0, 100);
@@ -123,6 +124,7 @@ router.get('/audit', authenticateToken, requirePlatformAdmin, async (req, res) =
     const to = req.query.to ? new Date(String(req.query.to)) : null;
 
     if (tenantId) where.OR = [{ tenantId }, { targetTenantId: tenantId }];
+    if (branchId) where.branchId = branchId;
     if (action) where.action = { contains: action, mode: 'insensitive' };
     if (model) where.model = { contains: model, mode: 'insensitive' };
     if (from || to) {
@@ -204,7 +206,7 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
       where,
       orderBy: { createdAt: 'desc' },
       take: 20000,
-      select: { tenantId: true, userId: true, model: true, action: true, changes: true, createdAt: true },
+      select: { tenantId: true, userId: true, branchId: true, branchName: true, model: true, action: true, changes: true, createdAt: true },
     });
     const usageSummary = summarizePlatformAudit(logs);
     const usageTenantIds = usageSummary.byBusiness.map(item => item.tenantId);
@@ -213,10 +215,22 @@ router.get('/audit/insights', authenticateToken, requirePlatformAdmin, async (re
       : [];
     const usageTenantNames = new Map(usageTenants.map(tenant => [tenant.id, tenant.name]));
     usageSummary.byBusiness = usageSummary.byBusiness.map(item => ({ ...item, tenantName: usageTenantNames.get(item.tenantId) || 'Business unavailable' }));
+    const branchIds = [...new Set(usageSummary.byBranch.map(item => item.branchId).filter(Boolean))];
+    const branches = branchIds.length
+      ? await prisma.branch.findMany({ where: { id: { in: branchIds } }, select: { id: true, name: true } })
+      : [];
+    const branchNames = new Map(branches.map(branch => [branch.id, branch.name]));
+    usageSummary.byBranch = usageSummary.byBranch.map(item => ({
+      ...item,
+      branchName: item.branchName || branchNames.get(item.branchId) || (item.branchId ? 'Branch unavailable' : 'Unassigned / tenant-wide'),
+      tenantName: usageTenantNames.get(item.tenantId) || 'Business unavailable',
+    }));
+    const totalEvents = await prisma.auditLog.count({ where });
     res.json({
       days,
-      totalEvents: logs.length,
-      truncated: logs.length === 20000,
+      totalEvents,
+      sampledEvents: logs.length,
+      truncated: totalEvents > logs.length,
       ...usageSummary,
       refreshedAt: new Date().toISOString(),
     });

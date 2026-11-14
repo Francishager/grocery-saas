@@ -16,12 +16,32 @@ export function summarizePlatformAudit(logs) {
   const pagesByHour = Array.from({ length: 24 }, () => new Map());
   const tenantFeatureStats = new Map();
   const byDay = new Map();
+  const branchStats = new Map();
 
   for (const log of logs) {
     const localTime = Object.fromEntries(KAMPALA_FORMATTER.formatToParts(log.createdAt).map(({ type, value }) => [type, value]));
     const localDay = `${localTime.year}-${localTime.month}-${localTime.day}`;
     const isFeatureUsage = log.action === 'view' || log.action === 'engagement';
     const feature = String(log.model || 'Other').trim();
+    const branchKey = `${log.tenantId}:${log.branchId || 'unassigned'}`;
+    const branch = branchStats.get(branchKey) || {
+      tenantId: log.tenantId,
+      branchId: log.branchId || null,
+      branchName: log.branchName || null,
+      eventCount: 0,
+      pageViews: 0,
+      activeMs: 0,
+      interactionCount: 0,
+    };
+    branch.eventCount += 1;
+    if (isFeatureUsage) {
+      const metrics = log.changes && typeof log.changes === 'object' ? log.changes : {};
+      branch.pageViews += log.action === 'view' ? 1 : 0;
+      branch.activeMs += Math.max(0, Number(metrics.activeMs) || 0);
+      branch.interactionCount += Math.max(0, Number(metrics.interactionCount) || 0);
+    }
+    if (!branch.branchName && log.branchName) branch.branchName = log.branchName;
+    branchStats.set(branchKey, branch);
     if (isFeatureUsage && feature) {
       const stats = featureStats.get(feature) || { feature, count: 0, activeMs: 0, interactionCount: 0, maxScrollDepth: 0 };
       const visitKey = `${log.tenantId}:${log.userId}:${feature.toLowerCase()}:${localDay}`;
@@ -75,6 +95,7 @@ export function summarizePlatformAudit(logs) {
       topPages: [...pagesByHour[hour]].map(([page, views]) => ({ page, views })).sort((a, b) => b.views - a.views || a.page.localeCompare(b.page)).slice(0, 8),
     })),
     byPage: [...pageViews].map(([page, views]) => ({ page, views })).sort((a, b) => b.views - a.views || a.page.localeCompare(b.page)).slice(0, 20),
+    byBranch: [...branchStats.values()].sort((a, b) => b.eventCount - a.eventCount || String(a.branchId || '').localeCompare(String(b.branchId || ''))),
     byBusiness: [...new Set([...tenantFeatureStats.values()].map(item => item.tenantId))].map(tenantId => {
       const allFeatures = [...tenantFeatureStats.values()].filter(item => item.tenantId === tenantId)
         .sort((a, b) => b.activeMs - a.activeMs || b.interactionCount - a.interactionCount || b.count - a.count);

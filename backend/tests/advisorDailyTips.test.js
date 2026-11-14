@@ -8,7 +8,11 @@ function databaseFor(tenant, notificationStore = new Map(), contentStore = new M
     return `${key.tenantId}:${key.tipDate}:${key.slot}`;
   };
   const tx = {
-    $queryRaw: async () => [],
+    $queryRaw: async strings => {
+      const query = strings.join('?');
+      assert.match(query, /WITH lock AS MATERIALIZED \(SELECT pg_advisory_xact_lock\(hashtextextended\(\?, 0\)\)\) SELECT 1 AS locked FROM lock/);
+      return [{ locked: 1 }];
+    },
     advisorDailyTipContent: {
       findUnique: async ({ where }) => contentStore.get(contentKey(where)) || null,
       create: async ({ data }) => {
