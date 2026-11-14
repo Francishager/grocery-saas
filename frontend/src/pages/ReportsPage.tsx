@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
 import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
-import { reportsApiV2, branchesApi, inventoryApi, apiFetch, type ReportParams } from '@/lib/api'
+import { reportsApiV2, branchesApi, apiFetch, type ReportParams } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -2056,6 +2056,10 @@ export default function ReportsPage() {
   const [selectedDailyCustomerId, setSelectedDailyCustomerId] = useState('')
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
   const [entityList, setEntityList] = useState<any[]>([])
+  const [entityListLoading, setEntityListLoading] = useState(false)
+  const [entityListError, setEntityListError] = useState('')
+  const [entitySearch, setEntitySearch] = useState('')
+  const [entityReloadKey, setEntityReloadKey] = useState(0)
   const [branchList, setBranchList] = useState<any[]>([])
   const [dailyStaffList, setDailyStaffList] = useState<any[]>([])
   const [dailyCustomerList, setDailyCustomerList] = useState<any[]>([])
@@ -2117,9 +2121,6 @@ export default function ReportsPage() {
               if (!cancelled) setEntityList(list.map((s: any) => ({ id: s.id, label: s.name })))
             }
           }
-        } else if (entityType === 'product') {
-          const products = await inventoryApi.list()
-          if (!cancelled) setEntityList(products.map((p: any) => ({ id: p.id, label: p.name })))
         } else if (entityType === 'tenancy') {
           const tenancies = await reportsApiV2.propertyTenancies()
           if (!cancelled) setEntityList(tenancies.map((row: any) => ({ id: row.id, label: `${row.tenantName} · ${row.unit?.property?.name || 'Property'} / ${row.unit?.unitCode || ''}` })))
@@ -2129,6 +2130,52 @@ export default function ReportsPage() {
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedReport, selectedCustomerIdParam, selectedSupplierIdParam, selectedProductIdParam])
+
+  useEffect(() => {
+    if (currentReport?.entityType !== 'product') {
+      setEntitySearch('')
+      setEntityListError('')
+      setEntityListLoading(false)
+      return
+    }
+
+    let cancelled = false
+    const timer = window.setTimeout(async () => {
+      setEntityListLoading(true)
+      setEntityListError('')
+      try {
+        const params = new URLSearchParams({ page: '1', limit: '100' })
+        params.set('itemType', 'product')
+        const search = entitySearch.trim()
+        if (search) params.set('search', search)
+        if (selectedBranchId && selectedBranchId !== 'all') params.set('branchId', selectedBranchId)
+
+        const response = await apiFetch(`/api/inventory?${params.toString()}`)
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(payload?.error || `Could not load products (${response.status})`)
+
+        const products = Array.isArray(payload?.products) ? payload.products : Array.isArray(payload) ? payload : []
+        const selectableProducts = products
+          .filter((product: any) => product?.id && product.itemType !== 'service' && product.itemType !== 'rental')
+          .map((product: any) => ({ id: product.id, label: product.name || product.sku || 'Unnamed product' }))
+        if (cancelled) return
+        setEntityList(selectableProducts)
+        setSelectedEntityId((current) => selectableProducts.some((product: any) => product.id === current) ? current : '')
+      } catch (error: any) {
+        if (!cancelled) {
+          setEntityList([])
+          setEntityListError(error?.message || 'Could not load products. Check your connection and retry.')
+        }
+      } finally {
+        if (!cancelled) setEntityListLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [currentReport?.entityType, entitySearch, selectedBranchId, entityReloadKey])
 
   // Fetch business info for print/export headers
   useEffect(() => {
@@ -2487,19 +2534,36 @@ export default function ReportsPage() {
                     <Label className="text-xs">
                       {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : currentReport.entityType === 'tenancy' ? 'Tenant / tenancy' : 'Product'}
                     </Label>
-                    <Select value={selectedEntityId || (currentReport.entityType === 'product' || currentReport.entityType === 'tenancy' ? '' : 'all')} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
+                    {currentReport.entityType === 'product' && (
+                      <Input
+                        value={entitySearch}
+                        onChange={(event) => setEntitySearch(event.target.value)}
+                        placeholder="Search products by name, SKU, or barcode"
+                        className="mb-2 w-[min(100%,320px)]"
+                        aria-label="Search products for Product Ledger"
+                      />
+                    )}
+                    <Select disabled={currentReport.entityType === 'product' && entityListLoading} value={selectedEntityId || (currentReport.entityType === 'product' || currentReport.entityType === 'tenancy' ? '' : 'all')} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
                       <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder={currentReport.entityType === 'tenancy' ? 'Select tenant...' : `Select ${currentReport.entityType}...`} />
+                        <SelectValue placeholder={currentReport.entityType === 'tenancy' ? 'Select tenant...' : currentReport.entityType === 'product' && entityListLoading ? 'Loading products...' : `Select ${currentReport.entityType}...`} />
                       </SelectTrigger>
                       <SelectContent>
                         {currentReport.entityType !== 'tenancy' && currentReport.entityType !== 'product' && <SelectItem value="all">All {currentReport.entityType}s</SelectItem>}
-                        {entityList.length === 0 ? (
+                        {currentReport.entityType === 'product' && entityListLoading ? (
+                          <SelectItem value="_loading" disabled>Loading products...</SelectItem>
+                        ) : entityList.length === 0 ? (
                           <SelectItem value="_none" disabled>No {currentReport.entityType === 'tenancy' ? 'tenants' : `${currentReport.entityType}s`} found</SelectItem>
                         ) : (
                           entityList.map(e => <SelectItem key={e.id} value={e.id}>{e.label}</SelectItem>)
                         )}
                       </SelectContent>
                     </Select>
+                    {currentReport.entityType === 'product' && entityListError && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-destructive">
+                        <span>{entityListError}</span>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setEntityReloadKey((value) => value + 1)}>Retry</Button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {currentReport.showBranchFilter && branchList.length > 0 && (
