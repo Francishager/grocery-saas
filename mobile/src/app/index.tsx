@@ -13,6 +13,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import WebView, { type WebViewNavigation } from 'react-native-webview';
 import { Directory } from 'expo-file-system';
@@ -133,7 +134,24 @@ export default function HomeScreen() {
     try {
       if (request.type === 'passkey.get') {
         if (!request.options) throw new Error('Passkey challenge is missing.');
-        response = { ok: true, result: await Passkey.get(request.options as unknown as PasskeyGetRequest) };
+        if (request.options.userVerification !== 'required') throw new Error('The server did not require user verification.');
+        if (!(await LocalAuthentication.hasHardwareAsync()) || !(await LocalAuthentication.isEnrolledAsync())) {
+          throw new Error('No enrolled biometric is available. Use your JibuSales password to verify this switch.');
+        }
+        const biometric = await LocalAuthentication.authenticateAsync({
+          promptMessage: 'JibuSales needs to verify it’s you',
+          promptSubtitle: 'Confirm before switching businesses',
+          promptDescription: 'Use your enrolled biometric. You can choose password confirmation in JibuSales instead.',
+          cancelLabel: 'Cancel',
+          disableDeviceFallback: true,
+          biometricsSecurityLevel: 'strong',
+        });
+        if (!biometric.success) throw new Error('Biometric verification did not complete. Your business was not switched.');
+        const assertion = await Passkey.get(request.options as unknown as PasskeyGetRequest);
+        if (!assertion.id || !assertion.response?.authenticatorData || !assertion.response?.clientDataJSON || !assertion.response?.signature) {
+          throw new Error('The passkey did not return a complete signed verification. Your business was not switched.');
+        }
+        response = { ok: true, result: assertion };
       } else if (request.type === 'passkey.create') {
         if (!request.options) throw new Error('Passkey setup challenge is missing.');
         response = { ok: true, result: await Passkey.create(request.options as unknown as PasskeyCreateRequest) };

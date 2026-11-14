@@ -28,6 +28,11 @@ test('Android app bridges passkey enrollment and authentication to native Creden
   assert.match(app, /type:'passkey\.create'/)
   assert.match(app, /Passkey\.get\(request\.options as unknown as PasskeyGetRequest\)/)
   assert.match(app, /Passkey\.create\(request\.options as unknown as PasskeyCreateRequest\)/)
+  const getPasskey = app.slice(app.indexOf("if (request.type === 'passkey.get')"), app.indexOf("} else if (request.type === 'passkey.create')"))
+  assert.match(getPasskey, /request\.options\.userVerification !== 'required'/)
+  assert.match(getPasskey, /LocalAuthentication\.authenticateAsync\([\s\S]*disableDeviceFallback: true[\s\S]*biometricsSecurityLevel: 'strong'/)
+  assert.ok(getPasskey.indexOf('if (!biometric.success) throw') < getPasskey.indexOf('Passkey.get('))
+  assert.match(getPasskey, /assertion\.response\?\.signature/)
 })
 
 test('Android Digital Asset Links associates the app with the JibuSales passkey origin', async () => {
@@ -49,10 +54,22 @@ test('business switch offers native passkey verification and a password fallback
   assert.match(auth, /authenticateWithBusinessPasskey\(options\)/)
   assert.match(auth, /const statusResponse = await fetch\(`\$\{resolvedApiEndpoint\}\/security\/status`/)
   assert.match(layout, /JibuSales needs to verify it’s you/)
-  assert.match(layout, /Verify it’s you to open/)
-  assert.match(layout, /Use fingerprint or device unlock/)
+  assert.match(layout, /Confirm your identity with a biometric or your JibuSales password/)
+  assert.match(layout, /Verify with fingerprint \/ biometric/)
   assert.match(layout, /if \(!confirmationPassword && !usePasskey\) \{\s*setPendingBusinessTarget\(nextTenantId\)/)
   assert.doesNotMatch(auth, /Complete account security setup before switching businesses\./)
+})
+
+test('server refuses to switch unless the assertion has a fresh challenge and verified user presence', async () => {
+  const security = await read('../../backend/src/services/userSecurity.js')
+  const route = await read('../../backend/src/routes/auth.js')
+  assert.match(security, /purpose: 'business-switch', targetTenantId, expiresAt: \{ gt: new Date\(\) \}/)
+  assert.match(security, /requireUserVerification: true/)
+  assert.match(security, /!result\.verified \|\| !result\.authenticationInfo\.userVerified/)
+  assert.match(security, /Business-switch confirmation was already used/)
+  assert.match(route, /if \(req\.body\?\.securityAssertion\) \{\s*await verifyBusinessSwitch/)
+  assert.match(route, /else if \(req\.body\?\.confirmationPassword && await bcrypt\.compare/)
+  assert.match(route, /Passkey confirmation failed\. Use your account password to recover this switch/)
 })
 
 test('security enrollment is server-scoped to owners with multiple businesses and requires a configured method', async () => {

@@ -1327,10 +1327,10 @@ export function TenantLayout() {
         {pendingBusinessTarget && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="presentation">
           <section role="dialog" aria-modal="true" aria-labelledby="business-switch-security-title" className="w-full max-w-sm rounded-lg border bg-card p-5 text-card-foreground shadow-xl">
             <h2 id="business-switch-security-title" className="text-base font-semibold">JibuSales needs to verify it’s you</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Verify it’s you to open {businesses.find(item => item.id === pendingBusinessTarget)?.name || 'the selected business'}.</p>
-            {user?.businessSwitchSecurityMethod === 'passkey' && <Button type="button" variant="outline" className="mt-4 w-full" disabled={switchingBusiness} onClick={() => void handleBusinessSwitch(pendingBusinessTarget, undefined, true)}><Fingerprint className="mr-2 h-4 w-4" />{switchingBusiness ? 'Verifying…' : 'Use fingerprint or device unlock'}</Button>}
+            <p className="mt-1 text-sm text-muted-foreground">Confirm your identity with a biometric or your JibuSales password to open {businesses.find(item => item.id === pendingBusinessTarget)?.name || 'the selected business'}.</p>
+            {user?.businessSwitchSecurityMethod === 'passkey' && <Button type="button" variant="outline" className="mt-4 w-full" disabled={switchingBusiness} onClick={() => void handleBusinessSwitch(pendingBusinessTarget, undefined, true)}><Fingerprint className="mr-2 h-4 w-4" />{switchingBusiness ? 'Verifying…' : 'Verify with fingerprint / biometric'}</Button>}
             <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void handleBusinessSwitch(pendingBusinessTarget, switchPassword) }}>
-              <input type="password" autoComplete="current-password" autoFocus required value={switchPassword} onChange={event => setSwitchPassword(event.target.value)} className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="JibuSales password" />
+              <input type="password" autoComplete="current-password" required value={switchPassword} onChange={event => setSwitchPassword(event.target.value)} className="h-10 w-full rounded-md border bg-background px-3 text-sm" aria-label="JibuSales password" />
               {switchError && <p role="alert" className="text-sm text-destructive">{switchError}</p>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => { setPendingBusinessTarget(''); setSwitchPassword(''); setSwitchError('') }}>Cancel</Button>

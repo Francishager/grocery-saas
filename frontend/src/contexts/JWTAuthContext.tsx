@@ -5,11 +5,19 @@ import { getApiAuthEndpoint } from '@/lib/apiConfig'
 import { startAuthentication } from '@simplewebauthn/browser'
 
 async function authenticateWithBusinessPasskey(options: Record<string, unknown>) {
+  let assertion: Record<string, unknown>
   if (typeof window !== 'undefined') {
     const nativeWindow = window as Window & { JibuNativePasskey?: { get?: (request: Record<string, unknown>) => Promise<Record<string, unknown>> } }
-    if (nativeWindow.JibuNativePasskey?.get) return nativeWindow.JibuNativePasskey.get(options)
+    if (nativeWindow.JibuNativePasskey?.get) assertion = await nativeWindow.JibuNativePasskey.get(options)
+    else assertion = await startAuthentication({ optionsJSON: options as Parameters<typeof startAuthentication>[0]['optionsJSON'] }) as unknown as Record<string, unknown>
+  } else {
+    throw new Error('Passkey verification is unavailable. Use password confirmation instead.')
   }
-  return startAuthentication({ optionsJSON: options as Parameters<typeof startAuthentication>[0]['optionsJSON'] })
+  const response = assertion?.response as Record<string, unknown> | undefined
+  if (!assertion?.id || !response?.authenticatorData || !response?.clientDataJSON || !response?.signature) {
+    throw new Error('Biometric/passkey verification did not complete. The business was not switched.')
+  }
+  return assertion
 }
 
 export interface User {
