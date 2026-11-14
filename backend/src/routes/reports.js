@@ -4136,7 +4136,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
     const itemQuery = { where: { productId }, select: { quantity: true, conversionFactor: true } };
     const scopedProductIds = [product.id];
 
-    const [sales, saleRecords, purchases, supplierPurchases, adjustments, saleReturns] = await Promise.all([
+    const [sales, saleRecords, purchases, supplierPurchases, adjustments, saleReturns, transfers, productionOrders, productionWaste] = await Promise.all([
       // POS sales
       prisma.sale.findMany({
         where: scopedSaleWhere(req, s),
@@ -4172,6 +4172,30 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         select: { id: true, returnNo: true, createdAt: true, items: itemQuery },
         orderBy: { createdAt: "asc" },
       }),
+      prisma.stockTransferItem.findMany({
+        where: {
+          OR: [{ productId }, { destinationProductId: productId }],
+          transfer: {
+            tenantId: s.tenantId,
+            status: { in: ["in_transit", "received", "cancelled"] },
+            ...(s.branchId ? { OR: [{ fromBranchId: s.branchId }, { toBranchId: s.branchId }] } : {}),
+          },
+        },
+        select: {
+          quantity: true,
+          productId: true,
+          destinationProductId: true,
+          transfer: { select: { id: true, transferNo: true, status: true, createdAt: true, updatedAt: true, fromBranchId: true, toBranchId: true, fromBranch: { select: { name: true } }, toBranch: { select: { name: true } } } },
+        },
+      }),
+      prisma.productionOrder.findMany({
+        where: scopedWhere(s, { productId, status: "completed" }),
+        select: { id: true, orderNo: true, actualQuantity: true, quantity: true, updatedAt: true, branch: { select: { name: true } } },
+      }),
+      prisma.productionWaste.findMany({
+        where: { tenantId: s.tenantId, productId, ...(s.branchId ? { productionOrder: { branchId: s.branchId } } : {}) },
+        select: { id: true, quantity: true, reason: true, createdAt: true, productionOrder: { select: { orderNo: true, branch: { select: { name: true } } } } },
+      }),
     ]);
 
     const allAdjustmentWhere = { tenantId: s.tenantId, model: "Product", action: "update", recordId: { in: scopedProductIds } };
@@ -4203,8 +4227,11 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }) : Promise.resolve([]),
     ]);
 
-    const { from } = req.query;
+    const { from, to } = req.query;
     const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+    if (toDate && String(to).length <= 10) toDate.setHours(23, 59, 59, 999);
+    const inReportRange = (date) => (!fromDate || new Date(date) >= fromDate) && (!toDate || new Date(date) <= toDate);
     const sumQtyBefore = (records, dateField = "createdAt", convertSalesUnit = false) =>
       records.reduce((a, r) => a + (new Date(r[dateField]) < fromDate ? r.items.reduce((sum, item) => {
         const quantity = Number(item.quantity || 0);
@@ -4218,7 +4245,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         if (!Number.isFinite(beforeQty) || !Number.isFinite(afterQty) || new Date(log.createdAt) >= fromDate) return sum;
         return sum + (afterQty - beforeQty);
       }, 0);
-    const openingStock = fromDate
+    const openingFromRecordedMovements = fromDate
       ? (sumQtyBefore(allPurchases) + sumQtyBefore(allSupplierPurchases) + sumQtyBefore(allSaleReturns)) -
       (sumQtyBefore(allSales, "createdAt", true) + sumQtyBefore(allSaleRecords, "createdAt", true)) +
         sumAdjustmentBefore(allAdjustments)
@@ -4310,6 +4337,60 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }
     }
 
+    const transferMovements = [];
+    for (const item of transfers) {
+      const transfer = item.transfer;
+      const addTransferMovement = (date, direction, branchName, branchId, description) => {
+        if (s.branchId && branchId !== s.branchId) return;
+        transferMovements.push({
+          date,
+          refNo: transfer.transferNo || transfer.id.slice(-6),
+          description,
+          inQty: direction === "in" ? Number(item.quantity || 0) : 0,
+          outQty: direction === "out" ? Number(item.quantity || 0) : 0,
+          branch: branchName || "Unassigned",
+        });
+      };
+      if (item.productId === productId) {
+        addTransferMovement(transfer.createdAt, "out", transfer.fromBranch?.name, transfer.fromBranchId, "Branch transfer (out)");
+        if (transfer.status === "cancelled") {
+          addTransferMovement(transfer.updatedAt, "in", transfer.fromBranch?.name, transfer.fromBranchId, "Cancelled transfer (restored)");
+        }
+      }
+      if (transfer.status === "received" && (item.destinationProductId === productId || (!item.destinationProductId && item.productId === productId))) {
+        addTransferMovement(transfer.updatedAt, "in", transfer.toBranch?.name, transfer.toBranchId, "Branch transfer (in)");
+      }
+    }
+    entries.push(...transferMovements.filter((movement) => inReportRange(movement.date)));
+
+    const productionMovements = [
+      ...productionOrders.map((order) => ({
+        date: order.updatedAt,
+        refNo: order.orderNo,
+        description: "Production completed (in)",
+        inQty: Number(order.actualQuantity || order.quantity || 0),
+        outQty: 0,
+        branch: order.branch?.name || "Unassigned",
+      })),
+      ...productionWaste.map((waste) => ({
+        date: waste.createdAt,
+        refNo: waste.productionOrder?.orderNo || waste.id.slice(-6),
+        description: `Production waste (out)${waste.reason ? `: ${waste.reason}` : ""}`,
+        inQty: 0,
+        outQty: Number(waste.quantity || 0),
+        branch: waste.productionOrder?.branch?.name || "Unassigned",
+      })),
+    ];
+    entries.push(...productionMovements.filter((movement) => inReportRange(movement.date)));
+
+    const priorTransferNet = transferMovements
+      .filter((movement) => fromDate && new Date(movement.date) < fromDate)
+      .reduce((sum, movement) => sum + movement.inQty - movement.outQty, 0);
+    const priorProductionNet = productionMovements
+      .filter((movement) => fromDate && new Date(movement.date) < fromDate)
+      .reduce((sum, movement) => sum + movement.inQty - movement.outQty, 0);
+    const openingStock = openingFromRecordedMovements + priorTransferNet + priorProductionNet;
+
     entries.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     let bal = openingStock;
@@ -4323,10 +4404,12 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       openingStock,
       closingStock: entries.length ? entries[entries.length - 1].balance : openingStock,
       data: entries,
+      note: "The ledger shows recorded movements. Opening quantities entered before movement history was captured may not have a dated ledger entry.",
       summary: {
         totalIn: entries.reduce((a, e) => a + e.inQty, 0),
         totalOut: entries.reduce((a, e) => a + e.outQty, 0),
         entryCount: entries.length,
+        currentStock: Number(product.quantity || 0),
       },
     });
   } catch (err) { handleBranchError(res, err); }

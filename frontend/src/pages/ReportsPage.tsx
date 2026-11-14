@@ -906,6 +906,17 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
   const [detail, setDetail] = useState<{ title: string; rows: any[] } | null>(null)
   if (!data) return <p className="text-center text-muted-foreground py-8">No data available. Click Generate to load.</p>
   const entries = data.data || []
+  if (!entries.length && data.product) {
+    return (
+      <div className="space-y-3 rounded-lg border bg-muted/20 p-4 text-center">
+        <p className="font-medium">No recorded stock movements for this product in the selected period.</p>
+        <p className="text-sm text-muted-foreground">
+          Current stock: {Number(data.product.currentStock || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })} {data.product.baseUnit || 'Piece'}.
+          {' '}Opening stock entered before movement history was captured may not have a dated ledger entry.
+        </p>
+      </div>
+    )
+  }
   if (!entries.length) return <p className="text-center text-muted-foreground py-8">No transactions found for the selected period.</p>
 
   const entityName = data.customer?.name || data.supplier?.name || data.product?.name || ''
