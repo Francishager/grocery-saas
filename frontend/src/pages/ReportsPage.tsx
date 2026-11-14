@@ -2301,7 +2301,7 @@ export default function ReportsPage() {
         setReportData(result)
       }
     } catch (error: any) {
-      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'propertyManagement' || currentReport.renderType === 'rental') {
+      if (currentReport.categoryId === "financial" || currentReport.renderType === "dailyBusiness" || currentReport.renderType === 'propertyManagement' || currentReport.renderType === 'rental' || (currentReport.renderType === 'ledger' && currentReport.ledgerType === 'product')) {
         setReportData(null)
         toast({ variant: "destructive", title: "Report unavailable", description: error.message })
         return

@@ -516,6 +516,9 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
       return {
         productId: item.productId,
         quantity,
+        enteredQuantity: quantity,
+        unitName: product.baseUnit || null,
+        conversionFactor: 1,
         cost,
         total: cost * quantity,
         oldCost: product.cost
@@ -579,6 +582,9 @@ router.post('/purchases', authenticateToken, requirePermission('canCreatePayable
           purchaseId: createdPurchase.id,
           productId: item.productId,
           quantity: item.quantity,
+          enteredQuantity: item.enteredQuantity,
+          unitName: item.unitName,
+          conversionFactor: item.conversionFactor,
           cost: item.cost,
           total: item.total
         }))

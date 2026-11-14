@@ -36,6 +36,9 @@ async function checkedPurchaseItems(items, scope) {
     return {
       productId: item.productId,
       quantity: item.quantity,
+      enteredQuantity: item.quantity,
+      unitName: product.baseUnit || null,
+      conversionFactor: 1,
       cost,
       total: cost * item.quantity,
       oldCost: product.cost,

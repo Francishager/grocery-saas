@@ -1292,7 +1292,16 @@ router.patch('/invoices/:id/approve', requireFeature('procurement.buyer'), requi
           accountId: isService ? config.purchaseExpenseAccountId : config.inventoryAccountId,
         };
       });
-      await tx.supplierPurchaseItem.createMany({ data: purchaseLines.map((line) => ({ purchaseId: purchase.id, productId: line.productId, quantity: line.quantity, cost: line.cost, total: line.total })) });
+      await tx.supplierPurchaseItem.createMany({ data: purchaseLines.map((line) => ({
+        purchaseId: purchase.id,
+        productId: line.productId,
+        quantity: line.quantity,
+        enteredQuantity: line.quantity,
+        unitName: line.product?.baseUnit || null,
+        conversionFactor: 1,
+        cost: line.cost,
+        total: line.total,
+      })) });
       await tx.supplier.update({ where: { id: supplier.id }, data: { balance: { increment: Number(invoice.total) } } });
       const freightByProduct = new Map();
       for (const line of purchaseLines) {

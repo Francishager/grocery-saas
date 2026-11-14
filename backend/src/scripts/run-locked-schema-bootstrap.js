@@ -16,6 +16,7 @@ const requiredScripts = [
   'ensure-customer-alternate-phone-schema.js',
   'ensure-user-theme-schema.js',
   'ensure-fractional-product-stock-schema.js',
+  'ensure-inventory-line-unit-snapshots-schema.js',
   'ensure-salon-spa-schema.js',
   'ensure-tenant-memberships-schema.js',
   'ensure-tenant-contact-email-nonunique.js',

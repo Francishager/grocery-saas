@@ -4133,32 +4133,34 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
     product = await prisma.product.findFirst({ where: scopedWhere(s, { id: productId }) });
     if (!product) return res.status(404).json({ error: "Product not found" });
 
-    const itemQuery = { where: { productId }, select: { quantity: true, conversionFactor: true } };
+    const saleItemQuery = { where: { productId }, select: { quantity: true, conversionFactor: true } };
+    const purchaseItemQuery = { where: { productId }, select: { quantity: true, enteredQuantity: true, unitName: true, conversionFactor: true } };
+    const returnItemQuery = { where: { productId }, select: { quantity: true, enteredQuantity: true, unitName: true, conversionFactor: true } };
     const scopedProductIds = [product.id];
 
     const [sales, saleRecords, purchases, supplierPurchases, adjustments, saleReturns, transfers, productionOrders, productionWaste] = await Promise.all([
       // POS sales
       prisma.sale.findMany({
         where: scopedSaleWhere(req, s),
-        select: { id: true, receiptNo: true, createdAt: true, items: itemQuery },
+        select: { id: true, receiptNo: true, createdAt: true, items: saleItemQuery },
         orderBy: { createdAt: "asc" },
       }),
       // Credit sales (SaleRecord)
       prisma.saleRecord.findMany({
         where: scopedSaleWhere(req, s),
-        select: { id: true, receiptNo: true, createdAt: true, items: itemQuery },
+        select: { id: true, receiptNo: true, createdAt: true, items: saleItemQuery },
         orderBy: { createdAt: "asc" },
       }),
       // Quick purchases
       prisma.purchase.findMany({
         where: scopedWhere(s, df(req)),
-        select: { id: true, refNo: true, createdAt: true, items: itemQuery },
+        select: { id: true, refNo: true, createdAt: true, items: purchaseItemQuery },
         orderBy: { createdAt: "asc" },
       }),
       // Credit purchases (SupplierPurchase)
       prisma.supplierPurchase.findMany({
         where: scopedWhere(s, df(req)),
-        select: { id: true, refNo: true, createdAt: true, items: itemQuery },
+        select: { id: true, refNo: true, createdAt: true, items: purchaseItemQuery },
         orderBy: { createdAt: "asc" },
       }),
       // Stock adjustments
@@ -4169,7 +4171,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       // Sale returns (stock comes back in)
       prisma.saleReturn.findMany({
         where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { in: stockLedgerSaleReturnStatuses } }),
-        select: { id: true, returnNo: true, createdAt: true, items: itemQuery },
+        select: { id: true, returnNo: true, createdAt: true, items: returnItemQuery },
         orderBy: { createdAt: "asc" },
       }),
       prisma.stockTransferItem.findMany({
@@ -4203,23 +4205,23 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
     const [allSales, allSaleRecords, allPurchases, allSupplierPurchases, allSaleReturns, allAdjustments] = await Promise.all([
       prisma.sale.findMany({
         where: scopedWhere(s, { ...saleUserFilter, status: { notIn: ["cancelled", "refunded"] } }),
-        select: { createdAt: true, items: itemQuery },
+        select: { createdAt: true, items: saleItemQuery },
       }),
       prisma.saleRecord.findMany({
         where: scopedWhere(s, { ...saleUserFilter, status: { notIn: ["cancelled", "refunded"] } }),
-        select: { createdAt: true, items: itemQuery },
+        select: { createdAt: true, items: saleItemQuery },
       }),
       prisma.purchase.findMany({
         where: scopedWhere(s),
-        select: { createdAt: true, items: itemQuery },
+        select: { createdAt: true, items: purchaseItemQuery },
       }),
       prisma.supplierPurchase.findMany({
         where: scopedWhere(s),
-        select: { createdAt: true, items: itemQuery },
+        select: { createdAt: true, items: purchaseItemQuery },
       }),
       prisma.saleReturn.findMany({
         where: scopedWhere(s, { ...saleUserFilter, status: { in: stockLedgerSaleReturnStatuses } }),
-        select: { createdAt: true, items: itemQuery },
+        select: { createdAt: true, items: returnItemQuery },
       }),
       scopedProductIds.length ? prisma.auditLog.findMany({
         where: allAdjustmentWhere,
@@ -4238,6 +4240,12 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         const factor = Number(item.conversionFactor || 1);
         return sum + quantity * (convertSalesUnit && Number.isFinite(factor) && factor > 0 ? factor : 1);
       }, 0) : 0), 0);
+    const unitSnapshot = (item) => {
+      if (item.enteredQuantity == null || !item.unitName) return "";
+      const factor = Number(item.conversionFactor || 1);
+      const factorText = factor !== 1 ? ` x ${factor} ${product.baseUnit || "base units"}` : "";
+      return ` (${item.enteredQuantity} ${item.unitName}${factorText})`;
+    };
     const sumAdjustmentBefore = (logs) =>
       logs.reduce((sum, log) => {
         const beforeQty = Number(log.changes?.before?.quantity);
@@ -4285,7 +4293,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         entries.push({
           date: purchase.createdAt,
           refNo: purchase.refNo || purchase.id.slice(-6),
-          description: "Purchase (in)",
+          description: `Purchase (in)${unitSnapshot(item)}`,
           inQty: item.quantity,
           outQty: 0,
           balance: 0,
@@ -4298,7 +4306,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         entries.push({
           date: purchase.createdAt,
           refNo: purchase.refNo || purchase.id.slice(-6),
-          description: "Supplier Purchase (in)",
+          description: `Supplier Purchase (in)${unitSnapshot(item)}`,
           inQty: item.quantity,
           outQty: 0,
           balance: 0,
@@ -4329,7 +4337,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         entries.push({
           date: sr.createdAt,
           refNo: sr.returnNo,
-          description: "Sale Return (in)",
+          description: `Sale Return (in)${unitSnapshot(item)}`,
           inQty: item.quantity,
           outQty: 0,
           balance: 0,

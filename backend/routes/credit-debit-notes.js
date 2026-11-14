@@ -398,6 +398,9 @@ async function resolveCreditReturnItems(client, scope, { customerId, saleId, ite
     returnItems.push({
       productId: item.productId,
       quantity: requestedBaseQty,
+      enteredQuantity: requestedQty,
+      unitName: item.unitName || item.product?.baseUnit || null,
+      conversionFactor: Number(item.conversionFactor || 1),
       price: requestedBaseQty > 0 ? toMoney(lineTotal / requestedBaseQty) : 0,
       total: lineTotal,
       taxAmount: returnItemTaxAmount(item, requestedQty),

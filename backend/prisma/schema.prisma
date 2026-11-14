@@ -1658,15 +1658,18 @@ model Purchase {
 
 // Purchase Items
 model PurchaseItem {
-  id         String   @id @default(cuid())
-  purchaseId String
-  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  productId  String
-  product    Product  @relation(fields: [productId], references: [id])
-  quantity   Int
-  cost       Float
-  total      Float
-  createdAt  DateTime @default(now())
+  id               String   @id @default(cuid())
+  purchaseId       String
+  purchase         Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id])
+  quantity         Int
+  enteredQuantity  Float?
+  unitName         String?
+  conversionFactor Float?
+  cost             Float
+  total            Float
+  createdAt        DateTime @default(now())
 
   @@map("purchase_items")
 }
@@ -2140,15 +2143,18 @@ model SupplierPurchase {
 
 // Supplier Purchase Items
 model SupplierPurchaseItem {
-  id         String           @id @default(cuid())
-  purchaseId String
-  purchase   SupplierPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  productId  String
-  product    Product          @relation(fields: [productId], references: [id])
-  quantity   Int
-  cost       Float
-  total      Float
-  createdAt  DateTime         @default(now())
+  id               String           @id @default(cuid())
+  purchaseId       String
+  purchase         SupplierPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product          @relation(fields: [productId], references: [id])
+  quantity         Int
+  enteredQuantity  Float?
+  unitName         String?
+  conversionFactor Float?
+  cost             Float
+  total            Float
+  createdAt        DateTime         @default(now())
 
   @@map("supplier_purchase_items")
 }
@@ -3707,17 +3713,20 @@ model SaleReturn {
 }
 
 model SaleReturnItem {
-  id        String     @id @default(cuid())
-  returnId  String
-  return    SaleReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product    @relation(fields: [productId], references: [id])
-  quantity  Int
-  price     Float
-  total     Float
-  taxAmount Float? // Original sale-line tax allocated to the returned quantity
-  reason    String?
-  createdAt DateTime   @default(now())
+  id               String     @id @default(cuid())
+  returnId         String
+  return           SaleReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product    @relation(fields: [productId], references: [id])
+  quantity         Int
+  enteredQuantity  Float?
+  unitName         String?
+  conversionFactor Float?
+  price            Float
+  total            Float
+  taxAmount        Float? // Original sale-line tax allocated to the returned quantity
+  reason           String?
+  createdAt        DateTime   @default(now())
 
   @@index([returnId])
   @@map("sale_return_items")

@@ -301,6 +301,9 @@ router.post("/", authenticateToken, requirePermission("canRefundSale"), requireF
         returnItems.push({
           productId: saleItem.productId,
           quantity: baseQty,
+          enteredQuantity: qty,
+          unitName: saleItem.unitName || saleItem.product?.baseUnit || null,
+          conversionFactor: Number(saleItem.conversionFactor || 1),
           price: baseQty > 0 ? toMoney(lineTotal / baseQty) : toMoney(saleItem.price),
           total: lineTotal,
           taxAmount: returnItemTaxAmount(saleItem, qty),
