@@ -143,40 +143,35 @@ const CATEGORIES: ReportCategory[] = [
   {
     id: 'inventory', label: 'Inventory Reports', icon: Package, permission: 'canViewInventoryReport',
     items: [
-      { id: 'inventoryStock', label: 'Current Stock Report', apiFn: reportsApiV2.inventoryStock, renderType: 'table',
-        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price')]
+      { id: 'inventoryStock', label: 'Current Stock Report', apiFn: reportsApiV2.inventoryStock, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('baseUnit', 'Base Unit'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price'), textCol('branch', 'Branch')]
       },
-      { id: 'inventoryValuation', label: 'Stock Valuation Report', apiFn: reportsApiV2.inventoryValuation, renderType: 'table',
-        columns: [textCol('category', 'Category'), numberCol('quantity', 'Qty'), currencyCol('costValue', 'Cost Value'), currencyCol('retailValue', 'Retail Value')]
+      { id: 'inventoryValuation', label: 'Stock Valuation Report', apiFn: reportsApiV2.inventoryValuation, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('category', 'Category'), textCol('baseUnit', 'Base Unit'), numberCol('quantity', 'Qty'), numberCol('productCount', 'Products'), currencyCol('costValue', 'Cost Value'), currencyCol('retailValue', 'Retail Value')]
       },
-      { id: 'inventoryLowStock', label: 'Low Stock Report', apiFn: reportsApiV2.inventoryLowStock, renderType: 'table',
-        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('branch', 'Branch')]
+      { id: 'inventoryLowStock', label: 'Low Stock Report', apiFn: reportsApiV2.inventoryLowStock, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('baseUnit', 'Base Unit'), numberCol('minStock', 'Reorder At'), textCol('branch', 'Branch')]
       },
-      { id: 'inventoryOutOfStock', label: 'Out of Stock Report', apiFn: reportsApiV2.inventoryOutOfStock, renderType: 'table',
-        columns: [textCol('name', 'Product'), textCol('sku', 'SKU'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), numberCol('minStock', 'Min Stock'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price'), textCol('branch', 'Branch'), textCol('status', 'Status')]
+      { id: 'inventoryOutOfStock', label: 'Out of Stock Report', apiFn: reportsApiV2.inventoryOutOfStock, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('name', 'Product'), textCol('sku', 'SKU'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('baseUnit', 'Base Unit'), numberCol('minStock', 'Min Stock'), currencyCol('cost', 'Cost'), currencyCol('price', 'Price'), textCol('branch', 'Branch'), textCol('status', 'Status')]
       },
-      { id: 'inventoryStockMovement', label: 'Stock Movement Report', apiFn: reportsApiV2.inventoryStockMovement, renderType: 'enriched',
-        summaryKeys: [
-          { key: 'totalInbound', label: 'Total In', format: 'number' },
-          { key: 'totalOutbound', label: 'Total Out', format: 'number' },
-          { key: 'currentStock', label: 'Current Stock', format: 'number' },
-          { key: 'netChange', label: 'Net Change', format: 'number' },
-        ]
+      { id: 'inventoryStockMovement', label: 'Stock Movement Report', apiFn: reportsApiV2.inventoryStockMovement, renderType: 'table', showBranchFilter: true,
+        columns: [dateCol('date', 'Date'), textCol('type', 'Movement'), textCol('product', 'Product'), numberCol('quantity', 'Qty'), textCol('baseUnit', 'Base Unit'), numberCol('inQty', 'In'), numberCol('outQty', 'Out'), textCol('branch', 'Branch'), textCol('reference', 'Reference'), textCol('reason', 'Reason')]
       },
-      { id: 'inventoryAdjustments', label: 'Inventory Adjustment Report', apiFn: reportsApiV2.inventoryAdjustments, renderType: 'table',
-        columns: [textCol('action', 'Action'), textCol('model', 'Model'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
+      { id: 'inventoryAdjustments', label: 'Inventory Adjustment Report', apiFn: reportsApiV2.inventoryAdjustments, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('product', 'Product'), textCol('branch', 'Branch'), textCol('action', 'Action'), textCol('reason', 'Reason'), numberCol('quantityChange', 'Change'), textCol('baseUnit', 'Base Unit'), numberCol('beforeQuantity', 'Before'), numberCol('afterQuantity', 'After'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
       },
-      { id: 'inventoryExpiry', label: 'Expiry Report', apiFn: reportsApiV2.inventoryExpiry, renderType: 'table',
-        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), dateCol('expiryDate', 'Expiry Date')]
+      { id: 'inventoryExpiry', label: 'Expiry Report', apiFn: reportsApiV2.inventoryExpiry, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('name', 'Product'), textCol('category', 'Category'), numberCol('quantity', 'Qty'), textCol('baseUnit', 'Base Unit'), textCol('branch', 'Branch'), dateCol('expiryDate', 'Expiry Date'), numberCol('daysUntilExpiry', 'Days Left')]
       },
-      { id: 'inventoryDamaged', label: 'Damaged/Lost Stock Report', apiFn: reportsApiV2.inventoryDamaged, renderType: 'table',
-        columns: [textCol('action', 'Action'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
+      { id: 'inventoryDamaged', label: 'Damaged/Lost Stock Report', apiFn: reportsApiV2.inventoryDamaged, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('product', 'Product'), textCol('branch', 'Branch'), textCol('reason', 'Reason'), numberCol('quantity', 'Qty Lost'), textCol('baseUnit', 'Base Unit'), numberCol('beforeQuantity', 'Before'), numberCol('afterQuantity', 'After'), textCol('userEmail', 'User'), dateCol('createdAt', 'Date')]
       },
-      { id: 'inventoryFastMoving', label: 'Fast Moving Products', apiFn: reportsApiV2.inventoryFastMoving, renderType: 'table',
-        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      { id: 'inventoryFastMoving', label: 'Fast Moving Products', apiFn: reportsApiV2.inventoryFastMoving, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), textCol('baseUnit', 'Base Unit'), numberCol('saleCount', 'Lines Sold'), currencyCol('revenue', 'Revenue'), textCol('branch', 'Branch')]
       },
-      { id: 'inventorySlowMoving', label: 'Slow Moving Products', apiFn: reportsApiV2.inventorySlowMoving, renderType: 'table',
-        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), currencyCol('revenue', 'Revenue')]
+      { id: 'inventorySlowMoving', label: 'Slow Moving Products', apiFn: reportsApiV2.inventorySlowMoving, renderType: 'table', showBranchFilter: true,
+        columns: [textCol('product', 'Product'), numberCol('quantity', 'Qty Sold'), textCol('baseUnit', 'Base Unit'), numberCol('saleCount', 'Lines Sold'), currencyCol('revenue', 'Revenue'), textCol('branch', 'Branch')]
       },
       { id: 'inventoryProductLedger', label: 'Product Ledger', apiFn: reportsApiV2.inventoryProductLedger, renderType: 'ledger', ledgerType: 'product', entityType: 'product', showBranchFilter: true,
         columns: [dateCol('date', 'Date'), textCol('refNo', 'Ref No'), textCol('description', 'Description'), numberCol('inQty', 'In Qty'), numberCol('outQty', 'Out Qty'), numberCol('balance', 'Balance')]
@@ -948,10 +943,10 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[900px] text-sm">
             <thead className="bg-muted/50">
-              <tr>{columns?.map(col => { const isNumeric = col.format === 'currency' || col.format === 'number'; return <th key={col.key} className={`px-4 py-3 font-medium text-muted-foreground ${isNumeric ? 'text-right' : 'text-left'}`}>{col.label}</th> })}</tr>
+              <tr>{columns?.map(col => { const isNumeric = col.format === 'currency' || col.format === 'number'; const label = isProductLedger && ['inQty', 'outQty', 'balance'].includes(col.key) ? `${col.label} (${data.product?.baseUnit || 'base units'})` : col.label; return <th key={col.key} className={`px-4 py-3 font-medium text-muted-foreground ${isNumeric ? 'text-right' : 'text-left'}`}>{label}</th> })}</tr>
             </thead>
             <tbody>
-              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Opening Balance</td><td className="px-4 py-2 text-right">{isProductLedger ? openingValue : formatCurrency(openingValue)}</td></tr>
+              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>{isProductLedger ? 'Opening Stock' : 'Opening Balance'}</td><td className="px-4 py-2 text-right">{isProductLedger ? `${Number(openingValue || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${data.product?.baseUnit || ''}` : formatCurrency(openingValue)}</td></tr>
               {entries.map((row: any, i: number) => {
                 const rowDetails = detailsForRow(row)
                 return (
@@ -965,12 +960,12 @@ function LedgerReport({ data, columns }: { data: any; columns: ReportItem['colum
                   </tr>
                 )
               })}
-              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>Closing Balance</td><td className="px-4 py-2 text-right">{isProductLedger ? closingValue : formatCurrency(closingValue)}</td></tr>
+              <tr className="border-t bg-muted/20 font-medium"><td className="px-4 py-2" colSpan={columns ? columns.length - 1 : 1}>{isProductLedger ? 'Closing Stock' : 'Closing Balance'}</td><td className="px-4 py-2 text-right">{isProductLedger ? `${Number(closingValue || 0).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${data.product?.baseUnit || ''}` : formatCurrency(closingValue)}</td></tr>
             </tbody>
           </table>
         </div>
 
-        {data.summary && <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">{Object.entries(data.summary).map(([k, v]) => <div key={k}><p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p><p className="font-semibold">{typeof v === 'number' ? (k.toLowerCase().includes('count') || k.toLowerCase().includes('qty') ? v : formatCurrency(v)) : String(v)}</p></div>)}</div>}
+        {data.summary && <div className="flex flex-wrap gap-4 rounded-lg bg-muted/30 p-4">{Object.entries(data.summary).map(([k, v]) => <div key={k}><p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p><p className="font-semibold">{typeof v === 'number' ? (isProductLedger ? `${v.toLocaleString(undefined, { maximumFractionDigits: 6 })}${k === 'entryCount' ? '' : ` ${data.product?.baseUnit || ''}`}` : (k.toLowerCase().includes('count') || k.toLowerCase().includes('qty') ? v : formatCurrency(v))) : String(v)}</p></div>)}</div>}
       </div>
       {detail && <FinancialDetailModal title={detail.title} rows={detail.rows} onClose={() => setDetail(null)} />}
     </>
@@ -2210,6 +2205,11 @@ export default function ReportsPage() {
 
   const loadReport = useCallback(async () => {
     if (!currentReport) return
+    if (currentReport.entityType === 'product' && !selectedEntityId) {
+      setReportData(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setReportData(null)
     try {
@@ -2487,12 +2487,12 @@ export default function ReportsPage() {
                     <Label className="text-xs">
                       {currentReport.entityType === 'customer' ? 'Customer' : currentReport.entityType === 'supplier' ? 'Supplier' : currentReport.entityType === 'tenancy' ? 'Tenant / tenancy' : 'Product'}
                     </Label>
-                    <Select value={selectedEntityId || 'all'} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
+                    <Select value={selectedEntityId || (currentReport.entityType === 'product' || currentReport.entityType === 'tenancy' ? '' : 'all')} onValueChange={(v) => setSelectedEntityId(v === 'all' ? '' : v)}>
                       <SelectTrigger className="w-[200px]">
                         <SelectValue placeholder={currentReport.entityType === 'tenancy' ? 'Select tenant...' : `Select ${currentReport.entityType}...`} />
                       </SelectTrigger>
                       <SelectContent>
-                        {currentReport.entityType !== 'tenancy' && <SelectItem value="all">All {currentReport.entityType}s</SelectItem>}
+                        {currentReport.entityType !== 'tenancy' && currentReport.entityType !== 'product' && <SelectItem value="all">All {currentReport.entityType}s</SelectItem>}
                         {entityList.length === 0 ? (
                           <SelectItem value="_none" disabled>No {currentReport.entityType === 'tenancy' ? 'tenants' : `${currentReport.entityType}s`} found</SelectItem>
                         ) : (
@@ -2609,10 +2609,13 @@ export default function ReportsPage() {
                         {Object.entries(reportData.summary).map(([k, v]) => {
                           // Skip complex objects that should be displayed as breakdowns
                           if (typeof v === 'object' && v !== null) return null
+                          const value = typeof v === 'number' && currentReport.categoryId === 'inventory'
+                            ? /^totalValue$/i.test(k) || /cost|retail|stockvalue|revenue/i.test(k) ? formatCurrency(v) : new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(v)
+                            : typeof v === 'number' ? formatCurrency(v) : String(v)
                           return (
                             <div key={k}>
                               <p className="text-xs text-muted-foreground">{k.replace(/([A-Z])/g, ' $1').replace(/^./, c => c.toUpperCase())}</p>
-                              <p className="font-semibold">{typeof v === 'number' ? formatCurrency(v) : String(v)}</p>
+                              <p className="font-semibold">{value}</p>
                             </div>
                           )
                         })}
@@ -2685,7 +2688,7 @@ export default function ReportsPage() {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <FileText className="h-10 w-10 text-muted-foreground/50" />
-                    <p className="mt-3 text-sm text-muted-foreground">{currentReport.entityType === 'tenancy' && !selectedEntityId ? 'Select a tenant to load their statement' : 'Click "Generate" to load the report'}</p>
+                    <p className="mt-3 text-sm text-muted-foreground">{currentReport.entityType === 'tenancy' && !selectedEntityId ? 'Select a tenant to load their statement' : currentReport.entityType === 'product' && !selectedEntityId ? 'Select a product to view its stock ledger' : 'Click "Generate" to load the report'}</p>
                   </div>
                 )}
               </CardContent>

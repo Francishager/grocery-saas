@@ -14,12 +14,12 @@ import { buildDecisionSupportSummary, buildSupplierStatementData } from "../util
 import { attachCustomerReceivableBalances, effectiveCreditNoteRows, receivableSaleNetTotal } from "../utils/customerBalance.js";
 import {
   transformSalesData,
-  transformInventoryMovementData,
   transformCashFlowData,
 } from "../utils/enrichedReportTransform.js";
 import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js';
 import { LEGACY_REPORT_GROUP_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
 import { expenseDateWhere, cashMovementDirection, loadJournalExpenseRows, summarizeCashMovements, accountCashBalances, loadLedgerBalances, ledgerBalanceSheet, postedJournalWhere } from '../utils/reportAccounting.js';
+import { aggregateInventorySales, calendarDaysBetween, inventoryQuantityChange, isExplicitDamageReason, summarizeInventoryMovements } from '../utils/inventoryReportHelpers.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -2326,8 +2326,8 @@ router.get("/manufacturing/bom", authenticateToken, async (req, res) => {
 router.get("/inventory/stock", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, cost: p.cost || 0, price: p.price || 0, sku: p.sku || "", branch: p.branch?.name || "Unassigned" }));
+    const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, itemType: { not: "service" } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
+    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: Number(p.quantity || 0), baseUnit: p.baseUnit || "Piece", cost: Number(p.cost || 0), price: Number(p.price || 0), sku: p.sku || "", branch: p.branch?.name || "Unassigned" }));
     res.json({ data, summary: { count: data.length, totalValue: data.reduce((a, p) => a + p.cost * p.quantity, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -2335,28 +2335,35 @@ router.get("/inventory/stock", authenticateToken, async (req, res) => {
 router.get("/inventory/valuation", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true } });
-    const byCategory = {};
+    const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, itemType: { not: "service" } }), include: { category: true, branch: { select: { name: true } } } });
+    const byCategoryAndUnit = new Map();
     let totalValue = 0;
     products.forEach((p) => {
-      const val = (p.cost || 0) * p.quantity;
+      const quantity = Number(p.quantity || 0);
+      const cost = Number(p.cost || 0);
+      const price = Number(p.price || 0);
+      const val = cost * quantity;
       totalValue += val;
       const cat = p.category?.name || "Uncategorized";
-      if (!byCategory[cat]) byCategory[cat] = { category: cat, quantity: 0, costValue: 0, retailValue: 0 };
-      byCategory[cat].quantity += p.quantity;
-      byCategory[cat].costValue += val;
-      byCategory[cat].retailValue += (p.price || 0) * p.quantity;
+      const unit = p.baseUnit || "Piece";
+      const key = `${cat}\u0000${unit}`;
+      if (!byCategoryAndUnit.has(key)) byCategoryAndUnit.set(key, { category: cat, baseUnit: unit, quantity: 0, costValue: 0, retailValue: 0, productCount: 0 });
+      const row = byCategoryAndUnit.get(key);
+      row.quantity += quantity;
+      row.costValue += val;
+      row.retailValue += price * quantity;
+      row.productCount += 1;
     });
-    res.json({ data: Object.values(byCategory), summary: { totalCostValue: totalValue, totalRetailValue: products.reduce((a, p) => a + (p.price || 0) * p.quantity, 0) } });
+    res.json({ data: [...byCategoryAndUnit.values()], summary: { totalCostValue: totalValue, totalRetailValue: products.reduce((a, p) => a + Number(p.price || 0) * Number(p.quantity || 0), 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/inventory/low-stock", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const allProducts = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { quantity: "asc" } });
-    const filtered = allProducts.filter((p) => p.quantity <= p.minStock);
-    const data = filtered.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, branch: p.branch?.name || "Unassigned" }));
+    const allProducts = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, itemType: { not: "service" } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { quantity: "asc" } });
+    const filtered = allProducts.filter((p) => Number(p.quantity || 0) <= Number(p.minStock || 0));
+    const data = filtered.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: Number(p.quantity || 0), baseUnit: p.baseUnit || "Piece", minStock: Number(p.minStock || 0), branch: p.branch?.name || "Unassigned" }));
     res.json({ data, summary: { count: data.length } });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -2389,52 +2396,107 @@ router.get("/inventory/out-of-stock", authenticateToken, async (req, res) => {
 router.get("/inventory/stock-movement", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const [sales, purchases] = await Promise.all([
-      prisma.saleItem.findMany({ where: { sale: scopedSaleWhere(req, s) }, include: { product: { select: { name: true, id: true } }, sale: { select: { receiptNo: true, createdAt: true, id: true } } }, orderBy: { createdAt: "asc" } }),
-      prisma.purchaseItem.findMany({ where: { purchase: scopedWhere(s, df(req)) }, include: { product: { select: { name: true, id: true } }, purchase: { select: { refNo: true, createdAt: true, id: true } } }, orderBy: { createdAt: "asc" } }),
+    const [products, sales, receivableSales, purchases, supplierPurchases, saleReturns, transfers, productionOrders, productionWaste] = await Promise.all([
+      prisma.product.findMany({ where: scopedWhere(s, { itemType: { not: "service" } }), select: { id: true } }),
+      prisma.saleItem.findMany({
+        where: { sale: scopedSaleWhere(req, s) },
+        include: { product: { select: { id: true, name: true, baseUnit: true } }, sale: { select: { id: true, receiptNo: true, createdAt: true, branch: { select: { name: true } } } } },
+      }),
+      prisma.saleRecordItem.findMany({
+        where: { sale: scopedSaleWhere(req, s) },
+        include: { product: { select: { id: true, name: true, baseUnit: true } }, sale: { select: { id: true, receiptNo: true, createdAt: true, branch: { select: { name: true } } } } },
+      }),
+      prisma.purchaseItem.findMany({
+        where: { purchase: scopedWhere(s, df(req)) },
+        include: { product: { select: { id: true, name: true, baseUnit: true } }, purchase: { select: { id: true, refNo: true, createdAt: true, branch: { select: { name: true } } } } },
+      }),
+      prisma.supplierPurchaseItem.findMany({
+        where: { purchase: scopedWhere(s, df(req)) },
+        include: { product: { select: { id: true, name: true, baseUnit: true } }, purchase: { select: { id: true, refNo: true, createdAt: true, branch: { select: { name: true } } } } },
+      }),
+      prisma.saleReturnItem.findMany({
+        where: { return: scopedWhere(s, { ...df(req), status: { in: stockLedgerSaleReturnStatuses } }) },
+        include: { product: { select: { id: true, name: true, baseUnit: true } }, return: { select: { id: true, returnNo: true, createdAt: true, branch: { select: { name: true } } } } },
+      }),
+      prisma.stockTransferItem.findMany({ where: { transfer: { tenantId: s.tenantId, status: { in: ["in_transit", "received", "cancelled"] }, ...(s.branchId ? { OR: [{ fromBranchId: s.branchId }, { toBranchId: s.branchId }] } : {}) } }, include: { product: { select: { id: true, name: true, baseUnit: true } }, destinationProduct: { select: { id: true, name: true, baseUnit: true } }, transfer: { select: { id: true, transferNo: true, createdAt: true, updatedAt: true, status: true, fromBranchId: true, toBranchId: true, fromBranch: { select: { name: true } }, toBranch: { select: { name: true } } } } } }),
+      prisma.productionOrder.findMany({ where: scopedWhere(s, { status: "completed", ...df(req, "updatedAt") }), include: { product: { select: { id: true, name: true, baseUnit: true } }, branch: { select: { name: true } } } }),
+      prisma.productionWaste.findMany({ where: { tenantId: s.tenantId, ...df(req), ...(s.branchId ? { productionOrder: { branchId: s.branchId } } : {}) }, include: { product: { select: { id: true, name: true, baseUnit: true } }, productionOrder: { select: { orderNo: true, branch: { select: { name: true } } } } } }),
     ]);
-    const movements = [
-      ...sales.map((i) => ({
-        id: `sale-${i.sale?.id}-${i.product?.id}`,
-        date: i.createdAt,
-        type: 'Stock Out',
-        product: i.product?.name || 'Unknown',
-        quantity: i.quantity,
-        receiptNo: i.sale?.receiptNo,
-        reference: i.sale?.receiptNo,
-        isInbound: false,
-      })),
-      ...purchases.map((i) => ({
-        id: `purchase-${i.purchase?.id}-${i.product?.id}`,
-        date: i.createdAt,
-        type: 'Stock In',
-        product: i.product?.name || 'Unknown',
-        quantity: i.quantity,
-        receiptNo: i.purchase?.refNo,
-        reference: i.purchase?.refNo,
-        isInbound: true,
-      })),
-    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
-    const enriched = transformInventoryMovementData(movements);
-    res.json(enriched);
+    const productIds = products.map((p) => p.id);
+    const adjustmentLogs = productIds.length ? await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "update", recordId: { in: productIds }, ...df(req, "createdAt") }, orderBy: { createdAt: "asc" } }) : [];
+    const movements = [];
+    const addItemMovement = (item, parent, { type, inbound, quantity, reference }) => movements.push({
+      id: `${type}-${parent.id}-${item.id}`, date: parent.createdAt, type, product: item.product?.name || "Unknown",
+      quantity, inQty: inbound ? quantity : 0, outQty: inbound ? 0 : quantity, baseUnit: item.product?.baseUnit || "Piece",
+      reference: reference || parent.id.slice(-8), branch: parent.branch?.name || "Unassigned",
+    });
+    for (const item of sales) addItemMovement(item, item.sale, { type: "Sale", inbound: false, quantity: Number(item.quantity || 0) * Number(item.conversionFactor || 1), reference: item.sale.receiptNo });
+    for (const item of receivableSales) addItemMovement(item, item.sale, { type: "Credit Sale", inbound: false, quantity: Number(item.quantity || 0) * Number(item.conversionFactor || 1), reference: item.sale.receiptNo });
+    for (const item of purchases) addItemMovement(item, item.purchase, { type: "Purchase", inbound: true, quantity: Number(item.quantity || 0), reference: item.purchase.refNo });
+    for (const item of supplierPurchases) addItemMovement(item, item.purchase, { type: "Supplier Purchase", inbound: true, quantity: Number(item.quantity || 0), reference: item.purchase.refNo });
+    for (const item of saleReturns) addItemMovement(item, item.return, { type: "Sale Return", inbound: true, quantity: Number(item.quantity || 0), reference: item.return.returnNo });
+    const inRange = (date) => {
+      const range = df(req).createdAt;
+      const value = new Date(date).getTime();
+      return (!range?.gte || value >= range.gte.getTime()) && (!range?.lte || value <= range.lte.getTime());
+    };
+    for (const item of transfers) {
+      const transfer = item.transfer;
+      const addTransfer = (product, date, inbound, branchName, branchId) => {
+        if (!product || !inRange(date) || (s.branchId && branchId !== s.branchId)) return;
+        const quantity = Number(item.quantity || 0);
+        movements.push({ id: `transfer-${transfer.id}-${product.id}-${inbound ? "in" : "out"}`, date, type: inbound ? "Transfer In" : "Transfer Out", product: product.name || "Unknown", quantity, inQty: inbound ? quantity : 0, outQty: inbound ? 0 : quantity, baseUnit: product.baseUnit || "Piece", reference: transfer.transferNo || transfer.id.slice(-8), branch: branchName || "Unassigned" });
+      };
+      addTransfer(item.product, transfer.createdAt, false, transfer.fromBranch?.name, transfer.fromBranchId);
+      if (transfer.status === "cancelled") addTransfer(item.product, transfer.updatedAt, true, transfer.fromBranch?.name, transfer.fromBranchId);
+      if (transfer.status === "received") addTransfer(item.destinationProduct || item.product, transfer.updatedAt, true, transfer.toBranch?.name, transfer.toBranchId);
+    }
+    for (const order of productionOrders) {
+      const quantity = Number(order.actualQuantity || order.quantity || 0);
+      if (quantity > 0) movements.push({ id: `production-${order.id}`, date: order.updatedAt, type: "Production In", product: order.product?.name || "Unknown", quantity, inQty: quantity, outQty: 0, baseUnit: order.product?.baseUnit || "Piece", reference: order.orderNo, branch: order.branch?.name || "Unassigned" });
+    }
+    for (const waste of productionWaste) {
+      const quantity = Number(waste.quantity || 0);
+      if (quantity > 0 && waste.productId) movements.push({ id: `waste-${waste.id}`, date: waste.createdAt, type: "Production Waste", product: waste.product?.name || "Unknown", quantity, inQty: 0, outQty: quantity, baseUnit: waste.product?.baseUnit || "Piece", reference: waste.productionOrder?.orderNo || waste.id.slice(-8), branch: waste.productionOrder?.branch?.name || "Unassigned", reason: waste.reason || "Production waste" });
+    }
+    const changes = adjustmentLogs.map((log) => ({ log, change: inventoryQuantityChange(log) })).filter(({ change }) => change);
+    const adjustmentProducts = changes.length ? await prisma.product.findMany({ where: scopedWhere(s, { id: { in: [...new Set(changes.map(({ log }) => log.recordId))] } }), select: { id: true, name: true, baseUnit: true, branch: { select: { name: true } } } }) : [];
+    const byProductId = new Map(adjustmentProducts.map((product) => [product.id, product]));
+    for (const { log, change } of changes) {
+      const product = byProductId.get(log.recordId);
+      if (!product) continue;
+      movements.push({ id: `adjustment-${log.id}`, date: log.createdAt, type: "Stock Adjustment", product: product.name, quantity: Math.abs(change.delta), inQty: Math.max(0, change.delta), outQty: Math.max(0, -change.delta), baseUnit: product.baseUnit || "Piece", reference: log.id.slice(-8), branch: product.branch?.name || "Unassigned", reason: log.changes?.stockMovement?.reason || "Manual stock adjustment" });
+    }
+    movements.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.id.localeCompare(b.id));
+    const transactions = movements.map((movement) => {
+      return { id: movement.id, date: movement.date, type: movement.type, description: `${movement.product} · ${movement.type}`, details: `Qty: ${movement.quantity} ${movement.baseUnit}${movement.reason ? ` · ${movement.reason}` : ""}`, reference: movement.reference, status: "Recorded", debit: movement.inQty, credit: movement.outQty };
+    });
+    res.json({ data: movements, summary: summarizeInventoryMovements(movements), transactions, generatedAt: new Date().toISOString() });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/inventory/adjustments", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const logs = await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "update", ...df(req, "createdAt") }, orderBy: { createdAt: "desc" } });
-    res.json({ data: logs, summary: { count: logs.length } });
+    const products = await prisma.product.findMany({ where: scopedWhere(s), select: { id: true, name: true, baseUnit: true, branch: { select: { name: true } } } });
+    const byId = new Map(products.map((product) => [product.id, product]));
+    const logs = products.length ? await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "update", recordId: { in: products.map((product) => product.id) }, ...df(req, "createdAt") }, orderBy: { createdAt: "desc" } }) : [];
+    const data = logs.map((log) => {
+      const change = inventoryQuantityChange(log);
+      if (!change) return null;
+      const product = byId.get(log.recordId);
+      return { id: log.id, product: product?.name || "Unknown", branch: product?.branch?.name || "Unassigned", action: log.changes?.stockMovement?.type || (change.delta > 0 ? "stock_in" : "stock_out"), reason: log.changes?.stockMovement?.reason || "Manual stock adjustment", userEmail: log.userEmail || "Unknown", quantityChange: change.delta, baseUnit: product?.baseUnit || "Piece", beforeQuantity: change.before, afterQuantity: change.after, createdAt: log.createdAt };
+    }).filter(Boolean);
+    res.json({ data, summary: { count: data.length, totalStockIn: data.reduce((sum, row) => sum + Math.max(0, row.quantityChange), 0), totalStockOut: data.reduce((sum, row) => sum + Math.max(0, -row.quantityChange), 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
 router.get("/inventory/expiry", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, expiryDate: { not: null } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { expiryDate: "asc" } });
+    const products = await prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, itemType: { not: "service" }, expiryDate: { not: null } }), include: { category: true, branch: { select: { name: true } } }, orderBy: { expiryDate: "asc" } });
     const now = new Date();
-    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: p.quantity, expiryDate: p.expiryDate, daysUntilExpiry: Math.floor((new Date(p.expiryDate) - now) / 86400000), isExpired: new Date(p.expiryDate) < now }));
+    const data = products.map((p) => ({ name: p.name, category: p.category?.name || "Uncategorized", quantity: Number(p.quantity || 0), baseUnit: p.baseUnit || "Piece", branch: p.branch?.name || "Unassigned", expiryDate: p.expiryDate, daysUntilExpiry: calendarDaysBetween(p.expiryDate, now), isExpired: calendarDaysBetween(p.expiryDate, now) < 0 }));
     res.json({ data, summary: { count: data.length, expired: data.filter((p) => p.isExpired).length, expiringSoon: data.filter((p) => !p.isExpired && p.daysUntilExpiry <= 60).length } });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -2442,8 +2504,17 @@ router.get("/inventory/expiry", authenticateToken, async (req, res) => {
 router.get("/inventory/damaged", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const logs = await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "delete", ...df(req, "createdAt") }, orderBy: { createdAt: "desc" } });
-    res.json({ data: logs, summary: { count: logs.length } });
+    const products = await prisma.product.findMany({ where: scopedWhere(s), select: { id: true, name: true, baseUnit: true, branch: { select: { name: true } } } });
+    const byId = new Map(products.map((product) => [product.id, product]));
+    const logs = products.length ? await prisma.auditLog.findMany({ where: { tenantId: s.tenantId, model: "Product", action: "update", recordId: { in: products.map((product) => product.id) }, ...df(req, "createdAt") }, orderBy: { createdAt: "desc" } }) : [];
+    const data = logs.flatMap((log) => {
+      const change = inventoryQuantityChange(log);
+      const product = byId.get(log.recordId);
+      const movement = log.changes?.stockMovement || {};
+      if (!change || change.delta >= 0 || !isExplicitDamageReason(movement.reason || log.changes?.reason)) return [];
+      return [{ id: log.id, product: product?.name || "Unknown", branch: product?.branch?.name || "Unassigned", reason: movement.reason || log.changes?.reason, quantity: Math.abs(change.delta), baseUnit: product?.baseUnit || "Piece", beforeQuantity: change.before, afterQuantity: change.after, userEmail: log.userEmail || "Unknown", createdAt: log.createdAt }];
+    });
+    res.json({ data, summary: { count: data.length, quantityLost: data.reduce((sum, row) => sum + row.quantity, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -2451,20 +2522,13 @@ router.get("/inventory/fast-moving", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const where = scopedSaleWhere(req, s);
-    const [sales, saleRecords] = await Promise.all([
+    const [sales, products] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
+      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, itemType: { not: "service" } }), include: { branch: { select: { name: true } } } }),
     ]);
-    const map = {};
-    [...sales, ...saleRecords].forEach((sale) => {
-      sale.items.forEach((item) => {
-        const name = item.product?.name || "Unknown";
-        if (!map[name]) map[name] = { product: name, quantity: 0, revenue: 0 };
-        map[name].quantity += item.quantity;
-        map[name].revenue += item.total;
-      });
-    });
-    res.json({ data: Object.values(map).sort((a, b) => b.quantity - a.quantity) });
+    const saleRecords = await prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } });
+    const data = aggregateInventorySales([...sales, ...saleRecords], products).sort((a, b) => b.quantity - a.quantity || a.product.localeCompare(b.product));
+    res.json({ data });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -2472,20 +2536,13 @@ router.get("/inventory/slow-moving", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const where = scopedSaleWhere(req, s);
-    const [sales, saleRecords] = await Promise.all([
+    const [sales, products] = await Promise.all([
       prisma.sale.findMany({ where, include: { items: { include: { product: true } } } }),
-      salesView.findMany({ where, include: { items: { include: { product: true } } } }),
+      prisma.product.findMany({ where: scopedWhere(s, { isActive: { not: false }, itemType: { not: "service" } }), include: { branch: { select: { name: true } } } }),
     ]);
-    const soldMap = {};
-    [...sales, ...saleRecords].forEach((sale) => {
-      sale.items.forEach((item) => {
-        const name = item.product?.name || "Unknown";
-        if (!soldMap[name]) soldMap[name] = { product: name, quantity: 0, revenue: 0 };
-        soldMap[name].quantity += item.quantity;
-        soldMap[name].revenue += item.total;
-      });
-    });
-    res.json({ data: Object.values(soldMap).sort((a, b) => a.quantity - b.quantity) });
+    const saleRecords = await prisma.saleRecord.findMany({ where, include: { items: { include: { product: true } } } });
+    const data = aggregateInventorySales([...sales, ...saleRecords], products, { includeUnsold: true }).sort((a, b) => a.quantity - b.quantity || a.product.localeCompare(b.product));
+    res.json({ data });
   } catch (err) { handleBranchError(res, err); }
 });
 
@@ -4068,27 +4125,27 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const { productId } = req.query;
-    const itemFilter = productId ? { where: { productId } } : {};
     const saleUserFilter = saleVisibilityFilter(req);
 
-    let product = null;
-    if (productId) {
-      product = await prisma.product.findFirst({ where: scopedWhere(s, { id: productId }) });
-      if (!product) return res.status(404).json({ error: "Product not found" });
-    }
+    if (!productId) return res.status(400).json({ error: "Select a product to view its stock ledger" });
 
-    const itemQuery = productId ? { where: { productId }, select: { quantity: true } } : { select: { quantity: true } };
+    let product = null;
+    product = await prisma.product.findFirst({ where: scopedWhere(s, { id: productId }) });
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    const itemQuery = { where: { productId }, select: { quantity: true, conversionFactor: true } };
+    const scopedProductIds = [product.id];
 
     const [sales, saleRecords, purchases, supplierPurchases, adjustments, saleReturns] = await Promise.all([
       // POS sales
       prisma.sale.findMany({
-        where: scopedWhere(s, { ...df(req), ...saleUserFilter }),
+        where: scopedSaleWhere(req, s),
         select: { id: true, receiptNo: true, createdAt: true, items: itemQuery },
         orderBy: { createdAt: "asc" },
       }),
       // Credit sales (SaleRecord)
       prisma.saleRecord.findMany({
-        where: scopedWhere(s, { ...df(req), ...saleUserFilter }),
+        where: scopedSaleWhere(req, s),
         select: { id: true, receiptNo: true, createdAt: true, items: itemQuery },
         orderBy: { createdAt: "asc" },
       }),
@@ -4105,10 +4162,10 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
       }),
       // Stock adjustments
-      prisma.auditLog.findMany({
-        where: productId ? { tenantId: s.tenantId, model: "Product", recordId: productId, ...df(req, "createdAt") } : { tenantId: s.tenantId, model: "Product", ...df(req, "createdAt") },
+      scopedProductIds.length ? prisma.auditLog.findMany({
+        where: { tenantId: s.tenantId, model: "Product", action: "update", recordId: { in: scopedProductIds }, ...df(req, "createdAt") },
         orderBy: { createdAt: "asc" },
-      }),
+      }) : Promise.resolve([]),
       // Sale returns (stock comes back in)
       prisma.saleReturn.findMany({
         where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { in: stockLedgerSaleReturnStatuses } }),
@@ -4117,17 +4174,15 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }),
     ]);
 
-    const allAdjustmentWhere = productId
-      ? { tenantId: s.tenantId, model: "Product", recordId: productId }
-      : { tenantId: s.tenantId, model: "Product" };
+    const allAdjustmentWhere = { tenantId: s.tenantId, model: "Product", action: "update", recordId: { in: scopedProductIds } };
 
     const [allSales, allSaleRecords, allPurchases, allSupplierPurchases, allSaleReturns, allAdjustments] = await Promise.all([
       prisma.sale.findMany({
-        where: scopedWhere(s, saleUserFilter),
+        where: scopedWhere(s, { ...saleUserFilter, status: { notIn: ["cancelled", "refunded"] } }),
         select: { createdAt: true, items: itemQuery },
       }),
       prisma.saleRecord.findMany({
-        where: scopedWhere(s, saleUserFilter),
+        where: scopedWhere(s, { ...saleUserFilter, status: { notIn: ["cancelled", "refunded"] } }),
         select: { createdAt: true, items: itemQuery },
       }),
       prisma.purchase.findMany({
@@ -4142,16 +4197,20 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         where: scopedWhere(s, { ...saleUserFilter, status: { in: stockLedgerSaleReturnStatuses } }),
         select: { createdAt: true, items: itemQuery },
       }),
-      prisma.auditLog.findMany({
+      scopedProductIds.length ? prisma.auditLog.findMany({
         where: allAdjustmentWhere,
         select: { createdAt: true, changes: true },
-      }),
+      }) : Promise.resolve([]),
     ]);
 
     const { from } = req.query;
     const fromDate = from ? new Date(from) : null;
-    const sumQtyBefore = (records, dateField = "createdAt") =>
-      records.reduce((a, r) => a + (new Date(r[dateField]) < fromDate ? r.items.reduce((s, i) => s + i.quantity, 0) : 0), 0);
+    const sumQtyBefore = (records, dateField = "createdAt", convertSalesUnit = false) =>
+      records.reduce((a, r) => a + (new Date(r[dateField]) < fromDate ? r.items.reduce((sum, item) => {
+        const quantity = Number(item.quantity || 0);
+        const factor = Number(item.conversionFactor || 1);
+        return sum + quantity * (convertSalesUnit && Number.isFinite(factor) && factor > 0 ? factor : 1);
+      }, 0) : 0), 0);
     const sumAdjustmentBefore = (logs) =>
       logs.reduce((sum, log) => {
         const beforeQty = Number(log.changes?.before?.quantity);
@@ -4161,7 +4220,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }, 0);
     const openingStock = fromDate
       ? (sumQtyBefore(allPurchases) + sumQtyBefore(allSupplierPurchases) + sumQtyBefore(allSaleReturns)) -
-        (sumQtyBefore(allSales) + sumQtyBefore(allSaleRecords)) +
+      (sumQtyBefore(allSales, "createdAt", true) + sumQtyBefore(allSaleRecords, "createdAt", true)) +
         sumAdjustmentBefore(allAdjustments)
       : 0;
 
@@ -4175,7 +4234,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
           refNo: sale.receiptNo,
           description: "Sale (out)",
           inQty: 0,
-          outQty: item.quantity,
+          outQty: Number(item.quantity || 0) * Number(item.conversionFactor || 1),
           balance: 0,
         });
       }
@@ -4188,7 +4247,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
           refNo: sale.receiptNo,
           description: "Credit Sale (out)",
           inQty: 0,
-          outQty: item.quantity,
+          outQty: Number(item.quantity || 0) * Number(item.conversionFactor || 1),
           balance: 0,
         });
       }
@@ -4220,9 +4279,9 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
       }
     }
     for (const adj of adjustments) {
-      const beforeQty = Number(adj.changes?.before?.quantity);
-      const afterQty = Number(adj.changes?.after?.quantity);
-      const quantityDelta = Number.isFinite(beforeQty) && Number.isFinite(afterQty) ? afterQty - beforeQty : 0;
+      const change = inventoryQuantityChange(adj);
+      if (!change) continue;
+      const quantityDelta = change.delta;
       const stockMovement = adj.changes?.stockMovement || {};
       const movementLabel = stockMovement.reason || stockMovement.reference || adj.action;
       const enteredStock = stockMovement.enteredQuantity != null && stockMovement.unitName
@@ -4232,8 +4291,8 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
         date: adj.createdAt,
         refNo: stockMovement.reference || adj.id.slice(-6),
         description: `Adjustment: ${movementLabel}${enteredStock}`,
-        inQty: quantityDelta > 0 ? quantityDelta : 0,
-        outQty: quantityDelta < 0 ? Math.abs(quantityDelta) : 0,
+        inQty: Math.max(0, quantityDelta),
+        outQty: Math.max(0, -quantityDelta),
         balance: 0,
       });
     }
@@ -4260,7 +4319,7 @@ router.get("/inventory/product-ledger", authenticateToken, async (req, res) => {
     }
 
     res.json({
-      product: product ? { id: product.id, name: product.name, sku: product.sku || "", currentStock: product.quantity || 0 } : null,
+      product: product ? { id: product.id, name: product.name, sku: product.sku || "", baseUnit: product.baseUnit || "Piece", currentStock: Number(product.quantity || 0) } : null,
       openingStock,
       closingStock: entries.length ? entries[entries.length - 1].balance : openingStock,
       data: entries,
