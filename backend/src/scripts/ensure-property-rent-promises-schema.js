@@ -18,6 +18,22 @@ try {
     "chargeId" TEXT NOT NULL REFERENCES rent_charges(id) ON DELETE RESTRICT,
     amount DOUBLE PRECISION NOT NULL
   )`)
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS property_rent_promise_follow_ups (
+    id TEXT PRIMARY KEY,
+    "tenantId" TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    "promiseId" TEXT NOT NULL REFERENCES property_rent_promises(id) ON DELETE CASCADE,
+    "createdById" TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    "completedById" TEXT REFERENCES users(id) ON DELETE SET NULL,
+    "idempotencyKey" TEXT,
+    body TEXT NOT NULL,
+    "followUpAt" TIMESTAMP(3),
+    status TEXT NOT NULL DEFAULT 'open',
+    "completedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`)
+  await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS property_rent_promise_follow_ups_tenant_idempotency_key ON property_rent_promise_follow_ups ("tenantId", "idempotencyKey")')
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS property_rent_promise_follow_ups_tenant_promise_created_idx ON property_rent_promise_follow_ups ("tenantId", "promiseId", "createdAt")')
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS property_rent_promise_follow_ups_tenant_status_date_idx ON property_rent_promise_follow_ups ("tenantId", status, "followUpAt")')
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS property_rent_promises_tenant_tenancy_created_idx ON property_rent_promises ("tenantId", "tenancyId", "createdAt")')
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS property_rent_promises_tenant_due_idx ON property_rent_promises ("tenantId", "dueDate")')
   await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS property_rent_promises_tenant_idempotency_key ON property_rent_promises ("tenantId", "idempotencyKey")')
@@ -25,6 +41,9 @@ try {
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS property_rent_promise_charge_idx ON property_rent_promise_charge_allocations ("chargeId")')
   await prisma.$executeRawUnsafe('ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS "canViewRentPromises" BOOLEAN NOT NULL DEFAULT FALSE')
   await prisma.$executeRawUnsafe('ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS "canManageRentPromises" BOOLEAN NOT NULL DEFAULT FALSE')
+  await prisma.$executeRawUnsafe('ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS "canEditRentPromiseNotes" BOOLEAN NOT NULL DEFAULT FALSE')
+  await prisma.$executeRawUnsafe('ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS "canAddRentPromiseFollowUps" BOOLEAN NOT NULL DEFAULT FALSE')
+  await prisma.$executeRawUnsafe('ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS "canCompleteRentPromiseFollowUps" BOOLEAN NOT NULL DEFAULT FALSE')
   console.log('Property rent promise tracking schema is ready.')
 } catch (error) {
   console.error('Unable to prepare property rent promise tracking schema:', error.code || error.message)

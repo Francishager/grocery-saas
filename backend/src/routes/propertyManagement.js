@@ -1098,7 +1098,7 @@ router.post('/customers/:customerId/notes/:noteId/follow-ups', requirePermission
   }
 })
 
-router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canViewRentPromises', 'canManageRentPromises']), async (req, res) => {
+router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canViewRentPromises', 'canManageRentPromises', 'canEditRentPromiseNotes', 'canAddRentPromiseFollowUps', 'canCompleteRentPromiseFollowUps']), async (req, res) => {
   try {
     const tenantId = tenantIdOf(req)
     const customer = await prisma.customer.findFirst({ where: { id: req.params.customerId, tenantId }, select: { id: true } })
@@ -1108,6 +1108,13 @@ router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canVie
       orderBy: [{ createdAt: 'desc' }],
       include: {
         createdBy: { select: { fname: true, lname: true } },
+        followUps: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            createdBy: { select: { fname: true, lname: true } },
+            completedBy: { select: { fname: true, lname: true } },
+          },
+        },
         tenancy: { select: { id: true, tenantName: true, currency: true, unit: { select: { unitCode: true, property: { select: { name: true } } } } } },
         allocations: {
           include: {
@@ -1135,6 +1142,11 @@ router.get('/customers/:customerId/rent-promises', requireAnyPermission(['canVie
     res.json({ counts, tenancies, promises: promises.map(promise => ({
       ...promise,
       createdByName: [promise.createdBy?.fname, promise.createdBy?.lname].filter(Boolean).join(' ') || 'Staff',
+      followUps: promise.followUps.map(followUp => ({
+        ...followUp,
+        authorName: [followUp.createdBy?.fname, followUp.createdBy?.lname].filter(Boolean).join(' ') || 'Staff',
+        completedByName: [followUp.completedBy?.fname, followUp.completedBy?.lname].filter(Boolean).join(' ') || null,
+      })),
       allocations: promise.allocations.map(({ charge, ...allocation }) => ({ ...allocation, period: charge?.period, rentDueDate: charge?.dueDate })),
     })) })
   } catch (error) { console.error('Load tenant payment promises failed:', error); res.status(500).json({ error: 'Could not load tenant payment promises.' }) }
@@ -1216,6 +1228,82 @@ router.post('/customers/:customerId/rent-promises', requirePermission('canManage
     })
     res.status(201).json(promise)
   } catch (error) { const status = error.statusCode || 500; if (status === 500) console.error('Create tenant payment promise failed:', error); res.status(status).json({ error: status === 500 ? 'Could not record tenant payment promise.' : error.message }) }
+})
+
+router.patch('/customers/:customerId/rent-promises/:promiseId/notes', requirePermission('canEditRentPromiseNotes'), async (req, res) => {
+  const notes = String(req.body?.notes || '').trim()
+  if (notes.length > 1000) return badRequest(res, 'Promise notes must be 1,000 characters or fewer.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const promise = await prisma.propertyRentPromise.findFirst({
+      where: { id: req.params.promiseId, tenantId, tenancy: { customerId: req.params.customerId } },
+      select: { id: true },
+    })
+    if (!promise) return res.status(404).json({ error: 'Payment promise not found for this tenant.' })
+    await prisma.propertyRentPromise.update({ where: { id: promise.id }, data: { notes: notes || null } })
+    return res.json({ id: promise.id, notes: notes || null })
+  } catch (error) {
+    console.error('Edit tenant payment promise notes failed:', error)
+    return res.status(500).json({ error: 'Could not update payment promise notes.' })
+  }
+})
+
+router.post('/customers/:customerId/rent-promises/:promiseId/follow-ups', requirePermission('canAddRentPromiseFollowUps'), async (req, res) => {
+  const body = String(req.body?.body || '').trim()
+  const followUpRaw = String(req.body?.followUpAt || '').trim()
+  const followUpAt = followUpRaw ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(followUpRaw) ? `${followUpRaw}T23:59:59.999Z` : followUpRaw) : null
+  const idempotencyKey = String(req.body?.idempotencyKey || '').trim() || null
+  if (!body || body.length > 5000) return badRequest(res, 'Enter a follow-up update of up to 5,000 characters.')
+  if (followUpAt && !Number.isFinite(followUpAt.getTime())) return badRequest(res, 'Enter a valid next follow-up date.')
+  if (idempotencyKey && idempotencyKey.length > 128) return badRequest(res, 'Follow-up request key is too long.')
+  try {
+    const tenantId = tenantIdOf(req)
+    const promise = await prisma.propertyRentPromise.findFirst({
+      where: { id: req.params.promiseId, tenantId, tenancy: { customerId: req.params.customerId } },
+      select: { id: true },
+    })
+    if (!promise) return res.status(404).json({ error: 'Payment promise not found for this tenant.' })
+    if (idempotencyKey) {
+      const existing = await prisma.propertyRentPromiseFollowUp.findFirst({ where: { tenantId, promiseId: promise.id, idempotencyKey }, include: { createdBy: { select: { fname: true, lname: true } } } })
+      if (existing) return res.json({ ...existing, authorName: [existing.createdBy?.fname, existing.createdBy?.lname].filter(Boolean).join(' ') || 'Staff' })
+    }
+    const created = await prisma.propertyRentPromiseFollowUp.create({
+      data: { tenantId, promiseId: promise.id, createdById: req.user.id, idempotencyKey, body, followUpAt },
+      include: { createdBy: { select: { fname: true, lname: true } } },
+    })
+    return res.status(201).json({ ...created, authorName: [created.createdBy?.fname, created.createdBy?.lname].filter(Boolean).join(' ') || 'Staff' })
+  } catch (error) {
+    if (error?.code === 'P2002' && idempotencyKey) {
+      const existing = await prisma.propertyRentPromiseFollowUp.findFirst({ where: { tenantId: tenantIdOf(req), promiseId: req.params.promiseId, idempotencyKey }, include: { createdBy: { select: { fname: true, lname: true } } } }).catch(() => null)
+      if (existing) return res.json({ ...existing, authorName: [existing.createdBy?.fname, existing.createdBy?.lname].filter(Boolean).join(' ') || 'Staff' })
+    }
+    console.error('Create tenant payment promise follow-up failed:', error)
+    return res.status(500).json({ error: 'Could not save payment promise follow-up.' })
+  }
+})
+
+router.patch('/customers/:customerId/rent-promises/:promiseId/follow-ups/:followUpId/complete', requirePermission('canCompleteRentPromiseFollowUps'), async (req, res) => {
+  try {
+    const tenantId = tenantIdOf(req)
+    const followUp = await prisma.propertyRentPromiseFollowUp.findFirst({
+      where: { id: req.params.followUpId, tenantId, promiseId: req.params.promiseId, promise: { tenancy: { customerId: req.params.customerId } } },
+      select: { id: true, status: true, completedById: true, completedAt: true },
+    })
+    if (!followUp) return res.status(404).json({ error: 'Promise follow-up not found.' })
+    if (followUp.status === 'completed') return res.json(followUp)
+    const updated = await prisma.propertyRentPromiseFollowUp.updateMany({
+      where: { id: followUp.id, status: 'open' },
+      data: { status: 'completed', completedAt: new Date(), completedById: req.user.id },
+    })
+    const result = await prisma.propertyRentPromiseFollowUp.findUnique({
+      where: { id: followUp.id },
+      select: { id: true, status: true, completedById: true, completedAt: true },
+    })
+    return res.json(result || (updated.count ? { id: followUp.id, status: 'completed' } : followUp))
+  } catch (error) {
+    console.error('Complete tenant payment promise follow-up failed:', error)
+    return res.status(500).json({ error: 'Could not complete payment promise follow-up.' })
+  }
 })
 
 router.post('/customers/:customerId/payment-plans', requirePermission('canCreateRentPaymentPlans'), async (req, res) => {

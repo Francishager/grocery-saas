@@ -180,6 +180,7 @@ model Tenant {
   propertyRentPayments            PropertyRentPayment[]
   rentPaymentPlans                PropertyRentPaymentPlan[]
   rentPromises                    PropertyRentPromise[]
+  rentPromiseFollowUps             PropertyRentPromiseFollowUp[]
   rentReminders                   PropertyRentReminder[]
   propertyAccountingConfig        PropertyAccountingConfig?
   propertyOwnerPayouts            PropertyOwnerPayout[]
@@ -530,6 +531,8 @@ model User {
   propertyLandPurchasePaymentsCreated PropertyLandPurchasePayment[] @relation("PropertyLandPurchasePaymentCreator")
   rentPaymentPlansCreated             PropertyRentPaymentPlan[]     @relation("PropertyRentPaymentPlanCreator")
   rentPromisesCreated                 PropertyRentPromise[]         @relation("PropertyRentPromiseCreator")
+  rentPromiseFollowUpsCreated         PropertyRentPromiseFollowUp[] @relation("PropertyRentPromiseFollowUpCreator")
+  rentPromiseFollowUpsCompleted       PropertyRentPromiseFollowUp[] @relation("PropertyRentPromiseFollowUpCompleter")
   propertyTenantNotesCreated          PropertyTenantNote[]          @relation("PropertyTenantNoteCreator")
   propertyTenantNoteFollowUpsCreated  PropertyTenantNoteFollowUp[]  @relation("PropertyTenantNoteFollowUpCreator")
 
@@ -1119,6 +1122,9 @@ model UserPermission {
   canCancelRentPaymentPlans              Boolean  @default(false)
   canViewRentPromises                    Boolean  @default(false)
   canManageRentPromises                  Boolean  @default(false)
+  canEditRentPromiseNotes                Boolean  @default(false)
+  canAddRentPromiseFollowUps             Boolean  @default(false)
+  canCompleteRentPromiseFollowUps        Boolean  @default(false)
   canViewTenantNotes                     Boolean  @default(false)
   canManageTenantNotes                   Boolean  @default(false)
   canEditTenantNotes                     Boolean  @default(false)
@@ -3319,12 +3325,36 @@ model PropertyRentPromise {
   dueDate        DateTime
   notes          String?
   allocations    PropertyRentPromiseChargeAllocation[]
+  followUps      PropertyRentPromiseFollowUp[]
   createdAt      DateTime                              @default(now())
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, tenancyId, createdAt])
   @@index([tenantId, dueDate])
   @@map("property_rent_promises")
+}
+
+model PropertyRentPromiseFollowUp {
+  id             String             @id @default(cuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  promiseId      String
+  promise        PropertyRentPromise @relation(fields: [promiseId], references: [id], onDelete: Cascade)
+  createdById    String
+  createdBy      User               @relation("PropertyRentPromiseFollowUpCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  completedById  String?
+  completedBy    User?              @relation("PropertyRentPromiseFollowUpCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+  idempotencyKey String?
+  body           String             @db.Text
+  followUpAt     DateTime?
+  status         String             @default("open")
+  completedAt    DateTime?
+  createdAt      DateTime           @default(now())
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, promiseId, createdAt])
+  @@index([tenantId, status, followUpAt])
+  @@map("property_rent_promise_follow_ups")
 }
 
 model PropertyTenantNote {

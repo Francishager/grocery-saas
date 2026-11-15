@@ -173,7 +173,8 @@ type RentPlanPayment = { id: string; receiptNo: string; amount: number; paymentD
 type RentPaymentPlan = { id: string; planNo: string; status: string; totalAmount: number; amountPaid: number; installmentCount: number; frequency: string; startDate: string; notes?: string | null; tenancy: { tenantName: string; currency: string; unit: { unitCode: string; property: { name: string } } }; installments: RentPlanInstallment[]; payments: RentPlanPayment[] }
 type RentPlanProfileData = { plans: RentPaymentPlan[]; eligibleCharges: Array<{ id: string; tenancyId: string; tenancyName: string; propertyName: string; unitCode: string; currency: string; period: string; dueDate: string; description: string; amount: number; amountPaid: number; balance: number }> }
 type RentPromiseTenancy = { id: string; tenantName: string; currency: string; status: string; unit: { unitCode: string; property: { name: string } } }
-type RentPromise = { id: string; amount: number; dueDate: string; notes?: string | null; createdAt: string; createdByName: string; fulfilledAmount: number; remainingAmount: number; status: string; tenancy: RentPromiseTenancy; allocations: Array<{ id: string; amount: number; fulfilledAmount: number; remainingAmount: number; period: string; rentDueDate: string }> }
+type RentPromiseFollowUp = { id: string; body: string; followUpAt?: string | null; status: string; createdAt: string; authorName: string; completedAt?: string | null; completedByName?: string | null }
+type RentPromise = { id: string; amount: number; dueDate: string; notes?: string | null; createdAt: string; createdByName: string; fulfilledAmount: number; remainingAmount: number; status: string; tenancy: RentPromiseTenancy; allocations: Array<{ id: string; amount: number; fulfilledAmount: number; remainingAmount: number; period: string; rentDueDate: string }>; followUps: RentPromiseFollowUp[] }
 type RentPromiseProfileData = { counts: { total: number; upcoming: number; due_today: number; kept: number; partially_paid: number; partially_kept: number; missed: number; promisedAmount: number; fulfilledAmount: number; remainingAmount: number }; tenancies: RentPromiseTenancy[]; promises: RentPromise[] }
 type TenantProfileNoteFollowUp = { id: string; body: string; followUpAt?: string | null; createdAt: string; authorName: string }
 type TenantProfileNote = { id: string; kind: string; priority: string; body: string; followUpAt?: string | null; tenancyId?: string | null; status: string; createdAt: string; authorName: string; tenancyLabel?: string | null; isOverdue: boolean; followUps?: TenantProfileNoteFollowUp[] }
@@ -429,6 +430,10 @@ export default function CustomerTransactionHistoryDialog({
   const [rentPromiseError, setRentPromiseError] = useState('')
   const [creatingPromise, setCreatingPromise] = useState(false)
   const [showPromiseForm, setShowPromiseForm] = useState(false)
+  const [openRentPromiseActions, setOpenRentPromiseActions] = useState<string | null>(null)
+  const [rentPromiseFollowUpTarget, setRentPromiseFollowUpTarget] = useState<string | null>(null)
+  const [editingRentPromiseNoteId, setEditingRentPromiseNoteId] = useState<string | null>(null)
+  const [savingRentPromiseAction, setSavingRentPromiseAction] = useState(false)
   const [tenantNotesData, setTenantNotesData] = useState<TenantNotesData | null>(null)
   const [tenantNotesReload, setTenantNotesReload] = useState(0)
   const [tenantNotesError, setTenantNotesError] = useState('')
@@ -466,8 +471,11 @@ export default function CustomerTransactionHistoryDialog({
   const canViewRentPaymentPlans = propertyManagementEnabled && (hasPermission('canViewRentPaymentPlans') || hasPermission('canCreateRentPaymentPlans') || hasPermission('canCancelRentPaymentPlans'))
   const canCreateRentPaymentPlans = propertyManagementEnabled && hasPermission('canCreateRentPaymentPlans')
   const canCancelRentPaymentPlans = propertyManagementEnabled && hasPermission('canCancelRentPaymentPlans')
-  const canViewRentPromises = propertyManagementEnabled && (hasPermission('canViewRentPromises') || hasPermission('canManageRentPromises'))
+  const canViewRentPromises = propertyManagementEnabled && ['canViewRentPromises', 'canManageRentPromises', 'canEditRentPromiseNotes', 'canAddRentPromiseFollowUps', 'canCompleteRentPromiseFollowUps'].some(hasPermission)
   const canManageRentPromises = propertyManagementEnabled && hasPermission('canManageRentPromises')
+  const canEditRentPromiseNotes = propertyManagementEnabled && hasPermission('canEditRentPromiseNotes')
+  const canAddRentPromiseFollowUps = propertyManagementEnabled && hasPermission('canAddRentPromiseFollowUps')
+  const canCompleteRentPromiseFollowUps = propertyManagementEnabled && hasPermission('canCompleteRentPromiseFollowUps')
   const canViewTenantNotes = propertyManagementEnabled && hasPermission('canViewTenantNotes')
   const canManageTenantNotes = propertyManagementEnabled && hasPermission('canManageTenantNotes')
   const canEditTenantNotes = propertyManagementEnabled && hasPermission('canEditTenantNotes')
@@ -492,7 +500,29 @@ export default function CustomerTransactionHistoryDialog({
   }, [openTenantNoteActions])
 
   useEffect(() => {
+    if (!openRentPromiseActions) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Element && !target.closest('[data-rent-promise-actions], [data-rent-promise-followup-actions]')) setOpenRentPromiseActions(null)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenRentPromiseActions(null) }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openRentPromiseActions])
+
+  useEffect(() => {
     if (!open) setOpenTenantNoteActions(null)
+  }, [open])
+  useEffect(() => {
+    if (!open) {
+      setOpenRentPromiseActions(null)
+      setRentPromiseFollowUpTarget(null)
+      setEditingRentPromiseNoteId(null)
+    }
   }, [open])
   const canRecordRentPayment = propertyManagementEnabled && hasPermission('canRecordRentPayment')
   const canPrintRentReceipts = propertyManagementEnabled && (hasPermission('canViewPropertyCollections') || canRecordRentPayment)
@@ -690,6 +720,57 @@ export default function CustomerTransactionHistoryDialog({
       setRentPromiseReload(value => value + 1)
     } catch (error: any) { setRentPromiseError(error?.message || 'Could not record tenant payment promise.') }
     finally { setCreatingPromise(false) }
+  }
+
+  async function updateRentPromiseNote(promiseId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customer?.id || !canEditRentPromiseNotes) return
+    const form = new FormData(event.currentTarget)
+    setSavingRentPromiseAction(true)
+    setRentPromiseError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/rent-promises/${promiseId}/notes`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notes: form.get('notes') }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not update promise notes.')
+      setEditingRentPromiseNoteId(null)
+      setRentPromiseReload(value => value + 1)
+    } catch (error: any) { setRentPromiseError(error?.message || 'Could not update promise notes.') }
+    finally { setSavingRentPromiseAction(false) }
+  }
+
+  async function addRentPromiseFollowUp(promiseId: string, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!customer?.id || !canAddRentPromiseFollowUps) return
+    const form = new FormData(event.currentTarget)
+    setSavingRentPromiseAction(true)
+    setRentPromiseError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/rent-promises/${promiseId}/follow-ups`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          body: form.get('body'), followUpAt: form.get('followUpAt') || null, idempotencyKey: crypto.randomUUID(),
+        }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not save promise follow-up.')
+      setRentPromiseFollowUpTarget(null)
+      setRentPromiseReload(value => value + 1)
+    } catch (error: any) { setRentPromiseError(error?.message || 'Could not save promise follow-up.') }
+    finally { setSavingRentPromiseAction(false) }
+  }
+
+  async function completeRentPromiseFollowUp(promiseId: string, followUpId: string) {
+    if (!customer?.id || !canCompleteRentPromiseFollowUps) return
+    setRentPromiseError('')
+    try {
+      const response = await apiFetch(`/api/property-management/customers/${customer.id}/rent-promises/${promiseId}/follow-ups/${followUpId}/complete`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not complete promise follow-up.')
+      setRentPromiseReload(value => value + 1)
+    } catch (error: any) { setRentPromiseError(error?.message || 'Could not complete promise follow-up.') }
   }
 
   async function createTenantNote(event: FormEvent<HTMLFormElement>) {
@@ -1338,7 +1419,51 @@ export default function CustomerTransactionHistoryDialog({
               </form>}
               {!rentPromiseData && !rentPromiseError && <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">Loading promise history…</div>}
               {rentPromiseData && !rentPromiseData.promises.length && <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No payment promises have been recorded for this tenant.</div>}
-              {!!rentPromiseData?.promises.length && <div className="overflow-x-auto rounded-md border"><table className="min-w-[900px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">Recorded / by</th><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Due date</th><th className="px-3 py-2 text-right">Promised</th><th className="px-3 py-2 text-right">Fulfilled</th><th className="px-3 py-2 text-right">Remaining</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Rent periods / notes</th></tr></thead><tbody>{rentPromiseData.promises.map(promise => <tr key={promise.id} className="border-t align-top"><td className="px-3 py-3">{formatDisplayDate(promise.createdAt)}<div className="text-xs text-muted-foreground">{promise.createdByName}</div></td><td className="px-3 py-3">{promise.tenancy.unit.property.name}<div className="text-xs text-muted-foreground">{promise.tenancy.unit.unitCode}</div></td><td className="px-3 py-3">{formatDisplayDate(promise.dueDate)}</td><td className="px-3 py-3 text-right font-medium">{formatCurrency(promise.amount, promise.tenancy.currency)}</td><td className="px-3 py-3 text-right text-emerald-700">{formatCurrency(promise.fulfilledAmount, promise.tenancy.currency)}</td><td className="px-3 py-3 text-right">{formatCurrency(promise.remainingAmount, promise.tenancy.currency)}</td><td className="px-3 py-3"><Badge variant={promise.status === 'kept' ? 'outline' : promise.status === 'missed' ? 'destructive' : promise.status === 'partially_kept' ? 'secondary' : 'default'}>{promise.status.replace(/_/g, ' ')}</Badge></td><td className="max-w-64 whitespace-normal px-3 py-3">{[...new Set(promise.allocations.map(allocation => allocation.period))].join(', ') || '—'}{promise.notes && <div className="mt-1 text-xs text-muted-foreground">{promise.notes}</div>}</td></tr>)}</tbody></table></div>}
+              {!!rentPromiseData?.promises.length && <div className="overflow-x-auto rounded-md border"><table className="min-w-[1000px] w-full text-sm"><thead className="bg-muted/50 text-left"><tr><th className="px-3 py-2">Recorded / by</th><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Due date</th><th className="px-3 py-2 text-right">Promised</th><th className="px-3 py-2 text-right">Fulfilled</th><th className="px-3 py-2 text-right">Remaining</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Rent periods / promise note</th></tr></thead><tbody>{rentPromiseData.promises.map(promise => <tr key={promise.id} className="border-t align-top">
+                <td className="px-3 py-3">{formatDisplayDate(promise.createdAt)}<div className="text-xs text-muted-foreground">{promise.createdByName}</div></td>
+                <td className="px-3 py-3">{promise.tenancy.unit.property.name}<div className="text-xs text-muted-foreground">{promise.tenancy.unit.unitCode}</div></td>
+                <td className="px-3 py-3">{formatDisplayDate(promise.dueDate)}</td>
+                <td className="px-3 py-3 text-right font-medium">{formatCurrency(promise.amount, promise.tenancy.currency)}</td>
+                <td className="px-3 py-3 text-right text-emerald-700">{formatCurrency(promise.fulfilledAmount, promise.tenancy.currency)}</td>
+                <td className="px-3 py-3 text-right">{formatCurrency(promise.remainingAmount, promise.tenancy.currency)}</td>
+                <td className="px-3 py-3"><Badge variant={promise.status === 'kept' ? 'outline' : promise.status === 'missed' ? 'destructive' : promise.status === 'partially_kept' ? 'secondary' : 'default'}>{promise.status.replace(/_/g, ' ')}</Badge></td>
+                <td className="max-w-80 whitespace-normal px-3 py-3">
+                  <p className="text-xs text-muted-foreground">{[...new Set(promise.allocations.map(allocation => allocation.period))].join(', ') || 'No rent periods listed'}</p>
+                  {editingRentPromiseNoteId === promise.id && canEditRentPromiseNotes ? <form onSubmit={event => void updateRentPromiseNote(promise.id, event)} className="mt-2 space-y-2">
+                    <label className="block text-xs font-medium">Promise note<textarea name="notes" maxLength={1000} rows={3} defaultValue={promise.notes || ''} autoFocus className="mt-1 w-full rounded-md border bg-background p-2 text-sm" placeholder="Add the agreement or context for this promise" /></label>
+                    <div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={savingRentPromiseAction} onClick={() => setEditingRentPromiseNoteId(null)}>Cancel</Button><Button type="submit" size="sm" disabled={savingRentPromiseAction}>{savingRentPromiseAction ? 'Saving…' : 'Save note'}</Button></div>
+                  </form> : <p className="mt-1 whitespace-pre-wrap break-words">{promise.notes || <span className="text-muted-foreground">No note added</span>}</p>}
+                  {!!promise.followUps?.length && <div className="mt-3 space-y-2 border-l-2 border-primary/20 pl-3" aria-label="Promise follow-up history">
+                    {promise.followUps.map(followUp => <div key={followUp.id} className="rounded-md bg-muted/40 p-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div><p className="text-xs font-medium">Follow-up · {followUp.authorName}</p><time className="text-[11px] text-muted-foreground" dateTime={followUp.createdAt}>{formatDisplayDate(followUp.createdAt)}</time></div>
+                        <div className="flex items-center gap-1">
+                          <Badge variant={followUp.status === 'completed' ? 'outline' : 'secondary'}>{followUp.status}</Badge>
+                          {followUp.status !== 'completed' && canCompleteRentPromiseFollowUps && <div className="relative" data-rent-promise-followup-actions>
+                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label="Promise follow-up actions" aria-haspopup="menu" aria-expanded={openRentPromiseActions === `follow-up:${followUp.id}`} onClick={() => setOpenRentPromiseActions(current => current === `follow-up:${followUp.id}` ? null : `follow-up:${followUp.id}`)}><MoreHorizontal className="h-4 w-4" /></Button>
+                            {openRentPromiseActions === `follow-up:${followUp.id}` && <div role="menu" className="absolute right-0 top-full z-30 mt-1 min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"><button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent focus:bg-accent" onClick={() => { setOpenRentPromiseActions(null); void completeRentPromiseFollowUp(promise.id, followUp.id) }}><Check className="h-4 w-4" />Mark complete</button></div>}
+                          </div>}
+                        </div>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm">{followUp.body}</p>
+                      {followUp.followUpAt && <p className="mt-1 text-xs text-muted-foreground">Next follow-up {formatDisplayDate(followUp.followUpAt)}</p>}
+                      {followUp.status === 'completed' && <p className="mt-1 text-xs text-muted-foreground">Completed {followUp.completedAt ? formatDisplayDate(followUp.completedAt) : ''}{followUp.completedByName ? ` by ${followUp.completedByName}` : ''}</p>}
+                    </div>)}
+                  </div>}
+                  {rentPromiseFollowUpTarget === promise.id && canAddRentPromiseFollowUps && <form onSubmit={event => void addRentPromiseFollowUp(promise.id, event)} className="mt-3 grid gap-2 rounded-md border border-primary/25 bg-muted/20 p-3">
+                    <label className="block text-xs font-medium">Follow-up update<textarea name="body" required maxLength={5000} rows={3} autoFocus placeholder="Record the conversation, payment progress, or next agreed step" className="mt-1 w-full rounded-md border bg-background p-2 text-sm" /></label>
+                    <label className="block text-xs font-medium">Next follow-up date (optional)<input name="followUpAt" type="date" className="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" /></label>
+                    <div className="flex justify-end gap-2"><Button type="button" size="sm" variant="outline" disabled={savingRentPromiseAction} onClick={() => setRentPromiseFollowUpTarget(null)}>Cancel</Button><Button type="submit" size="sm" disabled={savingRentPromiseAction}>{savingRentPromiseAction ? 'Saving…' : 'Save follow-up'}</Button></div>
+                  </form>}
+                  {(canEditRentPromiseNotes || canAddRentPromiseFollowUps) && <div className="relative mt-2 flex justify-end" data-rent-promise-actions>
+                    <Button type="button" variant="ghost" size="icon" aria-label="Promise note actions" title="Promise actions" aria-haspopup="menu" aria-expanded={openRentPromiseActions === `promise:${promise.id}`} onClick={() => setOpenRentPromiseActions(current => current === `promise:${promise.id}` ? null : `promise:${promise.id}`)}><MoreHorizontal className="h-4 w-4" /></Button>
+                    {openRentPromiseActions === `promise:${promise.id}` && <div role="menu" aria-label="Promise note actions" className="absolute right-0 top-full z-30 mt-1 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+                      {canAddRentPromiseFollowUps && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent focus:bg-accent" onClick={() => { setRentPromiseFollowUpTarget(promise.id); setEditingRentPromiseNoteId(null); setOpenRentPromiseActions(null); setRentPromiseError('') }}><CalendarClock className="h-4 w-4" />Add linked follow-up</button>}
+                      {canEditRentPromiseNotes && <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent focus:bg-accent" onClick={() => { setEditingRentPromiseNoteId(promise.id); setRentPromiseFollowUpTarget(null); setOpenRentPromiseActions(null); setRentPromiseError('') }}><Edit className="h-4 w-4" />Edit promise note</button>}
+                    </div>}
+                  </div>}
+                </td>
+              </tr>)}</tbody></table></div>}
             </TabsContent>}
 
             {canViewSalesAndPayments && <TabsContent value="sales-payments" className="space-y-4">
