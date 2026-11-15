@@ -830,7 +830,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           access.viewWallet ? prisma.customerWalletTransaction.findMany({
             where: { tenantId: scope.tenantId, walletId: wallet.id },
             include: {
-              user: userSelect.select,
+              user: userSelect,
               payment: { select: { amount: true, currency: true, foreignAmount: true, paymentMethod: true, mobileProvider: true, phoneNumber: true, transactionId: true, reference: true, notes: true, createdAt: true } },
             }, orderBy: { createdAt: 'desc' }, take: 100,
           }) : Promise.resolve([]),
