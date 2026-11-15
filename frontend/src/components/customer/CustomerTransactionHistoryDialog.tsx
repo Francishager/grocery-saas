@@ -1082,10 +1082,11 @@ export default function CustomerTransactionHistoryDialog({
 
             <TabsContent value="overview" className="space-y-5">
             <div className="grid gap-3 md:grid-cols-[1.2fr_2fr]">
-              <div className="rounded-md border p-4">
+              <div className="relative rounded-md border p-4">
+                {(data.access.viewWallet || data.access.activateWallet || data.access.depositWallet || data.access.withdrawWallet) && <span className="absolute right-4 top-4 inline-flex size-9 items-center justify-center" role="status" aria-label={`Customer wallet ${data.customer.wallet?.active ? 'active' : 'inactive'}`} title={`Wallet ${data.customer.wallet?.active ? 'active' : 'inactive'}`}><span className="relative inline-flex size-3"><span className={cn('absolute inline-flex size-full animate-ping rounded-full opacity-60 motion-reduce:animate-none', data.customer.wallet?.active ? 'bg-emerald-400' : 'bg-red-400')} /><span className={cn('relative inline-flex size-3 rounded-full ring-2 ring-background', data.customer.wallet?.active ? 'bg-emerald-500' : 'bg-red-500')} /></span></span>}
                 <div className="flex items-center gap-3">
                   {rentalData?.access.identity && rentalData.customer.profilePhotoUrl && <img src={rentalData.customer.profilePhotoUrl} alt={`${data.customer.name} profile`} className="h-16 w-16 rounded-full border object-cover" />}
-                  <div><p className="text-xs font-semibold uppercase text-muted-foreground">{hasRentalTenancies ? 'Customer & tenant' : 'Customer'}</p>
+                  <div className="min-w-0 pr-8"><p className="text-xs font-semibold uppercase text-muted-foreground">{hasRentalTenancies ? 'Customer & tenant' : 'Customer'}</p>
                 <h3 className="mt-2 break-words text-lg font-semibold">{data.customer.name}</h3>
                   </div>
                 </div>
@@ -1157,7 +1158,6 @@ export default function CustomerTransactionHistoryDialog({
             {(data.access.viewWallet || data.access.activateWallet || data.access.depositWallet || data.access.withdrawWallet || data.access.edit || data.access.delete || (hasRentalTenancies && canEditRentalDetails && onEditCustomer)) && (
               <div className="flex flex-wrap gap-2 border-b pb-4">
                 {data.access.viewWallet && data.customer.wallet?.active && <div className="mr-auto flex items-center gap-2 rounded-md border bg-muted/25 px-3 py-2 text-sm"><Wallet className="h-4 w-4 text-primary" /><span>Wallet balance</span><strong>{formatCurrency(Number(data.customer.wallet.balance || 0))}</strong></div>}
-                {(data.access.viewWallet || data.access.activateWallet || data.access.depositWallet || data.access.withdrawWallet) && <span className="inline-flex size-9 items-center justify-center" role="status" aria-label={`Customer wallet ${data.customer.wallet?.active ? 'active' : 'inactive'}`} title={`Wallet ${data.customer.wallet?.active ? 'active' : 'inactive'}`}><span className={cn('size-3 rounded-full ring-4', data.customer.wallet?.active ? 'bg-emerald-500 ring-emerald-500/15' : 'bg-muted-foreground/50 ring-muted-foreground/10')} /></span>}
                 {data.access.activateWallet && !data.customer.wallet?.active && <Button size="sm" variant="outline" disabled={walletActionLoading} onClick={activateCustomerWallet}>{walletActionLoading ? 'Opening wallet…' : 'Activate wallet'}</Button>}
                 {data.access.depositWallet && data.customer.wallet?.active && onRecordPayment && <Button size="sm" onClick={() => onRecordPayment({ ...data.customer, ...data.summary, walletDeposit: true })}><Wallet className="mr-1 h-4 w-4" />Deposit</Button>}
                 {data.access.withdrawWallet && data.customer.wallet?.active && onWithdraw && <Button size="sm" variant="outline" onClick={() => onWithdraw({ ...data.customer, ...data.summary, walletWithdrawal: true })}>Withdraw</Button>}
