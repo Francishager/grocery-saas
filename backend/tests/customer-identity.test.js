@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   customerIdentityConflictMessage,
   findCustomerIdentityConflict,
+  findStrongCustomerIdentityDuplicates,
   normalizeCustomerIdentity,
 } from '../src/utils/customerIdentity.js';
 
@@ -15,6 +16,7 @@ test('customer identity normalization ignores case, spacing, and phone punctuati
     name: 'jane doe',
     email: 'jane.doe@example.com',
     phone: '256774222368',
+    alternatePhone: null,
   });
 });
 
@@ -59,5 +61,43 @@ test('unchanged legacy duplicate identities do not block non-identity edits', as
   });
 
   assert.equal(conflict, null);
+  assert.equal(queried, false);
+});
+
+test('credit duplicate check locks the tenant and searches other profiles by normalized strong identifiers', async () => {
+  const calls = [];
+  const duplicate = { id: 'other-profile', branchId: 'branch-b' };
+  const client = {
+    async $executeRawUnsafe(query, ...values) { calls.push({ query, values }); },
+    async $queryRawUnsafe(query, ...values) { calls.push({ query, values }); return [duplicate]; },
+  };
+
+  const result = await findStrongCustomerIdentityDuplicates(client, {
+    tenantId: 'tenant-a',
+    customerId: 'selected-profile',
+    identity: { email: ' JANE@EXAMPLE.COM ', phone: '+256 (774) 222-368' },
+  });
+
+  assert.deepEqual(result, [duplicate]);
+  assert.match(calls[0].query, /pg_advisory_xact_lock/);
+  assert.equal(calls[0].values[0], 'tenant-a');
+  assert.match(calls[1].query, /id <> \$2/);
+  assert.deepEqual(calls[1].values, ['tenant-a', 'selected-profile', 'jane@example.com', '256774222368', null]);
+});
+
+test('credit duplicate check skips profiles without a strong identifier', async () => {
+  let queried = false;
+  const client = {
+    async $executeRawUnsafe() { throw new Error('should not lock'); },
+    async $queryRawUnsafe() { queried = true; return []; },
+  };
+
+  const result = await findStrongCustomerIdentityDuplicates(client, {
+    tenantId: 'tenant-a',
+    customerId: 'selected-profile',
+    identity: { name: 'Jane Doe' },
+  });
+
+  assert.deepEqual(result, []);
   assert.equal(queried, false);
 });

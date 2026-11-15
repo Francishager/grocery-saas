@@ -58,6 +58,46 @@ export async function findCustomerIdentityConflict(client, {
   return conflict?.field ? { field: conflict.field } : null;
 }
 
+export async function findStrongCustomerIdentityDuplicates(client, {
+  tenantId,
+  customerId,
+  identity,
+} = {}) {
+  const normalized = normalizeCustomerIdentity(identity);
+  if (!tenantId || !customerId || (!normalized.email && !normalized.phone && !normalized.alternatePhone)) return [];
+
+  // Serialize this check with customer create/update so a duplicate cannot be
+  // introduced while a credit sale is being committed.
+  await client.$executeRawUnsafe(
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 20260929))',
+    tenantId,
+  );
+
+  return client.$queryRawUnsafe(`
+    SELECT id, "branchId"
+    FROM customers
+    WHERE "tenantId" = $1
+      AND id <> $2
+      AND (
+        ($3::text IS NOT NULL AND lower(btrim(COALESCE(email, ''))) = $3)
+        OR ($4::text IS NOT NULL AND (
+          regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $4
+          OR regexp_replace(COALESCE("alternatePhone", ''), '[^0-9]', '', 'g') = $4
+        ))
+        OR ($5::text IS NOT NULL AND (
+          regexp_replace(COALESCE(phone, ''), '[^0-9]', '', 'g') = $5
+          OR regexp_replace(COALESCE("alternatePhone", ''), '[^0-9]', '', 'g') = $5
+        ))
+      )
+    LIMIT 1`,
+    tenantId,
+    customerId,
+    normalized.email,
+    normalized.phone,
+    normalized.alternatePhone,
+  );
+}
+
 export function customerIdentityConflictMessage(field) {
   const labels = { name: 'name', email: 'email address', phone: 'phone number', alternatePhone: 'phone number' };
   const label = labels[field] || 'name, email address, or phone number';

@@ -13,7 +13,7 @@ import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 import { allocateCustomerReceipt, allocateCustomerReceiptToRentals } from '../src/utils/customerReceiptAllocation.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
-import { customerIdentityConflictMessage, findCustomerIdentityConflict } from '../src/utils/customerIdentity.js'
+import { customerIdentityConflictMessage, findCustomerIdentityConflict, findStrongCustomerIdentityDuplicates } from '../src/utils/customerIdentity.js'
 import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
@@ -2094,6 +2094,21 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       }
 
       const remainingOnCredit = Math.max(0, toMoney(balance) - toMoney(creditApplied))
+      if (remainingOnCredit > 0.01) {
+        const duplicateProfiles = await findStrongCustomerIdentityDuplicates(tx, {
+          tenantId: scope.tenantId,
+          customerId,
+          identity: customer,
+        })
+        if (duplicateProfiles.length) {
+          const hasOtherBranchProfile = duplicateProfiles.some((profile) => profile.branchId !== customer.branchId)
+          throw Object.assign(new Error(
+            hasOtherBranchProfile
+              ? 'A matching customer profile exists in another branch. Reconcile the customer records before recording this credit sale so balances and credit limits cannot be split across branches.'
+              : 'Another customer profile has the same phone number or email. Reconcile the customer records before recording this credit sale so balances and credit limits cannot be split.',
+          ), { statusCode: 409, code: 'DUPLICATE_CUSTOMER_CREDIT_REVIEW_REQUIRED' })
+        }
+      }
       const creditCheck = validateCustomerCreditSaleLimit({
         ...customer,
         balance: Math.max(0, toMoney(customerBalanceBefore?.balance)),
@@ -2123,7 +2138,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
     res.status(201).json({ ...withUser(printableSale), creditApplied: sale.creditApplied || 0 })
   } catch (error) {
     console.error('Create sale error:', error)
-    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message })
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.code ? { code: error.code } : {}) })
     handleBranchError(res, error, 'Failed to create sale')
   }
 })
