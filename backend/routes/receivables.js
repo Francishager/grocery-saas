@@ -1465,13 +1465,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 // Create new customer
 router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCustomer', 'canCreateReceivable']), requireTenant, async (req, res) => {
   try {
-    console.log('POST /customers - Request body:', req.body)
     const scope = await resolveBranchScope(prisma, req, {
       source: 'body',
       requireBranch: false,
       allowOwnerAll: true
     })
-    console.log('POST /customers - Scope resolved:', scope)
     const { name, email, phone, alternatePhone, address, creditLimit, notes, openingBalanceNote } = req.body
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })

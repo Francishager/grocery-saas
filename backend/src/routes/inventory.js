@@ -1207,13 +1207,7 @@ router.post("/", authenticateToken, requireItemTypePermission('create'), async (
     res.status(201).json({ message: "Product created", product });
   } catch (err) {
     if (err?.code === 'LIMIT_REACHED') return res.status(403).json({ error: err.message });
-    // Log error and incoming body to help diagnose 500s when saving products
-    try {
-      console.error("Create product error:", err && (err.stack || err));
-      console.error("Request body:", req.body, "user:", req.user?.id || null);
-    } catch (logErr) {
-      console.error("Failed to log create product error context", logErr);
-    }
+    console.error("Create product failed", { userId: req.user?.id || null, code: err?.code || null });
     if (err?.code === "P2002") return res.status(409).json({ error: "SKU or barcode already exists in this branch" });
     handleBranchError(res, err);
   }

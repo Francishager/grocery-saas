@@ -168,7 +168,7 @@ export default function IntegrationsPage() {
               </div>
               <div><Label>Display Name</Label><Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="e.g. My Stripe Account" /></div>
               <div><Label>API Key</Label><Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Your API key" /></div>
-              <div><Label>Secret Key</Label><Input type="password" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder="Your secret key" /></div>
+              <div><Label>Secret Key</Label><Input type="password" autoComplete="off" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder="Your secret key" /></div>
               <div className="flex items-center gap-2 rounded-lg bg-muted p-3 text-sm text-muted-foreground">
                 <Settings className="h-4 w-4" />
                 <span>Credentials are encrypted and stored securely. You can test the connection after adding.</span>

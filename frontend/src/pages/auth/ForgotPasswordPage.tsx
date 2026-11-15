@@ -195,6 +195,7 @@ export default function ForgotPasswordPage() {
                 <Input
                   id="new-password"
                   type="password"
+                  autoComplete="new-password"
                   minLength={12}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
@@ -207,6 +208,7 @@ export default function ForgotPasswordPage() {
                 <Input
                   id="confirm-password"
                   type="password"
+                  autoComplete="new-password"
                   minLength={12}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

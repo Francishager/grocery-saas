@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showAlert(resetMsg, 'success', 'Password reset successful. You can now log in.');
         setTimeout(()=>{ window.location.href = 'index.html'; }, 1500);
       }catch(err){
-        console.error('reset-password error:', err);
+        console.error('reset-password error:', err?.name || 'Request failed');
         showAlert(resetMsg, 'danger', 'Network error. Try again.');
       }
     });

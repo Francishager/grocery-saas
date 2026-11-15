@@ -184,15 +184,15 @@ export default function UserProfilePage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label>Current Password</Label>
-            <Input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm(f => ({ ...f, currentPassword: e.target.value }))} placeholder="Enter current password" />
+            <Input type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm(f => ({ ...f, currentPassword: e.target.value }))} placeholder="Enter current password" />
           </div>
           <div className="space-y-2">
             <Label>New Password</Label>
-            <Input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="Min 12 characters" minLength={12} />
+            <Input type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm(f => ({ ...f, newPassword: e.target.value }))} placeholder="Min 12 characters" minLength={12} />
           </div>
           <div className="space-y-2">
             <Label>Confirm New Password</Label>
-            <Input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm(f => ({ ...f, confirmPassword: e.target.value }))} placeholder="Re-enter new password" />
+            <Input type="password" autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm(f => ({ ...f, confirmPassword: e.target.value }))} placeholder="Re-enter new password" />
           </div>
           <Button
             onClick={handleChangePassword}

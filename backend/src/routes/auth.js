@@ -465,7 +465,7 @@ router.post("/request-reset", resetIpLimiter, resetIdentityLimiter, async (req, 
 
     res.json({ message: "If an account exists for that email, a reset code will be sent." });
   } catch (err) {
-    console.error("Request reset error:", err);
+    console.error("Request reset error:", err?.code || err?.name || "UNKNOWN_ERROR");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -488,7 +488,7 @@ router.post("/reset-password", resetIpLimiter, resetIdentityLimiter, async (req,
     await prisma.user.update({ where: { id: user.id }, data: { password: hashed, otpCode: null, otpExpires: null } });
     res.json({ message: "Password updated" });
   } catch (err) {
-    console.error("Reset password error:", err);
+    console.error("Reset password error:", err?.code || err?.name || "UNKNOWN_ERROR");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -550,7 +550,7 @@ router.put("/change-password", authenticateToken, async (req, res) => {
     await prisma.user.update({ where: { id: req.user.id }, data: { password: hashed } });
     res.json({ message: "Password changed successfully" });
   } catch (err) {
-    console.error("Change password error:", err);
+    console.error("Change password error:", err?.code || err?.name || "UNKNOWN_ERROR");
     res.status(500).json({ error: "Failed to change password" });
   }
 });

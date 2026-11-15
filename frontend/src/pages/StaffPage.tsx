@@ -319,6 +319,7 @@ export default function StaffPage() {
             <Input
               id="staff-password"
               type="password"
+              autoComplete="new-password"
               value={form.password}
               onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
               disabled={saving}
