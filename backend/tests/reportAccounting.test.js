@@ -71,6 +71,20 @@ test('cash tills reconcile receipts, repayments, expenses, refunds and transfers
   assert.equal(result.cashPaidOut, 175000);
 });
 
+test('customer wallet deposits increase cash but are not receivable collections', () => {
+  const result = summarizeCashMovements([
+    movement('till', 'receipt', 75000, 'wallet-payment'),
+    movement('till', 'receipt', 25000, 'invoice-payment'),
+  ], 0, {
+    collectionReferences: new Set(['wallet-payment', 'invoice-payment']),
+    walletDepositReferences: new Set(['wallet-payment']),
+  });
+  assert.equal(result.cashReceived, 100000);
+  assert.equal(result.cashCollections, 25000);
+  assert.equal(result.otherCashIn, 75000);
+  assert.equal(result.cashAtHand, 100000);
+});
+
 test('bank-only and safe-to-bank movements cannot reduce cash at hand', () => {
   const result = summarizeCashMovements([
     movement('bank', 'deposit', 900000, null, 'bank'),

@@ -20,6 +20,7 @@ import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js
 import { LEGACY_REPORT_GROUP_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
 import { expenseDateWhere, cashMovementDirection, loadJournalExpenseRows, summarizeCashMovements, accountCashBalances, loadLedgerBalances, ledgerBalanceSheet, postedJournalWhere } from '../utils/reportAccounting.js';
 import { aggregateInventorySales, calendarDaysBetween, inventoryQuantityChange, isExplicitDamageReason, summarizeInventoryMovements } from '../utils/inventoryReportHelpers.js';
+import { customerWalletDepositReferenceKeys, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement } from '../utils/customerWalletReporting.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -629,6 +630,26 @@ function financialCustomerPaymentRow(payment) {
   };
 }
 
+function financialWalletDepositRow(payment) {
+  const amount = toMoney(payment?.amount || 0);
+  return {
+    id: `wallet-deposit-${payment?.id}`,
+    sourceId: payment?.id,
+    date: payment?.createdAt,
+    type: 'Customer Wallet Deposit',
+    account: 'Customer Wallet Liability',
+    description: `Wallet deposit - ${payment?.customer?.name || 'Customer'}`,
+    reference: customerPaymentDisplayReference(payment),
+    customer: payment?.customer?.name || 'Unknown customer',
+    branch: branchLabel(payment),
+    staff: payment?.staff || '',
+    paymentMethod: normalizedPaymentMethod(payment?.paymentMethod),
+    amount,
+    status: 'Received',
+    details: [payment?.notes || 'Customer funds deposited to wallet', payment?.mobileProvider ? `Provider: ${payment.mobileProvider}` : null, payment?.transactionId ? `Transaction ID: ${payment.transactionId}` : null].filter(Boolean).join(' · '),
+  };
+}
+
 function financialSupplierPaymentRow(payment) {
   const amount = toMoney(payment?.amount || 0);
   return {
@@ -670,7 +691,7 @@ function financialTaxPaymentRow(payment) {
   };
 }
 
-function financialCashMovementRow(movement) {
+function financialCashMovementRow(movement, isWalletDeposit = false, isWalletWithdrawal = false) {
   const amount = toMoney(movement?.amount || 0);
   const rawType = String(movement?.type || "income").toLowerCase();
   const direction = cashMovementDirection(rawType);
@@ -679,7 +700,7 @@ function financialCashMovementRow(movement) {
     id: `cash-${movement?.id}`,
     sourceId: movement?.id,
     date: movement?.createdAt,
-    type: direction === "transfer-in" ? "Transfer In" : direction === "transfer-out" ? "Transfer Out" : isIn ? "Cash Inflow" : "Cash Outflow",
+    type: direction === "transfer-in" ? "Transfer In" : direction === "transfer-out" ? "Transfer Out" : isWalletDeposit ? "Customer Wallet Deposit" : isWalletWithdrawal ? "Customer Wallet Withdrawal" : isIn ? "Cash Inflow" : "Cash Outflow",
     account: movement?.account?.name || paymentAccountLabel(movement?.account?.type || rawType),
     accountType: movement?.account?.type || "cash",
     description: movement?.description || rawType,
@@ -693,6 +714,8 @@ function financialCashMovementRow(movement) {
     balance: toMoney(movement?.balanceAfter || 0),
     direction,
     rawType,
+    walletDeposit: isWalletDeposit,
+    walletWithdrawal: isWalletWithdrawal,
     status: "Cleared",
     details: `${movement?.account?.type || "cash"} account movement; after balance ${toMoney(movement?.balanceAfter || 0)}`,
   };
@@ -750,12 +773,13 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
   const journalDateWhere = dateRange && Object.keys(dateRange).length ? dateRange : {};
   const taxWhere = scopedWhere(scope, dateRange && Object.keys(dateRange).length ? { dateOfPayment: dateRange } : {});
 
-  const [sales, saleRecords, expenses, journalRows, customerPayments, supplierPayments, cashTransactions, taxPayments] = await Promise.all([
+  const [sales, saleRecords, expenses, journalRows, customerPayments, walletWithdrawals, supplierPayments, cashTransactions, taxPayments] = await Promise.all([
     prisma.sale.findMany({ where: saleWhere, include: { user: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" } }),
     salesView.findMany({ where: saleWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, customer: { select: { id: true, name: true, phone: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" } }),
     prisma.expense.findMany({ where: expenseWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, cashAccount: { select: { id: true, name: true, type: true } } }, orderBy: { date: "asc" } }),
     journalExpenseRows(scope, journalDateWhere),
-    prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+    prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } }, allocations: { select: { targetType: true } } }, orderBy: { createdAt: "asc" } }),
+    prisma.customerWithdrawal.findMany({ where: scopedWhere(scope, { ...createdWhere, walletId: { not: null } }), select: { id: true, reference: true, amount: true, createdAt: true, customer: { select: { name: true } }, branch: { select: { name: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.supplierPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { supplier: { select: { id: true, name: true, phone: true } }, purchase: { select: { id: true, refNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, ...createdWhere, account: { tenantId: scope.tenantId, ...(scope.branchId ? { OR: [{ branchId: scope.branchId }, { branchId: null }] } : {}) } }, include: { account: { select: { id: true, name: true, type: true, balance: true, branch: { select: { id: true, name: true } } } }, User: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.taxPayment.findMany({ where: taxWhere, include: { branch: { select: { id: true, name: true } } }, orderBy: { dateOfPayment: "asc" } }),
@@ -774,18 +798,40 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
     if (movement.reference && !movementByReference.has(movement.reference)) movementByReference.set(movement.reference, movement);
     if (!movementByReference.has(movement.id)) movementByReference.set(movement.id, movement);
   });
-  const customerPaymentRows = customerPayments.map((payment) => {
+  const walletDepositPayments = customerPayments.filter(isCustomerWalletDeposit)
+  const receivablePayments = customerPayments.filter((payment) => !isCustomerWalletDeposit(payment))
+  const customerPaymentRows = receivablePayments.map((payment) => {
     const movement = [payment.reference, payment.id, payment.transactionId]
       .filter(Boolean)
       .map((reference) => movementByReference.get(reference))
       .find(Boolean);
     return financialCustomerPaymentRow({ ...payment, staff: movement ? userLabel(movement.User) : "" });
   }).filter((row) => row.amount > 0);
+  const walletDepositRows = walletDepositPayments.map(financialWalletDepositRow).filter((row) => row.amount > 0);
+  const walletWithdrawalReferences = customerWalletWithdrawalReferenceKeys(walletWithdrawals)
+  const walletWithdrawalRows = walletWithdrawals.map((withdrawal) => ({
+    id: `wallet-withdrawal-${withdrawal.id}`,
+    sourceId: withdrawal.id,
+    date: withdrawal.createdAt,
+    type: 'Customer Wallet Withdrawal',
+    account: 'Customer Wallet Liability',
+    description: `Wallet withdrawal - ${withdrawal.customer?.name || 'Customer'}`,
+    reference: withdrawal.reference || shortReference(withdrawal),
+    customer: withdrawal.customer?.name || 'Unknown customer',
+    branch: withdrawal.branch?.name || 'Unassigned',
+    amount: toMoney(withdrawal.amount),
+    status: 'Paid',
+  })).filter((row) => row.amount > 0);
   const supplierPaymentRows = supplierPayments.map(financialSupplierPaymentRow).filter((row) => row.amount > 0);
-  const cashRows = cashTransactions.map(financialCashMovementRow).filter((row) => row.amount > 0);
+  const walletDepositReferences = customerWalletDepositReferenceKeys(walletDepositPayments)
+  const cashRows = cashTransactions.map((movement) => financialCashMovementRow(
+    movement,
+    isCustomerWalletDepositMovement(movement, walletDepositReferences),
+    isCustomerWalletWithdrawalMovement(movement, walletWithdrawalReferences),
+  )).filter((row) => row.amount > 0);
   const taxPaymentRows = taxPayments.map(financialTaxPaymentRow).filter((row) => row.amount > 0);
 
-  return { sales, saleRecords, expenses, journalRows: uniqueJournalRows, saleRows, receivableSaleRows, revenueRows: [...saleRows, ...receivableSaleRows], cogsRows, taxRows, discountRows, expenseRows, customerPaymentRows, supplierPaymentRows, cashRows, taxPaymentRows };
+  return { sales, saleRecords, expenses, journalRows: uniqueJournalRows, saleRows, receivableSaleRows, revenueRows: [...saleRows, ...receivableSaleRows], cogsRows, taxRows, discountRows, expenseRows, customerPaymentRows, walletDepositRows, walletWithdrawalRows, supplierPaymentRows, cashRows, taxPaymentRows };
 }
 
 function financialTotalsFromData(data) {
@@ -800,9 +846,10 @@ function financialTotalsFromData(data) {
   const totalTax = sumFinancialRows(data.taxRows);
   const totalDiscount = sumFinancialRows(data.discountRows);
   const customerCollections = sumFinancialRows(data.customerPaymentRows);
+  const walletDeposits = sumFinancialRows(data.walletDepositRows || []);
   const supplierPayments = sumFinancialRows(data.supplierPaymentRows);
   const taxPayments = sumFinancialRows(data.taxPaymentRows);
-  return { revenue, salesRevenue: revenue, posSalesRevenue, receivableSalesRevenue, grossSales, cogs, grossProfit, expenses, totalExpense: expenses, netProfit, totalTax, totalDiscount, salesCount: data.revenueRows.length, expenseCount: data.expenseRows.length, customerPayments: customerCollections, customerCollections, supplierPayments, taxPayments, totalIncome: revenue, grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0, netMargin: revenue > 0 ? (netProfit / revenue) * 100 : 0, cogsRatio: revenue > 0 ? (cogs / revenue) * 100 : 0, expenseRatio: revenue > 0 ? (expenses / revenue) * 100 : 0, averageSale: data.revenueRows.length ? revenue / data.revenueRows.length : 0 };
+  return { revenue, salesRevenue: revenue, posSalesRevenue, receivableSalesRevenue, grossSales, cogs, grossProfit, expenses, totalExpense: expenses, netProfit, totalTax, totalDiscount, salesCount: data.revenueRows.length, expenseCount: data.expenseRows.length, customerPayments: customerCollections, customerCollections, walletDeposits, supplierPayments, taxPayments, totalIncome: revenue, grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0, netMargin: revenue > 0 ? (netProfit / revenue) * 100 : 0, cogsRatio: revenue > 0 ? (cogs / revenue) * 100 : 0, expenseRatio: revenue > 0 ? (expenses / revenue) * 100 : 0, averageSale: data.revenueRows.length ? revenue / data.revenueRows.length : 0 };
 }
 
 function financialDetailGroups(data) {
@@ -814,7 +861,7 @@ function financialDetailGroups(data) {
   const customerPayments = sortFinancialRows(data.customerPaymentRows);
   const supplierPayments = sortFinancialRows(data.supplierPaymentRows);
   const taxPayments = sortFinancialRows(data.taxPaymentRows);
-  return { revenue, salesRevenue: revenue, totalIncome: revenue, posSalesRevenue: sortFinancialRows(data.saleRows), receivableSalesRevenue: sortFinancialRows(data.receivableSaleRows), cogs, grossProfit: [...revenue, ...cogs], expenses, totalExpense: expenses, netProfit: [...revenue, ...cogs, ...expenses], salesCount: revenue, totalTax, taxCollected: totalTax, totalDiscount, customerPayments, customerCollections: customerPayments, supplierPayments, taxPayments };
+  return { revenue, salesRevenue: revenue, totalIncome: revenue, posSalesRevenue: sortFinancialRows(data.saleRows), receivableSalesRevenue: sortFinancialRows(data.receivableSaleRows), cogs, grossProfit: [...revenue, ...cogs], expenses, totalExpense: expenses, netProfit: [...revenue, ...cogs, ...expenses], salesCount: revenue, totalTax, taxCollected: totalTax, totalDiscount, customerPayments, customerCollections: customerPayments, walletDeposits: sortFinancialRows(data.walletDepositRows || []), supplierPayments, taxPayments };
 }
 
 async function loadFinancialBalanceSnapshot(req, scope) {
@@ -1074,6 +1121,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
           customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
           sale: { select: { id: true, receiptNo: true } },
           branch: { select: { id: true, name: true } },
+          allocations: { select: { targetType: true } },
         },
         orderBy: { createdAt: "asc" },
       }),
@@ -1183,6 +1231,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const allExpenses = [...expenses, ...accountingExpenses];
 
     const transactionRows = [];
+    const walletDepositReferences = customerWalletDepositReferenceKeys(payments)
     const salesBreakdown = { cash: 0, credit: 0, mobile_money: 0, bank: 0, card: 0 };
     const paidAtSaleBySaleId = new Map();
     payments.forEach((payment) => {
@@ -1566,12 +1615,36 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     }
 
     let debtCollections = 0;
+    let walletDepositTotal = 0;
+    let walletDepositCount = 0;
     for (const payment of payments) {
-      if (isPaidAtSaleCustomerPayment(payment)) continue;
       const method = normalizedPaymentMethod(payment.paymentMethod);
       if (!paymentMethodMatches(method, requestedMethod)) continue;
       const paymentMovement = findMatchingMovement(payment.reference, payment.id, payment.transactionId);
       if (userId && paymentMovement?.userId !== userId) continue;
+      if (isCustomerWalletDeposit(payment)) {
+        walletDepositTotal += Number(payment.amount || 0);
+        walletDepositCount += 1;
+        transactionRows.push({
+          id: payment.id,
+          kind: 'wallet-deposit',
+          date: payment.createdAt,
+          reference: customerPaymentDisplayReference(payment),
+          customer: payment.customer?.name || 'Unknown customer',
+          customerId: payment.customerId,
+          amount: Number(payment.amount || 0),
+          debit: Number(payment.amount || 0),
+          credit: 0,
+          paymentMethod: method,
+          staff: paymentMovement?.User ? userLabel(paymentMovement.User) : 'Recorded deposit',
+          staffId: paymentMovement?.User?.id || null,
+          branch: payment.branch?.name || '',
+          notes: payment.notes || null,
+          walletLiabilityIncrease: Number(payment.amount || 0),
+        });
+        continue;
+      }
+      if (isPaidAtSaleCustomerPayment(payment)) continue;
       debtCollections += Number(payment.amount || 0);
       const paymentStaff = paymentMovement?.User || null;
       if (paymentStaff) addStaff(paymentStaff, { collections: payment.amount });
@@ -1690,11 +1763,12 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       ].filter(Boolean)),
       collectionReferences: new Set(payments.filter((payment) => !isPaidAtSaleCustomerPayment(payment))
         .flatMap((payment) => [payment.id, payment.reference, payment.transactionId]).filter(Boolean)),
+      walletDepositReferences,
       expenseReferences: new Set(allExpenses.flatMap((expense) => [expense.id, expense.reference, expense.journalEntryId]).filter(Boolean)),
     });
     const { cashReceived, cashAtHand, netCashMovement } = cashMovement;
     const cashLedger = cashTransactions.filter((movement) => movement.account?.type === "cash")
-      .map((movement) => ({ ...financialCashMovementRow(movement), kind: "cash-movement" }));
+      .map((movement) => ({ ...financialCashMovementRow(movement, isCustomerWalletDepositMovement(movement, walletDepositReferences)), kind: "cash-movement" }));
     const expensesTotal = toMoney(filteredExpenses.reduce((sum, expense) => sum + Number(expense.amount || 0), 0));
     salesReturns = toMoney(salesReturns);
     creditNoteAdjustments = toMoney(creditNoteAdjustments);
@@ -1761,6 +1835,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         bankSales: toMoney(salesBreakdown.bank),
         cardSales: toMoney(salesBreakdown.card),
         debtCollections: toMoney(debtCollections),
+        walletDeposits: toMoney(walletDepositTotal),
+        walletDepositCount,
         cashReceived,
         cashAtHand,
         netCashMovement,
@@ -2654,12 +2730,13 @@ router.get("/financial/income", authenticateToken, async (req, res) => {
       totalDiscount: totals.totalDiscount,
       customerPayments: totals.customerPayments,
       customerCollections: totals.customerCollections,
+      walletDeposits: totals.walletDeposits,
       totalIncome: totals.totalIncome,
       salesCount: totals.salesCount,
       averageSale: totals.averageSale,
-      summary: { salesRevenue: totals.salesRevenue, posSalesRevenue: totals.posSalesRevenue, receivableSalesRevenue: totals.receivableSalesRevenue, customerCollections: totals.customerCollections, totalIncome: totals.totalIncome, salesCount: totals.salesCount },
+      summary: { salesRevenue: totals.salesRevenue, posSalesRevenue: totals.posSalesRevenue, receivableSalesRevenue: totals.receivableSalesRevenue, customerCollections: totals.customerCollections, walletDeposits: totals.walletDeposits, totalIncome: totals.totalIncome, salesCount: totals.salesCount },
       detailGroups,
-      transactions: sortFinancialRows([...detailGroups.revenue, ...detailGroups.customerPayments]),
+      transactions: sortFinancialRows([...detailGroups.revenue, ...detailGroups.customerPayments, ...detailGroups.walletDeposits]),
       data: sortFinancialRows(detailGroups.revenue),
       reportingBasis: "Accrual income report: revenue comes from sales; customer payments are shown separately as receivable collections.",
       generatedAt: new Date().toISOString(),
@@ -2693,21 +2770,21 @@ router.get("/financial/cash-flow", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const data = await loadFinancialReportData(req, s);
-    const groups = { sales: [], customerPayments: [], otherInflows: [], purchases: [], expenses: [], supplierPayments: [], otherOutflows: [], transfersIn: [], transfersOut: [] };
-    const details = { sales: 0, customerPayments: 0, otherInflows: 0, purchases: 0, expenses: 0, supplierPayments: 0, otherOutflows: 0, transfersIn: 0, transfersOut: 0 };
+    const groups = { sales: [], customerPayments: [], walletDeposits: [], otherInflows: [], purchases: [], expenses: [], supplierPayments: [], walletWithdrawals: [], otherOutflows: [], transfersIn: [], transfersOut: [] };
+    const details = { sales: 0, customerPayments: 0, walletDeposits: 0, otherInflows: 0, purchases: 0, expenses: 0, supplierPayments: 0, walletWithdrawals: 0, otherOutflows: 0, transfersIn: 0, transfersOut: 0 };
     for (const row of data.cashRows) {
       const type = String(row.rawType || "").toLowerCase();
       const direction = row.direction;
       let key = "otherInflows";
       if (direction === "transfer-in") key = "transfersIn";
       else if (direction === "transfer-out") key = "transfersOut";
-      else if (direction === "in") key = type === "sale" ? "sales" : (type === "receipt" || type === "collection" ? "customerPayments" : "otherInflows");
-      else key = type === "expense" ? "expenses" : (type === "purchase" ? "purchases" : (type === "payment" ? "supplierPayments" : "otherOutflows"));
+      else if (direction === "in") key = type === "sale" ? "sales" : row.walletDeposit ? "walletDeposits" : (type === "receipt" || type === "collection" ? "customerPayments" : "otherInflows");
+      else key = row.walletWithdrawal ? "walletWithdrawals" : type === "expense" ? "expenses" : (type === "purchase" ? "purchases" : (type === "payment" ? "supplierPayments" : "otherOutflows"));
       details[key] += Number(row.amount || 0);
       groups[key].push(row);
     }
-    const inflow = toMoney(details.sales + details.customerPayments + details.otherInflows);
-    const outflow = toMoney(details.purchases + details.expenses + details.supplierPayments + details.otherOutflows);
+    const inflow = toMoney(details.sales + details.customerPayments + details.walletDeposits + details.otherInflows);
+    const outflow = toMoney(details.purchases + details.expenses + details.supplierPayments + details.walletWithdrawals + details.otherOutflows);
     const transfersIn = toMoney(details.transfersIn);
     const transfersOut = toMoney(details.transfersOut);
     const netCashFlow = toMoney(inflow - outflow);
@@ -2723,14 +2800,16 @@ router.get("/financial/cash-flow", authenticateToken, async (req, res) => {
       details,
       summary: { inflow, outflow, netCashFlow, transfersIn, transfersOut, netAccountMovement, ...details },
       detailGroups: {
-        inflow: sortFinancialRows([...groups.sales, ...groups.customerPayments, ...groups.otherInflows]),
-        outflow: sortFinancialRows([...groups.purchases, ...groups.expenses, ...groups.supplierPayments, ...groups.otherOutflows]),
+        inflow: sortFinancialRows([...groups.sales, ...groups.customerPayments, ...groups.walletDeposits, ...groups.otherInflows]),
+        outflow: sortFinancialRows([...groups.purchases, ...groups.expenses, ...groups.supplierPayments, ...groups.walletWithdrawals, ...groups.otherOutflows]),
         netCashFlow: sortFinancialRows(data.cashRows.filter((row) => row.direction === "in" || row.direction === "out")),
         netAccountMovement: sortFinancialRows(data.cashRows),
         transfersIn: sortFinancialRows(groups.transfersIn),
         transfersOut: sortFinancialRows(groups.transfersOut),
         sales: sortFinancialRows(groups.sales),
         customerPayments: sortFinancialRows(groups.customerPayments),
+        walletDeposits: sortFinancialRows(groups.walletDeposits),
+        walletWithdrawals: sortFinancialRows(groups.walletWithdrawals),
         expenses: sortFinancialRows(groups.expenses),
         supplierPayments: sortFinancialRows(groups.supplierPayments),
       },
@@ -2808,7 +2887,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       // Expenses
       prisma.expense.findMany({ where: scopedExpenseWhere(s, { ...expenseDateWhere(dateRangeFromQuery(req)), ...branchFilter }), select: { id: true, reference: true, category: true, amount: true, date: true, createdAt: true }, orderBy: { date: "desc" } }),
       // Customer payments
-      prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, allocations: { none: { targetType: 'customer_wallet' } } }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Supplier payments
       prisma.supplierPayment.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Credit notes
@@ -3112,12 +3191,12 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         select: { id: true, receiptNo: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true, createdAt: true, paymentMethod: true, customer: { select: { id: true, name: true } } },
       }),
       prisma.customerPayment.findMany({
-        where: scopedWhere(s, { ...custFilter, ...df(req) }),
+        where: scopedWhere(s, { ...custFilter, ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }),
         orderBy: { createdAt: "asc" },
         select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true, customer: { select: { id: true, name: true } } },
       }),
       prisma.customerWithdrawal.findMany({
-        where: scopedWhere(s, { ...custFilter, ...df(req) }),
+        where: scopedWhere(s, { ...custFilter, ...df(req), walletId: null }),
         orderBy: { createdAt: "asc" },
         select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true, customer: { select: { id: true, name: true } } },
       }),
@@ -3152,11 +3231,11 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         select: { total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true, createdAt: true },
       }),
       prisma.customerPayment.findMany({
-        where: scopedWhere(s, { ...custFilter }),
+        where: scopedWhere(s, { ...custFilter, allocations: { none: { targetType: 'customer_wallet' } } }),
         select: { amount: true, createdAt: true },
       }),
       prisma.customerWithdrawal.findMany({
-        where: scopedWhere(s, { ...custFilter }),
+        where: scopedWhere(s, { ...custFilter, walletId: null }),
         select: { amount: true, createdAt: true },
       }),
       prisma.creditNote.findMany({
@@ -3298,8 +3377,8 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       const [customersRaw, sales, payments, withdrawals, creditNotes, saleReturns] = await Promise.all([
         prisma.customer.findMany({ where: scopedWhere(s), orderBy: { name: "asc" } }),
         prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
-        prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
-        prisma.customerWithdrawal.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+        prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+        prisma.customerWithdrawal.findMany({ where: scopedWhere(s, { ...df(req), walletId: null }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { not: "cancelled" } }), include: { customer: { select: { id: true, name: true } }, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: "completed" }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
       ]);
@@ -3410,11 +3489,11 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
       }),
       prisma.customerPayment.findMany({
-        where: scopedWhere(s, { customerId, ...df(req) }),
+        where: scopedWhere(s, { customerId, ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }),
         orderBy: { createdAt: "asc" },
       }),
       prisma.customerWithdrawal.findMany({
-        where: scopedWhere(s, { customerId, ...df(req) }),
+        where: scopedWhere(s, { customerId, ...df(req), walletId: null }),
         orderBy: { createdAt: "asc" },
       }),
       prisma.creditNote.findMany({
@@ -4496,7 +4575,7 @@ router.get("/receivables/aging", authenticateToken, async (req, res) => {
 router.get("/receivables/collection", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } }, branch: { select: { name: true } } }, orderBy: { createdAt: "desc" } });
+    const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } }, branch: { select: { name: true } }, allocations: { select: { targetType: true } } }, orderBy: { createdAt: "desc" } });
     const accounts = await paymentAccountDetails(s.tenantId, payments, 'receipt');
     const paymentReferences = payments.flatMap((payment) => [payment.reference, payment.id, payment.transactionId]).filter(Boolean);
     const movements = paymentReferences.length ? await prisma.cashTransaction.findMany({
@@ -4509,7 +4588,9 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
       if (movement.reference && !movementByPaymentRef.has(movement.reference)) movementByPaymentRef.set(movement.reference, movement);
       if (!movementByPaymentRef.has(movement.id)) movementByPaymentRef.set(movement.id, movement);
     });
-    const data = payments.map((p) => {
+    const receivablePayments = payments.filter((payment) => !isCustomerWalletDeposit(payment))
+    const walletDeposits = payments.filter(isCustomerWalletDeposit)
+    const data = receivablePayments.map((p) => {
       const account = accounts.get(p.id);
       const movement = [p.reference, p.id, p.transactionId].filter(Boolean).map((ref) => movementByPaymentRef.get(ref)).find(Boolean);
       return {
@@ -4532,7 +4613,20 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
         bankBranch: account?.branchName || null,
       };
     });
-    res.json({ data, summary: { count: data.length, totalCollected: data.reduce((a, p) => a + p.amount, 0) } });
+    res.json({ data, walletDeposits: walletDeposits.map((payment) => ({
+      createdAt: payment.createdAt,
+      customer: payment.customer?.name || 'Unknown customer',
+      branch: payment.branch?.name || 'Unassigned',
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod || 'cash',
+      reference: customerPaymentDisplayReference(payment),
+      notes: payment.notes || null,
+    })), summary: {
+      count: data.length,
+      totalCollected: data.reduce((sum, payment) => sum + payment.amount, 0),
+      walletDepositCount: walletDeposits.length,
+      totalWalletDeposits: walletDeposits.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+    } });
   } catch (err) { handleBranchError(res, err); }
 });
 

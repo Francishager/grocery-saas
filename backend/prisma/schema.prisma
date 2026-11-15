@@ -30,8 +30,10 @@ model Branch {
   sales                 Sale[]
   purchases             Purchase[]
   customers             Customer[]
+  customerWallets       CustomerWallet[]
   saleRecords           SaleRecord[]
   customerPayments      CustomerPayment[]
+  customerWalletTransactions CustomerWalletTransaction[]
   customerWithdrawals   CustomerWithdrawal[]
   invoices              Invoice[]
   suppliers             Supplier[]
@@ -156,6 +158,8 @@ model Tenant {
   // BUSINESS DATA
   // =====================
   customers                       Customer[]
+  customerWallets                 CustomerWallet[]
+  customerWalletTransactions      CustomerWalletTransaction[]
   customerWithdrawals             CustomerWithdrawal[]
   customerPaymentAllocations      CustomerPaymentAllocation[]
   customerCreditApplications      CustomerCreditApplication[]
@@ -533,6 +537,8 @@ model User {
   rentPromisesCreated                 PropertyRentPromise[]         @relation("PropertyRentPromiseCreator")
   rentPromiseFollowUpsCreated         PropertyRentPromiseFollowUp[] @relation("PropertyRentPromiseFollowUpCreator")
   rentPromiseFollowUpsCompleted       PropertyRentPromiseFollowUp[] @relation("PropertyRentPromiseFollowUpCompleter")
+  customerWalletsCreated              CustomerWallet[]                @relation("CustomerWalletCreator")
+  customerWalletTransactions          CustomerWalletTransaction[]     @relation("CustomerWalletTransactionCreator")
   propertyTenantNotesCreated          PropertyTenantNote[]          @relation("PropertyTenantNoteCreator")
   propertyTenantNoteFollowUpsCreated  PropertyTenantNoteFollowUp[]  @relation("PropertyTenantNoteFollowUpCreator")
 
@@ -817,6 +823,10 @@ model UserPermission {
   canViewCustomerAddress                 Boolean  @default(false)
   canViewCustomerBalance                 Boolean  @default(false)
   canViewCustomerCreditLimit             Boolean  @default(false)
+  canViewCustomerWallet                  Boolean  @default(false)
+  canActivateCustomerWallet              Boolean  @default(false)
+  canDepositCustomerWallet               Boolean  @default(false)
+  canWithdrawCustomerWallet              Boolean  @default(false)
   canManageCustomerCreditLimit           Boolean  @default(false)
   canCreateCustomerCreditLimit           Boolean  @default(false)
   canEditCustomerCreditLimit             Boolean  @default(false)
@@ -1715,7 +1725,9 @@ model Customer {
   branch             Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   creditLimit        Float          @default(0)
   balance            Float          @default(0) // Current outstanding balance
+  walletEnabled      Boolean        @default(false)
   openingBalance     Float          @default(0)
+  openingBalanceType String         @default("debit")
   openingBalanceDate DateTime?
   openingBalanceNote String?
   status             CustomerStatus @default(active)
@@ -1726,6 +1738,7 @@ model Customer {
 
   sales                           SaleRecord[]
   payments                        CustomerPayment[]
+  wallet                          CustomerWallet?
   paymentAllocations              CustomerPaymentAllocation[]
   creditApplications              CustomerCreditApplication[]
   receivableReconciliationReviews CustomerReceivableReconciliationReview[]
@@ -1873,6 +1886,7 @@ model CustomerPayment {
   notes                      String?
   createdAt                  DateTime                    @default(now())
   allocations                CustomerPaymentAllocation[]
+  walletTransaction          CustomerWalletTransaction?
   procurementPaymentApproval ProcurementPaymentApproval?
 
   @@index([tenantId, branchId])
@@ -1972,6 +1986,8 @@ model CustomerWithdrawal {
   branch         Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId     String
   customer       Customer     @relation(fields: [customerId], references: [id])
+  walletId       String?
+  wallet         CustomerWallet? @relation(fields: [walletId], references: [id], onDelete: SetNull)
   userId         String
   user           User         @relation(fields: [userId], references: [id])
   cashAccountId  String?
@@ -1990,6 +2006,55 @@ model CustomerWithdrawal {
   @@index([customerId])
   @@index([cashAccountId])
   @@map("customer_withdrawals")
+}
+
+model CustomerWallet {
+  id                   String                    @id @default(cuid())
+  tenantId             String
+  customerId           String                    @unique
+  branchId             String?
+  isActive             Boolean                   @default(true)
+  migratedLegacyAmount Decimal                   @default(0) @db.Decimal(18, 2)
+  createdById          String?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  tenant               Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer             Customer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branch               Branch?                   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdBy            User?                     @relation("CustomerWalletCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  transactions         CustomerWalletTransaction[]
+  withdrawals          CustomerWithdrawal[]
+
+  @@index([tenantId, branchId, isActive])
+  @@map("customer_wallets")
+}
+
+model CustomerWalletTransaction {
+  id             String        @id @default(cuid())
+  tenantId       String
+  branchId       String?
+  walletId       String
+  userId         String?
+  paymentId      String?       @unique
+  kind           String
+  direction      String
+  amount         Decimal       @db.Decimal(18, 2)
+  reference      String?
+  sourceType     String?
+  sourceId       String?
+  idempotencyKey String?       @unique
+  paymentMethod  String?
+  notes          String?
+  createdAt      DateTime      @default(now())
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  wallet         CustomerWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user           User?         @relation("CustomerWalletTransactionCreator", fields: [userId], references: [id], onDelete: SetNull)
+  payment        CustomerPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, walletId, createdAt])
+  @@index([tenantId, sourceType, sourceId])
+  @@map("customer_wallet_transactions")
 }
 
 // Invoices

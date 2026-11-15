@@ -47,6 +47,10 @@ export function customerProfileAccess(permissions = []) {
     edit: has('canEditCustomer') || has('canEditReceivable'),
     delete: has('canDeleteCustomer'),
     withdraw: has('canCreateWithdrawal'),
+    viewWallet: has('canViewCustomerWallet'),
+    activateWallet: has('canActivateCustomerWallet'),
+    depositWallet: has('canDepositCustomerWallet'),
+    withdrawWallet: has('canWithdrawCustomerWallet'),
   }
 }
 
@@ -69,6 +73,7 @@ export function customerProfilePayload(customer, access) {
     ...(access.balance && {
       balance: money(customer.balance),
       openingBalance: money(customer.openingBalance),
+      openingBalanceType: customer.openingBalanceType || (Number(customer.openingBalance) < 0 ? 'credit' : 'debit'),
       openingBalanceDate: customer.openingBalanceDate,
       openingBalanceNote: customer.openingBalanceNote,
       trustScore: customer.trustScore,
@@ -77,6 +82,16 @@ export function customerProfilePayload(customer, access) {
         : {}),
     }),
     ...(access.withdraw && { availableForWithdrawal: Math.max(0, money(-Number(customer.balance || 0))) }),
+    ...((access.viewWallet || access.activateWallet || access.depositWallet || access.withdrawWallet) && customer.wallet && {
+      wallet: {
+        active: Boolean(customer.wallet.active),
+        ...(access.viewWallet && { balance: money(customer.wallet.balance) }),
+        ...(access.viewWallet && {
+          migratedLegacyAmount: money(customer.wallet.migratedLegacyAmount),
+          transactions: customer.wallet.transactions || [],
+        }),
+      },
+    }),
   }
 }
 
@@ -85,6 +100,7 @@ export function filterCustomerHistoryRows(rows, access) {
     if (['receivable_sale', 'sale_payment_adjustment', 'customer_credit_application', 'pos_sale', 'customer_invoice', 'property_sale', 'historical_rental_receivable'].includes(row.source)) return access.sales || (row.source === 'historical_rental_receivable' && access.businessActivity)
     if (['property_sale_payment', 'rental_payment'].includes(row.source)) return access.payments || (row.source === 'rental_payment' && access.businessActivity)
     if (row.source === 'customer_payment') return access.payments
+    if (row.source === 'customer_wallet') return access.viewWallet
     if (row.source === 'customer_withdrawal') return access.withdrawals
     if (row.source === 'credit_note') return access.creditNotes
     if (row.source === 'sale_return') return access.returns

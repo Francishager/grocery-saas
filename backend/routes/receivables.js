@@ -20,6 +20,8 @@ import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
 import { ensureRentalAccounting, ensureRentalCashLedgerAccount, postRentalJournal, rentalReceiptLines } from '../src/services/rentalAccountingService.js'
 import { applyAvailableCustomerCredit, validateCustomerCreditSaleLimit } from '../src/services/customerCreditApplicationService.js'
+import { ensureCustomerWalletAccount, getCustomerWalletBalance, postWalletJournalEntry } from '../src/services/customerWalletService.js'
+import { openCustomerWallet, recordCustomerWalletOpeningBalance } from '../src/services/customerWalletService.js'
 import { resolveTenantTransactionCurrency, toBaseCurrency, toTransactionCurrency } from '../src/services/currencyRates.js'
 import { allocatePharmacySaleBatches } from '../src/services/pharmacyBatchService.js'
 import {
@@ -192,6 +194,7 @@ const canManageOpeningBalance = (req) => (
 
 const hasOpeningBalanceInput = (body) => (
   Object.prototype.hasOwnProperty.call(body, 'openingBalance') ||
+  Object.prototype.hasOwnProperty.call(body, 'openingBalanceType') ||
   Object.prototype.hasOwnProperty.call(body, 'openingBalanceDate') ||
   Object.prototype.hasOwnProperty.call(body, 'openingBalanceNote')
 )
@@ -229,6 +232,12 @@ async function getTenantCustomerProfileAccess(req, tenantId) {
   const access = customerProfileAccess(req.user?.permissions)
   const features = await getTenantFeatures(tenantId)
   if (!hasFeatureAccess(features, 'customers.credit_limits')) access.creditLimit = false
+  if (!hasFeatureAccess(features, 'customers.wallet')) {
+    access.viewWallet = false
+    access.activateWallet = false
+    access.depositWallet = false
+    access.withdrawWallet = false
+  }
   return access
 }
 
@@ -438,6 +447,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
         creditLimit: true,
         balance: true,
         openingBalance: true,
+        openingBalanceType: true,
         openingBalanceDate: true,
         openingBalanceNote: true,
         status: true
@@ -524,6 +534,7 @@ router.get('/customers/:id/credit-info', authenticateToken, requirePermission('c
           balance: toMoney(reconciledCustomer.balance),
           trustScore,
           openingBalance: toMoney(customer.openingBalance),
+          openingBalanceType: customer.openingBalanceType || (toMoney(customer.openingBalance) < 0 ? 'credit' : 'debit'),
         }),
         ...(access.balance && {
           outstandingSalesCount: outstandingSales.length,
@@ -591,6 +602,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     const propertyManagementEnabled = hasFeatureAccess(tenantFeatures, 'property_management.landlord')
       || hasFeatureAccess(tenantFeatures, 'property_management.agent')
     const rentalFeatureEnabled = hasFeatureAccess(tenantFeatures, 'rentals')
+    const walletFeatureEnabled = hasFeatureAccess(tenantFeatures, 'customers.wallet')
+    access.viewWallet = walletFeatureEnabled && access.viewWallet
+    access.activateWallet = walletFeatureEnabled && access.activateWallet
+    access.depositWallet = walletFeatureEnabled && access.depositWallet
+    access.withdrawWallet = walletFeatureEnabled && access.withdrawWallet
     const limit = Math.min(Math.max(Number(req.query.limit || 250), 25), 1000)
 
     const customer = await prisma.customer.findFirst({
@@ -652,15 +668,15 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
             },
           },
           allocations: {
-            where: { targetType: 'rental' },
-            select: { amount: true, rental: { select: { rentalNo: true, historicalReference: true } } },
+            where: { targetType: { in: ['rental', 'customer_wallet'] } },
+            select: { targetType: true, amount: true, rental: { select: { rentalNo: true, historicalReference: true } } },
           },
         },
         orderBy: { createdAt: 'asc' },
         take: limit
       }) : Promise.resolve([]),
       access.withdrawals ? prisma.customerWithdrawal.findMany({
-        where: scopedWhere(scope, { customerId: id }),
+        where: scopedWhere(scope, { customerId: id, walletId: null }),
         include: {
           branch: { select: { id: true, name: true } },
           cashAccount: { select: { id: true, name: true, type: true } },
@@ -793,7 +809,35 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         orderBy: { paymentDate: 'asc' }, take: limit,
       })) : Promise.resolve([]),
     ]) : [[], []]
-    const reconciledCustomer = { ...customer, balance: balanceSnapshot?.balance ?? toMoney(customer.balance) }
+    let resolvedBalanceSnapshot = balanceSnapshot
+    let wallet = null
+    let walletTransactions = []
+    let walletBalance = 0
+    if (walletFeatureEnabled) {
+      wallet = await prisma.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId: id } })
+      const legacyFunds = Math.max(0, -toMoney(balanceSnapshot?.balance ?? customer.balance))
+      if (!wallet && (customer.walletEnabled || legacyFunds > 0)) {
+        const opened = await prisma.$transaction(tx => openCustomerWallet(tx, {
+          scope, customerId: id, userId: req.user.id, branchId: customer.branchId,
+          allowLegacyMigration: legacyFunds > 0,
+        }))
+        wallet = opened.wallet
+        resolvedBalanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, id)
+      }
+      if (wallet) {
+        [walletBalance, walletTransactions] = await Promise.all([
+          getCustomerWalletBalance(prisma, scope.tenantId, wallet.id),
+          access.viewWallet ? prisma.customerWalletTransaction.findMany({
+            where: { tenantId: scope.tenantId, walletId: wallet.id },
+            include: {
+              user: userSelect.select,
+              payment: { select: { amount: true, currency: true, foreignAmount: true, paymentMethod: true, mobileProvider: true, phoneNumber: true, transactionId: true, reference: true, notes: true, createdAt: true } },
+            }, orderBy: { createdAt: 'desc' }, take: 100,
+          }) : Promise.resolve([]),
+        ])
+      }
+    }
+    const reconciledCustomer = { ...customer, balance: resolvedBalanceSnapshot?.balance ?? toMoney(customer.balance) }
     const trustScore = await getRepaymentTrustScore(prisma, await trustModuleScope(scope, tenantFeatures), reconciledCustomer)
     const effectivePermissions = Array.isArray(req.user?.permissions) ? req.user.permissions : []
     const canViewTrustScore = access.balance
@@ -818,6 +862,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     }
     const profileCustomer = customerProfilePayload({ ...reconciledCustomer, ...(tenantPropertyAddress ? { address: tenantPropertyAddress } : {}), trustScore }, access)
     if (canViewTrustScore) profileCustomer.trustScore = trustScore
+    if (access.viewWallet || access.activateWallet || access.depositWallet || access.withdrawWallet) {
+      profileCustomer.wallet = {
+        active: Boolean(wallet?.isActive),
+        ...(access.viewWallet && { balance: walletBalance }),
+        ...(access.viewWallet && { migratedLegacyAmount: toMoney(wallet?.migratedLegacyAmount), transactions: walletTransactions }),
+      }
+    }
 
     const rows = []
     const paymentTotalBySale = new Map()
@@ -835,18 +886,19 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         .map((ret) => ret.saleId),
     ])
 
-    if (access.balance && toMoney(customer.openingBalance) > 0) {
+    if (access.balance && Math.abs(toMoney(customer.openingBalance)) > 0) {
+      const openingBalanceValue = toMoney(customer.openingBalance)
       rows.push({
         id: `opening-${customer.id}`,
         source: 'opening_balance',
-        type: 'Opening Balance',
+        type: openingBalanceValue < 0 ? 'Customer Savings Opening Balance' : 'Opening Receivable Balance',
         date: customer.openingBalanceDate || customer.createdAt,
         reference: 'Opening Balance',
-        description: customer.openingBalanceNote || 'Balance brought forward before using JibuSales',
-        debit: toMoney(customer.openingBalance),
-        credit: 0,
-        amount: toMoney(customer.openingBalance),
-        balanceImpact: toMoney(customer.openingBalance),
+        description: customer.openingBalanceNote || (openingBalanceValue < 0 ? 'Customer funds held before using JibuSales' : 'Balance brought forward before using JibuSales'),
+        debit: Math.max(0, openingBalanceValue),
+        credit: Math.max(0, -openingBalanceValue),
+        amount: Math.abs(openingBalanceValue),
+        balanceImpact: openingBalanceValue,
         affectsBalance: true,
         paymentMethod: null,
         status: 'system',
@@ -990,13 +1042,14 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     })
 
     payments.forEach((payment) => {
+      const walletDeposit = (payment.allocations || []).some(allocation => allocation.targetType === 'customer_wallet')
       rows.push({
         id: payment.id,
-        source: 'customer_payment',
-        type: 'Payment',
+        source: walletDeposit ? 'customer_wallet' : 'customer_payment',
+        type: walletDeposit ? 'Wallet Deposit' : 'Payment',
         date: payment.createdAt,
         reference: customerPaymentDisplayReference(payment),
-        originalReference: payment.sale?.receiptNo || payment.allocations?.[0]?.rental?.historicalReference || payment.allocations?.[0]?.rental?.rentalNo || null,
+        originalReference: payment.sale?.receiptNo || payment.allocations?.find(allocation => allocation.targetType === 'rental')?.rental?.historicalReference || payment.allocations?.find(allocation => allocation.targetType === 'rental')?.rental?.rentalNo || null,
         description: (() => {
           const linkedRentals = (payment.allocations || []).map((allocation) => {
             const reference = allocation.rental?.historicalReference || allocation.rental?.rentalNo
@@ -1004,13 +1057,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           }).filter(Boolean)
           const saleText = payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : ''
           const rentalText = linkedRentals.length ? `Applied to rental ${linkedRentals.join(', ')}` : ''
-          return [saleText, rentalText, !saleText && !rentalText ? payment.notes || 'Customer payment' : ''].filter(Boolean).join(' · ')
+          return [walletDeposit ? 'Deposited to customer wallet' : '', saleText, rentalText, !walletDeposit && !saleText && !rentalText ? payment.notes || 'Customer payment' : ''].filter(Boolean).join(' · ')
         })(),
         debit: 0,
         credit: toMoney(payment.amount),
         amount: toMoney(payment.amount),
-        balanceImpact: -toMoney(payment.amount),
-        affectsBalance: true,
+        balanceImpact: walletDeposit ? 0 : -toMoney(payment.amount),
+        affectsBalance: !walletDeposit,
         paymentMethod: payment.paymentMethod,
         mobileProvider: payment.mobileProvider || null,
         phoneNumber: payment.phoneNumber || null,
@@ -1409,6 +1462,10 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         edit: access.edit,
         delete: access.delete,
         withdraw: access.withdraw,
+        viewWallet: access.viewWallet,
+        activateWallet: access.activateWallet,
+        depositWallet: access.depositWallet,
+        withdrawWallet: access.withdrawWallet,
       },
       summary: {
         ...totals,
@@ -1429,7 +1486,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           asOf: now,
           currentBalance: toMoney(reconciledCustomer.balance),
           receivableExposure: Math.max(0, toMoney(reconciledCustomer.balance)),
-          customerFunds: Math.max(0, -toMoney(reconciledCustomer.balance)),
+          customerFunds: Math.max(0, -toMoney(reconciledCustomer.balance)) + walletBalance,
           ...(access.creditLimit && {
             creditLimit: toMoney(customer.creditLimit),
             availableLimit: Math.max(0, toMoney(customer.creditLimit) - Math.max(0, toMoney(reconciledCustomer.balance))),
@@ -1462,6 +1519,182 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
   }
 })
 
+router.get('/customers/:id/wallet', authenticateToken, requirePermission('canViewCustomerWallet'), requireFeature('customers.wallet'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true })
+    const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    let wallet = await prisma.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId: customer.id } })
+    let migrated = false
+    if (!wallet && customer.walletEnabled) {
+      const result = await prisma.$transaction(tx => openCustomerWallet(tx, { scope, customerId: customer.id, userId: req.user.id, branchId: customer.branchId, allowLegacyMigration: false }))
+      wallet = result.wallet
+    } else if (!wallet) {
+      const snapshot = await calculateCustomerReceivableBalance(prisma, scope, customer.id)
+      if (Number(snapshot?.balance) < -0.009) {
+        const result = await prisma.$transaction(tx => openCustomerWallet(tx, { scope, customerId: customer.id, userId: req.user.id, branchId: customer.branchId }))
+        wallet = result.wallet
+        migrated = result.migrated
+      }
+    }
+    if (!wallet) return res.json({ active: false, balance: 0, transactions: [], migrated: false })
+    const [balance, transactions] = await Promise.all([
+      getCustomerWalletBalance(prisma, scope.tenantId, wallet.id),
+      prisma.customerWalletTransaction.findMany({ where: { tenantId: scope.tenantId, walletId: wallet.id }, include: { user: { select: { id: true, fname: true, lname: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    ])
+    res.json({ active: wallet.isActive, balance, migratedLegacyAmount: Number(wallet.migratedLegacyAmount || 0), migrated, transactions })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    handleBranchError(res, error, 'Failed to load customer wallet')
+  }
+})
+
+router.post('/customers/:id/wallet/activate', authenticateToken, requirePermission('canActivateCustomerWallet'), requireFeature('customers.wallet'), requireTenant, async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: true })
+    const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: req.params.id }) })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    const result = await prisma.$transaction(tx => openCustomerWallet(tx, { scope, customerId: customer.id, userId: req.user.id, branchId: customer.branchId }))
+    res.status(201).json({ active: result.wallet.isActive, migrated: result.migrated, walletId: result.wallet.id })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    handleBranchError(res, error, 'Failed to activate customer wallet')
+  }
+})
+
+router.post('/wallet/deposits', authenticateToken, requirePermission('canDepositCustomerWallet'), requireFeature('customers.wallet'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const { customerId, amount, paymentMethod = 'cash', reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId, currency, unitsPerBase } = req.body
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    const customer = await prisma.customer.findFirst({ where: { id: customerId, tenantId: tenantIdFromUser(req.user) } })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    const scopeRequest = customer.branchId ? { ...req, body: { ...req.body, branchId: customer.branchId } } : req
+    const scope = await resolveBranchScope(prisma, scopeRequest, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    const wallet = await prisma.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId, isActive: true } })
+    if (!wallet) return res.status(409).json({ error: 'Activate this customer wallet before accepting a deposit.', code: 'CUSTOMER_WALLET_NOT_ACTIVE' })
+    const fx = await resolveTenantTransactionCurrency(prisma, scope.tenantId, currency, unitsPerBase)
+    const foreignAmount = toMoney(amount)
+    const baseAmount = toBaseCurrency(foreignAmount, fx.rateToBase)
+    if (baseAmount <= 0) return res.status(400).json({ error: 'Deposit amount must be greater than zero.' })
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, cashAccountId || req.userCashAccountId)) return res.status(403).json({ error: `You do not have permission to use ${paymentMethod}.`, code: 'NO_PAYMENT_METHOD_PERMISSION' })
+    const provider = String(mobileProvider || '').trim() || null
+    const phone = String(phoneNumber || '').trim() || null
+    const txnId = String(transactionId || '').trim() || null
+    if (paymentMethod === 'mobile_money' && (!provider || !phone || !txnId)) return res.status(400).json({ error: 'Mobile money deposits require provider, phone number, and transaction ID.' })
+    if (paymentMethod === 'card' && !txnId) return res.status(400).json({ error: 'Card deposits require a transaction ID.' })
+    const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160) || null
+    if (idempotencyKey) {
+      const existing = await prisma.customerWalletTransaction.findFirst({ where: { tenantId: scope.tenantId, idempotencyKey }, include: { payment: true } })
+      if (existing) {
+        const mayViewBalance = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerWallet') || req.userPermissions?.canViewCustomerWallet === true
+        return res.status(200).json({ transaction: existing, payment: existing.payment, ...(mayViewBalance && { balance: await getCustomerWalletBalance(prisma, scope.tenantId, wallet.id) }), duplicate: true })
+      }
+    }
+    const account = await resolveReceiptCashAccount(prisma, scope, req, paymentMethod, cashAccountId, 'wallet deposits')
+    if (String(account.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) return res.status(409).json({ error: `Select a ${fx.baseCurrency} transaction account.` })
+    const receiptReference = String(reference || '').trim() || `WAL-${Date.now()}`
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${wallet.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const payment = await tx.customerPayment.create({ data: {
+        tenantId: scope.tenantId, branchId: scope.branchId, customerId,
+        amount: baseAmount, currency: fx.currency, foreignAmount, exchangeRateToBase: fx.rateToBase,
+        exchangeRateAsOf: fx.rateDate, exchangeRateSource: fx.provider, paymentMethod,
+        mobileProvider: paymentMethod === 'mobile_money' ? provider : null,
+        phoneNumber: paymentMethod === 'mobile_money' ? phone : null,
+        transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? txnId : null,
+        reference: receiptReference, idempotencyKey, allocationMode: 'explicit', notes: notes || null,
+      } })
+      await tx.customerPaymentAllocation.create({ data: { tenantId: scope.tenantId, customerId, paymentId: payment.id, targetType: 'customer_wallet', amount: baseAmount, createdById: req.user.id } })
+      const updatedAccount = await tx.cashAccount.update({ where: { id: account.id }, data: { balance: { increment: baseAmount } } })
+      await tx.cashTransaction.create({ data: {
+        tenantId: scope.tenantId, accountId: account.id, type: 'receipt', amount: baseAmount,
+        balanceAfter: updatedAccount.balance, currency: fx.currency, foreignAmount,
+        exchangeRateToBase: fx.rateToBase, exchangeRateAsOf: fx.rateDate, exchangeRateSource: fx.provider,
+        reference: receiptReference, description: `Customer wallet deposit: ${customer.name}`, userId: req.user.id,
+      } })
+      await syncLinkedTransactionAccountBalance(tx, scope.tenantId, account.id)
+      const cashLedger = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${account.id}` }, isActive: true } })
+      const walletAccount = await ensureCustomerWalletAccount(tx, scope.tenantId)
+      if (!cashLedger) throw Object.assign(new Error(`No linked chart account exists for ${account.name}. Link it in Accounting before recording this deposit.`), { statusCode: 409 })
+      await postWalletJournalEntry(tx, { tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id, sourceType: 'CUSTOMER_WALLET_DEPOSIT', sourceId: payment.id, reference: receiptReference, description: `Customer wallet deposit ${receiptReference}`, lines: [
+        { accountId: cashLedger.id, debit: baseAmount, credit: 0, description: 'Cash received into transaction account' },
+        { accountId: walletAccount.id, debit: 0, credit: baseAmount, description: 'Increase customer wallet liability' },
+      ] })
+      const walletTransaction = await tx.customerWalletTransaction.create({ data: {
+        tenantId: scope.tenantId, branchId: scope.branchId, walletId: wallet.id, userId: req.user.id,
+        paymentId: payment.id, kind: 'deposit', direction: 'in', amount: baseAmount,
+        reference: receiptReference, idempotencyKey, paymentMethod, notes: notes || null,
+      } })
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
+      const mayViewBalance = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerWallet') || req.userPermissions?.canViewCustomerWallet === true
+      return { payment, walletTransaction, ...(mayViewBalance ? { balance: await getCustomerWalletBalance(tx, scope.tenantId, wallet.id) } : {}) }
+    }, { isolationLevel: 'Serializable', timeout: 20000 })
+    res.status(201).json({ ...result, baseCurrency: fx.baseCurrency })
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    handleBranchError(res, error, 'Failed to record customer wallet deposit')
+  }
+})
+
+router.post('/wallet/withdrawals', authenticateToken, requirePermission('canWithdrawCustomerWallet'), requireFeature('customers.wallet'), requireTenant, loadUserPermissions, async (req, res) => {
+  try {
+    const { customerId, amount, paymentMethod = 'cash', reference, notes, mobileProvider, phoneNumber, transactionId, cashAccountId } = req.body
+    if (!customerId) return res.status(400).json({ error: 'Customer is required' })
+    const tenantId = tenantIdFromUser(req.user)
+    const customer = await prisma.customer.findFirst({ where: { id: customerId, tenantId } })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    const scopeRequest = customer.branchId ? { ...req, body: { ...req.body, branchId: customer.branchId } } : req
+    const scope = await resolveBranchScope(prisma, scopeRequest, { source: 'body', requireBranch: true, allowOwnerAll: false })
+    const wallet = await prisma.customerWallet.findFirst({ where: { tenantId, customerId, isActive: true } })
+    if (!wallet) return res.status(409).json({ error: 'This customer does not have an active wallet.', code: 'CUSTOMER_WALLET_NOT_ACTIVE' })
+    if (!['cash', 'mobile_money', 'bank_transfer', 'card', 'cheque'].includes(paymentMethod)) return res.status(400).json({ error: 'Choose a supported withdrawal method.' })
+    const withdrawalAmount = toMoney(amount)
+    if (withdrawalAmount <= 0) return res.status(400).json({ error: 'Withdrawal amount must be greater than zero.' })
+    if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, cashAccountId || req.userCashAccountId)) return res.status(403).json({ error: `You do not have permission to use ${paymentMethod}.`, code: 'NO_PAYMENT_METHOD_PERMISSION' })
+    const provider = String(mobileProvider || '').trim() || null
+    const phone = String(phoneNumber || '').trim() || null
+    const txnId = String(transactionId || '').trim() || null
+    if (paymentMethod === 'mobile_money' && (!provider || !phone || !txnId)) return res.status(400).json({ error: 'Mobile money withdrawals require provider, phone number, and transaction ID.' })
+    if (['card', 'bank_transfer', 'cheque'].includes(paymentMethod) && !txnId && paymentMethod !== 'bank_transfer') return res.status(400).json({ error: 'Enter the transaction or cheque reference.' })
+    const account = await resolveReceiptCashAccount(prisma, scope, req, paymentMethod, cashAccountId, 'wallet withdrawals')
+    const withdrawal = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${wallet.id} AND "tenantId" = ${tenantId} FOR UPDATE`
+      const currentBalance = await getCustomerWalletBalance(tx, tenantId, wallet.id)
+      if (withdrawalAmount > currentBalance + 0.009) throw Object.assign(new Error('Withdrawal exceeds available wallet funds.'), { statusCode: 400, code: 'INSUFFICIENT_CUSTOMER_WALLET_FUNDS' })
+      const debited = await tx.cashAccount.updateMany({ where: { id: account.id, tenantId, isActive: true, balance: { gte: withdrawalAmount } }, data: { balance: { decrement: withdrawalAmount } } })
+      if (debited.count !== 1) throw Object.assign(new Error(`Insufficient available balance in ${account.name}.`), { statusCode: 400, code: 'INSUFFICIENT_ACCOUNT_BALANCE' })
+      const updatedAccount = await tx.cashAccount.findUnique({ where: { id: account.id } })
+      const withdrawalReference = String(reference || '').trim() || `WD-${Date.now()}`
+      const created = await tx.customerWithdrawal.create({ data: {
+        tenantId, branchId: scope.branchId, customerId, walletId: wallet.id, userId: req.user.id, cashAccountId: account.id,
+        amount: withdrawalAmount, paymentMethod,
+        mobileProvider: paymentMethod === 'mobile_money' ? provider : null,
+        phoneNumber: paymentMethod === 'mobile_money' ? phone : null,
+        transactionId: ['mobile_money', 'card', 'bank_transfer', 'cheque'].includes(paymentMethod) ? txnId : null,
+        reference: withdrawalReference, notes,
+      }, include: { customer: { select: { id: true, name: true } }, branch: { select: { id: true, name: true } }, user: { select: { id: true, fname: true, lname: true } }, cashAccount: { select: { id: true, name: true, type: true, balance: true } } } })
+      await tx.cashTransaction.create({ data: { tenantId, accountId: account.id, type: 'withdrawal', amount: withdrawalAmount, balanceAfter: updatedAccount.balance, reference: withdrawalReference, description: `Customer wallet withdrawal: ${customer.name}`, userId: req.user.id } })
+      await syncLinkedTransactionAccountBalance(tx, tenantId, account.id)
+      const cashLedger = await tx.account.findFirst({ where: { tenantId, description: { contains: `cashAccount:${account.id}` }, isActive: true } })
+      const walletAccount = await ensureCustomerWalletAccount(tx, tenantId)
+      if (!cashLedger) throw Object.assign(new Error(`No linked chart account exists for ${account.name}. Link it in Accounting before recording this withdrawal.`), { statusCode: 409 })
+      await postWalletJournalEntry(tx, { tenantId, branchId: scope.branchId, userId: req.user.id, sourceType: 'CUSTOMER_WALLET_WITHDRAWAL', sourceId: created.id, reference: withdrawalReference, description: `Customer wallet withdrawal ${withdrawalReference}`, lines: [
+        { accountId: walletAccount.id, debit: withdrawalAmount, credit: 0, description: 'Reduce customer wallet liability' },
+        { accountId: cashLedger.id, debit: 0, credit: withdrawalAmount, description: 'Funds paid from transaction account' },
+      ] })
+      const walletTransaction = await tx.customerWalletTransaction.create({ data: { tenantId, branchId: scope.branchId, walletId: wallet.id, userId: req.user.id, kind: 'withdrawal', direction: 'out', amount: withdrawalAmount, reference: withdrawalReference, sourceType: 'withdrawal', sourceId: created.id, paymentMethod, notes } })
+      const balance = await getCustomerWalletBalance(tx, tenantId, wallet.id)
+      await reconcileCustomerReceivableBalance(tx, scope, customerId)
+      const mayViewBalance = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerWallet') || req.userPermissions?.canViewCustomerWallet === true
+      return { ...created, walletTransaction, ...(mayViewBalance ? { walletBalance: balance } : {}) }
+    }, { isolationLevel: 'Serializable', timeout: 20000 })
+    res.status(201).json(withdrawal)
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    handleBranchError(res, error, 'Failed to record customer wallet withdrawal')
+  }
+})
+
 // Create new customer
 router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCustomer', 'canCreateReceivable']), requireTenant, async (req, res) => {
   try {
@@ -1471,6 +1704,7 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       allowOwnerAll: true
     })
     const { name, email, phone, alternatePhone, address, creditLimit, notes, openingBalanceNote } = req.body
+    let walletEnabled = req.body.walletEnabled === true
     if (!name?.trim()) {
       return res.status(400).json({ error: 'Customer name is required' })
     }
@@ -1479,6 +1713,13 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
     if (normalizedPhone && normalizedPhone === normalizedAlternatePhone) return res.status(400).json({ error: 'Use a different number for the alternate phone.' })
 
     const customerFeatures = await getTenantFeatures(scope.tenantId)
+    const walletFeatureEnabled = hasFeatureAccess(customerFeatures, 'customers.wallet')
+    const canActivateWallet = req.user?.permissions?.includes('*')
+      || req.user?.permissions?.includes('canActivateCustomerWallet')
+      || req.userPermissions?.canActivateCustomerWallet === true
+    if (walletEnabled && (!walletFeatureEnabled || !canActivateWallet)) {
+      return res.status(403).json({ error: 'Customer Wallet must be enabled for this business and you need permission to activate a wallet.', code: 'CUSTOMER_WALLET_ACTIVATION_NOT_ALLOWED' })
+    }
     const creditLimitsEnabled = hasFeatureAccess(customerFeatures, 'customers.credit_limits')
     if (creditLimit !== undefined) {
       if (!creditLimitsEnabled) {
@@ -1495,16 +1736,26 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
       return res.status(400).json({ error: creditLimitCheck.message, code: 'INVALID_CUSTOMER_CREDIT_LIMIT' })
     }
 
-    const openingBalance = toMoney(req.body.openingBalance, 0)
-    if (openingBalance < 0) {
+    const openingBalanceAmount = toMoney(req.body.openingBalance, 0)
+    if (openingBalanceAmount < 0) {
       return res.status(400).json({ error: 'Opening balance cannot be negative' })
     }
+    const openingBalanceType = String(req.body.openingBalanceType || 'debit').toLowerCase()
+    if (!['debit', 'credit'].includes(openingBalanceType)) return res.status(400).json({ error: 'Choose whether the opening balance is a debit or customer savings credit.' })
+    const openingBalance = openingBalanceType === 'credit' ? -openingBalanceAmount : openingBalanceAmount
 
-    if ((openingBalance > 0 || req.body.openingBalanceDate || openingBalanceNote) && !canManageOpeningBalance(req)) {
+    if ((openingBalanceAmount > 0 || req.body.openingBalanceDate || openingBalanceNote) && !canManageOpeningBalance(req)) {
       return res.status(403).json({ error: 'Only owner and admin users can manage opening balances' })
     }
 
-    const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalance)
+    if (openingBalanceType === 'credit' && openingBalanceAmount > 0) {
+      if (!walletFeatureEnabled) return res.status(403).json({ error: 'Customer savings opening balances require the Customer Wallet feature.', code: 'CUSTOMER_WALLET_FEATURE_REQUIRED' })
+      const canActivateWallet = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canActivateCustomerWallet') || req.userPermissions?.canActivateCustomerWallet === true
+      if (!canActivateWallet) return res.status(403).json({ error: 'You need permission to open a customer wallet before recording customer savings.', code: 'CUSTOMER_WALLET_ACTIVATION_NOT_ALLOWED' })
+      walletEnabled = true
+    }
+
+    const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalanceAmount)
     if (req.body.openingBalanceDate && !openingBalanceDate) {
       return res.status(400).json({ error: 'Opening balance date is invalid' })
     }
@@ -1534,7 +1785,9 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
             address,
             creditLimit: creditLimitCheck.amount,
             balance: openingBalance,
+            walletEnabled: Boolean(walletEnabled),
             openingBalance,
+            openingBalanceType,
             openingBalanceDate,
             openingBalanceNote,
             notes,
@@ -1543,7 +1796,22 @@ router.post('/customers', authenticateToken, requireAnyPermission(['canCreateCus
             branchId: scope.branchId || req.body.branchId || null
           }
         })
-        if (openingBalance > 0) {
+        if (walletEnabled) await openCustomerWallet(tx, {
+          scope, customerId: created.id, userId: req.user.id,
+          branchId: scope.branchId || req.body.branchId || null,
+          allowLegacyMigration: false,
+        })
+        if (openingBalanceType === 'credit' && openingBalanceAmount > 0) {
+          await recordCustomerWalletOpeningBalance(tx, {
+            scope, customerId: created.id, userId: req.user.id,
+            branchId: scope.branchId || req.body.branchId || null,
+            amount: openingBalanceAmount, date: openingBalanceDate || new Date(),
+            reference: created.name, customerName: created.name,
+          })
+          const reconciled = await reconcileCustomerReceivableBalance(tx, scope, created.id)
+          return reconciled?.customer || created
+        }
+        if (openingBalanceAmount > 0) {
           const config = await getReceivablesAccountingConfig(tx, scope.tenantId)
           if (config?.isEnabled) await postReceivablesJournal(tx, {
             tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
@@ -1611,13 +1879,21 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
     }
 
     const existingOpeningBalance = toMoney(existingCustomer.openingBalance, 0)
+    const existingOpeningBalanceType = existingCustomer.openingBalanceType || (existingOpeningBalance < 0 ? 'credit' : 'debit')
+    if (req.body.openingBalanceType && String(req.body.openingBalanceType).toLowerCase() !== existingOpeningBalanceType) {
+      return res.status(409).json({ error: 'Opening balance direction is fixed when the customer is created. Use wallet transactions for later customer savings activity.', code: 'OPENING_BALANCE_TYPE_IMMUTABLE' })
+    }
     let openingBalanceDelta = 0
     const openingBalanceData = {}
     if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalance')) {
-      const openingBalance = toMoney(req.body.openingBalance, 0)
-      if (openingBalance < 0) {
+      const openingBalanceAmount = toMoney(req.body.openingBalance, 0)
+      if (openingBalanceAmount < 0) {
         return res.status(400).json({ error: 'Opening balance cannot be negative' })
       }
+      if (existingOpeningBalanceType === 'credit' && Math.abs(openingBalanceAmount - Math.abs(existingOpeningBalance)) > 0.009) {
+        return res.status(409).json({ error: 'Customer savings opening balances are historical wallet funds and cannot be rewritten. Record a wallet deposit or withdrawal instead.', code: 'WALLET_OPENING_BALANCE_IMMUTABLE' })
+      }
+      const openingBalance = existingOpeningBalanceType === 'credit' ? -openingBalanceAmount : openingBalanceAmount
 
       openingBalanceDelta = openingBalance - existingOpeningBalance
       if (openingBalanceDelta !== 0) {
@@ -1641,8 +1917,8 @@ router.put('/customers/:id', authenticateToken, requireAnyPermission(['canEditCu
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'openingBalanceDate')) {
       const openingBalanceForDate = Object.prototype.hasOwnProperty.call(openingBalanceData, 'openingBalance')
-        ? openingBalanceData.openingBalance
-        : existingOpeningBalance
+        ? Math.abs(openingBalanceData.openingBalance)
+        : Math.abs(existingOpeningBalance)
       const openingBalanceDate = parseOpeningBalanceDate(req.body.openingBalanceDate, openingBalanceForDate)
       if (req.body.openingBalanceDate && !openingBalanceDate) {
         return res.status(400).json({ error: 'Opening balance date is invalid' })
@@ -1836,6 +2112,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
     if (customer.status !== 'active') return res.status(400).json({ error: 'Customer is not active' })
+    const walletFeatureEnabledForTenant = hasFeatureAccess(await getTenantFeatures(scope.tenantId), 'customers.wallet')
 
     const productIds = [...new Set(items.map((item) => item.productId).filter(Boolean))]
     const products = await prisma.product.findMany({
@@ -1916,8 +2193,15 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
 
     const sale = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
-      const customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
-      const availableCustomerCredit = Math.max(0, -toMoney(customerBalanceBefore?.balance))
+      let customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
+      let activeWallet = walletFeatureEnabledForTenant ? await tx.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId, isActive: true } }) : null
+      if (walletFeatureEnabledForTenant && !activeWallet && Number(customerBalanceBefore?.balance) < -0.009) {
+        const opened = await openCustomerWallet(tx, { scope, customerId, userId: req.user.id, branchId: customer.branchId })
+        activeWallet = opened.wallet
+        customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
+      }
+      const walletBalanceBefore = activeWallet ? await getCustomerWalletBalance(tx, scope.tenantId, activeWallet.id) : 0
+      const availableCustomerCredit = activeWallet ? walletBalanceBefore : Math.max(0, -toMoney(customerBalanceBefore?.balance))
         const createdSale = await tx.saleRecord.create({
           data: {
           receiptNo,
@@ -1969,7 +2253,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       })
 
       const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
-      if (arConfig?.isEnabled) {
+      if (arConfig?.isEnabled || activeWallet) {
         await postReceivablesJournal(tx, {
           tenantId: scope.tenantId,
           branchId: scope.branchId,
@@ -1980,6 +2264,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
           reference: createdSale.receiptNo,
           description: `Credit sale ${createdSale.receiptNo}`,
           lines: saleRecognitionLines(arConfig, createdSale, saleItems),
+          allowDisabled: Boolean(activeWallet),
         })
       }
 
@@ -2056,7 +2341,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         })
 
         await syncLinkedTransactionAccountBalance(tx, scope.tenantId, receiptAccount.id)
-        if (arConfig?.isEnabled) {
+        if (arConfig?.isEnabled || activeWallet) {
           const transactionAccount = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${receiptAccount.id}` } } })
           if (!transactionAccount) throw Object.assign(new Error(`No linked chart account exists for ${receiptAccount.name}. Link this transaction account in Accounting before recording receivables.`), { statusCode: 409 })
           await postReceivablesJournal(tx, {
@@ -2069,6 +2354,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
             reference: receiptNo,
             description: `Customer receipt ${receiptNo}`,
             lines: receiptCollectionLines(arConfig, { transactionAccountId: transactionAccount.id, amount: paid, receivableApplied: paid, reference: receiptNo }),
+            allowDisabled: Boolean(activeWallet),
           })
         }
       }
@@ -2078,7 +2364,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
         const application = await applyAvailableCustomerCredit(tx, {
           scope, customerId, saleId: createdSale.id,
           amountDue: balance, availableCredit: availableCustomerCredit,
-          userId: req.user.id, branchId: scope.branchId,
+          userId: req.user.id, branchId: scope.branchId, useWallet: walletFeatureEnabledForTenant,
         })
         creditApplied = application.amount
         if (creditApplied > 0 && arConfig?.isEnabled) {
@@ -2086,6 +2372,21 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
             await postCustomerCreditApplicationJournal(tx, {
               tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
               application: creditApplication, reference: createdSale.receiptNo,
+            })
+          }
+        }
+        if (creditApplied > 0 && activeWallet) {
+          const walletAccount = await ensureCustomerWalletAccount(tx, scope.tenantId)
+          for (const walletApplication of application.applications.filter((row) => row.sourceType === 'wallet')) {
+            await postWalletJournalEntry(tx, {
+              tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+              sourceType: 'CUSTOMER_WALLET_SALE_APPLICATION', sourceId: walletApplication.id,
+              reference: createdSale.receiptNo,
+              description: `Apply customer wallet to credit sale ${createdSale.receiptNo}`,
+              lines: [
+                { accountId: walletAccount.id, debit: toMoney(walletApplication.amount), credit: 0, description: 'Customer wallet funds applied to sale' },
+                { accountId: arConfig?.receivableAccountId, debit: 0, credit: toMoney(walletApplication.amount), description: 'Settle customer receivable with wallet' },
+              ],
             })
           }
         }

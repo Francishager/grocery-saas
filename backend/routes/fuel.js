@@ -139,6 +139,7 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
       const application = await applyAvailableCustomerCredit(tx, {
         scope, customerId, saleId: created.id, amountDue: amount,
         availableCredit: Math.max(0, -currentBalance), userId: req.user.id, branchId: scope.branchId,
+        useWallet: false,
       });
       for (const creditApplication of application.applications.filter((row) => row.sourceType === 'payment')) {
         await postCustomerCreditApplicationJournal(tx, {

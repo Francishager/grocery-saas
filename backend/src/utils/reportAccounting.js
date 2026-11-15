@@ -158,7 +158,7 @@ export async function loadJournalExpenseRows(client, scope, dateRange, { userId 
   });
 }
 
-export function summarizeCashMovements(movements, openingCash = 0, { saleReferences = new Set(), collectionReferences = new Set(), expenseReferences = new Set() } = {}) {
+export function summarizeCashMovements(movements, openingCash = 0, { saleReferences = new Set(), collectionReferences = new Set(), walletDepositReferences = new Set(), expenseReferences = new Set() } = {}) {
   const totals = { openingCash: money(openingCash), cashSales: 0, cashCollections: 0, cashExpenses: 0,
     otherCashIn: 0, otherCashOut: 0, cashTransfersIn: 0, cashTransfersOut: 0,
     cashToSafe: 0, cashToBank: 0, cashToMobileMoney: 0 };
@@ -179,6 +179,7 @@ export function summarizeCashMovements(movements, openingCash = 0, { saleReferen
     else if (direction === 'transfer-out') totals.cashTransfersOut += amount;
     else if (direction === 'in') {
       if (saleReferences.has(row.reference) || row.type === 'sale') totals.cashSales += amount;
+      else if (walletDepositReferences.has(row.reference)) totals.otherCashIn += amount;
       else if (collectionReferences.has(row.reference) || ['receipt', 'collection'].includes(row.type)) totals.cashCollections += amount;
       else totals.otherCashIn += amount;
     } else if (row.type === 'expense' || expenseReferences.has(row.reference)) totals.cashExpenses += amount;

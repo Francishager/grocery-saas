@@ -64,7 +64,9 @@ interface Customer {
   balance?: number
   rentalBalance?: number
   availableForWithdrawal?: number
+  walletBalance?: number
   openingBalance?: number
+  openingBalanceType?: 'debit' | 'credit'
   openingBalanceDate?: string | null
   openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
@@ -228,9 +230,11 @@ export default function ReceivablesPage() {
   const [showSaleModal, setShowSaleModal] = useState(false)
   const [savingSale, setSavingSale] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [walletDepositMode, setWalletDepositMode] = useState(false)
   const [savingPayment, setSavingPayment] = useState(false)
   const savingPaymentRef = React.useRef(false)
   const [showWithdrawalModal, setShowWithdrawalModal] = useState(false)
+  const [walletWithdrawalMode, setWalletWithdrawalMode] = useState(false)
   const [savingWithdrawal, setSavingWithdrawal] = useState(false)
   const savingWithdrawalRef = React.useRef(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
@@ -341,6 +345,7 @@ export default function ReceivablesPage() {
     if (request.type === 'payment') {
       setSelectedCustomer(customer)
       setSelectedSale(null)
+      setWalletDepositMode(true)
       setPaymentAmount('')
       setPaymentNotes('')
       setPaymentCurrency(baseCurrency)
@@ -1010,7 +1015,7 @@ export default function ReceivablesPage() {
     savingPaymentRef.current = true
     setSavingPayment(true)
     try {
-      const response = await apiFetch('/api/receivables/payments', {
+    const response = await apiFetch(walletDepositMode && !selectedSale ? '/api/receivables/wallet/deposits' : '/api/receivables/payments', {
         method: 'POST',
         headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({
@@ -1026,7 +1031,7 @@ export default function ReceivablesPage() {
           mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined,
           transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? transactionId : undefined,
-          notes: paymentNotes.trim() || 'Payment recorded via dashboard'
+          notes: paymentNotes.trim() || (walletDepositMode ? 'Customer wallet deposit' : 'Payment recorded via dashboard')
         })
       })
 
@@ -1041,6 +1046,7 @@ export default function ReceivablesPage() {
       setShowPaymentModal(false)
       setSelectedCustomer(null)
       setSelectedSale(null)
+      setWalletDepositMode(false)
       setPaymentAmount('')
       setPaymentNotes('')
       setPaymentMethod('cash')
@@ -1065,11 +1071,11 @@ export default function ReceivablesPage() {
   }
   const recordWithdrawal = async () => {
     if (savingWithdrawalRef.current) return
-    if (!canCreateWithdrawal) {
+    if (walletWithdrawalMode ? !hasPermission('canWithdrawCustomerWallet') : !canCreateWithdrawal) {
       toast({
         variant: 'destructive',
         title: 'You do not have permission to record customer withdrawals',
-        description: 'Required permission: canCreateWithdrawal',
+        description: walletWithdrawalMode ? 'Required permission: canWithdrawCustomerWallet' : 'Required permission: canCreateWithdrawal',
       })
       return
     }
@@ -1088,7 +1094,7 @@ export default function ReceivablesPage() {
       return
     }
     const availableFunds = availableCustomerFunds(targetCustomer)
-    if (amount > availableFunds) {
+    if (!walletWithdrawalMode && amount > availableFunds) {
       toast({ variant: 'destructive', title: 'Insufficient customer funds', description: `${targetCustomer.name} has ${formatCurrency(availableFunds)} available to withdraw.` })
       return
     }
@@ -1105,7 +1111,7 @@ export default function ReceivablesPage() {
     savingWithdrawalRef.current = true
     setSavingWithdrawal(true)
     try {
-      const response = await apiFetch('/api/receivables/withdrawals', {
+      const response = await apiFetch(walletWithdrawalMode ? '/api/receivables/wallet/withdrawals' : '/api/receivables/withdrawals', {
         method: 'POST',
         body: JSON.stringify({
           customerId: targetCustomer.id,
@@ -1135,6 +1141,7 @@ export default function ReceivablesPage() {
       })
       setShowWithdrawalModal(false)
       setSelectedCustomer(null)
+      setWalletWithdrawalMode(false)
       setWithdrawalAmount('')
       setPaymentMethod('cash')
       setMobileProvider('')
@@ -1668,8 +1675,11 @@ export default function ReceivablesPage() {
   const withdrawalValue = parseAmount(withdrawalAmount)
   const withdrawalAccountBalance = Number(selectedWithdrawalAccount?.balance || 0)
   const withdrawalAccountBalanceAfter = selectedWithdrawalAccount ? withdrawalAccountBalance - withdrawalValue : null
-  const withdrawalAvailableFunds = availableCustomerFunds(selectedCustomer)
-  const withdrawalCustomerFundsAfter = Math.max(0, withdrawalAvailableFunds - withdrawalValue)
+  const canViewWithdrawalFunds = !walletWithdrawalMode || hasPermission('canViewCustomerWallet')
+  const withdrawalAvailableFunds = walletWithdrawalMode
+    ? (canViewWithdrawalFunds ? Math.max(0, parseAmount(selectedCustomer?.walletBalance)) : Number.POSITIVE_INFINITY)
+    : availableCustomerFunds(selectedCustomer)
+  const withdrawalCustomerFundsAfter = Number.isFinite(withdrawalAvailableFunds) ? Math.max(0, withdrawalAvailableFunds - withdrawalValue) : null
   const withdrawalLimit = selectedWithdrawalAccount ? Math.min(withdrawalAvailableFunds, Math.max(0, withdrawalAccountBalance)) : withdrawalAvailableFunds
   const customerTableMinWidth = 240 + (canViewCustomerPhone ? 150 : 0) + (canViewCustomerEmail ? 220 : 0) + (canViewCustomerCreditLimit ? 155 : 0) + (canViewCustomerBalance ? 400 : 0) + (canViewCustomerBalance && canViewCustomerCreditLimit ? 155 : 0) + 115
 
@@ -1885,6 +1895,7 @@ export default function ReceivablesPage() {
                         onClick={() => {
                           setSelectedCustomer(sale.customer)
                           setSelectedSale(sale)
+                          setWalletDepositMode(false)
                           setPaymentAmount(String(sale.balance || ''))
                           setPaymentNotes('')
                           setShowPaymentModal(true)
@@ -2089,16 +2100,18 @@ export default function ReceivablesPage() {
           if (!open) setHistoryCustomer(null)
         }}
         onRecordPayment={(profile) => {
-          setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedCustomer({ ...profile, ...(hasPermission('canViewCustomerWallet') ? { walletBalance: Number(profile.walletBalance ?? (profile.wallet as any)?.balance ?? 0) } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
           setSelectedSale(null)
+          setWalletDepositMode(Boolean(profile.walletDeposit))
           setPaymentAmount('')
           setPaymentNotes('')
           setHistoryCustomer(null)
           setShowPaymentModal(true)
         }}
         onWithdraw={(profile) => {
-          setSelectedCustomer({ ...profile, status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedCustomer({ ...profile, ...(hasPermission('canViewCustomerWallet') ? { walletBalance: Number(profile.walletBalance ?? (profile.wallet as any)?.balance ?? 0) } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
           setSelectedSale(null)
+          setWalletWithdrawalMode(Boolean(profile.walletWithdrawal))
           setWithdrawalAmount('')
           setPaymentMethod('cash')
           setMobileProvider('')
@@ -2408,7 +2421,7 @@ export default function ReceivablesPage() {
         <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/50 [touch-action:pan-y]">
           <div className="flex min-h-full items-start justify-center p-2 sm:items-center sm:p-4">
           <div className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-lg bg-background p-4 shadow-xl [-webkit-overflow-scrolling:touch] sm:max-h-[calc(100dvh-2rem)] sm:p-6">
-            <h3 className="mb-4 text-lg font-semibold">Record Payment</h3>
+            <h3 className="mb-4 text-lg font-semibold">{walletDepositMode && !selectedSale ? 'Deposit to Customer Wallet' : 'Record Payment'}</h3>
             <div className="space-y-4">
               <div>
                 <Label>Customer</Label>
@@ -2417,7 +2430,9 @@ export default function ReceivablesPage() {
                   <p className="text-sm text-muted-foreground">Sale: {selectedSale.receiptNo}</p>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  Balance: {Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0).toFixed(2)}
+                  {walletDepositMode && !selectedSale
+                    ? (hasPermission('canViewCustomerWallet') ? `Wallet balance: ${formatCurrency(Number(selectedCustomer.walletBalance || 0))}` : 'Wallet is active; deposits are recorded as customer-held funds.')
+                    : `Balance: ${Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0).toFixed(2)}`}
                 </p>
               </div>
               
@@ -2557,6 +2572,7 @@ export default function ReceivablesPage() {
                   setShowPaymentModal(false)
                   setSelectedSale(null)
                   setSelectedCustomer(null)
+                  setWalletDepositMode(false)
                   setPaymentAmount('')
                   setPaymentNotes('')
                   setSelectedCashAccountId(null)
@@ -2572,7 +2588,7 @@ export default function ReceivablesPage() {
                 (paymentMethod === 'mobile_money' ? (!mobileProvider || !phoneNumber.trim() || !transactionId.trim()) : false) ||
                 (paymentMethod === 'card' ? !transactionId.trim() : false)
               }>
-                {savingPayment ? 'Recording...' : 'Record Payment'}
+                {savingPayment ? 'Recording...' : walletDepositMode && !selectedSale ? 'Record Deposit' : 'Record Payment'}
               </Button>
             </div>
           </div>
@@ -2581,10 +2597,10 @@ export default function ReceivablesPage() {
       )}
 
       {/* Withdrawal Modal */}
-      {showWithdrawalModal && selectedCustomer && canCreateWithdrawal && (
+        {showWithdrawalModal && selectedCustomer && (walletWithdrawalMode ? hasPermission('canWithdrawCustomerWallet') : canCreateWithdrawal) && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
-            <h3 className="text-lg font-semibold mb-4">Record Withdrawal</h3>
+            <h3 className="text-lg font-semibold mb-4">{walletWithdrawalMode ? 'Withdraw from Customer Wallet' : 'Record Withdrawal'}</h3>
             <form
               className="space-y-4"
               onSubmit={(event) => {
@@ -2597,7 +2613,9 @@ export default function ReceivablesPage() {
                 <Label>Customer</Label>
                 <p className="font-medium">{selectedCustomer.name}</p>
                 <p className="text-sm text-muted-foreground">
-                  Available Customer Funds: {formatCurrency(withdrawalAvailableFunds)}
+                  {walletWithdrawalMode
+                    ? (canViewWithdrawalFunds ? `Available wallet funds: ${formatCurrency(withdrawalAvailableFunds)}` : 'Wallet is active. Available funds are checked securely when you submit.')
+                    : `Available customer funds: ${formatCurrency(withdrawalAvailableFunds)}`}
                 </p>
               </div>
 
@@ -2608,17 +2626,19 @@ export default function ReceivablesPage() {
                   type="number"
                   min="0.01"
                   step="0.01"
-                  max={withdrawalLimit}
+                  max={Number.isFinite(withdrawalLimit) ? withdrawalLimit : undefined}
                   required
                   aria-describedby="withdrawalFundsLimit"
-                  aria-invalid={withdrawalValue > withdrawalAvailableFunds}
+                  aria-invalid={Number.isFinite(withdrawalAvailableFunds) && withdrawalValue > withdrawalAvailableFunds}
                   value={withdrawalAmount}
                   onChange={(event) => setWithdrawalAmount(event.target.value)}
                   placeholder="0.00"
                 />
-                <p id="withdrawalFundsLimit" className={withdrawalValue > withdrawalAvailableFunds ? 'mt-1 text-sm text-red-600' : 'mt-1 text-sm text-muted-foreground'}>
-                  {withdrawalValue > withdrawalAvailableFunds ? 'Withdrawal exceeds available customer funds. ' : 'Maximum withdrawal: '}
-                  {formatCurrency(withdrawalLimit)}
+                <p id="withdrawalFundsLimit" className={Number.isFinite(withdrawalAvailableFunds) && withdrawalValue > withdrawalAvailableFunds ? 'mt-1 text-sm text-red-600' : 'mt-1 text-sm text-muted-foreground'}>
+                  {Number.isFinite(withdrawalAvailableFunds)
+                    ? (withdrawalValue > withdrawalAvailableFunds ? 'Withdrawal exceeds available customer funds. ' : 'Maximum withdrawal: ')
+                    : 'Wallet funds are validated securely when the withdrawal is submitted.'}
+                  {Number.isFinite(withdrawalLimit) && formatCurrency(withdrawalLimit)}
                 </p>
               </div>
 
@@ -2725,8 +2745,8 @@ export default function ReceivablesPage() {
 
               <div className="rounded-md border p-4 text-sm">
                 <div className="flex justify-between gap-4">
-                  <span>Customer Funds Remaining</span>
-                  <span className="font-semibold whitespace-nowrap">{formatCurrency(withdrawalCustomerFundsAfter)}</span>
+                  <span>{walletWithdrawalMode ? 'Wallet funds after withdrawal' : 'Customer funds remaining'}</span>
+                  <span className="font-semibold whitespace-nowrap">{withdrawalCustomerFundsAfter === null ? 'Validated on submit' : formatCurrency(withdrawalCustomerFundsAfter)}</span>
                 </div>
                 <div className="flex justify-between gap-4 text-muted-foreground">
                   <span>Account Balance After</span>
@@ -2743,6 +2763,7 @@ export default function ReceivablesPage() {
                   onClick={() => {
                     setShowWithdrawalModal(false)
                     setSelectedCustomer(null)
+                    setWalletWithdrawalMode(false)
                     setWithdrawalAmount('')
                     setPaymentMethod('cash')
                     setMobileProvider('')
@@ -2764,7 +2785,7 @@ export default function ReceivablesPage() {
                     (paymentMethod === 'card' ? !transactionId.trim() : false)
                   }
                 >
-                  {savingWithdrawal ? 'Recording...' : 'Record Withdrawal'}
+                  {savingWithdrawal ? 'Recording...' : walletWithdrawalMode ? 'Record Wallet Withdrawal' : 'Record Withdrawal'}
                 </Button>
               </div>
               </fieldset>

@@ -1,4 +1,5 @@
 import { calculateCustomerReceivableBalance, calculateCustomerReceivableBalanceBefore, effectiveCreditNoteRows } from '../utils/customerBalance.js'
+import { getCustomerWalletBalance } from './customerWalletService.js'
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100
 
@@ -54,8 +55,35 @@ export function customerAdvanceAllocation(payment, allocations = []) {
   return money(Math.min(receiptAmount, allocatedToCustomer + unallocatedRemainder))
 }
 
-export async function applyAvailableCustomerCredit(client, { scope, customerId, saleId, amountDue, availableCredit, userId, branchId }) {
+export async function applyAvailableCustomerCredit(client, { scope, customerId, saleId, amountDue, availableCredit, userId, branchId, useWallet = false }) {
   const balanceSnapshot = await calculateCustomerReceivableBalance(client, scope, customerId)
+  const wallet = useWallet ? await client.customerWallet?.findFirst?.({ where: { tenantId: scope.tenantId, customerId, isActive: true } }) : null
+  if (wallet) {
+    await client.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${wallet.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+    const walletAvailable = await getCustomerWalletBalance(client, scope.tenantId, wallet.id)
+    const amount = customerCreditOffset(amountDue, walletAvailable)
+    if (amount <= 0) return { amount: 0, applications: [] }
+    const application = await client.customerCreditApplication.create({ data: {
+      tenantId: scope.tenantId, branchId: branchId || null, customerId, saleId,
+      sourceType: 'wallet', sourceId: wallet.id, amount, createdById: userId,
+    } })
+    await client.customerWalletTransaction.create({ data: {
+      tenantId: scope.tenantId, branchId: branchId || wallet.branchId || null,
+      walletId: wallet.id, userId, kind: 'sale_application', direction: 'out', amount,
+      reference: saleId, sourceType: 'sale', sourceId: saleId,
+      idempotencyKey: `wallet-sale:${wallet.id}:${saleId}`.slice(0, 160),
+      notes: 'Customer wallet applied to credit sale.',
+    } })
+    const sale = await client.saleRecord.findFirst({ where: { id: saleId, tenantId: scope.tenantId, customerId } })
+    if (!sale) throw Object.assign(new Error('Sale not found while applying wallet funds.'), { statusCode: 409 })
+    const newAmountPaid = money(Number(sale.amountPaid || 0) + amount)
+    const newBalance = money(Math.max(0, Number(sale.total) - newAmountPaid))
+    await client.saleRecord.update({ where: { id: saleId }, data: {
+      amountPaid: newAmountPaid, balance: newBalance,
+      paymentStatus: newBalance <= 0 ? 'paid' : newAmountPaid > 0 ? 'partial' : 'unpaid',
+    } })
+    return { amount, applications: [application], wallet, walletBalance: money(walletAvailable - amount), balanceSnapshot }
+  }
   const creditAvailable = availableCredit == null ? Math.max(0, -money(balanceSnapshot?.balance)) : Math.max(0, money(availableCredit))
   const target = customerCreditOffset(amountDue, creditAvailable)
   if (target <= 0) return { amount: 0, applications: [] }

@@ -5,7 +5,7 @@ import {
   getCustomerReceivableBalanceMap,
 } from '../src/utils/customerBalance.js';
 
-function makeClient({ customer, sales, payments = [], allocations = [], creditNotes = [], creditApplications = [], returns = [] }) {
+function makeClient({ customer, sales, payments = [], allocations = [], creditNotes = [], creditApplications = [], returns = [], wallets = [], walletTransactions = [], withdrawals = [] }) {
   return {
     customer: {
       findFirst: async () => customer,
@@ -36,14 +36,25 @@ function makeClient({ customer, sales, payments = [], allocations = [], creditNo
       })),
     },
     customerWithdrawal: {
-      groupBy: async () => [],
-      aggregate: async () => ({ _sum: { amount: 0 } }),
+      groupBy: async (query) => {
+        const rows = withdrawals.filter((withdrawal) => query.where.walletId === null ? !withdrawal.walletId : true)
+        const grouped = new Map()
+        for (const withdrawal of rows) grouped.set(withdrawal.customerId, (grouped.get(withdrawal.customerId) || 0) + withdrawal.amount)
+        return [...grouped].map(([customerId, amount]) => ({ customerId, _sum: { amount } }))
+      },
+      aggregate: async (query) => ({ _sum: { amount: withdrawals.filter((withdrawal) => query.where.walletId === null ? !withdrawal.walletId : true).reduce((sum, withdrawal) => sum + withdrawal.amount, 0) } }),
     },
     creditNote: {
       findMany: async () => creditNotes,
     },
     customerCreditApplication: {
       findMany: async () => creditApplications,
+    },
+    customerWallet: {
+      findMany: async () => wallets,
+    },
+    customerWalletTransaction: {
+      groupBy: async () => walletTransactions,
     },
     saleReturn: {
       findMany: async () => returns,
@@ -257,6 +268,61 @@ test('explicit customer-account allocation reduces the customer account separate
   assert.equal(result.components.customerAccountAllocations, 80);
   assert.equal(result.components.unappliedCustomerReceipts, 0);
 });
+
+test('migrated legacy customer funds remain separate from receivables as wallet funds are applied', async () => {
+  const wallet = { id: 'wallet-1', customerId: customer.id, migratedLegacyAmount: 100, isActive: true }
+  const data = makeClient({
+    customer,
+    sales: [sale({ total: 60, subtotal: 60 })],
+    payments: [{ id: 'legacy-payment', customerId: customer.id, saleId: null, amount: 100, allocationMode: 'explicit' }],
+    allocations: [{ paymentId: 'legacy-payment', customerId: customer.id, targetType: 'customer_account', amount: 100 }],
+    creditApplications: [{ customerId: customer.id, saleId: 'sale', sourceType: 'wallet', sourceId: wallet.id, amount: 60 }],
+    wallets: [wallet],
+    walletTransactions: [
+      { walletId: wallet.id, direction: 'in', _sum: { amount: 100 } },
+      { walletId: wallet.id, direction: 'out', _sum: { amount: 60 } },
+    ],
+  })
+
+  const [result] = await getCustomerReceivableBalanceMap(data, { tenantId: 'tenant' }, [customer])
+
+  assert.equal(result[1].balance, 0)
+  assert.equal(result[1].components.customerWalletBalance, 40)
+})
+
+test('customer savings opening balance is held in wallet liability instead of appearing as receivable credit', async () => {
+  const wallet = { id: 'wallet-opening', customerId: customer.id, migratedLegacyAmount: 100, isActive: true }
+  const data = makeClient({
+    customer: { ...customer, openingBalance: -100, openingBalanceType: 'credit' },
+    sales: [],
+    wallets: [wallet],
+    walletTransactions: [{ walletId: wallet.id, direction: 'in', _sum: { amount: 100 } }],
+  })
+
+  const [result] = await getCustomerReceivableBalanceMap(data, { tenantId: 'tenant' }, [{ ...customer, openingBalance: -100, openingBalanceType: 'credit' }])
+
+  assert.equal(result[1].balance, 0)
+  assert.equal(result[1].components.customerWalletBalance, 100)
+})
+
+test('wallet withdrawals reduce wallet funds without creating a customer receivable', async () => {
+  const wallet = { id: 'wallet-withdrawal', customerId: customer.id, migratedLegacyAmount: 100, isActive: true }
+  const data = makeClient({
+    customer: { ...customer, openingBalance: -100 },
+    sales: [],
+    wallets: [wallet],
+    walletTransactions: [
+      { walletId: wallet.id, direction: 'in', _sum: { amount: 100 } },
+      { walletId: wallet.id, direction: 'out', _sum: { amount: 35 } },
+    ],
+    withdrawals: [{ id: 'withdrawal-1', customerId: customer.id, walletId: wallet.id, amount: 35 }],
+  })
+
+  const [result] = await getCustomerReceivableBalanceMap(data, { tenantId: 'tenant' }, [{ ...customer, openingBalance: -100 }])
+
+  assert.equal(result[1].balance, 0)
+  assert.equal(result[1].components.customerWalletBalance, 65)
+})
 
 test('credit-note balance applied to a new sale reallocates credit without changing total customer balance', async () => {
   const oldSale = sale({ id: 'old-sale', total: 50, subtotal: 50, amountPaid: 50, legacyPaidAmountAtCutover: 0 });

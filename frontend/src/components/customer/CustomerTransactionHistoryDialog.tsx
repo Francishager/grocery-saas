@@ -107,6 +107,7 @@ type CustomerHistoryResponse = {
     trustScore?: number
     availableForWithdrawal?: number
     canDelete?: boolean
+    wallet?: { active: boolean; balance?: number; migratedLegacyAmount?: number; transactions?: Array<{ id: string; kind: string; direction: string; amount: number; reference?: string | null; paymentMethod?: string | null; notes?: string | null; createdAt: string; paymentId?: string | null; payment?: { paymentMethod: string; mobileProvider?: string | null; phoneNumber?: string | null; transactionId?: string | null; notes?: string | null; reference?: string | null; currency?: string | null; foreignAmount?: number | null } | null }> }
   }
   summary: {
     currentBalance?: number
@@ -144,6 +145,10 @@ type CustomerHistoryResponse = {
     edit: boolean
     delete: boolean
     withdraw: boolean
+    viewWallet: boolean
+    activateWallet: boolean
+    depositWallet: boolean
+    withdrawWallet: boolean
   }
   creditHistory?: CustomerCreditHistory
   transactions: CustomerHistoryTransaction[]
@@ -340,7 +345,7 @@ function transactionTone(row: CustomerHistoryTransaction) {
 function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?: string | null) {
   const isCreditNote = row.source === 'credit_note'
   const isReturn = row.source === 'sale_return'
-  const isPayment = ['customer_payment', 'property_sale_payment', 'rental_payment'].includes(row.source)
+  const isPayment = ['customer_payment', 'customer_wallet', 'property_sale_payment', 'rental_payment'].includes(row.source)
   const isHistoricalRentalReceivable = row.source === 'historical_rental_receivable'
   const amount = Number(row.amount || row.debit || row.credit || 0)
   const title = isCreditNote
@@ -348,14 +353,14 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
     : isReturn
       ? row.paymentMethod === 'credit' ? 'Sales Return Credit Receipt' : 'Sales Return Refund Receipt'
       : isPayment
-        ? row.source === 'rental_payment' ? 'Rental Payment Receipt' : 'Customer Payment Receipt'
+        ? row.source === 'rental_payment' ? 'Rental Payment Receipt' : row.source === 'customer_wallet' ? 'Customer Wallet Deposit Receipt' : 'Customer Payment Receipt'
       : isHistoricalRentalReceivable ? 'Historical Rental Receivable' : `${row.type || 'Customer transaction'} receipt`
   const fields = [
     { label: 'Transaction type', value: row.type },
     ...(row.originalReference && !isPayment ? [{ label: row.source === 'historical_rental_receivable' ? 'JibuSales rental record' : 'Original sale', value: row.originalReference }] : []),
     ...(isHistoricalRentalReceivable ? [{ label: 'Balance due', value: formatCurrency(Number(row.remainingBalance || 0)) }] : []),
     ...(row.reason ? [{ label: 'Reason', value: row.reason }] : []),
-    ...(isPayment ? [{ label: 'Payment applied to', value: row.originalReference || 'Customer account' }] : []),
+    ...(isPayment ? [{ label: 'Payment applied to', value: row.source === 'customer_wallet' ? 'Customer wallet' : row.originalReference || 'Customer account' }] : []),
     ...(isCreditNote ? [
       { label: 'Credit note value', value: formatCurrency(amount) },
       { label: 'Refund recorded', value: formatCurrency(Number(row.refundAmount || 0)) },
@@ -383,7 +388,7 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
     reference: displayReference(row.reference, row.id, row.type || 'Transaction'),
     date: row.date || new Date(),
     amount,
-    amountLabel: isPayment ? 'Payment received' : isHistoricalRentalReceivable ? 'Opening balance brought forward' : undefined,
+    amountLabel: row.source === 'customer_wallet' ? 'Wallet deposit received' : isPayment ? 'Payment received' : isHistoricalRentalReceivable ? 'Opening balance brought forward' : undefined,
     partyLabel: 'Customer',
     partyName: customerName || undefined,
     itemsLabel: isPayment && row.items?.length ? 'Items on linked invoice' : undefined,
@@ -422,6 +427,9 @@ export default function CustomerTransactionHistoryDialog({
 }) {
   const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
+  const [walletActionLoading, setWalletActionLoading] = useState(false)
+  const [walletActionError, setWalletActionError] = useState('')
+  const [walletReload, setWalletReload] = useState(0)
   const [rentalData, setRentalData] = useState<RentalLedgerResponse | null>(null)
   const [rentPlanData, setRentPlanData] = useState<RentPlanProfileData | null>(null)
   const [rentPlanReload, setRentPlanReload] = useState(0)
@@ -568,7 +576,7 @@ export default function CustomerTransactionHistoryDialog({
 
     loadHistory()
     return () => controller.abort()
-  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile])
+  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile, walletReload])
 
   useEffect(() => {
     if (!open || !customer?.id || !canViewRentPaymentPlans) {
@@ -679,6 +687,22 @@ export default function CustomerTransactionHistoryDialog({
       setRentalReload(value => value + 1)
     } catch (err: any) { setHouseholdError(err?.message || 'Could not update tenant household details.') }
     finally { setSavingHousehold(false) }
+  }
+
+  async function activateCustomerWallet() {
+    if (!customer?.id || walletActionLoading) return
+    setWalletActionLoading(true)
+    setWalletActionError('')
+    try {
+      const response = await apiFetch(`/api/receivables/customers/${customer.id}/wallet/activate`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result?.error || 'Could not activate the customer wallet.')
+      setWalletReload(value => value + 1)
+    } catch (error: any) {
+      setWalletActionError(error?.message || 'Could not activate the customer wallet.')
+    } finally { setWalletActionLoading(false) }
   }
 
   async function createRentPaymentPlan(event: FormEvent<HTMLFormElement>) {
@@ -1123,20 +1147,21 @@ export default function CustomerTransactionHistoryDialog({
               </div>
             </div>
 
+            {data.access.viewWallet && data.customer.wallet?.active && <section className="space-y-3 rounded-md border p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">Customer wallet</h3><p className="text-xs text-muted-foreground">Deposits are customer funds, separate from invoice settlement.</p></div><p className="text-lg font-semibold">{formatCurrency(Number(data.customer.wallet.balance || 0))}</p></div>
+              <div className="overflow-x-auto rounded-md border"><table className="min-w-[720px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Date</th><th className="px-3 py-2">Activity</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Amount</th>{data.access.printReceipts && <th className="px-3 py-2 text-right">Receipt</th>}</tr></thead><tbody>{(data.customer.wallet.transactions || []).map(row => <tr key={row.id} className="border-t"><td className="px-3 py-2">{formatDisplayDate(row.createdAt)}</td><td className="px-3 py-2">{normalizeText(row.kind)}</td><td className="px-3 py-2">{row.reference || '—'}</td><td className="px-3 py-2">{normalizeText(row.paymentMethod) || '—'}</td><td className={cn('px-3 py-2 text-right font-medium', row.direction === 'in' ? 'text-emerald-700' : 'text-foreground')}>{row.direction === 'in' ? '+' : '−'}{formatCurrency(Number(row.amount || 0))}</td>{data.access.printReceipts && <td className="px-3 py-2 text-right">{row.paymentId && row.direction === 'in' && <TransactionReceiptButton label="Reprint" data={{ title: 'Customer Wallet Deposit Receipt', reference: row.reference || row.payment?.reference || '', date: row.createdAt, amount: Number(row.amount || 0), partyLabel: 'Customer', partyName: data.customer.name || undefined, fields: [{ label: 'Wallet activity', value: 'Deposit' }, { label: 'Payment method', value: normalizeText(row.payment?.paymentMethod || row.paymentMethod) }, { label: 'Mobile money provider', value: row.payment?.mobileProvider }, { label: 'Mobile money number', value: row.payment?.phoneNumber }, { label: 'Transaction ID', value: row.payment?.transactionId }, { label: 'Note', value: row.payment?.notes || row.notes }] }} />}</td>}</tr>)}{!(data.customer.wallet.transactions || []).length && <tr><td colSpan={data.access.printReceipts ? 6 : 5} className="px-3 py-6 text-center text-muted-foreground">No wallet transactions yet.</td></tr>}</tbody></table></div>
+            </section>}
+
             {canViewTenantHousehold && <section className="space-y-3 rounded-md border p-4"><div><h3 className="font-semibold">Tenant household details</h3><p className="text-xs text-muted-foreground">Optional details recorded on each tenancy.</p></div>{householdTenancies.map(row => <div key={row.id} className="space-y-3 border-t pt-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">{row.unit.property.name} · {row.unit.unitCode}</p>{hasPermission('canEditTenantPersonalDetails') && <Button type="button" variant="outline" size="sm" onClick={() => { setEditingHouseholdTenancyId(editingHouseholdTenancyId === row.id ? null : row.id); setHouseholdError('') }}>{editingHouseholdTenancyId === row.id ? 'Close editor' : 'Edit household details'}</Button>}</div>{editingHouseholdTenancyId === row.id ? <form onSubmit={saveHousehold}><HouseholdDetailsFields defaults={row}/>{householdError && <p role="alert" className="mt-2 text-sm text-destructive">{householdError}</p>}<div className="mt-3 flex justify-end"><Button type="submit" disabled={savingHousehold}>{savingHousehold ? 'Saving…' : 'Save household details'}</Button></div></form> : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div><p className="text-xs text-muted-foreground">Marital status</p><p className="text-sm">{row.maritalStatus ? normalizeText(row.maritalStatus) : 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Spouse name(s)</p><p className="text-sm">{row.spouseNames || 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Children</p><p className="text-sm">{row.childrenCount == null ? 'Not provided' : row.childrenCount === 0 ? 'No children' : row.childrenCount}</p></div><div><p className="text-xs text-muted-foreground">Household size</p><p className="text-sm">{row.householdSize ?? 'Not provided'}</p></div><div><p className="text-xs text-muted-foreground">Place of origin</p><p className="text-sm">{row.placeOfOrigin || 'Not provided'}</p></div></div>}</div>)}</section>}
 
-            {(data.access.recordPayment || data.access.withdraw || data.access.edit || data.access.delete || (hasRentalTenancies && canEditRentalDetails && onEditCustomer)) && (
+            {(data.access.viewWallet || data.access.activateWallet || data.access.depositWallet || data.access.withdrawWallet || data.access.edit || data.access.delete || (hasRentalTenancies && canEditRentalDetails && onEditCustomer)) && (
               <div className="flex flex-wrap gap-2 border-b pb-4">
-                {data.access.recordPayment && onRecordPayment && (
-                  <Button size="sm" onClick={() => onRecordPayment({ ...data.customer, ...data.summary })}>
-                    Record Payment
-                  </Button>
-                )}
-                {data.access.withdraw && onWithdraw && (
-                  <Button size="sm" variant="outline" disabled={Number(data.summary.availableForWithdrawal ?? data.customer.availableForWithdrawal ?? 0) <= 0} onClick={() => onWithdraw({ ...data.customer, ...data.summary })}>
-                    Withdraw Customer Funds
-                  </Button>
-                )}
+                {data.access.viewWallet && data.customer.wallet?.active && <div className="mr-auto flex items-center gap-2 rounded-md border bg-muted/25 px-3 py-2 text-sm"><Wallet className="h-4 w-4 text-primary" /><span>Wallet balance</span><strong>{formatCurrency(Number(data.customer.wallet.balance || 0))}</strong></div>}
+                {(data.access.viewWallet || data.access.activateWallet || data.access.depositWallet || data.access.withdrawWallet) && <span className="inline-flex items-center rounded-md border px-2.5 py-1.5 text-sm text-muted-foreground">Wallet {data.customer.wallet?.active ? 'active' : 'inactive'}</span>}
+                {data.access.activateWallet && !data.customer.wallet?.active && <Button size="sm" variant="outline" disabled={walletActionLoading} onClick={activateCustomerWallet}>{walletActionLoading ? 'Opening wallet…' : 'Activate wallet'}</Button>}
+                {data.access.depositWallet && data.customer.wallet?.active && onRecordPayment && <Button size="sm" onClick={() => onRecordPayment({ ...data.customer, ...data.summary, walletDeposit: true })}><Wallet className="mr-1 h-4 w-4" />Deposit</Button>}
+                {data.access.withdrawWallet && data.customer.wallet?.active && onWithdraw && <Button size="sm" variant="outline" onClick={() => onWithdraw({ ...data.customer, ...data.summary, walletWithdrawal: true })}>Withdraw</Button>}
+                {walletActionError && <p role="alert" className="w-full text-sm text-destructive">{walletActionError}</p>}
                 {(hasRentalTenancies ? canEditRentalDetails : data.access.edit) && onEditCustomer && (
                   <Button size="sm" variant="outline" onClick={() => onEditCustomer({ ...data.customer, ...data.summary, ...(hasRentalTenancies ? { rentalTenancies: rentalData?.tenancies } : {}) })}>
                     <Edit className="mr-1 h-4 w-4" />

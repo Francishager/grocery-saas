@@ -67,6 +67,23 @@ test('customer operational permissions are independent of profile viewing', () =
   assert.equal(access.sales, false)
 })
 
+test('wallet action permissions expose state only; viewing balance and history needs its own permission', () => {
+  const source = {
+    id: 'customer-1', name: 'A Customer', status: 'active',
+    wallet: { active: true, balance: 125000, migratedLegacyAmount: 25000, transactions: [{ id: 'wallet-tx-1' }] },
+  }
+  const depositor = customerProfilePayload(source, customerProfileAccess(['canDepositCustomerWallet']))
+  assert.deepEqual(depositor.wallet, { active: true })
+
+  const withdrawer = customerProfilePayload(source, customerProfileAccess(['canWithdrawCustomerWallet']))
+  assert.deepEqual(withdrawer.wallet, { active: true })
+
+  const viewer = customerProfilePayload(source, customerProfileAccess(['canViewCustomerWallet']))
+  assert.equal(viewer.wallet.balance, 125000)
+  assert.equal(viewer.wallet.migratedLegacyAmount, 25000)
+  assert.deepEqual(viewer.wallet.transactions, [{ id: 'wallet-tx-1' }])
+})
+
 test('record-payment profiles carry the customer branch needed to post in the correct scope', () => {
   const access = customerProfileAccess(['canViewCustomer', 'canRecordCustomerPayment'])
   const customer = customerProfilePayload({ id: 'customer-1', name: 'A Customer', status: 'active', branchId: 'branch-b' }, access)

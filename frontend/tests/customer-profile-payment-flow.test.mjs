@@ -52,7 +52,7 @@ test('mobile-money payments require and submit provider, phone, and transaction 
 test('receivables payment modal scrolls on mobile and saves the entered note', () => {
   assert.match(receivablesPage, /max-h-\[calc\(100dvh-1rem\)\].*overflow-y-auto.*overscroll-contain/);
   assert.match(receivablesPage, /<Textarea[\s\S]*?id="customerPaymentNotes"[\s\S]*?value=\{paymentNotes\}/);
-  assert.match(receivablesPage, /notes: paymentNotes\.trim\(\) \|\| 'Payment recorded via dashboard'/);
+  assert.match(receivablesPage, /notes: paymentNotes\.trim\(\) \|\| \(walletDepositMode \? 'Customer wallet deposit' : 'Payment recorded via dashboard'\)/);
 });
 
 test('customer-profile payment dialog stays above its overlay and records an optional note', () => {

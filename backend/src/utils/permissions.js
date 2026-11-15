@@ -115,6 +115,10 @@ const PERMISSION_TO_FEATURES = {
   canViewCustomerWithdrawalsHistory: ['customers', 'crm'],
   canViewCustomerBusinessActivity: ['customers', 'crm'],
   canViewCustomerNotes: ['customers', 'crm'],
+  canViewCustomerWallet: ['customers'],
+  canActivateCustomerWallet: ['customers'],
+  canDepositCustomerWallet: ['customers'],
+  canWithdrawCustomerWallet: ['customers'],
   canRecordCustomerPayment: ['customers', 'crm', 'receivables.payments'],
   canPrintCustomerReceipts: ['customers', 'crm'],
   canEditCustomer: ['customers', 'crm'],
@@ -440,6 +444,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewCustomerSalesHistory", "canViewCustomerPaymentsHistory", "canViewCustomerReturnsHistory",
   "canViewCustomerCreditNotesHistory", "canViewCustomerWithdrawalsHistory", "canViewCustomerBusinessActivity",
   "canViewCustomerNotes", "canRecordCustomerPayment", "canPrintCustomerReceipts",
+  "canViewCustomerWallet", "canActivateCustomerWallet", "canDepositCustomerWallet", "canWithdrawCustomerWallet",
   "canCreateReceivable", "canViewReceivable", "canEditReceivable", "canDeleteReceivable",
   "canViewReceivableReconciliation", "canReviewReceivableReconciliation", "canApplyReceivableReconciliation",
   // Suppliers
@@ -801,7 +806,23 @@ const PERMISSION_DETAIL_OVERRIDES = {
   },
   canRecordCustomerPayment: {
     name: 'Record customer payments',
-    description: 'Record payments against customer balances and unapplied customer funds.',
+    description: 'Settle customer receivables and invoice balances.',
+  },
+  canViewCustomerWallet: {
+    name: 'View customer wallets',
+    description: 'View wallet balances and wallet transaction history.',
+  },
+  canActivateCustomerWallet: {
+    name: 'Activate customer wallets',
+    description: 'Activate a wallet for a customer when the Customer Wallet feature is enabled.',
+  },
+  canDepositCustomerWallet: {
+    name: 'Deposit to customer wallets',
+    description: 'Record customer wallet deposits with receipt and accounting entries.',
+  },
+  canWithdrawCustomerWallet: {
+    name: 'Withdraw from customer wallets',
+    description: 'Pay out verified customer wallet funds with receipt and accounting entries.',
   },
   canPrintCustomerReceipts: {
     name: 'Print and download customer receipts',

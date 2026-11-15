@@ -13,6 +13,7 @@ const requiredScripts = [
   'ensure-property-tenant-notes-schema.js',
   'ensure-payment-permissions-and-rent-mobile-schema.js',
   'ensure-customer-credit-applications-schema.js',
+  'ensure-customer-wallet-schema.js',
   'ensure-customer-alternate-phone-schema.js',
   'ensure-user-theme-schema.js',
   'ensure-fractional-product-stock-schema.js',

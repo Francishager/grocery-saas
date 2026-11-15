@@ -34,6 +34,7 @@ interface Customer {
   creditLimit: number
   balance: number
   openingBalance?: number
+  openingBalanceType?: 'debit' | 'credit'
   openingBalanceDate?: string | null
   openingBalanceNote?: string
   status: 'active' | 'inactive' | 'blocked'
@@ -77,8 +78,10 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
     address: '',
     creditLimit: 0,
     openingBalance: 0,
+    openingBalanceType: 'debit' as 'debit' | 'credit',
     openingBalanceDate: todayInputDate(),
     openingBalanceNote: '',
+    walletEnabled: false,
     notes: '',
     branchId: '',
     ...initialData
@@ -99,9 +102,11 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       creditLimit: 0,
       notes: '',
       ...initialData,
-      openingBalance: initialData?.openingBalance ?? 0,
+      openingBalance: Math.abs(Number(initialData?.openingBalance ?? 0)),
+      openingBalanceType: initialData?.openingBalanceType || (Number(initialData?.openingBalance || 0) < 0 ? 'credit' : 'debit'),
       openingBalanceDate: initialData?.openingBalanceDate ? String(initialData.openingBalanceDate).slice(0, 10) : todayInputDate(),
       openingBalanceNote: initialData?.openingBalanceNote || '',
+      walletEnabled: false,
       branchId: initialData?.branchId || initialData?.branch?.id || defaultBranchId(user, branches),
     })
   }, [isOpen, initialData])
@@ -156,7 +161,7 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
       const openingBalanceChanged = Boolean(
         initialData?.id &&
         canManageOpeningBalances &&
-        Number(formData.openingBalance || 0) !== Number(initialData?.openingBalance || 0)
+        Number(formData.openingBalance || 0) !== Math.abs(Number(initialData?.openingBalance || 0))
       )
       if (openingBalanceChanged && !(await appConfirm('Changing this opening balance will adjust the current customer balance. Continue?'))) {
         setLoading(false)
@@ -172,10 +177,14 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         email: !initialData?.id || canViewCustomerEmail ? formData.email : undefined,
         address: !initialData?.id || canViewCustomerAddress ? formData.address : undefined,
         notes: !initialData?.id || canViewCustomerNotes ? formData.notes : undefined,
-        openingBalance: canManageOpeningBalances ? Number(formData.openingBalance || 0) : undefined,
-        openingBalanceDate: canManageOpeningBalances ? formData.openingBalanceDate || null : undefined,
+        openingBalance: canManageOpeningBalances && !(initialData?.id && formData.openingBalanceType === 'credit') ? Number(formData.openingBalance || 0) : undefined,
+        openingBalanceType: canManageOpeningBalances && !initialData?.id ? formData.openingBalanceType : undefined,
+        openingBalanceDate: canManageOpeningBalances && !(initialData?.id && formData.openingBalanceType === 'credit') ? formData.openingBalanceDate || null : undefined,
         openingBalanceNote: canManageOpeningBalances ? formData.openingBalanceNote || '' : undefined,
         confirmOpeningBalanceChange: openingBalanceChanged || undefined,
+        walletEnabled: !initialData?.id && isFeatureEnabled('customers.wallet') && hasPermission('canActivateCustomerWallet')
+          ? Boolean(formData.walletEnabled || (formData.openingBalanceType === 'credit' && Number(formData.openingBalance || 0) > 0))
+          : undefined,
       }
       
       const response = await apiFetch(url, {
@@ -206,8 +215,10 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
         address: '',
         creditLimit: 0,
         openingBalance: 0,
+        openingBalanceType: 'debit',
         openingBalanceDate: todayInputDate(),
         openingBalanceNote: '',
+        walletEnabled: false,
         notes: '',
         branchId: defaultBranchId(user, branches),
       })
@@ -334,9 +345,9 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
 
           {canManageOpeningBalances && (
             <div className="rounded-md border p-3 space-y-3">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="space-y-2">
-                  <Label htmlFor="openingBalance">Opening Balance</Label>
+                  <Label htmlFor="openingBalance">Opening balance amount</Label>
                   <Input
                     id="openingBalance"
                     type="number"
@@ -345,7 +356,26 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
                     min="0"
                     step="0.01"
                     placeholder="0"
+                    disabled={Boolean(initialData?.id && formData.openingBalanceType === 'credit')}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="openingBalanceType">Balance direction</Label>
+                  <Select
+                    value={formData.openingBalanceType}
+                    onValueChange={(value: 'debit' | 'credit') => {
+                      setFormData((prev) => ({ ...prev, openingBalanceType: value, walletEnabled: value === 'credit' ? true : prev.walletEnabled }))
+                    }}
+                    disabled={Boolean(initialData?.id)}
+                  >
+                    <SelectTrigger id="openingBalanceType"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="debit">Customer owes business (Debit)</SelectItem>
+                      <SelectItem value="credit" disabled={!isFeatureEnabled('customers.wallet') || !hasPermission('canActivateCustomerWallet')}>
+                        Customer savings held (Credit)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="openingBalanceDate">Opening Balance Date</Label>
@@ -354,9 +384,16 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
                     type="date"
                     value={formData.openingBalanceDate || ''}
                     onChange={(e) => handleInputChange('openingBalanceDate', e.target.value)}
+                    disabled={Boolean(initialData?.id && formData.openingBalanceType === 'credit')}
                   />
                 </div>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {formData.openingBalanceType === 'credit'
+                  ? 'Credit means the business already holds this customer’s money before JibuSales. It becomes a wallet liability, not sales income or cash received today. Customer Wallet must be enabled; the wallet will be opened automatically.'
+                  : 'Debit means the customer already owed the business before JibuSales. It increases receivables and does not mean cash was received.'}
+              </p>
+              {initialData?.id && formData.openingBalanceType === 'credit' && <p className="text-xs text-muted-foreground">This historical savings opening is fixed. Record later savings through wallet deposits or withdrawals so the cash and accounting history remain accurate.</p>}
               <div className="space-y-2">
                 <Label htmlFor="openingBalanceNote">Opening Balance Note</Label>
                 <Textarea
@@ -368,6 +405,21 @@ export default function CreateCustomerModal({ isOpen, onClose, onSuccess, initia
                 />
               </div>
             </div>
+          )}
+
+          {!initialData?.id && formData.openingBalanceType !== 'credit' && isFeatureEnabled('customers.wallet') && hasPermission('canActivateCustomerWallet') && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-primary"
+                checked={Boolean(formData.walletEnabled)}
+                onChange={(event) => handleInputChange('walletEnabled', event.target.checked)}
+              />
+              <span>
+                <span className="block text-sm font-medium">Open a customer wallet</span>
+                <span className="mt-1 block text-xs text-muted-foreground">Accept deposits separately from invoice payments and track the customer’s available funds.</span>
+              </span>
+            </label>
           )}
 
           {canManageCustomers && (
