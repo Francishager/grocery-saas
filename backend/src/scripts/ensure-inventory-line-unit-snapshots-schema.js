@@ -4,7 +4,13 @@ try {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '15s'");
     await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(2026111401)');
-    for (const table of ['purchase_items', 'supplier_purchase_items', 'sale_return_items']) {
+    for (const table of [
+      'purchase_items',
+      'supplier_purchase_items',
+      'sale_items',
+      'sale_record_items',
+      'sale_return_items',
+    ]) {
       await tx.$executeRawUnsafe(`
         ALTER TABLE IF EXISTS "${table}"
         ADD COLUMN IF NOT EXISTS "enteredQuantity" DOUBLE PRECISION,
