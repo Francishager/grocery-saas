@@ -17,7 +17,11 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const requestUrl = new URL(request.url)
     if (requestUrl.pathname !== '/api' && !requestUrl.pathname.startsWith('/api/')) {
-      return withSecurityHeaders(await env.ASSETS.fetch(request))
+      const response = await env.ASSETS.fetch(request)
+      if (requestUrl.pathname.startsWith('/assets/') && response.headers.get('content-type')?.includes('text/html')) {
+        return withSecurityHeaders(new Response('Asset not found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }))
+      }
+      return withSecurityHeaders(response)
     }
 
     const apiUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, `${env.API_ORIGIN.replace(/\/$/, '')}/`)

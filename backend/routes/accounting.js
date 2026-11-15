@@ -52,7 +52,7 @@ const STANDARD_HR_ACCOUNT_NAMES = new Set([
 ]);
 
 const financialYearPermissions = requireFeature("accounting");
-router.get("/financial-year-closes", authenticateToken, requireAnyPermission(["canViewAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose"]), financialYearPermissions, async (req, res) => {
+router.get("/financial-year-closes", authenticateToken, requireAnyPermission(["canViewFinancialYearClose", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose"]), financialYearPermissions, async (req, res) => {
   try {
     const tenantId = req.user.tenantId || req.user.tenant_id;
     if (!tenantId) return res.status(400).json({ error: "Business account is required." });

@@ -336,6 +336,7 @@ const PERMISSION_TO_FEATURES = {
   canManageFinancialYearClose: ['accounting'],
   canSignOffFinancialYearClose: ['accounting'],
   canReopenFinancialYearClose: ['accounting'],
+  canViewFinancialYearClose: ['accounting'],
   canDeleteAccounting: ['accounting'],
   canReverseAccountingEntry: ['accounting'],
   canPostToProtectedAccounts: ['accounting'],
@@ -506,7 +507,7 @@ export const ALL_PERMISSION_KEYS = [
   "canViewCommunication", "canCreateCommunication", "canEditCommunication", "canDeleteCommunication",
   "canViewTeamMessaging", "canSendTeamMessages",
   // Accounting
-  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose", "canDeleteAccounting", "canReverseAccountingEntry", "canPostToProtectedAccounts", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
+  "canViewAccounting", "canCreateAccounting", "canEditAccounting", "canViewFinancialYearClose", "canManageFinancialYearClose", "canSignOffFinancialYearClose", "canReopenFinancialYearClose", "canDeleteAccounting", "canReverseAccountingEntry", "canPostToProtectedAccounts", "canViewChartOfAccounts", "canCreateChartOfAccounts", "canEditChartOfAccounts",
   // Transaction Accounts & Cash Movements
   "canViewTransactionAccount", "canUseAnyTransactionAccount", "canUseOtherCashAccount", "canUseOwnCashAccount", "canUseOtherStaffCashAccount",
   "canUseSafeAccount", "canUseBankAccount", "canUseMobileMoneyAccount", "canUseCardAccount",
@@ -1332,6 +1333,10 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canManageFinancialYearClose: {
     name: 'Prepare financial-year close',
     description: 'Review close checks, prepare the year-end statement snapshot, and maintain draft close packs.',
+  },
+  canViewFinancialYearClose: {
+    name: 'View financial-year close',
+    description: 'View financial-year close packs, checks, and history without preparing, signing off, or reopening a period.',
   },
   canSignOffFinancialYearClose: {
     name: 'Sign off and close financial year',

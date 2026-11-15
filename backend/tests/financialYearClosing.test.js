@@ -52,7 +52,7 @@ test('financial-year close rejects invalid or inverted periods', async () => {
 })
 
 test('financial-year close permissions are surfaced and scoped to the accounting feature', () => {
-  for (const key of ['canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose']) {
+  for (const key of ['canViewFinancialYearClose', 'canManageFinancialYearClose', 'canSignOffFinancialYearClose', 'canReopenFinancialYearClose']) {
     assert.ok(ALL_PERMISSION_KEYS.includes(key))
     assert.ok(PERMISSION_METADATA[key]?.name)
     assert.equal(permissionAllowedForTenant(key, ['accounting']), true)

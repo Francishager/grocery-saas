@@ -12,16 +12,9 @@ declare let self: ServiceWorkerGlobalScope
 clientsClaim()
 precacheAndRoute(self.__WB_MANIFEST || [])
 
-registerRoute(
-  ({ request, url }) => request.destination === 'script' && url.origin === self.location.origin && url.pathname.startsWith('/assets/'),
-  new CacheFirst({
-    cacheName: 'app-code',
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 160, maxAgeSeconds: 60 * 60 * 24 * 30 }),
-      new CacheableResponsePlugin({ statuses: [200] }),
-    ],
-  })
-)
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.delete('app-code'))
+})
 
 registerRoute(
   ({ request, url }) => request.destination === 'image' && url.origin === self.location.origin,

@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         strategies: 'injectManifest',
-        registerType: 'prompt',
+        registerType: 'autoUpdate',
         cleanupOutdatedCaches: true,
         srcDir: 'src',
         filename: 'sw.ts',
@@ -43,7 +43,8 @@ export default defineConfig(({ mode }) => {
           ],
         },
         injectManifest: {
-          globPatterns: ['**/*.{css,html,ico,woff2}'],
+          // Keep the app shell network-fresh; only stable supporting assets belong in precache.
+          globPatterns: ['**/*.{css,ico,woff2}'],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         },
         devOptions: {
