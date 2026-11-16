@@ -1104,6 +1104,8 @@ model UserPermission {
   canProcessRentalReturn                 Boolean  @default(false)
   canViewRentalReport                    Boolean  @default(false)
   canGenerateRentalContract              Boolean  @default(false)
+  canManageRentalSourcing                Boolean  @default(false)
+  canRecordRentalSupplierPayment         Boolean  @default(false)
   canViewPlanner                         Boolean  @default(false)
   canManagePlanner                       Boolean  @default(false)
   canViewCRM                             Boolean  @default(false)
