@@ -482,10 +482,15 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     rentalsApi.paymentAccounts(paymentMethod, branchId || undefined).then(accounts => {
       if (cancelled) return
       setPaymentAccounts(accounts)
-      setCashAccountId(current => accounts.some((account: any) => account.id === current) ? current : accounts.length === 1 ? accounts[0].id : '')
+      const assignedCashAccountId = user?.cashAccountId || user?.cashAccount?.id
+      setCashAccountId(current => {
+        if (accounts.some((account: any) => account.id === current)) return current
+        if (assignedCashAccountId && accounts.some((account: any) => account.id === assignedCashAccountId)) return assignedCashAccountId
+        return accounts.length === 1 ? accounts[0].id : ''
+      })
     }).catch(() => { if (!cancelled) { setPaymentAccounts([]); setCashAccountId('') } })
     return () => { cancelled = true }
-  }, [showForm, selectedRental?.id, online, paymentMethod, amountPaid, depositAmount, paymentAmount, depositRefundAmount, advanceRefundAmount, branchId])
+  }, [showForm, selectedRental?.id, online, paymentMethod, amountPaid, depositAmount, paymentAmount, depositRefundAmount, advanceRefundAmount, branchId, user?.cashAccountId, user?.cashAccount?.id])
 
   useEffect(() => {
     setContractDraftValue(selectedRental?.contractDraft || '')
@@ -770,6 +775,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const openRentalPayment = async (rental: Rental) => {
     setSelectedRental(rental)
     setPaymentAmount(Math.max(0, Number(rental.balance) || 0))
+    setPaymentMethod('cash')
+    setCashAccountId(user?.cashAccountId || user?.cashAccount?.id || '')
     window.scrollTo({ top: 0, behavior: 'smooth' })
     try {
       const updated = await rentalsApi.get(rental.id)
