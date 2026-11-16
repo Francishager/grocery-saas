@@ -33,6 +33,16 @@ try {
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_messages_conversation_created_idx ON jibu_network_messages ("conversationId", "createdAt")');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_messages_sender_created_idx ON jibu_network_messages ("senderId", "createdAt")');
 
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS jibu_network_contacts (
+    id TEXT PRIMARY KEY,
+    "ownerId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    "contactUserId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT jibu_network_contacts_not_self CHECK ("ownerId" <> "contactUserId")
+  )`);
+  await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS jibu_network_contacts_owner_contact_key ON jibu_network_contacts ("ownerId", "contactUserId")');
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_contacts_owner_created_idx ON jibu_network_contacts ("ownerId", "createdAt")');
+
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS jibu_network_follows (
     id TEXT PRIMARY KEY,
     "followerId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

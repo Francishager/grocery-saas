@@ -606,6 +606,8 @@ model User {
   jibuNetworkConversationsTwo JibuNetworkConversation[] @relation("JibuNetworkParticipantTwo")
   jibuNetworkRequests JibuNetworkConversation[] @relation("JibuNetworkRequester")
   jibuNetworkMessages JibuNetworkMessage[] @relation("JibuNetworkMessageSender")
+  jibuNetworkContacts JibuNetworkContact[] @relation("JibuNetworkContactOwner")
+  jibuNetworkSavedBy JibuNetworkContact[] @relation("JibuNetworkContactSaved")
   jibuNetworkFollows JibuNetworkFollow[] @relation("JibuNetworkFollower")
   jibuNetworkFollowers JibuNetworkFollow[] @relation("JibuNetworkFollowee")
   jibuNetworkUpdates JibuNetworkUpdate[]
@@ -2623,6 +2625,19 @@ model JibuNetworkMessage {
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
   @@map("jibu_network_messages")
+}
+
+model JibuNetworkContact {
+  id            String   @id @default(cuid())
+  ownerId       String
+  owner         User     @relation("JibuNetworkContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  contactUserId String
+  contactUser   User     @relation("JibuNetworkContactSaved", fields: [contactUserId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([ownerId, contactUserId])
+  @@index([ownerId, createdAt])
+  @@map("jibu_network_contacts")
 }
 
 model JibuNetworkFollow {

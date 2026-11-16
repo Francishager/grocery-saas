@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { randomUUID } from 'node:crypto';
 import prisma from '../src/db.js';
 import { authenticateToken, requireTenant } from '../middleware/auth.js';
 import { requireFeature } from '../middleware/featureCheck.js';
@@ -133,6 +134,49 @@ router.get('/lookup', async (req, res) => {
   const person = await prisma.user.findFirst({ where: { jibuId: id, jibuNetworkEnabled: true, isActive: true }, select: publicUserSelect });
   if (!person || person.id === req.user.id || await blockedEitherWay(req.user.id, person.id)) return res.json({ person: null });
   res.json({ person: publicUser(person) });
+});
+
+router.get('/contacts', async (req, res) => {
+  const rows = await prisma.jibuNetworkContact.findMany({
+    where: { ownerId: req.user.id },
+    include: { contactUser: { select: { ...publicUserSelect, isActive: true, jibuNetworkEnabled: true } } },
+    orderBy: [{ contactUser: { fname: 'asc' } }, { contactUser: { lname: 'asc' } }],
+    take: 500,
+  });
+  const blockedRows = await prisma.jibuNetworkBlock.findMany({
+    where: { OR: [{ blockerId: req.user.id }, { blockedUserId: req.user.id }] },
+    select: { blockerId: true, blockedUserId: true },
+  });
+  const blockedIds = new Set(blockedRows.map(row => row.blockerId === req.user.id ? row.blockedUserId : row.blockerId));
+  res.json({ contacts: rows
+    .filter(row => row.contactUser?.isActive && row.contactUser.jibuNetworkEnabled && !blockedIds.has(row.contactUserId))
+    .map(row => ({ ...publicUser(row.contactUser), savedAt: row.createdAt })) });
+});
+
+router.post('/contacts', async (req, res) => {
+  if (!await allowNetworkRate(req.user.id, 'contact', 40, 60 * 60 * 1000)) return fail(res, 429, 'You have added several contacts recently. Try again later.');
+  const targetId = networkId(req.body?.jibuId);
+  if (!validNetworkId(targetId)) return fail(res, 400, 'Enter a complete JibuSales ID including its country code.');
+  const [owner, target] = await Promise.all([
+    prisma.user.findFirst({ where: { id: req.user.id, jibuNetworkEnabled: true, isActive: true }, select: { id: true } }),
+    prisma.user.findFirst({ where: { jibuId: targetId, jibuNetworkEnabled: true, isActive: true }, select: publicUserSelect }),
+  ]);
+  if (!owner) return fail(res, 403, 'Enable your JibuSales Network profile before saving contacts.');
+  if (!target || target.id === req.user.id || await blockedEitherWay(req.user.id, target.id)) return fail(res, 404, 'That JibuSales member is not available.');
+  const contact = await prisma.jibuNetworkContact.upsert({
+    where: { ownerId_contactUserId: { ownerId: req.user.id, contactUserId: target.id } },
+    create: { id: randomUUID(), ownerId: req.user.id, contactUserId: target.id },
+    update: {},
+  });
+  res.status(201).json({ contact: { ...publicUser(target), savedAt: contact.createdAt } });
+});
+
+router.delete('/contacts/:jibuId', async (req, res) => {
+  const id = networkId(req.params.jibuId);
+  if (!validNetworkId(id)) return fail(res, 400, 'Enter a complete JibuSales ID including its country code.');
+  const target = await prisma.user.findFirst({ where: { jibuId: id }, select: { id: true } });
+  if (target) await prisma.jibuNetworkContact.deleteMany({ where: { ownerId: req.user.id, contactUserId: target.id } });
+  res.json({ saved: false });
 });
 
 router.get('/chats', async (req, res) => {
