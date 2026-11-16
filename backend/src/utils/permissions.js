@@ -1711,6 +1711,10 @@ export function resolveEffectivePermissions(user, permissionRecord = null, inher
     granted.add('canViewCustomerCreditLimit');
   }
 
+  // Sending requires access to the chat list and conversation history. Keep
+  // the send grant independently assignable, but make its prerequisite explicit.
+  if (granted.has('canSendTeamMessages')) granted.add('canViewTeamMessaging');
+
   return [...granted];
 }
 

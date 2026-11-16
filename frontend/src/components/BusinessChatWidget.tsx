@@ -56,7 +56,7 @@ export function BusinessChatWidget() {
   const { user, hasPermission } = useJWTAuth()
   const { canAccessFeature } = useFeatureAccess()
   const enabled = Boolean(user && canAccessFeature('communication.team_messaging'))
-  const canView = user?.role === 'owner' || hasPermission('canViewTeamMessaging')
+  const canView = user?.role === 'owner' || hasPermission('canViewTeamMessaging') || hasPermission('canSendTeamMessages')
   const canSend = canView && (user?.role === 'owner' || hasPermission('canSendTeamMessages'))
   const [open, setOpen] = useState(false)
   const [networkOpen, setNetworkOpen] = useState(false)

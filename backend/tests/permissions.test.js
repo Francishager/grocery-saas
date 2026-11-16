@@ -185,6 +185,26 @@ test('team messaging permissions are separate from generic communication permiss
   assert.equal(PERMISSION_METADATA.canSendTeamMessages.category, 'team_messaging');
 });
 
+test('sending team messages grants the required view access but view-only remains read-only', () => {
+  const sendOnly = resolveEffectivePermissions(
+    { role: 'attendant' },
+    { canViewTeamMessaging: false, canSendTeamMessages: true },
+    [],
+    new Set(['communication.team_messaging']),
+  );
+  const viewOnly = resolveEffectivePermissions(
+    { role: 'attendant' },
+    { canViewTeamMessaging: true, canSendTeamMessages: false },
+    [],
+    new Set(['communication.team_messaging']),
+  );
+
+  assert.ok(sendOnly.includes('canViewTeamMessaging'));
+  assert.ok(sendOnly.includes('canSendTeamMessages'));
+  assert.ok(viewOnly.includes('canViewTeamMessaging'));
+  assert.ok(!viewOnly.includes('canSendTeamMessages'));
+});
+
 test('receivable reconciliation access and review are independently permissioned', () => {
   assert.equal(PERMISSION_METADATA.canViewReceivableReconciliation.category, 'customers');
   assert.equal(PERMISSION_METADATA.canApplyReceivableReconciliation.category, 'customers');
