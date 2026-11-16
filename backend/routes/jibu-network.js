@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'node:crypto';
 import prisma from '../src/db.js';
-import { authenticateToken, requireTenant } from '../middleware/auth.js';
+import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js';
 import { requireFeature } from '../middleware/featureCheck.js';
 import { createJibuId, isValidJibuId, normalizeJibuId, JIBU_NETWORK_DIAL_CODES } from '../src/services/jibuNetworkIdentity.js';
 import { deleteCloudinaryAsset, uploadBufferToCloudinary } from '../src/utils/cloudinaryUpload.js';
@@ -55,7 +55,7 @@ async function cleanupExpiredUpdates(now) {
   }
 }
 
-router.use(authenticateToken, requireTenant, requireFeature('social_network'));
+router.use(authenticateToken, requireTenant, requireFeature('communication.team_messaging'), requirePermission('canViewTeamMessaging'));
 
 function fail(res, status, error) { return res.status(status).json({ error }); }
 function displayName(user) { return [user?.fname, user?.lname].filter(Boolean).join(' ').trim() || 'JibuSales member'; }
@@ -108,6 +108,9 @@ router.put('/me', async (req, res) => {
     await prisma.user.update({ where: { id: req.user.id }, data: { jibuNetworkEnabled: false } });
     return res.json({ profile: { enabled: false } });
   }
+  if (req.user.role !== 'owner' && !req.user.permissions?.includes('canSendTeamMessages') && !req.user.permissions?.includes('*')) {
+    return fail(res, 403, 'Send Team Messages permission is required to opt in to cross-business discovery.');
+  }
   const countryCode = String(req.body?.countryCode || '').trim();
   if (!dialCodes.has(countryCode)) return fail(res, 400, 'Choose a supported country calling code.');
   const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { jibuId: true, jibuCountryCode: true } });
@@ -125,6 +128,14 @@ router.put('/me', async (req, res) => {
     }
   }
   return fail(res, 503, 'Could not issue an ID right now. Please try again.');
+});
+
+router.use(async (req, res, next) => {
+  try {
+    const user = await prisma.user.findFirst({ where: { id: req.user.id, isActive: true }, select: { jibuNetworkEnabled: true } });
+    if (!user?.jibuNetworkEnabled) return fail(res, 403, 'Opt in to cross-business messaging before accessing Network contacts, chats, updates or community.');
+    next();
+  } catch (error) { next(error); }
 });
 
 router.get('/lookup', async (req, res) => {
@@ -153,7 +164,7 @@ router.get('/contacts', async (req, res) => {
     .map(row => ({ ...publicUser(row.contactUser), savedAt: row.createdAt })) });
 });
 
-router.post('/contacts', async (req, res) => {
+router.post('/contacts', requirePermission('canSendTeamMessages'), async (req, res) => {
   if (!await allowNetworkRate(req.user.id, 'contact', 40, 60 * 60 * 1000)) return fail(res, 429, 'You have added several contacts recently. Try again later.');
   const targetId = networkId(req.body?.jibuId);
   if (!validNetworkId(targetId)) return fail(res, 400, 'Enter a complete JibuSales ID including its country code.');
@@ -171,7 +182,7 @@ router.post('/contacts', async (req, res) => {
   res.status(201).json({ contact: { ...publicUser(target), savedAt: contact.createdAt } });
 });
 
-router.delete('/contacts/:jibuId', async (req, res) => {
+router.delete('/contacts/:jibuId', requirePermission('canSendTeamMessages'), async (req, res) => {
   const id = networkId(req.params.jibuId);
   if (!validNetworkId(id)) return fail(res, 400, 'Enter a complete JibuSales ID including its country code.');
   const target = await prisma.user.findFirst({ where: { jibuId: id }, select: { id: true } });
@@ -201,7 +212,7 @@ router.get('/chats', async (req, res) => {
   res.json({ chats: visible, unread });
 });
 
-router.post('/requests', async (req, res) => {
+router.post('/requests', requirePermission('canSendTeamMessages'), async (req, res) => {
   if (!await allowNetworkRate(req.user.id, 'request', 8, 60 * 60 * 1000)) return fail(res, 429, 'You have sent several chat requests recently. Try again later.');
   const targetId = networkId(req.body?.jibuId);
   const body = String(req.body?.message || '').trim();
@@ -227,7 +238,7 @@ router.post('/requests', async (req, res) => {
   res.status(201).json({ chatId: chat.id, status: chat.status });
 });
 
-router.post('/chats/:id/accept', async (req, res) => {
+router.post('/chats/:id/accept', requirePermission('canSendTeamMessages'), async (req, res) => {
   const chat = await chatForParticipant(req.params.id, req.user.id);
   if (!chat || chat.status !== 'pending' || chat.requestedById === req.user.id) return fail(res, 404, 'Incoming message request not found.');
   if (await blockedEitherWay(req.user.id, chat.requestedById)) return fail(res, 403, 'This request is unavailable.');
@@ -235,7 +246,7 @@ router.post('/chats/:id/accept', async (req, res) => {
   res.json({ ok: true, status: 'accepted' });
 });
 
-router.post('/chats/:id/decline', async (req, res) => {
+router.post('/chats/:id/decline', requirePermission('canSendTeamMessages'), async (req, res) => {
   const chat = await chatForParticipant(req.params.id, req.user.id);
   if (!chat || chat.status !== 'pending' || chat.requestedById === req.user.id) return fail(res, 404, 'Incoming message request not found.');
   await prisma.jibuNetworkConversation.update({ where: { id: chat.id }, data: { status: 'declined' } });
@@ -253,7 +264,7 @@ router.get('/chats/:id/messages', async (req, res) => {
   res.json({ messages, status: chat.status, requestedById: chat.requestedById });
 });
 
-router.post('/chats/:id/messages', async (req, res) => {
+router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), async (req, res) => {
   if (!await allowNetworkRate(req.user.id, 'message', 60, 60_000)) return fail(res, 429, 'You are sending messages too quickly. Wait a minute and try again.');
   const body = String(req.body?.body || '').trim();
   if (!body || body.length > 4000) return fail(res, 400, 'Write a message of 1 to 4,000 characters.');
@@ -282,7 +293,7 @@ router.get('/community/:list', async (req, res) => {
   res.json({ people });
 });
 
-router.post('/community/follow', async (req, res) => {
+router.post('/community/follow', requirePermission('canSendTeamMessages'), async (req, res) => {
   const self = await prisma.user.findFirst({ where: { id: req.user.id, jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
   if (!self) return fail(res, 403, 'Enable your JibuSales Network profile before following members.');
   const target = await prisma.user.findFirst({ where: { jibuId: networkId(req.body?.jibuId), jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
@@ -291,7 +302,7 @@ router.post('/community/follow', async (req, res) => {
   res.json({ following: true });
 });
 
-router.delete('/community/follow/:jibuId', async (req, res) => {
+router.delete('/community/follow/:jibuId', requirePermission('canSendTeamMessages'), async (req, res) => {
   const target = await prisma.user.findFirst({ where: { jibuId: networkId(req.params.jibuId) }, select: { id: true } });
   if (!target) return res.json({ following: false });
   await prisma.jibuNetworkFollow.deleteMany({ where: { followerId: req.user.id, followeeId: target.id } });
@@ -320,7 +331,7 @@ router.get('/updates', async (req, res) => {
   res.json({ updates: filtered });
 });
 
-router.post('/updates', statusRateLimit, parseStatusImage, async (req, res) => {
+router.post('/updates', requirePermission('canSendTeamMessages'), statusRateLimit, parseStatusImage, async (req, res) => {
   const body = String(req.body?.body || '').trim();
   const background = String(req.body?.background || 'emerald');
   if ((!body && !req.file) || body.length > 500) return fail(res, 400, 'Add a caption of up to 500 characters or choose an image.');
@@ -349,7 +360,7 @@ router.post('/updates', statusRateLimit, parseStatusImage, async (req, res) => {
   }
 });
 
-router.delete('/updates/:id', async (req, res) => {
+router.delete('/updates/:id', requirePermission('canSendTeamMessages'), async (req, res) => {
   const update = await prisma.jibuNetworkUpdate.findFirst({ where: { id: req.params.id, userId: req.user.id } });
   if (!update) return fail(res, 404, 'Update not found.');
   if (update.imagePublicId) await deleteCloudinaryAsset(update.imagePublicId);
@@ -362,7 +373,7 @@ router.get('/blocks', async (req, res) => {
   res.json({ people: rows.map((row) => publicUser(row.blockedUser)) });
 });
 
-router.post('/blocks', async (req, res) => {
+router.post('/blocks', requirePermission('canSendTeamMessages'), async (req, res) => {
   const target = await prisma.user.findFirst({ where: { jibuId: networkId(req.body?.jibuId) }, select: { id: true } });
   if (!target || target.id === req.user.id) return fail(res, 404, 'JibuSales member not found.');
   await prisma.jibuNetworkBlock.upsert({ where: { blockerId_blockedUserId: { blockerId: req.user.id, blockedUserId: target.id } }, create: { blockerId: req.user.id, blockedUserId: target.id }, update: {} });
@@ -370,14 +381,14 @@ router.post('/blocks', async (req, res) => {
   res.json({ blocked: true });
 });
 
-router.delete('/blocks/:jibuId', async (req, res) => {
+router.delete('/blocks/:jibuId', requirePermission('canSendTeamMessages'), async (req, res) => {
   const target = await prisma.user.findFirst({ where: { jibuId: networkId(req.params.jibuId) }, select: { id: true } });
   if (!target) return res.json({ blocked: false });
   await prisma.jibuNetworkBlock.deleteMany({ where: { blockerId: req.user.id, blockedUserId: target.id } });
   res.json({ blocked: false });
 });
 
-router.post('/reports', async (req, res) => {
+router.post('/reports', requirePermission('canSendTeamMessages'), async (req, res) => {
   if (!await allowNetworkRate(req.user.id, 'report', 10, 60 * 60 * 1000)) return fail(res, 429, 'You have submitted several reports recently. Try again later.');
   const chat = await chatForParticipant(String(req.body?.conversationId || ''), req.user.id);
   const requestedJibuId = networkId(req.body?.jibuId);

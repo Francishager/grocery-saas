@@ -5,6 +5,10 @@ import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { cn } from '@/lib/utils'
+import { lazy, Suspense } from 'react'
+import { Globe2 } from 'lucide-react'
+
+const JibuNetworkPage = lazy(() => import('@/pages/JibuNetworkPage'))
 
 type Person = { id: string; name: string; role: string; avatar?: string | null }
 type MessageReaction = { id: string; userId: string; emoji: string }
@@ -55,6 +59,7 @@ export function BusinessChatWidget() {
   const canView = user?.role === 'owner' || hasPermission('canViewTeamMessaging')
   const canSend = canView && (user?.role === 'owner' || hasPermission('canSendTeamMessages'))
   const [open, setOpen] = useState(false)
+  const [networkOpen, setNetworkOpen] = useState(false)
   const [newMessageMode, setNewMessageMode] = useState(false)
   const [people, setPeople] = useState<Person[]>([])
   const [peopleSearch, setPeopleSearch] = useState('')
@@ -324,11 +329,13 @@ export function BusinessChatWidget() {
     </div>}
 
     {open && <section aria-label="Business messages" className="fixed inset-0 z-[79] flex flex-col overflow-hidden bg-background sm:inset-x-auto sm:bottom-20 sm:right-4 sm:top-auto sm:h-[min(680px,calc(100dvh-6rem))] sm:w-[min(420px,calc(100vw-2rem))] sm:border sm:shadow-2xl">
+      {networkOpen ? <Suspense fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground">Opening Team Messaging…</div>}><JibuNetworkPage embedded onClose={() => setNetworkOpen(false)} /></Suspense> : <>
       <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-4">
         {selected ? <button type="button" aria-label="Back to chats" onClick={() => { setSelected(null); setMessages([]); setNewMessageMode(false) }} className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-muted"><ArrowLeft className="size-5" /></button> : <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-900"><MessageCircle className="size-5" /></div>}
         {selected && <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(selected.participant.name)}</div>}
         <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{selected?.participant.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p aria-live="polite" className={cn('truncate text-xs', peerTyping ? 'font-medium text-emerald-700' : 'capitalize text-muted-foreground')}>{selected && peerTyping ? 'Typing…' : selected ? selected.participant.role.replace(/_/g, ' ') : 'Private business team messaging'}</p></div>
         {!selected && canSend && <button type="button" aria-label="Choose a contact" title="New chat" onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
+        {!selected && canView && <button type="button" aria-label="Open cross-business messaging" title="Contacts, status and communities" onClick={() => setNetworkOpen(true)} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><Globe2 className="size-5" /></button>}
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
       {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : selected ? <>
@@ -377,6 +384,7 @@ export function BusinessChatWidget() {
         </div>
       </>}
       {error && <div role="alert" className="shrink-0 border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200">{error}</div>}
+      </>}
     </section>}
 
     {launcherPosition && <button

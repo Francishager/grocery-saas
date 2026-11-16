@@ -210,15 +210,11 @@ const MODULES = [
   {
     id: 'communication', name: 'Communication', features: [
       { name: 'communication', displayName: 'Communication' },
+      { name: 'communication.team_messaging', displayName: 'Team Messaging' },
       { name: 'communication.sms', displayName: 'SMS Notifications' },
       { name: 'communication.email', displayName: 'Email Notifications' },
       { name: 'communication.whatsapp', displayName: 'WhatsApp Integration' },
       { name: 'communication.notifications', displayName: 'In-App Notifications' },
-    ]
-  },
-  {
-    id: 'social_network', name: 'JibuSales Network', features: [
-      { name: 'social_network', displayName: 'JibuSales Network' },
     ]
   },
   {

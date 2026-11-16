@@ -115,7 +115,7 @@ async function seedFeatures() {
 
     // ===== Communication =====
     { name: 'communication', displayName: 'Communication', module: 'communication', category: 'integration', description: 'Notifications and messaging' },
-    { name: 'communication.team_messaging', displayName: 'Team Messaging', module: 'communication', category: 'integration', description: 'Private in-app messages between active users in the same business' },
+    { name: 'communication.team_messaging', displayName: 'Team Messaging', module: 'communication', category: 'integration', description: 'Private in-app messages with optional, user-opt-in JibuSales-wide contacts, status updates and community' },
     { name: 'communication.sms', displayName: 'SMS Notifications', module: 'communication', category: 'integration', description: 'Send SMS reminders and alerts' },
     { name: 'communication.email', displayName: 'Email Notifications', module: 'communication', category: 'integration', description: 'Send email notifications' },
     { name: 'communication.whatsapp', displayName: 'WhatsApp Integration', module: 'communication', category: 'integration', description: 'Send notifications via WhatsApp' },

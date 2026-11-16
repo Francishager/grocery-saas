@@ -101,11 +101,12 @@ try {
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_rate_limits_window_idx ON jibu_network_rate_limits ("windowStart")');
 
   await prisma.feature.upsert({
-    where: { name: 'social_network' },
-    create: { name: 'social_network', displayName: 'JibuSales Network', description: 'Opt-in cross-business chats, status updates and following feed with request acceptance and user safety controls.', module: 'social_network', category: 'module', isActive: true },
-    update: { displayName: 'JibuSales Network', description: 'Opt-in cross-business chats, status updates and following feed with request acceptance and user safety controls.', module: 'social_network', category: 'module', isActive: true },
+    where: { name: 'communication.team_messaging' },
+    create: { name: 'communication.team_messaging', displayName: 'Team Messaging', description: 'Private in-business messaging with optional user-opt-in JibuSales-wide contacts, status updates and community.', module: 'communication', category: 'integration', isActive: true },
+    update: { displayName: 'Team Messaging', description: 'Private in-business messaging with optional user-opt-in JibuSales-wide contacts, status updates and community.', module: 'communication', category: 'integration', isActive: true },
   });
-  console.log('JibuSales Network additive schema and opt-in feature are ready. Existing plans remain unchanged.');
+  await prisma.feature.updateMany({ where: { name: 'social_network' }, data: { isActive: false } });
+  console.log('JibuSales Network is included in Team Messaging; users must opt in individually. Legacy standalone entitlement is retired.');
 } catch (error) {
   console.error('Unable to prepare JibuSales Network schema:', error.code || error.message);
   process.exitCode = 1;
