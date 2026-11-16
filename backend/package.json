@@ -14,7 +14,7 @@
     "test:login-portal": "node --test tests/loginPortal.test.js",
     "test:owner-welcome": "node --test tests/ownerWelcomeEmail.test.js",
     "test:provisioning": "node --test tests/tenantProvisioning.test.js",
-    "test:permissions": "node --test tests/manualJournalPolicy.test.js",
+    "test:permissions": "node --test tests/permissions.test.js tests/manualJournalPolicy.test.js tests/financialYearClosing.test.js",
     "test:platform-observability": "node --test tests/platformRuntimeMetrics.test.js",
     "test:scaling-safety": "node --test tests/postgresAdvisoryLock.test.js",
     "test:railway-status": "node --test tests/railwayStatusService.test.js",

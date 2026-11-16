@@ -1298,6 +1298,7 @@ model UserPermission {
   canViewAccounting                      Boolean  @default(false)
   canCreateAccounting                    Boolean  @default(false)
   canEditAccounting                      Boolean  @default(false)
+  canViewFinancialYearClose              Boolean  @default(false)
   canManageFinancialYearClose            Boolean  @default(false)
   canSignOffFinancialYearClose           Boolean  @default(false)
   canReopenFinancialYearClose            Boolean  @default(false)
