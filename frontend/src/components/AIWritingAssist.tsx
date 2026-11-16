@@ -22,7 +22,7 @@ export function AIWritingAssist({ module, field, onUse }: {
   const [privacyConfirmed, setPrivacyConfirmed] = useState(false)
   const fieldLabels: Record<string, string> = {
     'opportunity': 'opportunity', 'lead notes': 'lead notes', 'interaction notes': 'interaction notes',
-    'support case details': 'support case details', 'campaign name': 'campaign name',
+    'support case summary': 'support case summary', 'support case details': 'support case details', 'interaction subject': 'interaction subject', 'campaign name': 'campaign name',
     'email subject': 'email subject', 'campaign content': 'campaign content',
     'planner title': 'planner title', 'planner notes': 'planner notes',
     'tenancy agreement notes': 'tenancy agreement notes',

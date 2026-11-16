@@ -7,7 +7,7 @@ const router = Router();
 const acquire = createAdvisorLimiter();
 const sensitivePattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+?\d[\s().-]*){8,}\d|\b(?:UGX|KES|TZS|RWF|USD|EUR|GBP)\s*[\d,.]+|[$€£]\s*[\d,.]+|\b(?:password|passcode|pin|bank account|account number|card number|national id|nin|customer balance|salary|credit limit)\b/i;
 const fields = {
-  crm: new Set(['opportunity', 'lead notes', 'interaction notes', 'support case details', 'campaign name', 'email subject', 'campaign content']),
+  crm: new Set(['opportunity', 'lead notes', 'interaction subject', 'interaction notes', 'support case summary', 'support case details', 'campaign name', 'email subject', 'campaign content']),
   planner: new Set(['planner title', 'planner notes']),
   general: new Set(['business text']),
 };

@@ -96,6 +96,10 @@ export default function RentalItemsPage() {
   const canDelete = hasPermission('canDeleteRental')
   const canStockIn = hasPermission('canRecordStockIn')
   const canStockOut = hasPermission('canAdjustStock')
+  const stockAdjustmentQuantity = Number(stockAdjustment?.quantity) || 0
+  const projectedStockQuantity = stockAdjustment
+    ? Number(stockAdjustment.item.quantity || 0) + (stockAdjustment.type === 'stock_in' ? stockAdjustmentQuantity : -stockAdjustmentQuantity)
+    : 0
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -389,13 +393,20 @@ export default function RentalItemsPage() {
         <DialogHeader><DialogTitle>{stockAdjustment.type === 'stock_in' ? 'Stock In' : 'Stock Out'} · {stockAdjustment.item.product_name}</DialogTitle><DialogDescription>Record a quantity movement for this rental asset. Only on-hand assets can be removed. Process customer returns from Rentals → Returns so the booking, condition, and stock stay linked.</DialogDescription></DialogHeader>
         <form onSubmit={saveStockAdjustment} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">On hand</p><p className="mt-1 font-semibold tabular-nums">{Number(stockAdjustment.item.quantity || 0)} assets</p></div>
-            <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">After movement</p><p className="mt-1 font-semibold tabular-nums">{Number(stockAdjustment.item.quantity || 0) + (stockAdjustment.type === 'stock_in' ? 1 : -1) * (Number(stockAdjustment.quantity) || 0)} assets</p></div>
+            <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Current stock</p><p className="mt-1 font-semibold tabular-nums">{Number(stockAdjustment.item.quantity || 0)} assets</p></div>
+            <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">New stock</p><p className={`mt-1 font-semibold tabular-nums ${projectedStockQuantity < 0 ? 'text-destructive' : ''}`}>{projectedStockQuantity} assets</p></div>
           </div>
-          <div className="space-y-1"><Label htmlFor="rental-stock-quantity">Quantity</Label><Input id="rental-stock-quantity" type="number" min="1" step="1" max={stockAdjustment.type === 'stock_out' ? Number(stockAdjustment.item.quantity || 0) : undefined} value={stockAdjustment.quantity} onChange={event => setStockAdjustment(current => current ? { ...current, quantity: event.target.value } : current)} required /><p className="text-xs text-muted-foreground">Rental assets are counted in whole items.</p></div>
+          <div className="space-y-2">
+            <Label>Operation</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {canStockIn && <Button type="button" variant={stockAdjustment.type === 'stock_in' ? 'default' : 'outline'} onClick={() => setStockAdjustment(current => current ? { ...current, type: 'stock_in', reason: current.reason || 'Restock' } : current)}>Stock In</Button>}
+              {canStockOut && <Button type="button" variant={stockAdjustment.type === 'stock_out' ? 'default' : 'outline'} disabled={Number(stockAdjustment.item.quantity || 0) <= 0} onClick={() => setStockAdjustment(current => current ? { ...current, type: 'stock_out' } : current)}>Stock Out</Button>}
+            </div>
+          </div>
+          <div className="space-y-1"><Label htmlFor="rental-stock-quantity">{stockAdjustment.type === 'stock_in' ? 'Quantity received' : 'Quantity removed'}</Label><Input id="rental-stock-quantity" type="number" min="1" step="1" max={stockAdjustment.type === 'stock_out' ? Number(stockAdjustment.item.quantity || 0) : undefined} value={stockAdjustment.quantity} onChange={event => setStockAdjustment(current => current ? { ...current, quantity: event.target.value } : current)} required /><p className="text-xs text-muted-foreground">Rental assets are counted in whole items.</p></div>
           <div className="space-y-1"><Label htmlFor="rental-stock-reason">Reason</Label><Input id="rental-stock-reason" value={stockAdjustment.reason} onChange={event => setStockAdjustment(current => current ? { ...current, reason: event.target.value } : current)} placeholder={stockAdjustment.type === 'stock_in' ? 'New purchase, returned asset, opening count' : 'Damage, loss, disposal, count correction'} maxLength={300} /></div>
           <p className="text-xs text-muted-foreground">This records the asset-count movement and audit trail. It does not record a supplier purchase or payment.</p>
-          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setStockAdjustment(null)} disabled={savingStock}>Cancel</Button><Button type="submit" disabled={savingStock || !Number.isInteger(Number(stockAdjustment.quantity)) || Number(stockAdjustment.quantity) <= 0 || (stockAdjustment.type === 'stock_out' && Number(stockAdjustment.quantity) > Number(stockAdjustment.item.quantity || 0))}>{savingStock ? 'Saving…' : stockAdjustment.type === 'stock_in' ? 'Record Stock In' : 'Record Stock Out'}</Button></div>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setStockAdjustment(null)} disabled={savingStock}>Cancel</Button><Button type="submit" disabled={savingStock || !Number.isInteger(stockAdjustmentQuantity) || stockAdjustmentQuantity <= 0 || projectedStockQuantity < 0 || (stockAdjustment.type === 'stock_in' && !canStockIn) || (stockAdjustment.type === 'stock_out' && !canStockOut)}>{savingStock ? 'Saving…' : stockAdjustment.type === 'stock_in' ? 'Record Stock In' : 'Record Stock Out'}</Button></div>
         </form>
       </DialogContent>}
     </Dialog>
