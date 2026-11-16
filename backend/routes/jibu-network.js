@@ -240,8 +240,25 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
   const [participantOneId, participantTwoId] = [sender.id, recipient.id].sort();
   const existing = await prisma.jibuNetworkConversation.findUnique({ where: { participantOneId_participantTwoId: { participantOneId, participantTwoId } } });
   if (existing) {
-    if (existing.status === 'accepted') return res.json({ chatId: existing.id, status: existing.status, existing: true });
-    return fail(res, 409, existing.status === 'pending' ? 'A message request already exists for this member.' : 'A chat request between these accounts was already declined.');
+    if (existing.status === 'accepted') {
+      await prisma.$transaction(async (tx) => {
+        await tx.jibuNetworkMessage.create({ data: { conversationId: existing.id, senderId: sender.id, body } });
+        await tx.jibuNetworkConversation.update({ where: { id: existing.id }, data: { updatedAt: new Date() } });
+      });
+      return res.status(201).json({ chatId: existing.id, status: existing.status, existing: true });
+    }
+    if (existing.status === 'pending' && existing.requestedById !== sender.id) {
+      return fail(res, 409, 'This member has already sent you a request. Open it in Chats and accept or decline it first.');
+    }
+    const reopened = await prisma.$transaction(async (tx) => {
+      const updated = await tx.jibuNetworkConversation.update({
+        where: { id: existing.id },
+        data: { status: 'pending', requestedById: sender.id, updatedAt: new Date() },
+      });
+      await tx.jibuNetworkMessage.create({ data: { conversationId: existing.id, senderId: sender.id, body } });
+      return updated;
+    });
+    return res.status(201).json({ chatId: reopened.id, status: reopened.status, existing: true });
   }
   const chat = await prisma.$transaction(async (tx) => {
     const created = await tx.jibuNetworkConversation.create({ data: { participantOneId, participantTwoId, requestedById: sender.id, status: 'pending' } });
