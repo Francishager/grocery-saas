@@ -1,7 +1,7 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Sparkles, CalendarCheck, Printer, ChevronsUpDown } from 'lucide-react'
+import { Plus, Search, Clock, ArrowLeft, Package, Check, AlertTriangle, X, Sparkles, CalendarCheck, Printer, ChevronsUpDown, CreditCard } from 'lucide-react'
 import { apiFetch, rentalsApi, inventoryApi, branchesApi, settingsApi, categoriesApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -767,6 +767,19 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     if (canViewReport) loadSummary()
   }
 
+  const openRentalPayment = async (rental: Rental) => {
+    setSelectedRental(rental)
+    setPaymentAmount(Math.max(0, Number(rental.balance) || 0))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    try {
+      const updated = await rentalsApi.get(rental.id)
+      setSelectedRental(updated)
+      setPaymentAmount(Math.max(0, Number(updated.balance) || 0))
+    } catch (err: any) {
+      toast({ title: 'Could not refresh rental balance', description: err.message || 'Refresh the rental and try again.', variant: 'destructive' })
+    }
+  }
+
   const handleRecordRentalPayment = async () => {
     if (!selectedRental || !cashAccountId) return
     setSavingRentalPayment(true)
@@ -1344,6 +1357,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                       </td>}
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-1">
+                          {section === 'receivables' && canRecordRentalPayment && <Button type="button" variant="outline" size="sm" onClick={() => void openRentalPayment(rental)}><CreditCard className="mr-1 h-3.5 w-3.5" />Receive payment</Button>}
                           {section === 'receivables' && rental.customerId && hasPermission('canViewCustomer') && <Link to={`/tenant/receivables/customers/${encodeURIComponent(rental.customerId)}`} className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted">Open customer</Link>}
                           {section !== 'receivables' && rental.status === 'active' && ['reserved', 'confirmed'].includes(String(rental.bookingState)) && !rental.isHistoricalRecord && hasPermission('canEditRental') && (
                             <Button variant="outline" size="sm" onClick={() => handleCheckout(rental)}>
