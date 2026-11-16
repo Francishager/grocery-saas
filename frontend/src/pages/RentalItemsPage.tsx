@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Archive, Check, ChevronsUpDown, Clock, Edit2, ImagePlus, Plus, Search, Trash2 } from 'lucide-react'
+import { Archive, Check, ChevronsUpDown, Clock, Edit2, ImagePlus, MoreHorizontal, Plus, Search, Trash2 } from 'lucide-react'
 import { appConfirm } from '@/lib/appFeedback'
 import { branchesApi, categoriesApi, inventoryApi, type BranchOption, type InventoryItem } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -29,6 +30,7 @@ type RentalAssetForm = {
   replacementValue: string
   description: string
 }
+type StockAdjustment = { item: InventoryItem; type: 'stock_in' | 'stock_out'; quantity: string; reason: string }
 
 const emptyForm: RentalAssetForm = {
   product_name: '', sku: '', categoryId: '', branchId: '', quantity: '1', cost_price: '0',
@@ -84,12 +86,16 @@ export default function RentalItemsPage() {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [stockAdjustment, setStockAdjustment] = useState<StockAdjustment | null>(null)
+  const [savingStock, setSavingStock] = useState(false)
   const categoryPickerRef = useRef<HTMLDivElement | null>(null)
   const online = useOnlineStatus()
   const canCreate = hasPermission('canCreateRental')
   const canCreateCategory = canCreate
   const canEdit = hasPermission('canEditRental')
   const canDelete = hasPermission('canDeleteRental')
+  const canStockIn = hasPermission('canRecordStockIn')
+  const canStockOut = hasPermission('canAdjustStock')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -282,6 +288,36 @@ export default function RentalItemsPage() {
     }
   }
 
+  const saveStockAdjustment = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!stockAdjustment || savingStock) return
+    const quantity = Number(stockAdjustment.quantity)
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      toast({ title: 'Enter a whole quantity', description: 'Rental assets are counted as complete items.', variant: 'destructive' })
+      return
+    }
+    if (stockAdjustment.type === 'stock_out' && quantity > Number(stockAdjustment.item.quantity || 0)) {
+      toast({ title: 'Stock out exceeds on-hand quantity', description: 'Checked-out items are not included in the on-hand quantity.', variant: 'destructive' })
+      return
+    }
+    setSavingStock(true)
+    try {
+      await inventoryApi.adjustStock(String(stockAdjustment.item.id), {
+        adjustmentType: stockAdjustment.type,
+        quantity,
+        reason: stockAdjustment.reason.trim() || undefined,
+        branchId: stockAdjustment.item.branchId || null,
+      })
+      toast({ title: stockAdjustment.type === 'stock_in' ? 'Rental assets added to stock' : 'Rental assets removed from stock', description: `${quantity} ${quantity === 1 ? 'asset' : 'assets'} recorded. Rental availability will use the updated count.` })
+      setStockAdjustment(null)
+      await load()
+    } catch (error: any) {
+      toast({ title: 'Stock adjustment failed', description: error?.message || 'Review permissions and quantity, then try again.', variant: 'destructive' })
+    } finally {
+      setSavingStock(false)
+    }
+  }
+
   return <div className="min-w-0 space-y-5 p-4 md:p-6">
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -348,12 +384,38 @@ export default function RentalItemsPage() {
       </DialogContent>
     </Dialog>
 
+    <Dialog open={Boolean(stockAdjustment)} onOpenChange={open => { if (!open && !savingStock) setStockAdjustment(null) }}>
+      {stockAdjustment && <DialogContent className="sm:max-w-lg">
+        <DialogHeader><DialogTitle>{stockAdjustment.type === 'stock_in' ? 'Stock In' : 'Stock Out'} · {stockAdjustment.item.product_name}</DialogTitle><DialogDescription>Record a quantity movement for this rental asset. Only on-hand assets can be removed. Process customer returns from Rentals → Returns so the booking, condition, and stock stay linked.</DialogDescription></DialogHeader>
+        <form onSubmit={saveStockAdjustment} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">On hand</p><p className="mt-1 font-semibold tabular-nums">{Number(stockAdjustment.item.quantity || 0)} assets</p></div>
+            <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">After movement</p><p className="mt-1 font-semibold tabular-nums">{Number(stockAdjustment.item.quantity || 0) + (stockAdjustment.type === 'stock_in' ? 1 : -1) * (Number(stockAdjustment.quantity) || 0)} assets</p></div>
+          </div>
+          <div className="space-y-1"><Label htmlFor="rental-stock-quantity">Quantity</Label><Input id="rental-stock-quantity" type="number" min="1" step="1" max={stockAdjustment.type === 'stock_out' ? Number(stockAdjustment.item.quantity || 0) : undefined} value={stockAdjustment.quantity} onChange={event => setStockAdjustment(current => current ? { ...current, quantity: event.target.value } : current)} required /><p className="text-xs text-muted-foreground">Rental assets are counted in whole items.</p></div>
+          <div className="space-y-1"><Label htmlFor="rental-stock-reason">Reason</Label><Input id="rental-stock-reason" value={stockAdjustment.reason} onChange={event => setStockAdjustment(current => current ? { ...current, reason: event.target.value } : current)} placeholder={stockAdjustment.type === 'stock_in' ? 'New purchase, returned asset, opening count' : 'Damage, loss, disposal, count correction'} maxLength={300} /></div>
+          <p className="text-xs text-muted-foreground">This records the asset-count movement and audit trail. It does not record a supplier purchase or payment.</p>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setStockAdjustment(null)} disabled={savingStock}>Cancel</Button><Button type="submit" disabled={savingStock || !Number.isInteger(Number(stockAdjustment.quantity)) || Number(stockAdjustment.quantity) <= 0 || (stockAdjustment.type === 'stock_out' && Number(stockAdjustment.quantity) > Number(stockAdjustment.item.quantity || 0))}>{savingStock ? 'Saving…' : stockAdjustment.type === 'stock_in' ? 'Record Stock In' : 'Record Stock Out'}</Button></div>
+        </form>
+      </DialogContent>}
+    </Dialog>
+
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>Rental item register</CardTitle><p className="text-sm text-muted-foreground">Items available for hire, with branch and rate details.</p></div>
         <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search rental items" placeholder="Search rental items or code" value={search} onChange={event => setSearch(event.target.value)} className="pl-9" /></div>
       </CardHeader>
       <CardContent>
-        {loading ? <div className="py-12 text-center text-sm text-muted-foreground">Loading rental items…</div> : items.length === 0 ? <div className="py-12 text-center"><Archive className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="font-medium">No rental items yet</p><p className="mt-1 text-sm text-muted-foreground">Add the items your business offers for hire.</p>{canCreate && <Button className="mt-4" onClick={beginCreate}><Plus className="mr-2 h-4 w-4" />Add item</Button>}</div> : <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead><tr className="border-b text-left text-muted-foreground"><th className="py-3 pr-3">Rental item</th><th className="py-3 pr-3">Category</th><th className="py-3 pr-3">Branch</th><th className="py-3 pr-3 text-right">Owned</th><th className="py-3 pr-3">Hire rate</th><th className="py-3 pr-3 text-right">Deposit</th><th className="py-3 pr-3 text-right">Replacement</th><th className="py-3 text-right">Actions</th></tr></thead><tbody>{items.map(item => <tr key={item.id} className="border-b last:border-0"><td className="py-3 pr-3"><div className="flex items-center gap-3"><RentalItemImage src={item.image} alt="" className="size-11 shrink-0 object-cover" /><div className="min-w-0"><div className="font-medium">{item.product_name}</div><div className="text-xs text-muted-foreground">{item.sku || item.product_id || 'No item code'}</div></div></div></td><td className="py-3 pr-3">{item.categoryName || '—'}</td><td className="py-3 pr-3">{item.branch?.name || '—'}</td><td className="py-3 pr-3 text-right tabular-nums">{Number(item.quantity || 0)}</td><td className="py-3 pr-3"><span className="font-medium">{formatCurrency(item.rentalPrice ?? item.unit_price)}</span><span className="text-muted-foreground"> / {item.rentalPeriod || 'daily'}</span></td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.depositAmount || 0)}</td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.replacementValue || 0)}</td><td className="py-3 text-right"><div className="flex justify-end gap-1">{canEdit && <Button size="icon" variant="ghost" aria-label={`Edit ${item.product_name}`} title="Edit rental item" onClick={() => beginEdit(item)}><Edit2 className="h-4 w-4" /></Button>}{canDelete && <Button size="icon" variant="ghost" aria-label={`Delete ${item.product_name}`} title="Move to Trash" onClick={() => void remove(item)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}</div></td></tr>)}</tbody></table></div>}
+        {loading ? <div className="py-12 text-center text-sm text-muted-foreground">Loading rental items…</div> : items.length === 0 ? <div className="py-12 text-center"><Archive className="mx-auto mb-3 h-8 w-8 text-muted-foreground" /><p className="font-medium">No rental items yet</p><p className="mt-1 text-sm text-muted-foreground">Add the items your business offers for hire.</p>{canCreate && <Button className="mt-4" onClick={beginCreate}><Plus className="mr-2 h-4 w-4" />Add item</Button>}</div> : <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead><tr className="border-b text-left text-muted-foreground"><th className="py-3 pr-3">Rental item</th><th className="py-3 pr-3">Category</th><th className="py-3 pr-3">Branch</th><th className="py-3 pr-3 text-right">On hand</th><th className="py-3 pr-3">Hire rate</th><th className="py-3 pr-3 text-right">Deposit</th><th className="py-3 pr-3 text-right">Replacement</th><th className="py-3 text-right">Actions</th></tr></thead><tbody>{items.map(item => <tr key={item.id} className="border-b last:border-0"><td className="py-3 pr-3"><div className="flex items-center gap-3"><RentalItemImage src={item.image} alt="" className="size-11 shrink-0 object-cover" /><div className="min-w-0"><div className="font-medium">{item.product_name}</div><div className="text-xs text-muted-foreground">{item.sku || item.product_id || 'No item code'}</div></div></div></td><td className="py-3 pr-3">{item.categoryName || '—'}</td><td className="py-3 pr-3">{item.branch?.name || '—'}</td><td className="py-3 pr-3 text-right tabular-nums">{Number(item.quantity || 0)}</td><td className="py-3 pr-3"><span className="font-medium">{formatCurrency(item.rentalPrice ?? item.unit_price)}</span><span className="text-muted-foreground"> / {item.rentalPeriod || 'daily'}</span></td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.depositAmount || 0)}</td><td className="py-3 pr-3 text-right tabular-nums">{formatCurrency(item.replacementValue || 0)}</td><td className="py-3 text-right"><div className="flex justify-end gap-1">
+          {(canStockIn || canStockOut || canEdit || canDelete) && <DropdownMenu>
+            <DropdownMenuTrigger aria-label={`Actions for ${item.product_name}`} title="Rental item actions"><MoreHorizontal className="h-4 w-4" /></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canStockIn && <DropdownMenuItem onClick={() => setStockAdjustment({ item, type: 'stock_in', quantity: '1', reason: 'Restock' })}>Stock In</DropdownMenuItem>}
+              {canStockOut && <DropdownMenuItem disabled={Number(item.quantity || 0) <= 0} onClick={() => setStockAdjustment({ item, type: 'stock_out', quantity: '1', reason: '' })}>Stock Out</DropdownMenuItem>}
+              {canEdit && <DropdownMenuItem onClick={() => beginEdit(item)}>Edit item</DropdownMenuItem>}
+              {canDelete && <DropdownMenuItem onClick={() => void remove(item)}>Move to Trash</DropdownMenuItem>}
+            </DropdownMenuContent>
+          </DropdownMenu>}
+        </div></td></tr>)}</tbody></table></div>}
       </CardContent>
     </Card>
     <p className="flex items-center gap-2 text-xs text-muted-foreground"><Clock className="h-3.5 w-3.5" />Bookings and returns update item availability and keep a clear rental history. <Link className="text-primary hover:underline" to="/tenant/rentals/bookings">Go to bookings</Link></p>

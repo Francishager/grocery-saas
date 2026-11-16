@@ -13,6 +13,17 @@ test('returns explicit permissions from a user permission record', () => {
   assert.deepEqual(result, ['canViewDashboard', 'canViewSale']);
 });
 
+test('authenticated requests retain the assigned cash account for own-till payment checks', () => {
+  const authSource = readFileSync(new URL('../middleware/auth.js', import.meta.url), 'utf8');
+  const authenticateStart = authSource.indexOf('export const authenticateToken');
+  const authenticateEnd = authSource.indexOf('\nexport ', authenticateStart + 1);
+  const authenticateBody = authSource.slice(authenticateStart, authenticateEnd > -1 ? authenticateEnd : undefined);
+
+  assert.match(authenticateBody, /cashAccountId:\s*true/);
+  assert.match(authSource, /req\.user\?\.cashAccountId/);
+  assert.match(authSource, /checkPaymentMethodPermission\(req,\s*normalizedMethod\)/);
+});
+
 test('returns full permissions for owners and platform admins', () => {
   const ownerPermissions = resolveEffectivePermissions({ role: 'owner' });
   const platformPermissions = resolveEffectivePermissions({ role: 'saas_admin' });

@@ -1489,6 +1489,9 @@ router.post("/:id/stock-adjust", authenticateToken, async (req, res) => {
         return res.status(400).json({ error: "Stock unit conversion changed. Refresh the product and try again." });
       }
     }
+    if (product.itemType === "rental" && (req.body.unitId || req.body.stockUnitName || !Number.isInteger(parsedQuantity))) {
+      return res.status(400).json({ error: "Rental assets must be adjusted as whole items without product unit conversions." });
+    }
     if (!isValidStockQuantity(parsedQuantity, { allowZero: false, precision: 6 })) {
       return res.status(400).json({ error: "Converted stock quantity must be positive and use no more than 6 decimal places" });
     }
