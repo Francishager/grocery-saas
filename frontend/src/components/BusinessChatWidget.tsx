@@ -14,6 +14,12 @@ type Person = { id: string; name: string; role: string; avatar?: string | null }
 type MessageReaction = { id: string; userId: string; emoji: string }
 type Message = { id: string; senderId: string; recipientId: string; body: string; deliveredAt: string | null; readAt: string | null; createdAt: string; replyToMessage?: { id: string; senderId: string; body: string } | null; reactions?: MessageReaction[] }
 type Conversation = { id: string; participant: Person; latestMessage: Message | null; latestUnread?: Message | null; unreadCount: number; updatedAt: string }
+type NetworkPerson = { id: string; name: string; avatar?: string | null; jibuId?: string }
+type NetworkMessage = { id: string; senderId: string; body: string; deliveredAt: string | null; readAt: string | null; createdAt: string; replyToMessage?: { id: string; senderId: string; body: string } | null; reactions?: MessageReaction[] }
+type NetworkChat = { id: string; status: 'pending' | 'accepted'; incoming: boolean; participant: NetworkPerson; latestMessage: NetworkMessage | null; unreadCount: number; updatedAt: string }
+type InboxEntry =
+  | { source: 'business'; id: string; participant: Person; latestMessage: Message | null; unreadCount: number; updatedAt: string }
+  | ({ source: 'network' } & NetworkChat)
 type LauncherPosition = { x: number; y: number }
 const LAUNCHER_SIZE = 48
 const LAUNCHER_MARGIN = 12
@@ -35,6 +41,17 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(payload?.error || payload?.message || 'Business messages are unavailable.')
+  return payload as T
+}
+
+async function networkApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(`/api/network${path}`, {
+    ...init,
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload?.error || payload?.message || 'Network chats are unavailable.')
   return payload as T
 }
 
@@ -65,8 +82,11 @@ export function BusinessChatWidget() {
   const [peopleSearch, setPeopleSearch] = useState('')
   const [peopleLoading, setPeopleLoading] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const [networkChats, setNetworkChats] = useState<NetworkChat[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
+  const [selectedNetwork, setSelectedNetwork] = useState<NetworkChat | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [networkMessages, setNetworkMessages] = useState<NetworkMessage[]>([])
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null)
   const [peerTyping, setPeerTyping] = useState(false)
@@ -105,8 +125,12 @@ export function BusinessChatWidget() {
 
   const refreshConversations = useCallback(async () => {
     if (!enabled || !canView) return
-    try {
-      const { conversations: rows } = await api<{ conversations: Conversation[] }>('/conversations')
+    const [businessResult, networkResult] = await Promise.allSettled([
+      api<{ conversations: Conversation[] }>('/conversations'),
+      networkApi<{ profile: { enabled: boolean } }>('/me'),
+    ])
+    if (businessResult.status === 'fulfilled') {
+      const rows = businessResult.value.conversations
       const firstLoad = seenMessages.current === null
       const fresh = rows
         .map((conversation) => ({ conversation, message: conversation.latestUnread || conversation.latestMessage }))
@@ -118,7 +142,15 @@ export function BusinessChatWidget() {
       if (fresh) setIncoming(fresh)
       seenMessages.current = new Set(rows.flatMap((row) => [row.latestMessage?.id, row.latestUnread?.id]).filter((id): id is string => Boolean(id)))
       setConversations(rows)
-    } catch { /* Keep the current inbox usable during short network interruptions. */ }
+    }
+    if (networkResult.status === 'fulfilled') {
+      if (networkResult.value.profile.enabled) {
+        const chats = await networkApi<{ chats: NetworkChat[] }>('/chats').catch(() => null)
+        if (chats) setNetworkChats(chats.chats)
+      } else {
+        setNetworkChats([])
+      }
+    }
   }, [enabled, canView, user?.id])
 
   useEffect(() => {
@@ -151,10 +183,27 @@ export function BusinessChatWidget() {
       setMessages(rows)
       setPeerTyping(isPeerTyping)
       setConversations((current) => current.map((row) => row.id === conversation.id ? { ...row, unreadCount: 0 } : row))
+      setSelectedNetwork(null)
+      setNetworkMessages([])
       setSelected(conversation)
       setIncoming((current) => current?.conversation.id === conversation.id ? null : current)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not open this conversation.')
+    }
+  }, [])
+
+  const loadNetworkMessages = useCallback(async (chat: NetworkChat) => {
+    try {
+      const result = await networkApi<{ messages: NetworkMessage[]; status: NetworkChat['status'] }>(`/chats/${chat.id}/messages`)
+      setNetworkMessages(result.messages)
+      setNetworkChats((current) => current.map((row) => row.id === chat.id ? { ...row, unreadCount: 0, status: result.status } : row))
+      setSelected(null)
+      setMessages([])
+      setSelectedNetwork({ ...chat, status: result.status })
+      setReplyToMessage(null)
+      setActiveMessageMenuId(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not open this Network chat.')
     }
   }, [])
 
@@ -177,13 +226,33 @@ export function BusinessChatWidget() {
     }
   }, [open, selected?.id])
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [messages])
+  useEffect(() => {
+    if (!open || !selectedNetwork) return
+    let active = true
+    const refreshNetworkMessages = async () => {
+      try {
+        const result = await networkApi<{ messages: NetworkMessage[]; status: NetworkChat['status'] }>(`/chats/${selectedNetwork.id}/messages`)
+        if (!active) return
+        setNetworkMessages(result.messages)
+        setSelectedNetwork((current) => current?.id === selectedNetwork.id ? { ...current, status: result.status } : current)
+      } catch { /* Retain the visible thread through brief network interruptions. */ }
+    }
+    void refreshNetworkMessages()
+    const timer = window.setInterval(() => void refreshNetworkMessages(), 2200)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [open, selectedNetwork?.id])
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [messages, networkMessages])
 
   useEffect(() => () => {
     if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current)
   }, [])
 
-  const unread = useMemo(() => conversations.reduce((total, row) => total + row.unreadCount, 0), [conversations])
+  const inboxEntries = useMemo<InboxEntry[]>(() => [
+    ...conversations.map((conversation) => ({ ...conversation, source: 'business' as const })),
+    ...networkChats.map((chat) => ({ ...chat, source: 'network' as const })),
+  ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()), [conversations, networkChats])
+  const unread = useMemo(() => inboxEntries.reduce((total, row) => total + row.unreadCount, 0), [inboxEntries])
   const filteredPeople = useMemo(() => people.filter((person) => person.name.toLowerCase().includes(peopleSearch.toLowerCase())), [people, peopleSearch])
 
   async function startConversation(person: Person) {
@@ -201,6 +270,11 @@ export function BusinessChatWidget() {
     setError('')
     setNewMessageMode(true)
     setSelected(null)
+    setSelectedNetwork(null)
+    setMessages([])
+    setNetworkMessages([])
+    setReplyToMessage(null)
+    setActiveMessageMenuId(null)
     setPeopleSearch('')
     setPeopleLoading(true)
     try {
@@ -227,6 +301,49 @@ export function BusinessChatWidget() {
       await refreshConversations()
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Message could not be sent.') }
     finally { setSending(false) }
+  }
+
+  async function sendNetworkMessage(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedNetwork || selectedNetwork.status !== 'accepted' || !draft.trim() || !canSend) return
+    setSending(true)
+    setError('')
+    try {
+      await networkApi(`/chats/${selectedNetwork.id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ body: draft.trim() }),
+      })
+      setDraft('')
+      const result = await networkApi<{ messages: NetworkMessage[] }>(`/chats/${selectedNetwork.id}/messages`)
+      setNetworkMessages(result.messages)
+      await refreshConversations()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Network message could not be sent.')
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function respondToNetworkRequest(accept: boolean) {
+    if (!selectedNetwork || !canSend) return
+    setSending(true)
+    setError('')
+    try {
+      await networkApi(`/chats/${selectedNetwork.id}/${accept ? 'accept' : 'decline'}`, { method: 'POST', body: '{}' })
+      if (accept) {
+        const accepted = { ...selectedNetwork, status: 'accepted' as const }
+        setSelectedNetwork(accepted)
+        await loadNetworkMessages(accepted)
+      } else {
+        setSelectedNetwork(null)
+        setNetworkMessages([])
+      }
+      await refreshConversations()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Message request could not be updated.')
+    } finally {
+      setSending(false)
+    }
   }
 
   function beginMessagePress(messageId: string) {
@@ -263,7 +380,7 @@ export function BusinessChatWidget() {
 
   function changeDraft(value: string) {
     setDraft(value)
-    if (!selected || !canSend) return
+    if (!selected || selectedNetwork || !canSend) return
     if (typingTimeout.current !== null) window.clearTimeout(typingTimeout.current)
     if (!value.trim()) {
       lastTypingSentAt.current = 0
@@ -323,24 +440,28 @@ export function BusinessChatWidget() {
 
   if (!enabled) return null
 
+  const activeMessages: (Message | NetworkMessage)[] = selectedNetwork ? networkMessages : messages
+  const activePeer = selected?.participant || selectedNetwork?.participant || null
+  const visibleInboxEntries = inboxEntries.filter((entry) => !peopleSearch || entry.participant.name.toLowerCase().includes(peopleSearch.toLowerCase()))
+
   return createPortal(<>
     {incoming && !open && <div role="status" className="fixed bottom-[5.25rem] right-4 z-[80] w-[min(22rem,calc(100vw-2rem))] border bg-card p-3 shadow-xl sm:bottom-20">
       <div className="flex items-start gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(incoming.conversation.participant.name)}</div><button className="min-w-0 flex-1 text-left" onClick={() => { setOpen(true); void loadMessages(incoming.conversation) }}><span className="block text-xs font-semibold">{incoming.conversation.participant.name} sent a message</span><span className="mt-1 block truncate text-sm text-muted-foreground">{incoming.message.body}</span></button><button type="button" aria-label="Dismiss message popup" onClick={() => setIncoming(null)} className="rounded p-1 text-muted-foreground hover:bg-muted"><X className="size-4" /></button></div>
     </div>}
 
     {open && <section aria-label="Business messages" className="fixed inset-0 z-[79] flex flex-col overflow-hidden bg-background sm:inset-x-auto sm:bottom-4 sm:right-4 sm:top-auto sm:h-[min(720px,calc(100dvh-2rem))] sm:w-[min(520px,calc(100vw-2rem))] sm:border sm:shadow-2xl lg:h-[min(820px,calc(100dvh-2rem))] lg:w-[min(600px,calc(100vw-2rem))]">
-      {networkOpen ? <Suspense fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground">Opening Team Messaging…</div>}><JibuNetworkPage embedded onClose={() => setNetworkOpen(false)} /></Suspense> : <>
+      {networkOpen ? <Suspense fallback={<div className="grid h-full place-items-center text-sm text-muted-foreground">Opening Team Messaging…</div>}><JibuNetworkPage embedded onClose={() => { setNetworkOpen(false); void refreshConversations() }} /></Suspense> : <>
       <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-4">
-        {selected ? <button type="button" aria-label="Back to chats" onClick={() => { setSelected(null); setMessages([]); setNewMessageMode(false) }} className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-muted"><ArrowLeft className="size-5" /></button> : <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-900"><MessageCircle className="size-5" /></div>}
-        {selected && <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(selected.participant.name)}</div>}
-        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{selected?.participant.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p aria-live="polite" className={cn('truncate text-xs', peerTyping ? 'font-medium text-emerald-700' : 'capitalize text-muted-foreground')}>{selected && peerTyping ? 'Typing…' : selected ? selected.participant.role.replace(/_/g, ' ') : 'Private business team messaging'}</p></div>
-        {!selected && canSend && <button type="button" aria-label="Choose a contact" title="New chat" onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
-        {!selected && canView && <button type="button" aria-label="Open cross-business messaging" title="Contacts, status and communities" onClick={() => setNetworkOpen(true)} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><Globe2 className="size-5" /></button>}
+        {activePeer ? <button type="button" aria-label="Back to chats" onClick={() => { setSelected(null); setSelectedNetwork(null); setMessages([]); setNetworkMessages([]); setReplyToMessage(null); setActiveMessageMenuId(null); setNewMessageMode(false); setDraft('') }} className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-muted"><ArrowLeft className="size-5" /></button> : <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-900"><MessageCircle className="size-5" /></div>}
+        {activePeer && <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(activePeer.name)}</div>}
+        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{activePeer?.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p aria-live="polite" className={cn('truncate text-xs', peerTyping ? 'font-medium text-emerald-700' : 'capitalize text-muted-foreground')}>{selected && peerTyping ? 'Typing…' : selectedNetwork ? 'JibuSales Network' : selected ? selected.participant.role.replace(/_/g, ' ') : 'Business and Network conversations'}</p></div>
+        {!activePeer && canSend && <button type="button" aria-label="Choose a business contact" title="New business chat" onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
+        {!activePeer && canView && <button type="button" aria-label="Open Network updates and communities" title="Network updates and communities" onClick={() => setNetworkOpen(true)} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><Globe2 className="size-5" /></button>}
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
-      {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : selected ? <>
+      {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : (selected || selectedNetwork) ? <>
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[#efeae2] px-3 py-4 dark:bg-background sm:px-4">
-          {messages.map((message) => {
+          {activeMessages.map((message) => {
             const own = message.senderId === user?.id
             const status = message.readAt ? 'Read' : message.deliveredAt ? 'Delivered' : 'Sent; recipient offline'
             const StatusIcon = message.deliveredAt ? CheckCheck : Check
@@ -350,35 +471,49 @@ export function BusinessChatWidget() {
               reactionCounts.set(reaction.emoji, { count: current.count + 1, mine: current.mine || reaction.userId === user?.id })
             }
             return <div key={message.id} className={cn('relative max-w-[88%] sm:max-w-[82%]', own ? 'ml-auto' : 'mr-auto')}>
-              {activeMessageMenuId === message.id && canSend && <div className={cn('absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg', own ? 'right-0' : 'left-0')}>
-                {QUICK_REACTIONS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => void reactToMessage(message, emoji)} className="grid size-8 place-items-center rounded-full text-lg hover:bg-muted">{emoji}</button>)}
+              {activeMessageMenuId === message.id && canSend && selected && <div className={cn('absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg', own ? 'right-0' : 'left-0')}>
+                {QUICK_REACTIONS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => void reactToMessage(message as Message, emoji)} className="grid size-8 place-items-center rounded-full text-lg hover:bg-muted">{emoji}</button>)}
                 <span className="mx-0.5 h-5 w-px bg-border" />
-                <button type="button" aria-label="Reply to message" onClick={() => prepareReply(message)} className="grid size-8 place-items-center rounded-full hover:bg-muted"><Reply className="size-4" /></button>
+                <button type="button" aria-label="Reply to message" onClick={() => prepareReply(message as Message)} className="grid size-8 place-items-center rounded-full hover:bg-muted"><Reply className="size-4" /></button>
               </div>}
               <div
-                onContextMenu={(event) => { event.preventDefault(); setActiveMessageMenuId(message.id) }}
-                onPointerDown={(event) => { if (event.button === 0) beginMessagePress(message.id) }}
+                onContextMenu={(event) => { if (!selected) return; event.preventDefault(); setActiveMessageMenuId(message.id) }}
+                onPointerDown={(event) => { if (selected && event.button === 0) beginMessagePress(message.id) }}
                 onPointerUp={endMessagePress}
                 onPointerCancel={endMessagePress}
                 onPointerLeave={endMessagePress}
                 className={cn('select-text touch-pan-y px-3 py-2 shadow-sm', own ? 'rounded-2xl rounded-br-sm bg-[#d9fdd3] dark:bg-emerald-950/80' : 'rounded-2xl rounded-bl-sm bg-white dark:bg-muted')}
               >
-                {message.replyToMessage && <div className="mb-2 border-l-2 border-emerald-700/60 bg-black/5 px-2 py-1 dark:border-emerald-400/70 dark:bg-white/5"><p className="text-[10px] font-semibold text-emerald-800">{message.replyToMessage.senderId === user?.id ? 'You' : selected?.participant.name}</p><p className="line-clamp-2 whitespace-pre-wrap break-words text-xs text-[#53615a] dark:text-muted-foreground">{message.replyToMessage.body}</p></div>}
+                {message.replyToMessage && <div className="mb-2 border-l-2 border-emerald-700/60 bg-black/5 px-2 py-1 dark:border-emerald-400/70 dark:bg-white/5"><p className="text-[10px] font-semibold text-emerald-800">{message.replyToMessage.senderId === user?.id ? 'You' : activePeer?.name}</p><p className="line-clamp-2 whitespace-pre-wrap break-words text-xs text-[#53615a] dark:text-muted-foreground">{message.replyToMessage.body}</p></div>}
                 <p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b] dark:text-foreground">{message.body}</p>
                 <div className="mt-1 flex items-center justify-end gap-1"><time className="text-[10px] tabular-nums text-[#667781] dark:text-muted-foreground">{conversationTime(message.createdAt)}</time>{own && <span className={cn('inline-flex items-center', message.readAt ? 'text-sky-600' : 'text-slate-500')} title={status} aria-label={status}><StatusIcon className="size-3.5" aria-hidden="true" /></span>}</div>
               </div>
-              {reactionCounts.size > 0 && <div className={cn('mt-1 flex flex-wrap gap-1', own ? 'justify-end' : 'justify-start')}>{[...reactionCounts].map(([emoji, value]) => <button key={emoji} type="button" onClick={() => void reactToMessage(message, emoji)} aria-label={`${emoji}, ${value.count} reactions`} className={cn('inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-sm shadow-sm', value.mine && 'border-emerald-500 bg-emerald-50')}>{emoji}<span className="text-[11px] text-muted-foreground">{value.count}</span></button>)}</div>}
+              {!selectedNetwork && reactionCounts.size > 0 && <div className={cn('mt-1 flex flex-wrap gap-1', own ? 'justify-end' : 'justify-start')}>{[...reactionCounts].map(([emoji, value]) => <button key={emoji} type="button" onClick={() => void reactToMessage(message as Message, emoji)} aria-label={`${emoji}, ${value.count} reactions`} className={cn('inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-sm shadow-sm', value.mine && 'border-emerald-500 bg-emerald-50')}>{emoji}<span className="text-[11px] text-muted-foreground">{value.count}</span></button>)}</div>}
             </div>
           })}
         </div>
-        {canSend ? <form onSubmit={sendMessage} className="shrink-0 border-t bg-card p-3">
+        {selectedNetwork?.status === 'pending' ? selectedNetwork.incoming ? <div className="flex shrink-0 gap-2 border-t bg-card p-3"><button type="button" disabled={!canSend || sending} onClick={() => void respondToNetworkRequest(false)} className="h-10 flex-1 rounded-lg border text-sm font-medium disabled:opacity-50">Decline request</button><button type="button" disabled={!canSend || sending} onClick={() => void respondToNetworkRequest(true)} className="h-10 flex-1 rounded-lg bg-emerald-800 text-sm font-medium text-white disabled:opacity-50">Accept and reply</button></div> : <p className="border-t bg-card px-4 py-3 text-center text-xs text-muted-foreground">Your message request was sent. You can chat after they accept it.</p>
+        : selectedNetwork && canSend ? <form onSubmit={sendNetworkMessage} className="shrink-0 border-t bg-card p-3"><div className="flex items-end gap-2"><textarea aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm" /><button type="submit" aria-label="Send message" disabled={!draft.trim() || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-800 text-white disabled:opacity-50"><Send className="size-4" /></button></div></form>
+        : selectedNetwork ? <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>
+        : canSend ? <form onSubmit={sendMessage} className="shrink-0 border-t bg-card p-3">
           {replyToMessage && <div className="mb-2 flex items-center gap-2 border-l-2 border-emerald-700 bg-muted/60 px-2 py-1.5"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-emerald-800">Replying to {replyToMessage.senderId === user?.id ? 'yourself' : selected?.participant.name}</p><p className="truncate text-xs text-muted-foreground">{replyToMessage.body}</p></div><button type="button" aria-label="Cancel reply" onClick={() => setReplyToMessage(null)} className="grid size-7 place-items-center rounded-full hover:bg-muted"><X className="size-4" /></button></div>}
           <div className="flex items-end gap-2"><textarea ref={composerRef} aria-label="Message" value={draft} onChange={(event) => changeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm" /><button type="submit" aria-label="Send message" disabled={!draft.trim() || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-800 text-white disabled:opacity-50"><Send className="size-4" /></button></div>
         </form> : <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>}
       </> : <>
         <div className="shrink-0 border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input aria-label={newMessageMode ? 'Search contacts' : 'Search conversations'} value={peopleSearch} onChange={(event) => setPeopleSearch(event.target.value)} placeholder={newMessageMode ? 'Search contacts' : 'Search chats'} className="h-10 w-full rounded-full border-0 bg-muted/70 pl-10 pr-4 text-sm" /></div></div>
-        <div className="min-h-0 flex-1 overflow-y-auto">{newMessageMode ? filteredPeople.map((person) => <button key={person.id} type="button" onClick={() => void startConversation(person)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(person.name)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{person.name}</p><p className="text-xs capitalize text-muted-foreground">{person.role.replace(/_/g, ' ')}</p></div></button>) : [...conversations].filter((conversation) => !peopleSearch || conversation.participant.name.toLowerCase().includes(peopleSearch.toLowerCase())).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).map((conversation) => <button key={conversation.id} type="button" onClick={() => void loadMessages(conversation)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(conversation.participant.name)}</div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-semibold">{conversation.participant.name}</p><time className={cn('shrink-0 text-[11px]', conversation.unreadCount ? 'font-medium text-emerald-800' : 'text-muted-foreground')}>{conversationTime(conversation.latestMessage?.createdAt || conversation.updatedAt)}</time></div><div className="mt-1 flex items-center justify-between gap-2"><p className={cn('truncate text-xs', conversation.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground')}>{conversation.latestMessage?.body || 'Start a conversation'}</p>{conversation.unreadCount > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{conversation.unreadCount}</span>}</div></div></button>)}
-          {!newMessageMode && conversations.length === 0 && <div className="px-6 py-12 text-center"><MessageCircle className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-medium">No chats yet</p>{canSend ? <><p className="mt-1 text-xs text-muted-foreground">Start a private conversation with a teammate.</p><button type="button" onClick={() => void openNewMessage()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-800 px-4 py-2 text-sm font-medium text-white"><Plus className="size-4" />New chat</button></> : <p className="mt-1 text-xs text-muted-foreground">Ask your business admin to grant “Send Team Messages” to discover contacts and start chats.</p>}</div>}
+        <div className="min-h-0 flex-1 overflow-y-auto">{newMessageMode ? filteredPeople.map((person) => <button key={person.id} type="button" onClick={() => void startConversation(person)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(person.name)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{person.name}</p><p className="text-xs capitalize text-muted-foreground">{person.role.replace(/_/g, ' ')}</p></div></button>) : visibleInboxEntries.map((entry) => {
+          const latest = entry.latestMessage
+          const isNetwork = entry.source === 'network'
+          const subtitle = isNetwork ? entry.status === 'pending' ? entry.incoming ? 'Message request' : 'Request sent' : 'JibuSales Network' : 'Business chat'
+          return <button key={`${entry.source}:${entry.id}`} type="button" onClick={() => isNetwork ? void loadNetworkMessages(entry) : void loadMessages(entry)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50">
+            <div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(entry.participant.name)}</div>
+            <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-semibold">{entry.participant.name}</p><time className={cn('shrink-0 text-[11px]', entry.unreadCount ? 'font-medium text-emerald-800' : 'text-muted-foreground')}>{conversationTime(latest?.createdAt || entry.updatedAt)}</time></div>
+              <div className="mt-1 flex items-center justify-between gap-2"><p className={cn('truncate text-xs', entry.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground')}>{latest?.body || subtitle}</p><div className="flex shrink-0 items-center gap-1.5">{isNetwork && <span className="text-[10px] text-muted-foreground">{subtitle}</span>}{entry.unreadCount > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{entry.unreadCount}</span>}</div></div>
+            </div>
+          </button>
+        })}
+          {!newMessageMode && inboxEntries.length === 0 && <div className="px-6 py-12 text-center"><MessageCircle className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-medium">No chats yet</p>{canSend ? <><p className="mt-1 text-xs text-muted-foreground">Start a private conversation with a teammate, or open Network to message a JibuSales contact.</p><button type="button" onClick={() => void openNewMessage()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-800 px-4 py-2 text-sm font-medium text-white"><Plus className="size-4" />New chat</button></> : <p className="mt-1 text-xs text-muted-foreground">Ask your business admin to grant “Send Team Messages” to discover contacts and start chats.</p>}</div>}
+          {!newMessageMode && inboxEntries.length > 0 && visibleInboxEntries.length === 0 && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No chats match your search.</p>}
           {newMessageMode && peopleLoading && <p role="status" className="px-5 py-8 text-center text-sm text-muted-foreground">Loading business contacts…</p>}
           {newMessageMode && !peopleLoading && filteredPeople.length === 0 && !error && <p className="px-5 py-8 text-center text-sm text-muted-foreground">{people.length ? 'No contacts match your search.' : 'No other active users are available in this business account.'}</p>}
         </div>

@@ -212,10 +212,17 @@ router.get('/chats', async (req, res) => {
       data: { deliveredAt: new Date() },
     });
   }
-  const unread = visible.length
-    ? await prisma.jibuNetworkMessage.count({ where: { conversationId: { in: visible.map((chat) => chat.id) }, senderId: { not: req.user.id }, readAt: null } })
-    : 0;
-  res.json({ chats: visible, unread });
+  const unreadRows = visible.length
+    ? await prisma.jibuNetworkMessage.groupBy({
+      by: ['conversationId'],
+      where: { conversationId: { in: visible.map((chat) => chat.id) }, senderId: { not: req.user.id }, readAt: null },
+      _count: { _all: true },
+    })
+    : [];
+  const unreadByConversation = new Map(unreadRows.map((row) => [row.conversationId, row._count._all]));
+  const chats = visible.map((chat) => ({ ...chat, unreadCount: unreadByConversation.get(chat.id) || 0 }));
+  const unread = chats.reduce((total, chat) => total + chat.unreadCount, 0);
+  res.json({ chats, unread });
 });
 
 router.post('/requests', requirePermission('canSendTeamMessages'), async (req, res) => {
