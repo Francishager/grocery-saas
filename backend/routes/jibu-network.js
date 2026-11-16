@@ -206,6 +206,12 @@ router.get('/chats', async (req, res) => {
     if (!peer?.jibuNetworkEnabled || await blockedEitherWay(req.user.id, peer.id)) hidden.push(row.id);
     else visible.push(requestView(row, req.user.id));
   }
+  if (visible.length) {
+    await prisma.jibuNetworkMessage.updateMany({
+      where: { conversationId: { in: visible.map((chat) => chat.id) }, senderId: { not: req.user.id }, deliveredAt: null },
+      data: { deliveredAt: new Date() },
+    });
+  }
   const unread = visible.length
     ? await prisma.jibuNetworkMessage.count({ where: { conversationId: { in: visible.map((chat) => chat.id) }, senderId: { not: req.user.id }, readAt: null } })
     : 0;
@@ -259,8 +265,8 @@ router.get('/chats/:id/messages', async (req, res) => {
   const peerId = chat.participantOneId === req.user.id ? chat.participantTwoId : chat.participantOneId;
   const peer = await prisma.user.findFirst({ where: { id: peerId, jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
   if (!peer || await blockedEitherWay(req.user.id, peerId)) return fail(res, 404, 'Chat not found.');
-  const messages = (await prisma.jibuNetworkMessage.findMany({ where: { conversationId: chat.id }, orderBy: { createdAt: 'desc' }, take: 100 })).reverse();
   await prisma.jibuNetworkMessage.updateMany({ where: { conversationId: chat.id, senderId: peerId, readAt: null }, data: { readAt: new Date(), deliveredAt: new Date() } });
+  const messages = (await prisma.jibuNetworkMessage.findMany({ where: { conversationId: chat.id }, orderBy: { createdAt: 'desc' }, take: 100 })).reverse();
   res.json({ messages, status: chat.status, requestedById: chat.requestedById });
 });
 
