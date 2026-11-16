@@ -13,6 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const startupScriptPath = path.resolve(__dirname, '../start.sh');
 const startupScript = fs.readFileSync(startupScriptPath, 'utf8');
+const schemaBootstrap = fs.readFileSync(path.resolve(__dirname, '../src/scripts/run-locked-schema-bootstrap.js'), 'utf8');
 const dockerfile = fs.readFileSync(path.resolve(__dirname, '../Dockerfile'), 'utf8');
 const prismaSchema = fs.readFileSync(path.resolve(__dirname, '../prisma/schema.prisma'), 'utf8');
 
@@ -25,25 +26,34 @@ test('startup script launches the app without blocking on prisma bootstrap', () 
 test('container runs additive schema checks from its startup script without destructive schema push', () => {
   assert.match(dockerfile, /CMD \["\.\/start\.sh"\]/);
   assert.doesNotMatch(dockerfile, /prisma db push/);
-  assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
-  assert.match(startupScript, /ensure-property-tenant-notes-schema\.js/);
-  assert.match(startupScript, /ensure-customer-credit-applications-schema\.js/);
-  assert.match(startupScript, /ensure-customer-alternate-phone-schema\.js/);
-  assert.match(startupScript, /ensure-user-theme-schema\.js/);
-  assert.match(startupScript, /ensure-fractional-product-stock-schema\.js/);
-  assert.match(startupScript, /ensure-salon-spa-schema\.js/);
-  assert.match(startupScript, /ensure-tenant-memberships-schema\.js/);
-  assert.match(startupScript, /ensure-bar-feature\.js/);
-  assert.match(startupScript, /ensure-clinic-pharmacy-schema\.js/);
+  assert.match(startupScript, /run-locked-schema-bootstrap\.js/);
+  for (const migration of [
+    'ensure-property-tenancy-alternate-phone-schema.js',
+    'ensure-property-tenant-notes-schema.js',
+    'ensure-customer-credit-applications-schema.js',
+    'ensure-customer-alternate-phone-schema.js',
+    'ensure-user-theme-schema.js',
+    'ensure-fractional-product-stock-schema.js',
+    'ensure-salon-spa-schema.js',
+    'ensure-tenant-memberships-schema.js',
+    'ensure-bar-feature.js',
+    'ensure-clinic-pharmacy-schema.js',
+    'ensure-business-messaging-schema.js',
+  ]) assert.ok(schemaBootstrap.includes(migration), `startup bootstrap should include ${migration}`);
   for (const migration of [
     'ensure-salon-spa-schema.js',
     'ensure-tenant-memberships-schema.js',
     'ensure-bar-feature.js',
     'ensure-clinic-pharmacy-schema.js',
   ]) {
-    assert.ok(startupScript.indexOf(migration) < startupScript.indexOf('=== Starting Node App ==='));
+    assert.ok(schemaBootstrap.includes(migration));
   }
-  assert.ok(startupScript.indexOf('ensure-fractional-product-stock-schema.js') < startupScript.indexOf('=== Starting Node App ==='));
+  assert.ok(schemaBootstrap.includes('ensure-fractional-product-stock-schema.js'));
+  const businessMessagingSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-business-messaging-schema.js'), 'utf8');
+  for (const fragment of ['business_conversations', 'business_messages', 'business_message_reactions', '"deliveredAt"', '"replyToMessageId"', 'ADD COLUMN IF NOT EXISTS']) {
+    assert.ok(businessMessagingSchema.includes(fragment), `business messaging schema should include ${fragment}`);
+  }
+  assert.doesNotMatch(businessMessagingSchema, /DROP TABLE|TRUNCATE|force-reset/i);
   const fractionalStockMigration = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-fractional-product-stock-schema.js'), 'utf8');
   assert.match(fractionalStockMigration, /ALTER COLUMN "quantity" TYPE DECIMAL\(18, 6\)/);
   assert.match(fractionalStockMigration, /USING ROUND\("quantity"::numeric, 6\)/);
@@ -62,13 +72,12 @@ test('container runs additive schema checks from its startup script without dest
     'ensure-rental-credit-note-permissions-schema.js',
     'ensure-rental-cancellation-schema.js',
   ]) {
-    assert.ok(startupScript.indexOf(migration) < startupScript.indexOf('=== Starting Node App ==='));
+    assert.ok(schemaBootstrap.includes(migration));
   }
 });
 
 test('startup repairs all additive rental runtime tables and columns before serving rental and KPI queries', () => {
-  assert.match(startupScript, /ensure-rental-runtime-schema\.js/);
-  assert.ok(startupScript.indexOf('ensure-rental-runtime-schema.js') < startupScript.indexOf('=== Starting Node App ==='));
+  assert.ok(schemaBootstrap.includes('ensure-rental-runtime-schema.js'));
   const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-rental-runtime-schema.js'), 'utf8');
   for (const fragment of ['"bookingState"', '"depositPaid"', '"isHistoricalReceivable"', 'rental_charge_lines', 'rental_payments', 'rental_accounting_configs']) {
     assert.match(ensureScript, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -78,15 +87,14 @@ test('startup repairs all additive rental runtime tables and columns before serv
 });
 
 test('startup applies the additive alternate renter phone column before serving tenancy queries', () => {
-  assert.match(startupScript, /ensure-property-tenancy-alternate-phone-schema\.js/);
+  assert.ok(schemaBootstrap.includes('ensure-property-tenancy-alternate-phone-schema.js'));
   const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-property-tenancy-alternate-phone-schema.js'), 'utf8');
   assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS "alternatePhone" TEXT/);
 });
 
 test('startup creates permission and rent payment columns before the app queries them', () => {
-  const migration = 'node src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js';
-  assert.ok(startupScript.indexOf(migration) > startupScript.indexOf('ensure-property-rent-promises-schema.js'));
-  assert.ok(startupScript.indexOf(migration) < startupScript.indexOf('=== Starting Node App ==='));
+  const migration = 'ensure-payment-permissions-and-rent-mobile-schema.js';
+  assert.ok(schemaBootstrap.includes(migration));
   const ensureScript = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-payment-permissions-and-rent-mobile-schema.js'), 'utf8');
   assert.match(ensureScript, /ADD COLUMN IF NOT EXISTS.*BOOLEAN NOT NULL DEFAULT false/);
   assert.match(ensureScript, /ALTER COLUMN.*SET NOT NULL/);

@@ -34,7 +34,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
   })
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload?.error || 'Business messages are unavailable.')
+  if (!response.ok) throw new Error(payload?.error || payload?.message || 'Business messages are unavailable.')
   return payload as T
 }
 

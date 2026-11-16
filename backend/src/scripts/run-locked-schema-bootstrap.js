@@ -24,6 +24,7 @@ const requiredScripts = [
   'ensure-tenant-contact-email-nonunique.js',
   'ensure-bar-feature.js',
   'ensure-clinic-pharmacy-schema.js',
+  'ensure-business-messaging-schema.js',
   'ensure-jibu-network-schema.js',
 ];
 
