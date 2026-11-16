@@ -7,8 +7,9 @@ import { requireFeature, requireAnyFeature, hasFeatureAccess } from "../middlewa
 import { requestBusinessAdvice } from "../src/services/businessAdvisor.js";
 import { checkUsageLimit } from "../src/utils/usageLimits.js";
 import { customerIdentityConflictMessage, findCustomerIdentityConflict } from "../src/utils/customerIdentity.js";
-import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalMixedRevenueRecognitionLines, rentalConsumableCostLines, allocateRentalLineAmounts, rentalDamageChargeLines, rentalCreditNoteLines, rentalCancellationLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
+import { ensureRentalAccounting, ensureRentalCashLedgerAccount, recordRentalCashMovement, postRentalJournal, rentalInvoiceLines, rentalOutsourcedBillLines, rentalOutsourcedPaymentLines, rentalReceiptLines, rentalDepositReceiptLines, rentalDepositRefundLines, rentalDepositForfeitLines, rentalMixedRevenueRecognitionLines, rentalConsumableCostLines, allocateRentalLineAmounts, rentalDamageChargeLines, rentalCreditNoteLines, rentalCancellationLines, ensureLegacyRentalOpeningEntry, heldRentalDeposit } from "../src/services/rentalAccountingService.js";
 import { allocateHistoricalPaymentBalances } from "../src/services/rentalHistoricalEntryService.js";
+import { getPayablesAccountingConfig } from "../src/services/payablesAccountingService.js";
 
 const router = Router();
 const contractRequests = new Map();
@@ -165,6 +166,52 @@ async function consumeRentalChargeStockTx(tx, { tenantId, rental, userId }) {
   }
 }
 
+const hasRentalPermission = (req, permission) => req.userPermissions?.[permission] === true || req.user?.permissions?.includes(permission) || req.user?.permissions?.includes("*");
+
+async function createOutsourcedRentalBillsTx(tx, { tenantId, rental, userId }) {
+  const config = await ensureRentalAccounting(tx, tenantId);
+  for (const item of rental.items || []) {
+    if (item.sourceType !== "outsourced" || item.supplierPurchaseId) continue;
+    const supplier = await tx.supplier.findFirst({ where: { id: item.supplierId, tenantId } });
+    if (!supplier) throw Object.assign(new Error("The supplier for an outsourced rental item is unavailable."), { statusCode: 409 });
+    const amount = Math.round(Number(item.sourcingCost || 0) * Number(item.quantity || 0) * 100) / 100;
+    if (!(amount > 0)) throw Object.assign(new Error(`Enter the supplier's agreed cost for ${item.product?.name || "each outsourced item"}.`), { statusCode: 409 });
+    const mode = item.settlementMode === "rental" ? "rental" : "payables";
+    let payableAccountId = config.supplierPayableAccountId;
+    if (mode === "payables") {
+      const payableConfig = await getPayablesAccountingConfig(tx, tenantId);
+      if (!payableConfig?.isEnabled || !payableConfig.payableAccountId) throw Object.assign(new Error("Enable and configure Payables before using the Payables settlement route."), { statusCode: 409 });
+      payableAccountId = payableConfig.payableAccountId;
+    }
+    const purchase = await tx.supplierPurchase.create({
+      data: {
+        tenantId, branchId: rental.branchId, supplierId: supplier.id, userId,
+        total: amount, amountPaid: 0, balance: amount, paymentStatus: "unpaid",
+        rentalItemId: item.id, rentalSettlementMode: mode,
+        refNo: `${rental.rentalNo}-SRC-${item.id.slice(-6)}`,
+        notes: `Outsourced rental item ${item.product?.name || item.productId}; booking ${rental.rentalNo}`,
+      },
+    });
+    await tx.supplier.update({ where: { id: supplier.id }, data: { balance: { increment: amount } } });
+    await postRentalJournal(tx, {
+      tenantId, branchId: rental.branchId, userId, sourceType: "RENTAL_OUTSOURCE_BILL", sourceId: purchase.id,
+      reference: purchase.refNo, description: `Outsourced hire cost for ${rental.rentalNo}`,
+      lines: rentalOutsourcedBillLines(config, { amount, payableAccountId, itemName: item.product?.name || item.productId, supplierName: supplier.name }),
+    });
+    await tx.rentalItem.update({ where: { id: item.id }, data: { supplierPurchaseId: purchase.id } });
+  }
+}
+
+async function rentalWithSourcing(client, rental) {
+  if (!rental) return rental;
+  const items = await Promise.all((rental.items || []).map(async item => {
+    const supplier = item.supplierId ? await client.supplier.findFirst({ where: { id: item.supplierId, tenantId: rental.tenantId }, select: { id: true, name: true, phone: true } }) : null;
+    const supplierPurchase = item.sourceType === "outsourced" ? await client.supplierPurchase.findUnique({ where: { rentalItemId: item.id }, include: { payments: { orderBy: { createdAt: "asc" }, select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true } } } }) : null;
+    return { ...item, supplier, supplierPurchase, supplierPurchaseId: supplierPurchase?.id || item.supplierPurchaseId || null };
+  }));
+  return { ...rental, items };
+}
+
 const withUser = (record) => {
   if (!record) return record;
   const { User, ...rest } = record;
@@ -182,9 +229,9 @@ async function getRentalAvailability(client, scope, productIds, startDate, endDa
       status: { in: ["active", "overdue"] },
       hireDate: { lt: endDate },
       expectedReturnDate: { gt: startDate },
-      items: { some: { productId: { in: productIds } } },
+      items: { some: { productId: { in: productIds }, sourceType: "owned" } },
     }),
-    select: { bookingState: true, items: { where: { productId: { in: productIds } }, select: { productId: true, quantity: true } } },
+    select: { bookingState: true, items: { where: { productId: { in: productIds }, sourceType: "owned" }, select: { productId: true, quantity: true } } },
   });
   const booked = new Map();
   const checkedOut = new Map();
@@ -846,11 +893,11 @@ router.get("/:id", authenticateToken, requirePermission("canViewRental"), requir
         items: { include: { product: { select: { id: true, name: true, sku: true, rentalPrice: true, replacementValue: true } } } },
         chargeLines: true,
         payments: { where: { status: { in: ["posted", "historical"] } }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } },
-        ...((req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes("canViewRentalCreditNotes")) ? { creditNotes: { where: { status: { not: "cancelled" } }, include: { user: userSelect, payments: { where: { kind: "rental_credit_refund", status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } } }, orderBy: { createdAt: "desc" } } } : {}),
+        ...((req.userPermissions?.canViewRentalCreditNotes || req.user?.permissions?.includes("canViewRentalCreditNotes")) ? { creditNotes: { include: { user: userSelect, payments: { where: { kind: "rental_credit_refund", status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } }, user: userSelect }, orderBy: { paymentDate: "asc" } } }, orderBy: { createdAt: "desc" } } } : {}),
       },
     });
     if (!rental) return res.status(404).json({ error: "Rental not found" });
-    res.json(withUser(rental));
+    res.json(withUser(await rentalWithSourcing(prisma, rental)));
   } catch (err) {
     console.error("Rental get error:", err);
     handleBranchError(res, err, "Failed to fetch rental");
@@ -909,6 +956,8 @@ router.post("/:id/credit-notes", authenticateToken, requirePermission("canCreate
 
 router.patch("/:id/credit-notes/:creditNoteId/cancel", authenticateToken, requirePermission("canEditRentalCreditNote"), requireTenant, requireFeature("rentals"), async (req, res) => {
   try {
+    const cancellationReason = String(req.body?.reason || "").trim();
+    if (cancellationReason.length < 3 || cancellationReason.length > 500) return res.status(400).json({ error: "Enter a cancellation reason between 3 and 500 characters." });
     const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
     const updated = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM rentals WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
@@ -924,7 +973,7 @@ router.patch("/:id/credit-notes/:creditNoteId/cancel", authenticateToken, requir
       const nextBalance = Math.round((Number(rental.balance || 0) + Number(note.appliedAmount || 0)) * 100) / 100;
       const nextHistoricalReceivable = rental.isHistoricalReceivable ? Math.round((Number(rental.historicalReceivableAmount || 0) + Number(note.amount)) * 100) / 100 : Number(rental.historicalReceivableAmount || 0);
       await tx.rental.update({ where: { id: rental.id }, data: { totalAmount: nextTotal, taxAmount: nextTax, balance: nextBalance, historicalReceivableAmount: nextHistoricalReceivable, paymentStatus: nextBalance <= 0.01 ? "paid" : Number(rental.amountPaid) > 0 ? "partial" : "unpaid" } });
-      return tx.rentalCreditNote.update({ where: { id: note.id }, data: { status: "cancelled" } });
+      return tx.rentalCreditNote.update({ where: { id: note.id }, data: { status: "cancelled", cancellationReason, cancelledAt: new Date(), cancelledById: req.user.id } });
     }, { isolationLevel: "Serializable" });
     res.json({ note: updated });
   } catch (err) {
@@ -974,6 +1023,64 @@ router.post("/:id/credit-notes/:creditNoteId/refunds", authenticateToken, requir
     if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
     if (err.code === "P2034") return res.status(409).json({ error: "This rental refund changed at the same time. Refresh and retry." });
     handleBranchError(res, err, "Failed to refund rental credit note");
+  }
+});
+
+router.post("/:id/supplier-payments", authenticateToken, requirePermission("canRecordRentalSupplierPayment"), requireTenant, requireFeature("rentals"), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: "body", allowOwnerAll: true });
+    const amount = Math.round(toMoney(req.body?.amount, -1) * 100) / 100;
+    const method = String(req.body?.paymentMethod || "cash").toLowerCase();
+    const cashAccountId = String(req.body?.cashAccountId || "");
+    const transactionRef = String(req.body?.transactionRef || "").trim();
+    const mobileProvider = String(req.body?.mobileProvider || "").trim();
+    const phoneNumber = String(req.body?.phoneNumber || "").trim();
+    const requestKey = String(req.body?.idempotencyKey || randomUUID()).trim().slice(0, 100);
+    if (!(amount > 0) || !Number.isFinite(amount)) return res.status(400).json({ error: "Enter a positive supplier payment amount." });
+    if (method === "mobile_money" && (!mobileProvider || !phoneNumber || !transactionRef)) return res.status(400).json({ error: "Mobile money supplier payments require provider, phone number, and transaction reference." });
+    if (["card", "bank_transfer", "bank", "cheque"].includes(method) && !transactionRef) return res.status(400).json({ error: "This supplier payment method requires a transaction reference." });
+    const payment = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "rentals" WHERE "id" = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const rental = await tx.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }) });
+      const purchase = await tx.supplierPurchase.findFirst({ where: { rentalItemId: String(req.body?.rentalItemId || ""), tenantId: scope.tenantId } });
+      if (!rental || !purchase || purchase.rentalSettlementMode !== "rental") throw Object.assign(new Error("Rental-side supplier bill not found. Payables-routed bills must be settled from Payables."), { statusCode: 404 });
+      await tx.$queryRaw`SELECT "id" FROM "supplier_purchases" WHERE "id" = ${purchase.id} FOR UPDATE`;
+      const duplicate = await tx.supplierPayment.findUnique({ where: { idempotencyKey: `rental-source:${requestKey}` } });
+      if (duplicate) {
+        if (duplicate.purchaseId !== purchase.id || Math.abs(Number(duplicate.amount) - amount) > 0.01) throw Object.assign(new Error("This request key was already used for a different supplier payment."), { statusCode: 409 });
+        return duplicate;
+      }
+      const locked = await tx.supplierPurchase.findFirst({ where: { id: purchase.id, tenantId: scope.tenantId } });
+      if (!locked || amount > Number(locked.balance || 0) + 0.01) throw Object.assign(new Error("Payment exceeds this supplier bill's outstanding balance. Refresh and enter an amount within the current balance."), { statusCode: 409 });
+      const supplier = await tx.supplier.findFirst({ where: { id: locked.supplierId, tenantId: scope.tenantId } });
+      if (!supplier) throw Object.assign(new Error("Supplier account was not found."), { statusCode: 409 });
+      await tx.$queryRaw`SELECT "id" FROM "suppliers" WHERE "id" = ${supplier.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`;
+      const lockedSupplier = await tx.supplier.findFirst({ where: { id: supplier.id, tenantId: scope.tenantId } });
+      if (!lockedSupplier || Number(lockedSupplier.balance || 0) + 0.01 < amount) throw Object.assign(new Error("Supplier balance changed. Refresh the booking before recording this payment."), { statusCode: 409 });
+      const cashAccount = validateRentalPaymentAccount(req, await tx.cashAccount.findFirst({ where: { id: cashAccountId, tenantId: scope.tenantId, isActive: true } }), method);
+      const reference = String(req.body?.reference || "").trim().slice(0, 120) || `RSP-${Date.now()}-${randomUUID().slice(0, 6).toUpperCase()}`;
+      const movement = await recordRentalCashMovement(tx, { tenantId: scope.tenantId, userId: req.user.id, cashAccount, amount, direction: "expense", transactionType: "payment", reference, description: `Rental supplier payment: ${supplier.name}` });
+      const created = await tx.supplierPayment.create({ data: {
+        tenantId: scope.tenantId, branchId: rental.branchId, supplierId: supplier.id, purchaseId: locked.id,
+        amount, paymentMethod: method, mobileProvider: method === "mobile_money" ? mobileProvider : null,
+        phoneNumber: method === "mobile_money" ? phoneNumber : null,
+        transactionId: ["mobile_money", "card", "bank_transfer", "bank", "cheque"].includes(method) ? transactionRef : null,
+        reference, notes: String(req.body?.notes || `Outsourced hire for ${rental.rentalNo}`).trim().slice(0, 500),
+        idempotencyKey: `rental-source:${requestKey}`,
+      } });
+      const nextBillBalance = Math.max(0, Math.round((Number(locked.balance) - amount) * 100) / 100);
+      await tx.supplierPurchase.update({ where: { id: locked.id }, data: { amountPaid: { increment: amount }, balance: nextBillBalance, paymentStatus: nextBillBalance <= 0.01 ? "paid" : "partial" } });
+      await tx.supplier.update({ where: { id: supplier.id }, data: { balance: { decrement: amount } } });
+      const cashLedger = await ensureRentalCashLedgerAccount(tx, scope.tenantId, movement.cashAccount);
+      const config = await ensureRentalAccounting(tx, scope.tenantId);
+      await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: rental.branchId, userId: req.user.id, sourceType: "RENTAL_OUTSOURCE_PAYMENT", sourceId: created.id, reference, description: `Rental supplier payment to ${supplier.name}`, lines: rentalOutsourcedPaymentLines(config, { amount, cashAccountId: cashLedger.id, reference: locked.refNo || locked.id }) });
+      return created;
+    }, { isolationLevel: "Serializable" });
+    res.status(201).json({ payment });
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    if (err.code === "P2034") return res.status(409).json({ error: "This supplier bill changed while recording payment. Refresh and try again." });
+    handleBranchError(res, err, "Failed to record rental supplier payment");
   }
 });
 
@@ -1437,6 +1544,16 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
       const unitHirePrice = toMoney(item.unitHirePrice, product.rentalPrice || product.price || 0);
       const periods = Math.max(1, Number.parseInt(item.periods, 10) || 1);
       const totalAmount = unitHirePrice * quantity * periods;
+      const sourceType = item.sourceType === "outsourced" ? "outsourced" : "owned";
+      const sourcingCost = sourceType === "outsourced" ? toMoney(item.sourcingCost, -1) : 0;
+      const settlementMode = item.settlementMode === "rental" ? "rental" : "payables";
+      if (sourceType === "outsourced") {
+        if (!hasRentalPermission(req, "canManageRentalSourcing")) throw Object.assign(new Error("You do not have permission to source rental items externally."), { statusCode: 403 });
+        if (sourcingCost <= 0) throw Object.assign(new Error(`Enter a positive supplier cost per ${product.name}.`), { statusCode: 400 });
+        if (!String(item.supplierId || "").trim() && !String(item.supplierName || "").trim()) throw Object.assign(new Error(`Enter or select a supplier for ${product.name}.`), { statusCode: 400 });
+        if (settlementMode === "payables" && !hasRentalPermission(req, "canCreatePayable")) throw Object.assign(new Error("You need supplier-purchase permission to choose Payables settlement."), { statusCode: 403 });
+        if (settlementMode === "payables" && !hasFeatureAccess(req.tenantFeatures || new Set(), "payables")) throw Object.assign(new Error("Payables is not enabled. Choose Rental-side supplier settlement or ask the SaaS administrator to enable Payables."), { statusCode: 403 });
+      }
 
       return {
         productId: item.productId,
@@ -1447,6 +1564,12 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
         totalAmount,
         conditionOut: item.conditionOut || "good",
         notes: item.notes || null,
+        sourceType,
+        supplierId: String(item.supplierId || "").trim() || null,
+        supplierName: String(item.supplierName || "").trim().slice(0, 120),
+        supplierPhone: String(item.supplierPhone || "").trim().slice(0, 40),
+        sourcingCost,
+        settlementMode: sourceType === "outsourced" ? settlementMode : null,
       };
     });
 
@@ -1511,7 +1634,23 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
     const rentalNo = `HIRE-${Date.now()}`;
     const rental = await prisma.$transaction(async (tx) => {
       const availability = await getRentalAvailability(tx, scope, productIds, startDate, endDate);
+      const resolvedItems = [];
       for (const item of rentalItems) {
+        let supplierId = item.supplierId;
+        if (item.sourceType === "outsourced") {
+          if (supplierId) {
+            const supplier = await tx.supplier.findFirst({ where: scopedWhere(scope, { id: supplierId }) });
+            if (!supplier) throw Object.assign(new Error("Choose a supplier belonging to this business and branch."), { statusCode: 400 });
+          } else {
+            const phone = item.supplierPhone || null;
+            const existing = phone ? await tx.supplier.findFirst({ where: { tenantId: scope.tenantId, phone, ...(scope.branchId ? { OR: [{ branchId: scope.branchId }, { branchId: null }] } : {}) } }) : null;
+            const supplier = existing || await tx.supplier.create({ data: { tenantId: scope.tenantId, branchId: scope.branchId, name: item.supplierName, phone, notes: `Created from outsourced rental booking ${rentalNo}` } });
+            supplierId = supplier.id;
+          }
+        }
+        resolvedItems.push({ ...item, supplierId });
+      }
+      for (const item of resolvedItems.filter(row => row.sourceType === "owned")) {
         const available = availability.find((row) => row.productId === item.productId)?.available || 0;
         if (available < item.quantity) throw Object.assign(new Error(`${productsById.get(item.productId).name}: ${available} available for these dates.`), { statusCode: 409 });
       }
@@ -1550,7 +1689,13 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
           deliveryFee: normalizedDeliveryFee,
           notes,
           items: {
-            create: pricedRentalItems.map(({ ...rest }) => rest),
+            create: pricedRentalItems.map((item) => ({
+              productId: item.productId, quantity: item.quantity, unitHirePrice: item.unitHirePrice,
+              rentalPeriod: item.rentalPeriod, periods: item.periods, totalAmount: item.totalAmount,
+              conditionOut: item.conditionOut, notes: item.notes, sourceType: item.sourceType,
+              supplierId: resolvedItems.find(row => row.productId === item.productId)?.supplierId || null,
+              sourcingCost: item.sourcingCost, settlementMode: item.settlementMode,
+            })),
           },
           chargeLines: { create: pricedChargeLines },
         },
@@ -1563,7 +1708,7 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
         },
       });
 
-      if (bookingMode === "checkout") for (const item of rentalItems) {
+      if (bookingMode === "checkout") for (const item of rentalItems.filter(row => row.sourceType === "owned")) {
         await tx.product.update({ where: { id: item.productId }, data: { quantity: { decrement: item.quantity } } });
       }
 
@@ -1572,10 +1717,12 @@ router.post("/", authenticateToken, requirePermission("canCreateRental"), requir
         await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id, sourceType: "RENTAL_ISSUE", sourceId: created.id, reference: rentalNo, description: `Rental invoice ${rentalNo}`, lines: rentalInvoiceLines(config, { total: totalAmount, tax: taxAmount, reference: rentalNo }) });
       }
       if (bookingMode === "checkout") await consumeRentalChargeStockTx(tx, { tenantId: scope.tenantId, rental: created, userId: req.user.id });
+      if (bookingMode === "checkout") await createOutsourcedRentalBillsTx(tx, { tenantId: scope.tenantId, rental: created, userId: req.user.id });
       if (paid > 0) await recordRentalPaymentTx(tx, { req, tenantId: scope.tenantId, rental: created, amount: paid, method: paymentMethod, cashAccountId, kind: bookingMode === "reserve" ? "rental_advance" : "rental_payment", transactionRef: transactionId, mobileProvider, phoneNumber });
       if (deposit > 0) await recordRentalPaymentTx(tx, { req, tenantId: scope.tenantId, rental: created, amount: deposit, method: paymentMethod, cashAccountId, kind: "deposit", transactionRef: transactionId, mobileProvider, phoneNumber, notes: "Refundable security deposit" });
 
-      return tx.rental.findUnique({ where: { id: created.id }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true, payments: { where: { status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } } }, orderBy: { paymentDate: "asc" } } } });
+      const result = await tx.rental.findUnique({ where: { id: created.id }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true, payments: { where: { status: "posted" }, include: { cashAccount: { select: { id: true, name: true, type: true } } }, orderBy: { paymentDate: "asc" } } } });
+      return rentalWithSourcing(tx, result);
     }, { isolationLevel: "Serializable" });
 
     res.status(201).json(withUser(rental));
@@ -1593,6 +1740,7 @@ router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental
     const rental = await prisma.rental.findFirst({ where: scopedWhere(scope, { id: req.params.id }), include: { items: true, chargeLines: true } });
     if (!rental) return res.status(404).json({ error: "Rental not found." });
     if (rental.status !== "active" || !["reserved", "confirmed"].includes(rental.bookingState) || rental.isHistoricalRecord) return res.status(409).json({ error: "Only an active, uncompleted reservation can be checked out." });
+    if (rental.items.some(item => item.sourceType === "outsourced") && !hasRentalPermission(req, "canManageRentalSourcing")) return res.status(403).json({ error: "You do not have permission to confirm outsourced rental sourcing at check-out." });
     if (!rental.customerId && Number(rental.totalAmount) - Number(rental.amountPaid || 0) > 0.01) {
       return res.status(409).json({ error: "Link this renter to an existing customer before check-out so any unpaid rental balance can be tracked and collected." });
     }
@@ -1600,10 +1748,15 @@ router.post("/:id/checkout", authenticateToken, requirePermission("canEditRental
       const checkoutStart = new Date();
       if (new Date(rental.expectedReturnDate) <= checkoutStart) throw Object.assign(new Error("The reserved return date has passed. Update the reservation before check-out."), { statusCode: 409 });
       const availability = await getRentalAvailability(tx, scope, rental.items.map((item) => item.productId), checkoutStart, rental.expectedReturnDate, rental.id);
-      for (const item of rental.items) if ((availability.find((row) => row.productId === item.productId)?.available || 0) < item.quantity) throw Object.assign(new Error("Availability changed since reservation. Adjust the reservation before check-out."), { statusCode: 409 });
-      for (const item of rental.items) await tx.product.update({ where: { id: item.productId }, data: { quantity: { decrement: item.quantity } } });
+      for (const item of rental.items.filter(row => row.sourceType === "owned")) if ((availability.find((row) => row.productId === item.productId)?.available || 0) < item.quantity) throw Object.assign(new Error("Availability changed since reservation. Adjust the reservation before check-out."), { statusCode: 409 });
+      for (const item of rental.items.filter(row => row.sourceType === "owned")) await tx.product.update({ where: { id: item.productId }, data: { quantity: { decrement: item.quantity } } });
+      for (const item of rental.items.filter(row => row.sourceType === "outsourced")) {
+        if (!item.supplierId || !(Number(item.sourcingCost) > 0)) throw Object.assign(new Error("Confirm a supplier and agreed cost for each outsourced item before check-out."), { statusCode: 409 });
+        if (item.settlementMode === "payables" && (!hasRentalPermission(req, "canCreatePayable") || !hasFeatureAccess(req.tenantFeatures || new Set(), "payables"))) throw Object.assign(new Error("Payables access is required for this booking's supplier settlement route."), { statusCode: 403 });
+      }
       await consumeRentalChargeStockTx(tx, { tenantId: scope.tenantId, rental, userId: req.user.id });
       const checkedOut = await tx.rental.update({ where: { id: rental.id }, data: { bookingState: "checked_out", hireDate: new Date() }, include: { customer: true, branch: true, User: userSelect, items: { include: { product: { select: { id: true, name: true, sku: true } } } }, chargeLines: true } });
+      await createOutsourcedRentalBillsTx(tx, { tenantId: scope.tenantId, rental: checkedOut, userId: req.user.id });
       if (Number(checkedOut.totalAmount) > 0) {
         const config = await ensureRentalAccounting(tx, scope.tenantId);
         await postRentalJournal(tx, { tenantId: scope.tenantId, branchId: checkedOut.branchId, userId: req.user.id, sourceType: "RENTAL_ISSUE", sourceId: checkedOut.id, reference: checkedOut.rentalNo, description: `Rental invoice ${checkedOut.rentalNo}`, lines: rentalInvoiceLines(config, { total: checkedOut.totalAmount, tax: checkedOut.taxAmount, reference: checkedOut.rentalNo }) });
@@ -1664,7 +1817,7 @@ router.post("/:id/return", authenticateToken, requirePermission("canProcessRenta
 
         // Increment stock back (item returned)
         // If condition is "broken", don't return to stock
-        if (conditionReturn !== "broken") {
+        if (rentalItem.sourceType !== "outsourced" && conditionReturn !== "broken") {
           await tx.product.update({
             where: { id: rentalItem.productId },
             data: { quantity: { increment: rentalItem.quantity } },

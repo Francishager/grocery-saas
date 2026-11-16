@@ -63,6 +63,7 @@ const LeaveRequestPage = lazy(() => import('@/pages/hr/LeaveRequestPage'))
 const LeaveApprovalPage = lazy(() => import('@/pages/hr/LeaveApprovalPage'))
 const TransfersPage = lazy(() => import('@/pages/TransfersPage'))
 const CommunicationPage = lazy(() => import('@/pages/CommunicationPage'))
+const JibuNetworkPage = lazy(() => import('@/pages/JibuNetworkPage'))
 const IntegrationsPage = lazy(() => import('@/pages/IntegrationsPage'))
 const RestaurantPage = lazy(() => import('@/pages/RestaurantPage'))
 const FuelStationPage = lazy(() => import('@/pages/FuelStationPage'))
@@ -297,6 +298,7 @@ function App() {
           <Route path="hr/leaves/approval" element={<FeatureGuard feature="hr" permission="canApproveHRLeave"><LeaveApprovalPage /></FeatureGuard>} />
           <Route path="transfers" element={<FeatureGuard feature="inventory.transfers"><TransfersPage /></FeatureGuard>} />
           <Route path="communication" element={<FeatureGuard feature="communication"><CommunicationPage /></FeatureGuard>} />
+          <Route path="network" element={<FeatureGuard feature="social_network"><JibuNetworkPage /></FeatureGuard>} />
           <Route path="integrations" element={<FeatureGuard feature="integrations"><IntegrationsPage /></FeatureGuard>} />
           <Route path="restaurant" element={<Navigate to="/tenant/dashboard" replace />} />
           <Route path="restaurant/dashboard" element={<Navigate to="/tenant/dashboard" replace />} />

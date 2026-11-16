@@ -18,3 +18,9 @@ test('dialogs ignore outside interactions unless a caller already handled them',
   assert.match(dialog, /onInteractOutside\?\.\(event\)/);
   assert.match(dialog, /if \(!event\.defaultPrevented\) event\.preventDefault\(\)/);
 });
+
+test('chat explains the send permission needed to discover contacts and distinguishes loading from empty results', () => {
+  assert.match(chat, /grant “Send Team Messages” to discover contacts and start chats/);
+  assert.match(chat, /Loading business contacts/);
+  assert.match(chat, /No other active users are available in this business account/);
+});

@@ -58,6 +58,7 @@ export function BusinessChatWidget() {
   const [newMessageMode, setNewMessageMode] = useState(false)
   const [people, setPeople] = useState<Person[]>([])
   const [peopleSearch, setPeopleSearch] = useState('')
+  const [peopleLoading, setPeopleLoading] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selected, setSelected] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -196,10 +197,12 @@ export function BusinessChatWidget() {
     setNewMessageMode(true)
     setSelected(null)
     setPeopleSearch('')
+    setPeopleLoading(true)
     try {
       const { people: rows } = await api<{ people: Person[] }>('/people')
       setPeople(rows)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load team members.') }
+    finally { setPeopleLoading(false) }
   }
 
   async function sendMessage(event: FormEvent) {
@@ -368,8 +371,9 @@ export function BusinessChatWidget() {
       </> : <>
         <div className="shrink-0 border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input aria-label={newMessageMode ? 'Search contacts' : 'Search conversations'} value={peopleSearch} onChange={(event) => setPeopleSearch(event.target.value)} placeholder={newMessageMode ? 'Search contacts' : 'Search chats'} className="h-10 w-full rounded-full border-0 bg-muted/70 pl-10 pr-4 text-sm" /></div></div>
         <div className="min-h-0 flex-1 overflow-y-auto">{newMessageMode ? filteredPeople.map((person) => <button key={person.id} type="button" onClick={() => void startConversation(person)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(person.name)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{person.name}</p><p className="text-xs capitalize text-muted-foreground">{person.role.replace(/_/g, ' ')}</p></div></button>) : [...conversations].filter((conversation) => !peopleSearch || conversation.participant.name.toLowerCase().includes(peopleSearch.toLowerCase())).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).map((conversation) => <button key={conversation.id} type="button" onClick={() => void loadMessages(conversation)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50"><div className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-900">{initials(conversation.participant.name)}</div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-semibold">{conversation.participant.name}</p><time className={cn('shrink-0 text-[11px]', conversation.unreadCount ? 'font-medium text-emerald-800' : 'text-muted-foreground')}>{conversationTime(conversation.latestMessage?.createdAt || conversation.updatedAt)}</time></div><div className="mt-1 flex items-center justify-between gap-2"><p className={cn('truncate text-xs', conversation.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground')}>{conversation.latestMessage?.body || 'Start a conversation'}</p>{conversation.unreadCount > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{conversation.unreadCount}</span>}</div></div></button>)}
-          {!newMessageMode && conversations.length === 0 && <div className="px-6 py-12 text-center"><MessageCircle className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-medium">No chats yet</p><p className="mt-1 text-xs text-muted-foreground">Start a private conversation with a teammate.</p>{canSend && <button type="button" onClick={() => void openNewMessage()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-800 px-4 py-2 text-sm font-medium text-white"><Plus className="size-4" />New chat</button>}</div>}
-          {newMessageMode && filteredPeople.length === 0 && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No active team members found.</p>}
+          {!newMessageMode && conversations.length === 0 && <div className="px-6 py-12 text-center"><MessageCircle className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-medium">No chats yet</p>{canSend ? <><p className="mt-1 text-xs text-muted-foreground">Start a private conversation with a teammate.</p><button type="button" onClick={() => void openNewMessage()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-800 px-4 py-2 text-sm font-medium text-white"><Plus className="size-4" />New chat</button></> : <p className="mt-1 text-xs text-muted-foreground">Ask your business admin to grant “Send Team Messages” to discover contacts and start chats.</p>}</div>}
+          {newMessageMode && peopleLoading && <p role="status" className="px-5 py-8 text-center text-sm text-muted-foreground">Loading business contacts…</p>}
+          {newMessageMode && !peopleLoading && filteredPeople.length === 0 && !error && <p className="px-5 py-8 text-center text-sm text-muted-foreground">{people.length ? 'No contacts match your search.' : 'No other active users are available in this business account.'}</p>}
         </div>
       </>}
       {error && <div role="alert" className="shrink-0 border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200">{error}</div>}

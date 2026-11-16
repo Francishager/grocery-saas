@@ -209,6 +209,11 @@ const MODULES = [
     ]
   },
   {
+    id: 'social_network', name: 'JibuSales Network', icon: Users, color: 'text-emerald-700 bg-emerald-100', features: [
+      { name: 'social_network', displayName: 'JibuSales Network' },
+    ]
+  },
+  {
     id: 'integrations', name: 'Integrations', icon: CreditCard, color: 'text-emerald-600 bg-emerald-100', features: [
       { name: 'integrations', displayName: 'Integrations' },
       { name: 'integrations.mobile_money', displayName: 'Mobile Money' },
@@ -308,7 +313,7 @@ const MODULES = [
 const FEATURE_SECTIONS = [
   { id: 'business-operations', title: 'Business Operations', description: 'Core selling, inventory, customer, supplier, branch and financial workflows.', modules: ['dashboard', 'sales', 'inventory', 'customers', 'suppliers', 'procurement', 'financial', 'receivables', 'payables', 'accounting', 'reports', 'multi_branch'] },
   { id: 'industry-modules', title: 'Industry Modules', description: 'Specialized workflows for healthcare, bar, property, salon, service, hospitality, fuel, manufacturing and agriculture businesses.', modules: ['clinic_management', 'pharmacy_management', 'bar', 'restaurant', 'salon_spa', 'service', 'rentals', 'property_management', 'fuel_station', 'manufacturing', 'agriculture', 'assets'] },
-  { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, planning, customer relationships, administration, security and developer tools.', modules: ['hr', 'business_tools', 'communication', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
+  { id: 'people-platform', title: 'People & Platform', description: 'Workforce, communication, planning, customer relationships, administration, security and developer tools.', modules: ['hr', 'business_tools', 'communication', 'social_network', 'integrations', 'settings', 'audit', 'developer', 'referrals'] },
 ]
 
 interface TenantListItem { id: string; name: string; planId: string; plan: { name: string } }

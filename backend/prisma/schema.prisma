@@ -497,6 +497,9 @@ model User {
   lname              String?
   phone              String?
   avatar             String?
+  jibuId             String?  @unique
+  jibuCountryCode    String?
+  jibuNetworkEnabled Boolean  @default(false)
   preferredLanguage  String             @default("en")
   theme              String?
   role               UserRole           @default(attendant)
@@ -599,6 +602,17 @@ model User {
   businessMessagesSent     BusinessMessage[]         @relation("BusinessMessageSender")
   businessMessagesReceived BusinessMessage[]         @relation("BusinessMessageRecipient")
   businessMessageReactions BusinessMessageReaction[]
+  jibuNetworkConversationsOne JibuNetworkConversation[] @relation("JibuNetworkParticipantOne")
+  jibuNetworkConversationsTwo JibuNetworkConversation[] @relation("JibuNetworkParticipantTwo")
+  jibuNetworkRequests JibuNetworkConversation[] @relation("JibuNetworkRequester")
+  jibuNetworkMessages JibuNetworkMessage[] @relation("JibuNetworkMessageSender")
+  jibuNetworkFollows JibuNetworkFollow[] @relation("JibuNetworkFollower")
+  jibuNetworkFollowers JibuNetworkFollow[] @relation("JibuNetworkFollowee")
+  jibuNetworkUpdates JibuNetworkUpdate[]
+  jibuNetworkBlocksGiven JibuNetworkBlock[] @relation("JibuNetworkBlocker")
+  jibuNetworkBlocksReceived JibuNetworkBlock[] @relation("JibuNetworkBlocked")
+  jibuNetworkReportsGiven JibuNetworkReport[] @relation("JibuNetworkReporter")
+  jibuNetworkReportsReceived JibuNetworkReport[] @relation("JibuNetworkReported")
 
   @@map("users")
 }
@@ -2218,6 +2232,8 @@ model SupplierPurchase {
   exchangeRateSource String?
   dueDate            DateTime?
   notes              String?
+  rentalItemId       String?                @unique
+  rentalSettlementMode String?
   items              SupplierPurchaseItem[]
   payments           SupplierPayment[]
   debitNotes         DebitNote[]
@@ -2570,6 +2586,101 @@ model BusinessMessageReaction {
   @@unique([messageId, userId])
   @@index([tenantId, messageId])
   @@map("business_message_reactions")
+}
+
+model JibuNetworkConversation {
+  id               String               @id @default(cuid())
+  participantOneId String
+  participantOne   User                 @relation("JibuNetworkParticipantOne", fields: [participantOneId], references: [id], onDelete: Cascade)
+  participantTwoId String
+  participantTwo   User                 @relation("JibuNetworkParticipantTwo", fields: [participantTwoId], references: [id], onDelete: Cascade)
+  requestedById    String
+  requestedBy      User                 @relation("JibuNetworkRequester", fields: [requestedById], references: [id], onDelete: Cascade)
+  status           String               @default("pending")
+  messages         JibuNetworkMessage[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@unique([participantOneId, participantTwoId])
+  @@index([participantOneId, status, updatedAt])
+  @@index([participantTwoId, status, updatedAt])
+  @@map("jibu_network_conversations")
+}
+
+model JibuNetworkMessage {
+  id             String                  @id @default(cuid())
+  conversationId String
+  conversation   JibuNetworkConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User                    @relation("JibuNetworkMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  body           String
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime                @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([senderId, createdAt])
+  @@map("jibu_network_messages")
+}
+
+model JibuNetworkFollow {
+  id         String   @id @default(cuid())
+  followerId String
+  follower   User     @relation("JibuNetworkFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  followeeId String
+  followee   User     @relation("JibuNetworkFollowee", fields: [followeeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([followerId, followeeId])
+  @@index([followeeId, createdAt])
+  @@index([followerId, createdAt])
+  @@map("jibu_network_follows")
+}
+
+model JibuNetworkUpdate {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body       String   @default("")
+  background String   @default("emerald")
+  imageUrl   String?
+  imagePublicId String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId, expiresAt, createdAt])
+  @@index([expiresAt])
+  @@map("jibu_network_updates")
+}
+
+model JibuNetworkBlock {
+  id            String   @id @default(cuid())
+  blockerId     String
+  blocker       User     @relation("JibuNetworkBlocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedUserId String
+  blockedUser   User     @relation("JibuNetworkBlocked", fields: [blockedUserId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@unique([blockerId, blockedUserId])
+  @@index([blockedUserId])
+  @@map("jibu_network_blocks")
+}
+
+model JibuNetworkReport {
+  id             String   @id @default(cuid())
+  reporterId     String
+  reporter       User     @relation("JibuNetworkReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUserId String
+  reportedUser   User     @relation("JibuNetworkReported", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  conversationId String?
+  reason         String
+  details        String   @default("")
+  status         String   @default("open")
+  createdAt      DateTime @default(now())
+
+  @@index([status, createdAt])
+  @@index([reportedUserId, createdAt])
+  @@map("jibu_network_reports")
 }
 
 model ProcurementPurchaseOrder {
@@ -2992,6 +3103,11 @@ model RentalItem {
   conditionReturn ItemCondition? // Condition when returned (null if not yet returned)
   damageFee       Float? // Fee charged if item returned damaged
   notes           String?
+  sourceType      String         @default("owned")
+  supplierId      String?
+  sourcingCost    Float          @default(0)
+  settlementMode  String?
+  supplierPurchaseId String?     @unique
   createdAt       DateTime       @default(now())
 
   @@index([rentalId])
@@ -3054,6 +3170,8 @@ model RentalAccountingConfig {
   inventoryAccountId              String?
   costOfGoodsSoldAccountId        String?
   salesRevenueAccountId           String?
+  outsourcedCostAccountId        String?
+  supplierPayableAccountId        String?
   isEnabled                       Boolean  @default(true)
   isSystemManaged                 Boolean  @default(true)
   createdAt                       DateTime @default(now())
@@ -3113,6 +3231,9 @@ model RentalCreditNote {
   reason         String
   notes          String?         @db.Text
   status         String          @default("issued")
+  cancellationReason String?     @db.Text
+  cancelledAt    DateTime?
+  cancelledById  String?
   userId         String
   user           User            @relation(fields: [userId], references: [id], onDelete: Restrict)
   payments       RentalPayment[]

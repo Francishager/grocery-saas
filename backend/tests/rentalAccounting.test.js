@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   rentalInvoiceLines,
+  rentalOutsourcedBillLines,
+  rentalOutsourcedPaymentLines,
   rentalReceiptLines,
   rentalDepositReceiptLines,
   rentalDepositRefundLines,
@@ -25,6 +27,8 @@ const config = {
   renterCreditPayableAccountId: 'renter-credit-payable',
   openingEquityAccountId: 'rental-opening-equity',
   cancellationFeeRevenueAccountId: 'cancellation-fee-revenue',
+  outsourcedCostAccountId: 'outsourced-cost',
+  supplierPayableAccountId: 'rental-supplier-payable',
 }
 
 function assertBalanced(lines) {
@@ -37,6 +41,24 @@ test('rental invoice separates receivable, unearned rent, and output tax', () =>
   const lines = rentalInvoiceLines(config, { total: 120, tax: 20, reference: 'HIRE-1' })
   assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
     ['rental-ar', 120, 0], ['unearned-rent', 0, 100], ['tax-payable', 0, 20],
+  ])
+  assertBalanced(lines)
+})
+
+test('outsourced rental bills debit cost and credit the selected supplier control account', () => {
+  const rentalRoute = rentalOutsourcedBillLines(config, { amount: 150, payableAccountId: config.supplierPayableAccountId, itemName: 'Canopy', supplierName: 'Hire Partner' })
+  const payablesRoute = rentalOutsourcedBillLines(config, { amount: 150, payableAccountId: 'shared-payables-control', itemName: 'Canopy', supplierName: 'Hire Partner' })
+  assert.equal(rentalRoute[0].accountId, config.outsourcedCostAccountId)
+  assert.equal(rentalRoute[1].accountId, config.supplierPayableAccountId)
+  assert.equal(payablesRoute[1].accountId, 'shared-payables-control')
+  assertBalanced(rentalRoute)
+  assertBalanced(payablesRoute)
+})
+
+test('Rental-side supplier payments debit Rental payables and credit the chosen cash ledger', () => {
+  const lines = rentalOutsourcedPaymentLines(config, { amount: 50, cashAccountId: 'cash-ledger', reference: 'HIRE-1-SRC' })
+  assert.deepEqual(lines.map(({ accountId, debit, credit }) => [accountId, debit, credit]), [
+    ['rental-supplier-payable', 50, 0], ['cash-ledger', 0, 50],
   ])
   assertBalanced(lines)
 })

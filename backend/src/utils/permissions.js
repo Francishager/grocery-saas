@@ -225,6 +225,8 @@ const PERMISSION_TO_FEATURES = {
   canRefundRentalCreditNote: ['rentals', 'inventory.rentals'],
   canForfeitRentalDeposit: ['rentals', 'inventory.rentals'],
   canGenerateRentalContract: ['rentals', 'inventory.rentals'],
+  canManageRentalSourcing: ['rentals'],
+  canRecordRentalSupplierPayment: ['rentals'],
   canViewPlanner: ['planner', 'rentals'],
   canManagePlanner: ['planner', 'rentals'],
   canViewCRM: ['crm', 'rentals'],
@@ -488,7 +490,7 @@ export const ALL_PERMISSION_KEYS = [
   "canManageServiceCategory",
   // Rentals
   "canViewRental", "canCreateRental", "canEditRental", "canDeleteRental",
-  "canProcessRentalReturn", "canCancelRental", "canRecordRentalPayment", "canRefundRentalDeposit", "canRefundRentalAdvance", "canViewRentalCreditNotes", "canCreateRentalCreditNote", "canEditRentalCreditNote", "canRefundRentalCreditNote", "canForfeitRentalDeposit", "canGenerateRentalContract",
+  "canProcessRentalReturn", "canCancelRental", "canRecordRentalPayment", "canRefundRentalDeposit", "canRefundRentalAdvance", "canViewRentalCreditNotes", "canCreateRentalCreditNote", "canEditRentalCreditNote", "canRefundRentalCreditNote", "canForfeitRentalDeposit", "canGenerateRentalContract", "canManageRentalSourcing", "canRecordRentalSupplierPayment",
   "canViewPlanner", "canManagePlanner", "canViewCRM", "canCreateCRM", "canEditCRM", "canDeleteCRM",
   "canViewPropertyManagement", "canViewPropertyPortfolio", "canViewPropertyCollections", "canViewPropertyStatements", "canViewTenantPersonalDetails", "canManageTenantPersonalDetails", "canCreateTenantPersonalDetails", "canEditTenantPersonalDetails",
   "canManagePropertyOwners", "canManageProperties", "canManagePropertyUnits", "canCreatePropertyOwners", "canEditPropertyOwners", "canCreateProperties", "canEditProperties", "canCreatePropertyUnits", "canEditPropertyUnits",
@@ -1182,6 +1184,14 @@ const PERMISSION_DETAIL_OVERRIDES = {
   canGenerateRentalContract: {
     name: 'Generate rental contract drafts',
     description: 'Create and save AI-assisted rental contract drafts for human review.',
+  },
+  canManageRentalSourcing: {
+    name: 'Manage outsourced rental sourcing',
+    description: 'Record rental items sourced from third-party suppliers and confirm agreed supplier costs and settlement routes.',
+  },
+  canRecordRentalSupplierPayment: {
+    name: 'Pay rental suppliers',
+    description: 'Record Rental-side payments against outsourced rental supplier bills with cash movement, receipt, and ledger posting.',
   },
   canViewPlanner: { name: 'View Planner', description: 'View your tasks, appointments, notes, goals, and reminders.' },
   canManagePlanner: { name: 'Manage Planner', description: 'Create and manage your planner entries, share them with teammates, and edit items shared with you.' },

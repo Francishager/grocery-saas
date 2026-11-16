@@ -46,6 +46,12 @@ interface RentalItem {
   conditionReturn?: string | null
   damageFee?: number | null
   notes?: string | null
+  sourceType?: 'owned' | 'outsourced'
+  supplier?: { id: string; name: string; phone?: string | null } | null
+  supplierId?: string | null
+  sourcingCost?: number
+  settlementMode?: 'payables' | 'rental' | null
+  supplierPurchase?: { id: string; refNo?: string | null; total: number; balance: number; paymentStatus: string; payments?: { id: string; amount: number; paymentMethod: string; reference?: string | null; createdAt: string }[] } | null
 }
 
 interface RentalCreditNote {
@@ -59,6 +65,9 @@ interface RentalCreditNote {
   reason: string
   notes?: string | null
   status: string
+  cancellationReason?: string | null
+  cancelledAt?: string | null
+  cancelledById?: string | null
   createdAt: string
   payments?: { id: string; receiptNo: string; amount: number; paymentDate: string; paymentMethod?: string | null; cashAccount?: { name: string } | null }[]
 }
@@ -177,6 +186,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [paymentAccounts, setPaymentAccounts] = useState<{ id: string; name: string; type: string; balance: number; currency: string }[]>([])
   const [cashAccountId, setCashAccountId] = useState('')
   const [paymentAmount, setPaymentAmount] = useState(0)
+  const [supplierPaymentAmount, setSupplierPaymentAmount] = useState(0)
+  const [supplierPaymentItemId, setSupplierPaymentItemId] = useState('')
   const [depositRefundAmount, setDepositRefundAmount] = useState(0)
   const [advanceRefundAmount, setAdvanceRefundAmount] = useState(0)
   const [forfeitureReason, setForfeitureReason] = useState('')
@@ -188,6 +199,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [creditNoteAmount, setCreditNoteAmount] = useState(0)
   const [creditNoteReason, setCreditNoteReason] = useState('price_adjustment')
   const [creditNoteNotes, setCreditNoteNotes] = useState('')
+  const [creditNoteToCancel, setCreditNoteToCancel] = useState<RentalCreditNote | null>(null)
+  const [creditNoteCancellationReason, setCreditNoteCancellationReason] = useState('')
   const [refundCreditNote, setRefundCreditNote] = useState<RentalCreditNote | null>(null)
   const [creditRefundAmount, setCreditRefundAmount] = useState(0)
   const [mobileProvider, setMobileProvider] = useState('')
@@ -200,7 +213,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const [taxConfig, setTaxConfig] = useState<{ taxEnabled: boolean; taxRate: number; taxId: string } | null>(null)
   const [notes, setNotes] = useState('')
   const [branchId, setBranchId] = useState('')
-  const [selectedItems, setSelectedItems] = useState<{ productId: string; quantity: number; unitHirePrice: number; rentalPeriod: string; periods: number; conditionOut: string }[]>([])
+  const [selectedItems, setSelectedItems] = useState<{ productId: string; quantity: number; unitHirePrice: number; rentalPeriod: string; periods: number; conditionOut: string; sourceType: 'owned' | 'outsourced'; supplierName?: string; supplierPhone?: string; sourcingCost?: number; settlementMode?: 'payables' | 'rental' }[]>([])
   const [additionalCharges, setAdditionalCharges] = useState<RentalChargeDraft[]>([])
   const [bookingPurpose, setBookingPurpose] = useState('')
   const [deliveryRequired, setDeliveryRequired] = useState(false)
@@ -233,6 +246,8 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
   const canCancelRental = hasPermission('canCancelRental') || canDeleteRental
   const canViewReport = hasPermission('canViewReportRentalsSummary')
   const canGenerateContract = hasPermission('canGenerateRentalContract')
+  const canManageRentalSourcing = hasPermission('canManageRentalSourcing')
+  const canPayRentalSupplier = hasPermission('canRecordRentalSupplierPayment')
   const canSelectExistingCustomer = hasPermission('canViewCustomer')
   const canSearchCustomerPhone = hasPermission('canViewCustomerPhone')
 
@@ -532,6 +547,7 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
         rentalPeriod: String((item as any).rentalPeriod || 'daily'),
         periods: 1,
         conditionOut: 'good',
+        sourceType: 'owned',
       }])
     }
   }
@@ -799,6 +815,19 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     finally { setSavingRentalPayment(false) }
   }
 
+  const handleRecordRentalSupplierPayment = async () => {
+    if (!selectedRental || !supplierPaymentItemId || !cashAccountId || supplierPaymentAmount <= 0) return
+    setSavingRentalPayment(true)
+    try {
+      await rentalsApi.recordSupplierPayment(selectedRental.id, { rentalItemId: supplierPaymentItemId, amount: supplierPaymentAmount, paymentMethod, cashAccountId, idempotencyKey: crypto.randomUUID(), transactionRef: transactionId || undefined, mobileProvider: paymentMethod === 'mobile_money' ? mobileProvider : undefined, phoneNumber: paymentMethod === 'mobile_money' ? phoneNumber : undefined, notes: `Supplier settlement for ${selectedRental.rentalNo}` })
+      setSupplierPaymentAmount(0)
+      setSupplierPaymentItemId('')
+      await refreshSelectedRental()
+      toast({ title: 'Supplier payment recorded', description: 'The supplier bill, transaction account, and Rental supplier-payable account were updated.' })
+    } catch (err: any) { toast({ title: 'Supplier payment failed', description: err.message || 'Could not record supplier payment.', variant: 'destructive' }) }
+    finally { setSavingRentalPayment(false) }
+  }
+
   const handleIssueRentalCreditNote = async () => {
     if (!selectedRental || creditNoteAmount <= 0 || !creditNoteNotes.trim()) return
     setSavingCreditNote(true)
@@ -813,11 +842,13 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
     finally { setSavingCreditNote(false) }
   }
 
-  const handleCancelRentalCreditNote = async (note: RentalCreditNote) => {
-    if (!selectedRental || !(await appConfirm(`Cancel ${note.noteNo}? Its journal entry will be reversed.`))) return
+  const handleCancelRentalCreditNote = async () => {
+    if (!selectedRental || !creditNoteToCancel || creditNoteCancellationReason.trim().length < 3) return
     setSavingCreditNote(true)
     try {
-      await rentalsApi.cancelCreditNote(selectedRental.id, note.id)
+      await rentalsApi.cancelCreditNote(selectedRental.id, creditNoteToCancel.id, creditNoteCancellationReason.trim())
+      setCreditNoteToCancel(null)
+      setCreditNoteCancellationReason('')
       await refreshSelectedRental()
       toast({ title: 'Credit note cancelled', description: 'The rental balance and journal entry were reversed.' })
     } catch (err: any) { toast({ title: 'Could not cancel credit note', description: err.message || 'Refresh and try again.', variant: 'destructive' }) }
@@ -1108,8 +1139,18 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                 <div className="space-y-1 sm:col-span-2"><Label htmlFor="rental-credit-notes">Explanation</Label><Textarea id="rental-credit-notes" value={creditNoteNotes} onChange={event => setCreditNoteNotes(event.target.value)} maxLength={2000} placeholder="Explain the booking adjustment for the audit trail" /><p className="text-xs text-muted-foreground">The saved booking tax is reversed proportionally to the adjustment amount.</p></div>
                 <div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="outline" onClick={() => setShowCreditNoteForm(false)}>Cancel</Button><Button type="button" onClick={handleIssueRentalCreditNote} disabled={savingCreditNote || creditNoteAmount <= 0 || creditNoteAmount > Number(selectedRental.totalAmount) || !creditNoteNotes.trim()}>{savingCreditNote ? 'Posting…' : 'Post credit note'}</Button></div>
               </div>}
-              {canViewRentalCreditNotes && selectedRental.creditNotes?.length ? <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead><tr className="border-b text-left"><th className="py-2">Credit note</th><th>Date / reason</th><th className="text-right">Adjustment</th><th className="text-right">Refund due</th><th>Status</th><th></th></tr></thead><tbody>{selectedRental.creditNotes.map(note => { const refundDue = Math.max(0, Number(note.refundDue) - Number(note.refundedAmount)); return <tr key={note.id} className="border-b last:border-0"><td className="py-2 font-medium">{note.noteNo}<div className="max-w-64 truncate text-xs font-normal text-muted-foreground" title={note.notes || ''}>{note.notes || '—'}</div></td><td><span>{new Date(note.createdAt).toLocaleDateString()}</span><div className="capitalize text-xs text-muted-foreground">{note.reason.replaceAll('_', ' ')}</div></td><td className="text-right tabular-nums">{formatCurrency(note.amount)}</td><td className="text-right tabular-nums">{formatCurrency(refundDue)}</td><td className="capitalize">{refundDue <= 0 ? 'Applied' : Number(note.refundedAmount) > 0 ? 'Partially refunded' : 'Refund due'}</td><td className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => void printRentalCreditNote(note)}><Printer className="mr-1 h-4 w-4" />Print</Button>{canRefundRentalCreditNote && refundDue > 0 && <Button size="sm" variant="outline" onClick={() => { setRefundCreditNote(note); setCreditRefundAmount(refundDue) }}>Refund</Button>}{canEditRentalCreditNote && Number(note.refundedAmount) <= 0 && <Button size="sm" variant="ghost" disabled={savingCreditNote} onClick={() => void handleCancelRentalCreditNote(note)}>Cancel note</Button>}</div></td></tr> })}</tbody></table></div> : canViewRentalCreditNotes ? <p className="text-sm text-muted-foreground">No rental credit notes for this booking.</p> : <p className="text-sm text-muted-foreground">Issue a booking-linked adjustment when needed.</p>}
+              {canViewRentalCreditNotes && selectedRental.creditNotes?.length ? <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead><tr className="border-b text-left"><th className="py-2">Credit note</th><th>Date / reason</th><th className="text-right">Adjustment</th><th className="text-right">Refund due</th><th>Status</th><th></th></tr></thead><tbody>{selectedRental.creditNotes.map(note => { const refundDue = Math.max(0, Number(note.refundDue) - Number(note.refundedAmount)); const cancelled = note.status === 'cancelled'; return <tr key={note.id} className="border-b last:border-0"><td className="py-2 font-medium">{note.noteNo}<div className="max-w-64 truncate text-xs font-normal text-muted-foreground" title={note.notes || ''}>{note.notes || '—'}</div>{cancelled && <div className="max-w-64 truncate text-xs font-normal text-destructive" title={note.cancellationReason || ''}>Cancelled: {note.cancellationReason || 'No reason recorded'}</div>}</td><td><span>{new Date(note.createdAt).toLocaleDateString()}</span><div className="capitalize text-xs text-muted-foreground">{note.reason.replaceAll('_', ' ')}</div></td><td className="text-right tabular-nums">{formatCurrency(note.amount)}</td><td className="text-right tabular-nums">{formatCurrency(refundDue)}</td><td className="capitalize">{cancelled ? 'Cancelled' : refundDue <= 0 ? 'Applied' : Number(note.refundedAmount) > 0 ? 'Partially refunded' : 'Refund due'}</td><td className="text-right"><div className="flex justify-end gap-1"><Button size="sm" variant="outline" onClick={() => void printRentalCreditNote(note)}><Printer className="mr-1 h-4 w-4" />Print</Button>{!cancelled && canRefundRentalCreditNote && refundDue > 0 && <Button size="sm" variant="outline" onClick={() => { setRefundCreditNote(note); setCreditRefundAmount(refundDue) }}>Refund</Button>}{!cancelled && canEditRentalCreditNote && Number(note.refundedAmount) <= 0 && <Button size="sm" variant="ghost" disabled={savingCreditNote} onClick={() => { setCreditNoteToCancel(note); setCreditNoteCancellationReason('') }}>Cancel note</Button>}</div></td></tr> })}</tbody></table></div> : canViewRentalCreditNotes ? <p className="text-sm text-muted-foreground">No rental credit notes for this booking.</p> : <p className="text-sm text-muted-foreground">Issue a booking-linked adjustment when needed.</p>}
               {refundCreditNote && <div className="grid gap-3 rounded-md border border-primary/30 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3"><div className="sm:col-span-2 lg:col-span-3"><p className="font-medium">Refund {refundCreditNote.noteNo}</p><p className="text-xs text-muted-foreground">Outstanding refund: {formatCurrency(Math.max(0, Number(refundCreditNote.refundDue) - Number(refundCreditNote.refundedAmount)))}</p></div><div className="space-y-1"><Label htmlFor="rental-credit-refund-amount">Refund amount</Label><Input id="rental-credit-refund-amount" type="number" min="0.01" max={Math.max(0, Number(refundCreditNote.refundDue) - Number(refundCreditNote.refundedAmount))} step="0.01" value={creditRefundAmount || ''} onChange={event => setCreditRefundAmount(Number(event.target.value) || 0)} /></div><div className="space-y-1"><Label htmlFor="rental-credit-refund-method">Method</Label><select id="rental-credit-refund-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div><div className="space-y-1"><Label htmlFor="rental-credit-refund-account">Refund account</Label><select id="rental-credit-refund-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>{paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label htmlFor="rental-credit-refund-provider">Provider</Label><Input id="rental-credit-refund-provider" value={mobileProvider} onChange={event => setMobileProvider(event.target.value)} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label htmlFor="rental-credit-refund-phone">Phone</Label><Input id="rental-credit-refund-phone" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} type="tel" /></div></>}{!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-credit-refund-reference">Transaction reference</Label><Input id="rental-credit-refund-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}<div className="flex justify-end gap-2 sm:col-span-2 lg:col-span-3"><Button type="button" variant="outline" onClick={() => setRefundCreditNote(null)}>Close</Button><Button type="button" onClick={handleRefundRentalCreditNote} disabled={savingCreditNote || !cashAccountId || creditRefundAmount <= 0 || creditRefundAmount > Number(refundCreditNote.refundDue) - Number(refundCreditNote.refundedAmount) || (paymentMethod === 'mobile_money' && (!mobileProvider.trim() || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingCreditNote ? 'Posting…' : 'Record refund'}</Button></div></div>}
+            </section>}
+            {selectedRental.items.some(item => item.sourceType === 'outsourced') && <section className="space-y-3 border-t pt-4">
+              <div><h3 className="font-semibold">Externally sourced items</h3><p className="text-sm text-muted-foreground">These quantities are not part of owned inventory. Supplier costs are posted when checked out.</p></div>
+              <div className="space-y-2">{selectedRental.items.filter(item => item.sourceType === 'outsourced').map(item => <div key={item.id} className="rounded-md border p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium">{item.product?.name} · {item.quantity} item(s)</p><p className="text-sm text-muted-foreground">Supplier: {item.supplier?.name || 'Not recorded'}{item.supplier?.phone ? ` · ${item.supplier.phone}` : ''} · {formatCurrency(Number(item.sourcingCost || 0))} per item</p></div>
+                {item.supplierPurchase ? <div className="text-right text-sm"><p>{item.supplierPurchase.refNo || 'Supplier bill'} · <span className="capitalize">{item.supplierPurchase.paymentStatus}</span></p><p className="font-medium">Outstanding {formatCurrency(item.supplierPurchase.balance)}</p>{item.settlementMode === 'payables' && <p className="text-xs text-muted-foreground">Settle this bill in Payables.</p>}</div> : <p className="text-sm text-amber-700 dark:text-amber-300">Supplier bill is created at checkout.</p>}</div>
+                {!!item.supplierPurchase?.payments?.length && <div className="mt-3 space-y-1 border-t pt-2 text-xs text-muted-foreground">{item.supplierPurchase.payments.map(payment => <div key={payment.id} className="flex flex-wrap justify-between gap-2"><span>{payment.reference || 'Supplier payment'} · {payment.paymentMethod.replaceAll('_', ' ')} · {new Date(payment.createdAt).toLocaleDateString()}</span><span>{formatCurrency(payment.amount)}</span></div>)}</div>}
+                {item.supplierPurchase && item.settlementMode === 'rental' && canPayRentalSupplier && Number(item.supplierPurchase.balance) > 0 && <div className="mt-3 flex flex-wrap justify-end gap-2"><Button type="button" size="sm" variant="outline" onClick={() => { setSupplierPaymentItemId(item.id); setSupplierPaymentAmount(Number(item.supplierPurchase?.balance || 0)); setPaymentMethod('cash'); setCashAccountId(user?.cashAccountId || user?.cashAccount?.id || '') }}>Pay from Rental</Button></div>}
+              </div>)}</div>
+              {supplierPaymentItemId && <div className="grid gap-3 rounded-md border border-primary/30 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-4"><div className="space-y-1"><Label htmlFor="rental-supplier-payment-amount">Supplier payment amount</Label><Input id="rental-supplier-payment-amount" type="number" min="0.01" max={Number(selectedRental.items.find(item => item.id === supplierPaymentItemId)?.supplierPurchase?.balance || 0)} step="0.01" value={supplierPaymentAmount || ''} onChange={event => setSupplierPaymentAmount(Number(event.target.value) || 0)} /></div><div className="space-y-1"><Label htmlFor="rental-supplier-payment-method">Payment method</Label><select id="rental-supplier-payment-method" value={paymentMethod} onChange={event => setPaymentMethod(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="cash">Cash</option><option value="safe">Safe</option><option value="mobile_money">Mobile money</option><option value="bank_transfer">Bank</option><option value="card">Card</option></select></div><div className="space-y-1"><Label htmlFor="rental-supplier-payment-account">Pay from account</Label><select id="rental-supplier-payment-account" value={cashAccountId} onChange={event => setCashAccountId(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"><option value="">Select permitted account</option>{paymentAccounts.map(account => <option key={account.id} value={account.id}>{account.name} · {formatCurrency(account.balance)}</option>)}</select></div>{paymentMethod === 'mobile_money' && <><div className="space-y-1"><Label htmlFor="rental-supplier-provider">Provider</Label><Input id="rental-supplier-provider" value={mobileProvider} onChange={event => setMobileProvider(event.target.value)} placeholder="MTN / Airtel" /></div><div className="space-y-1"><Label htmlFor="rental-supplier-phone">Phone</Label><Input id="rental-supplier-phone" type="tel" value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} /></div></>}{!['cash', 'safe'].includes(paymentMethod) && <div className="space-y-1"><Label htmlFor="rental-supplier-reference">Transaction reference</Label><Input id="rental-supplier-reference" value={transactionId} onChange={event => setTransactionId(event.target.value)} /></div>}<div className="flex items-end gap-2"><Button type="button" variant="outline" onClick={() => { setSupplierPaymentItemId(''); setSupplierPaymentAmount(0) }}>Cancel</Button><Button type="button" onClick={handleRecordRentalSupplierPayment} disabled={savingRentalPayment || supplierPaymentAmount <= 0 || supplierPaymentAmount > Number(selectedRental.items.find(item => item.id === supplierPaymentItemId)?.supplierPurchase?.balance || 0) || !cashAccountId || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (['card', 'bank_transfer'].includes(paymentMethod) && !transactionId.trim())}>{savingRentalPayment ? 'Posting…' : 'Record supplier payment'}</Button></div></div>}
             </section>}
             <section className="space-y-3 border-t pt-4">
               <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Payments and receipts</h3><p className="text-sm text-muted-foreground">{selectedRental.isHistoricalRecord ? 'Past payment records are saved as historical receipt copies only.' : 'Collections and deposit movements are linked to transaction accounts and the general ledger.'}</p></div></div>
@@ -1592,6 +1633,26 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
                           >
                             <X className="h-4 w-4" />
                           </button>
+                          {canManageRentalSourcing && <div className="col-span-12 border-t pt-2">
+                            <label className="flex items-center gap-2 text-sm font-medium">
+                              <input type="checkbox" checked={si.sourceType === 'outsourced'} onChange={(event) => updateSelectedItem(si.productId, 'sourceType', event.target.checked ? 'outsourced' : 'owned')} />
+                              Source this item from an external supplier
+                            </label>
+                            {si.sourceType === 'outsourced' && <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <Input aria-label={`${item?.product_name || 'Item'} supplier name`} placeholder="Supplier name" value={si.supplierName || ''} onChange={(event) => updateSelectedItem(si.productId, 'supplierName', event.target.value)} />
+                              <Input aria-label={`${item?.product_name || 'Item'} supplier phone`} placeholder="Supplier phone (optional)" value={si.supplierPhone || ''} onChange={(event) => updateSelectedItem(si.productId, 'supplierPhone', event.target.value)} />
+                              <label className="text-xs text-muted-foreground">Supplier cost per item
+                                <Input aria-label={`${item?.product_name || 'Item'} supplier cost`} type="number" min="0.01" step="0.01" value={si.sourcingCost || ''} onChange={(event) => updateSelectedItem(si.productId, 'sourcingCost', Number(event.target.value) || 0)} />
+                              </label>
+                              <label className="text-xs text-muted-foreground">Supplier settlement route
+                                <select className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground" value={si.settlementMode || 'rental'} onChange={(event) => updateSelectedItem(si.productId, 'settlementMode', event.target.value)}>
+                                  <option value="rental">Pay from Rental</option>
+                                  {hasPermission('canCreatePayable') && <option value="payables">Settle in Payables</option>}
+                                </select>
+                              </label>
+                              <p className="sm:col-span-2 text-xs text-muted-foreground">Customer dates are reserved now. The supplier bill and cost posting are created when the item is checked out.</p>
+                            </div>}
+                          </div>}
                         </div>
                       )
                     })}
@@ -2011,6 +2072,23 @@ export default function RentalsPage({ section = 'bookings' }: { section?: 'booki
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" disabled={savingCancellation} onClick={() => setCancellingRental(null)}>Keep booking</Button>
               <Button type="button" variant="destructive" disabled={savingCancellation || cancellationReason.trim().length < 3 || cancellationChargePercent < 0 || cancellationChargePercent > 100} onClick={() => void handleCancel()}>{savingCancellation ? 'Cancelling…' : 'Confirm cancellation'}</Button>
+            </div>
+          </div>
+        </DialogContent>}
+      </Dialog>
+
+      <Dialog open={Boolean(creditNoteToCancel)} onOpenChange={open => { if (!open && !savingCreditNote) setCreditNoteToCancel(null) }}>
+        {creditNoteToCancel && <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Cancel credit note · {creditNoteToCancel.noteNo}</DialogTitle>
+            <DialogDescription>This reverses its accounting entry and restores the booking balance. The cancellation reason stays in the audit history.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Label htmlFor="rental-credit-cancellation-reason">Cancellation reason</Label>
+            <Textarea id="rental-credit-cancellation-reason" value={creditNoteCancellationReason} onChange={event => setCreditNoteCancellationReason(event.target.value)} maxLength={500} placeholder="For example, entered as a test or issued in error" />
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" disabled={savingCreditNote} onClick={() => setCreditNoteToCancel(null)}>Keep note</Button>
+              <Button type="button" variant="destructive" disabled={savingCreditNote || creditNoteCancellationReason.trim().length < 3} onClick={() => void handleCancelRentalCreditNote()}>{savingCreditNote ? 'Reversing…' : 'Confirm cancellation'}</Button>
             </div>
           </div>
         </DialogContent>}

@@ -57,6 +57,8 @@ const roles = [
   ['renterCreditPayableAccountId', 'Rental Customer Credits Payable', 'RNT-2320', 'liability', 'current_liability'],
   ['cancellationFeeRevenueAccountId', 'Rental Cancellation Fee Revenue', 'RNT-4490', 'revenue', 'operating_revenue'],
   ['openingEquityAccountId', 'Rental Legacy Opening Balance Equity', 'RNT-3905', 'equity', 'opening_balance'],
+  ['outsourcedCostAccountId', 'Outsourced Rental Hire Cost', 'RNT-5120', 'expense', 'cost_of_sales'],
+  ['supplierPayableAccountId', 'Rental Supplier Payables', 'RNT-2110', 'liability', 'current_liability'],
 ]
 
 export async function ensureRentalAccounting(tx, tenantId) {
@@ -110,7 +112,7 @@ export async function ensureRentalCashLedgerAccount(tx, tenantId, cashAccount) {
   return tx.account.update({ where: { id: account.id }, data: { name: cashAccount.name, type: 'asset', subType: `transaction_${cashAccount.type}`, balance: cashAccount.balance, branchId: cashAccount.branchId, isActive: cashAccount.isActive } })
 }
 
-export async function recordRentalCashMovement(tx, { tenantId, userId, cashAccount, amount, direction, reference, description }) {
+export async function recordRentalCashMovement(tx, { tenantId, userId, cashAccount, amount, direction, transactionType, reference, description }) {
   const value = money(amount)
   if (!(value > 0) || !['receipt', 'expense'].includes(direction)) throw Object.assign(new Error('Cash movement must have a positive amount and valid direction.'), { statusCode: 400 })
   await tx.$queryRaw`SELECT "id" FROM "cash_accounts" WHERE "id" = ${cashAccount.id} AND "tenantId" = ${tenantId} FOR UPDATE`
@@ -118,7 +120,7 @@ export async function recordRentalCashMovement(tx, { tenantId, userId, cashAccou
   if (!current) throw Object.assign(new Error('Selected transaction account is unavailable.'), { statusCode: 409 })
   if (direction === 'expense' && Number(current.balance) + 0.001 < value) throw Object.assign(new Error(`Insufficient balance in ${current.name}.`), { statusCode: 409 })
   const updated = await tx.cashAccount.update({ where: { id: current.id }, data: { balance: { [direction === 'receipt' ? 'increment' : 'decrement']: value } } })
-  await tx.cashTransaction.create({ data: { tenantId, accountId: updated.id, type: direction === 'receipt' ? 'income' : 'expense', amount: value, balanceAfter: updated.balance, reference, description, userId } })
+  await tx.cashTransaction.create({ data: { tenantId, accountId: updated.id, type: direction === 'receipt' ? 'income' : transactionType || 'expense', amount: value, balanceAfter: updated.balance, reference, description, userId } })
   return { cashAccount: updated, ledgerAccount: await ensureRentalCashLedgerAccount(tx, tenantId, updated) }
 }
 
@@ -155,6 +157,24 @@ export function rentalInvoiceLines(config, { total, tax, reference }) {
     { accountId: config.receivableAccountId, debit: money(total), credit: 0, description: `Rental receivable ${reference}` },
     ...(net > 0 ? [{ accountId: config.deferredRevenueAccountId, debit: 0, credit: net, description: `Unearned rental income ${reference}` }] : []),
     ...(tax > 0 ? [{ accountId: config.taxPayableAccountId, debit: 0, credit: money(tax), description: `Rental output tax ${reference}` }] : []),
+  ]
+}
+
+export function rentalOutsourcedBillLines(config, { amount, payableAccountId, itemName, supplierName }) {
+  const value = money(amount)
+  if (!(value > 0) || !payableAccountId) throw Object.assign(new Error('Outsourced rental bills need a positive cost and a mapped supplier-payable account.'), { statusCode: 400 })
+  return [
+    { accountId: config.outsourcedCostAccountId, debit: value, credit: 0, description: `Outsourced rental cost: ${itemName || 'rental item'}` },
+    { accountId: payableAccountId, debit: 0, credit: value, description: `Supplier payable: ${supplierName || 'rental supplier'}` },
+  ]
+}
+
+export function rentalOutsourcedPaymentLines(config, { amount, cashAccountId, reference }) {
+  const value = money(amount)
+  if (!(value > 0) || !cashAccountId) throw Object.assign(new Error('Outsourced rental payments need a positive amount and a linked transaction account.'), { statusCode: 400 })
+  return [
+    { accountId: config.supplierPayableAccountId, debit: value, credit: 0, description: `Settle rental supplier bill ${reference || ''}`.trim() },
+    { accountId: cashAccountId, debit: 0, credit: value, description: 'Rental supplier payment from transaction account' },
   ]
 }
 

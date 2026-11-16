@@ -217,6 +217,11 @@ const MODULES = [
     ]
   },
   {
+    id: 'social_network', name: 'JibuSales Network', features: [
+      { name: 'social_network', displayName: 'JibuSales Network' },
+    ]
+  },
+  {
     id: 'integrations', name: 'Integrations', features: [
       { name: 'integrations', displayName: 'Integrations' },
       { name: 'integrations.mobile_money', displayName: 'Mobile Money' },

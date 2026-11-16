@@ -30,6 +30,9 @@ try {
     )
   `)
   await prisma.$executeRawUnsafe(`ALTER TABLE rental_credit_notes ADD COLUMN IF NOT EXISTS "idempotencyKey" TEXT`)
+  await prisma.$executeRawUnsafe(`ALTER TABLE rental_credit_notes ADD COLUMN IF NOT EXISTS "cancellationReason" TEXT`)
+  await prisma.$executeRawUnsafe(`ALTER TABLE rental_credit_notes ADD COLUMN IF NOT EXISTS "cancelledAt" TIMESTAMP(3)`)
+  await prisma.$executeRawUnsafe(`ALTER TABLE rental_credit_notes ADD COLUMN IF NOT EXISTS "cancelledById" TEXT`)
   await prisma.$executeRawUnsafe(`
     ALTER TABLE rental_payments ADD COLUMN IF NOT EXISTS "rentalCreditNoteId" TEXT
   `)

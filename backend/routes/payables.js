@@ -787,6 +787,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
         where: scopedWhere(scope, { id: purchaseId, supplierId })
       })
       if (!purchase) return res.status(404).json({ error: 'Purchase not found for this supplier' })
+      if (purchase.rentalSettlementMode === 'rental') return res.status(409).json({ error: 'This supplier bill is assigned to Rental-side settlement. Record payment from the linked rental booking to keep its accounting route consistent.' })
       if (paidAmount > purchase.balance) return res.status(400).json({ error: 'Payment exceeds purchase balance' })
     } else {
       const [openPurchases, openLandPurchases, currentSupplier] = await Promise.all([
@@ -823,6 +824,7 @@ router.post('/payments', authenticateToken, requirePermission('canCreatePayable'
         await tx.$queryRaw`SELECT "id" FROM "supplier_purchases" WHERE "id" = ${purchaseId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
         lockedPurchase = await tx.supplierPurchase.findFirst({ where: { id: purchaseId, tenantId: scope.tenantId, supplierId } })
         if (!lockedPurchase || paidAmount > Number(lockedPurchase.balance || 0)) throw Object.assign(new Error('The supplier purchase balance changed. Refresh and enter a payment within its current balance.'), { statusCode: 409 })
+        if (lockedPurchase.rentalSettlementMode === 'rental') throw Object.assign(new Error('This supplier bill is assigned to Rental-side settlement. Record payment from the linked rental booking.'), { statusCode: 409 })
       }
       const createdPayment = await tx.supplierPayment.create({
         data: {

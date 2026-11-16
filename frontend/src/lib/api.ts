@@ -537,8 +537,8 @@ export const rentalsApi = {
 
   issueCreditNote: (id: string, data: { amount: number; reason: string; notes?: string; idempotencyKey?: string }) =>
     api.post<any>(`/api/rentals/${id}/credit-notes`, { body: data }),
-  cancelCreditNote: (id: string, noteId: string) =>
-    api.patch<any>(`/api/rentals/${id}/credit-notes/${noteId}/cancel`, { body: {} }),
+  cancelCreditNote: (id: string, noteId: string, reason: string) =>
+    api.patch<any>(`/api/rentals/${id}/credit-notes/${noteId}/cancel`, { body: { reason } }),
   refundCreditNote: (id: string, noteId: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
     api.post<any>(`/api/rentals/${id}/credit-notes/${noteId}/refunds`, { body: data }),
 
@@ -549,6 +549,9 @@ export const rentalsApi = {
 
   recordPayment: (id: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
     api.post<any>(`/api/rentals/${id}/payments`, { body: data }),
+
+  recordSupplierPayment: (id: string, data: { rentalItemId: string; amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; reference?: string; notes?: string }) =>
+    api.post<any>(`/api/rentals/${id}/supplier-payments`, { body: data }),
 
   refundDeposit: (id: string, data: { amount: number; paymentMethod: string; cashAccountId: string; idempotencyKey?: string; transactionRef?: string; mobileProvider?: string; phoneNumber?: string; notes?: string }) =>
     api.post<any>(`/api/rentals/${id}/deposit-refunds`, { body: data }),

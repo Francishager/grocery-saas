@@ -28,8 +28,14 @@ try {
       ALTER TABLE rental_items
         ADD COLUMN IF NOT EXISTS "discountAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
         ADD COLUMN IF NOT EXISTS "taxAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS "netAmount" DOUBLE PRECISION NOT NULL DEFAULT 0
+        ADD COLUMN IF NOT EXISTS "netAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "sourceType" TEXT NOT NULL DEFAULT 'owned',
+        ADD COLUMN IF NOT EXISTS "supplierId" TEXT,
+        ADD COLUMN IF NOT EXISTS "sourcingCost" DOUBLE PRECISION NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "settlementMode" TEXT,
+        ADD COLUMN IF NOT EXISTS "supplierPurchaseId" TEXT
     `)
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "rental_items_supplierPurchaseId_key" ON rental_items("supplierPurchaseId")`)
 
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS rental_charge_lines (
@@ -132,6 +138,9 @@ try {
         "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `)
+    await prisma.$executeRawUnsafe(`ALTER TABLE rental_accounting_configs ADD COLUMN IF NOT EXISTS "outsourcedCostAccountId" TEXT, ADD COLUMN IF NOT EXISTS "supplierPayableAccountId" TEXT`)
+    await prisma.$executeRawUnsafe(`ALTER TABLE supplier_purchases ADD COLUMN IF NOT EXISTS "rentalItemId" TEXT, ADD COLUMN IF NOT EXISTS "rentalSettlementMode" TEXT`)
+    await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "supplier_purchases_rentalItemId_key" ON supplier_purchases("rentalItemId")`)
 
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "rentals_tenantId_historicalImportKey_key" ON rentals("tenantId", "historicalImportKey")`)
     console.log('Rental runtime tables and additive columns are ready.')
