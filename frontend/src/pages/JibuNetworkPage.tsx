@@ -107,7 +107,7 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
     return result.profile
   }, [])
   const loadLists = useCallback(async () => {
-    const [chatResult, contactResult, updateResult, communityResult, followingResult, blockResult] = await Promise.all([
+    const [chatResult, contactResult, updateResult, communityResult, followingResult, blockResult] = await Promise.allSettled([
       request<{ chats: Chat[]; unread: number }>('/chats'),
       request<{ contacts: Person[] }>('/contacts'),
       request<{ updates: Update[] }>('/updates'),
@@ -115,14 +115,15 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
       request<{ people: Person[] }>('/community/following'),
       request<{ people: Person[] }>('/blocks'),
     ])
-    setChats(chatResult.chats)
-    setContacts(contactResult.contacts)
-    setUnreadCount(chatResult.unread)
-    setUpdates(updateResult.updates)
-    setPeople(communityResult.people)
-    setFollowing(followingResult.people)
-    setBlocked(blockResult.people)
-    return chatResult.chats
+    if (chatResult.status === 'rejected') throw chatResult.reason
+    setChats(chatResult.value.chats)
+    setUnreadCount(chatResult.value.unread)
+    if (contactResult.status === 'fulfilled') setContacts(contactResult.value.contacts)
+    if (updateResult.status === 'fulfilled') setUpdates(updateResult.value.updates)
+    if (communityResult.status === 'fulfilled') setPeople(communityResult.value.people)
+    if (followingResult.status === 'fulfilled') setFollowing(followingResult.value.people)
+    if (blockResult.status === 'fulfilled') setBlocked(blockResult.value.people)
+    return chatResult.value.chats
   }, [communityTab])
   const refresh = useCallback(async (initial = false) => {
     try {
@@ -252,12 +253,12 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   const sendRequest = () => foundPerson && run(async () => {
     const result = await request<{ chatId: string; status: Chat['status']; existing?: boolean }>('/requests', json({ jibuId: foundPerson.jibuId, message: intro }))
     setIntro(''); setLookupId(''); setFoundPerson(null); setNewChatOpen(false)
-    if (result.status === 'accepted') {
-      const latestChats = await loadLists()
-      setTab('chats')
-      setSelectedChat(latestChats.find((chat) => chat.id === result.chatId) || null)
-    }
-  }, 'Message request sent. Find it in Chats; the recipient must accept before messaging continues.')
+    const latestChats = await loadLists()
+    const sentChat = latestChats.find((chat) => chat.id === result.chatId)
+    if (!sentChat) throw new Error('The server accepted the request, but it did not return in your chat list. Refresh Chats and try again.')
+    setTab('chats')
+    setSelectedChat(sentChat)
+  }, 'Message sent. The recipient can now find your request in Chats.')
   const removeContact = (person: Person) => run(() => request(`/contacts/${encodeURIComponent(person.jibuId)}`, { method: 'DELETE' }), 'Contact removed. Existing chat history is unchanged.')
   const addContactById = (event: FormEvent) => {
     event.preventDefault()

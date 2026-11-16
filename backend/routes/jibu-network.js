@@ -6,6 +6,7 @@ import { authenticateToken, requirePermission, requireTenant } from '../middlewa
 import { requireFeature } from '../middleware/featureCheck.js';
 import { createJibuId, isValidJibuId, normalizeJibuId, JIBU_NETWORK_DIAL_CODES } from '../src/services/jibuNetworkIdentity.js';
 import { deleteCloudinaryAsset, uploadBufferToCloudinary } from '../src/utils/cloudinaryUpload.js';
+import { sendNotificationToUser } from '../src/services/webPush.js';
 
 const router = Router();
 const statusImageUpload = multer({
@@ -96,6 +97,15 @@ function requestView(row, userId) {
   const peer = row.participantOneId === userId ? row.participantTwo : row.participantOne;
   const latestMessage = row.messages?.[0] || null;
   return { id: row.id, status: row.status, incoming, participant: publicUser(peer), latestMessage, updatedAt: row.updatedAt };
+}
+function notifyNetworkRecipient(userId, isRequest = false) {
+  void sendNotificationToUser(userId, {
+    title: isRequest ? 'New JibuSales message request' : 'New JibuSales message',
+    body: isRequest
+      ? 'A JibuSales member sent you a request. Open Team Messaging to review it.'
+      : 'You received a message. Open Team Messaging to view it.',
+    data: { url: '/tenant/dashboard', type: isRequest ? 'jibu_network_request' : 'jibu_network_message' },
+  }).catch((error) => console.warn('Could not deliver JibuSales Network push notification.', error?.message || error));
 }
 
 router.get('/me', async (req, res) => {
@@ -245,6 +255,7 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
         await tx.jibuNetworkMessage.create({ data: { conversationId: existing.id, senderId: sender.id, body } });
         await tx.jibuNetworkConversation.update({ where: { id: existing.id }, data: { updatedAt: new Date() } });
       });
+      notifyNetworkRecipient(recipient.id);
       return res.status(201).json({ chatId: existing.id, status: existing.status, existing: true });
     }
     if (existing.status === 'pending' && existing.requestedById !== sender.id) {
@@ -258,6 +269,7 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
       await tx.jibuNetworkMessage.create({ data: { conversationId: existing.id, senderId: sender.id, body } });
       return updated;
     });
+    notifyNetworkRecipient(recipient.id, true);
     return res.status(201).json({ chatId: reopened.id, status: reopened.status, existing: true });
   }
   const chat = await prisma.$transaction(async (tx) => {
@@ -265,6 +277,7 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
     await tx.jibuNetworkMessage.create({ data: { conversationId: created.id, senderId: sender.id, body } });
     return created;
   });
+  notifyNetworkRecipient(recipient.id, true);
   res.status(201).json({ chatId: chat.id, status: chat.status });
 });
 
@@ -308,6 +321,7 @@ router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), asy
     await tx.jibuNetworkConversation.update({ where: { id: chat.id }, data: { updatedAt: new Date() } });
     return row;
   });
+  notifyNetworkRecipient(peerId);
   res.status(201).json({ message });
 });
 
