@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Camera, Check, CheckCheck, ChevronLeft, Clock3, Copy, Flag, Globe2, LoaderCircle, MessageCircle, MoreVertical, PhoneCall, Plus, Search, Send, Settings, Share2, ShieldBan, UserRoundPlus, Users, X } from 'lucide-react'
+import { Camera, Check, CheckCheck, ChevronLeft, Clock3, Copy, Flag, Globe2, LoaderCircle, MessageCircle, MoreVertical, Paperclip, PhoneCall, Plus, Search, Send, Settings, Share2, ShieldBan, UserRoundPlus, Users, X } from 'lucide-react'
 import { apiFetch, authApi } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { Button } from '@/components/ui/button'
@@ -11,8 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 type Person = { id: string; name: string; avatar: string | null; jibuId: string }
 type Profile = Partial<Person> & { countryCode: string | null; enabled: boolean }
-type Chat = { id: string; status: 'pending' | 'accepted' | 'declined'; incoming: boolean; participant: Person; latestMessage: { id: string; senderId: string; body: string; createdAt: string; deliveredAt: string | null; readAt: string | null } | null; updatedAt: string }
-type Message = { id: string; senderId: string; body: string; createdAt: string; deliveredAt: string | null; readAt: string | null }
+type Chat = { id: string; status: 'pending' | 'accepted' | 'declined'; incoming: boolean; participant: Person; latestMessage: { id: string; senderId: string; body: string; imageUrl?: string | null; createdAt: string; deliveredAt: string | null; readAt: string | null } | null; updatedAt: string }
+type Message = { id: string; senderId: string; body: string; imageUrl?: string | null; createdAt: string; deliveredAt: string | null; readAt: string | null }
 type Update = { id: string; body: string; background: string; imageUrl?: string | null; createdAt: string; expiresAt: string; user: Person }
 type MainTab = 'chats' | 'updates' | 'communities' | 'calls'
 type CommunityTab = 'followers' | 'following'
@@ -55,6 +55,11 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   const { user, updateUser, hasPermission } = useJWTAuth()
   const canManageNetwork = user?.role === 'owner' || hasPermission('canSendTeamMessages')
   const avatarInputRef = useRef<HTMLInputElement>(null)
+  const messageImageInputRef = useRef<HTMLInputElement>(null)
+  const sendingMessageRef = useRef(false)
+  const pendingMessageRef = useRef<{ signature: string; id: string; file: File | null } | null>(null)
+  const sendingRequestRef = useRef(false)
+  const pendingRequestRef = useRef<{ signature: string; id: string } | null>(null)
   const [tab, setTab] = useState<MainTab>('chats')
   const [communityTab, setCommunityTab] = useState<CommunityTab>('followers')
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -81,6 +86,7 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   const [foundPerson, setFoundPerson] = useState<Person | null>(null)
   const [intro, setIntro] = useState('')
   const [messageDraft, setMessageDraft] = useState('')
+  const [messageImage, setMessageImage] = useState<File | null>(null)
   const [statusDraft, setStatusDraft] = useState('')
   const [statusImage, setStatusImage] = useState<File | null>(null)
   const [statusImagePreview, setStatusImagePreview] = useState('')
@@ -158,7 +164,10 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   }, [viewingStatuses, viewingStatusIndex])
   useEffect(() => {
     const selectedChatId = selectedChat?.id
-    if (!selectedChatId) { setMessages([]); return }
+    if (!selectedChatId) { setMessages([]); setMessageImage(null); pendingMessageRef.current = null; return }
+    setMessageImage(null)
+    setMessageDraft('')
+    pendingMessageRef.current = null
     let active = true
     const load = async () => {
       try {
@@ -260,15 +269,23 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
     catch (err) { setError(err instanceof Error ? err.message : 'Could not search that ID.') }
     finally { setBusy(false) }
   }
-  const sendRequest = () => foundPerson && run(async () => {
-    const result = await request<{ chatId: string; status: Chat['status']; existing?: boolean }>('/requests', json({ jibuId: foundPerson.jibuId, message: intro }))
-    setIntro(''); setLookupId(''); setFoundPerson(null); setNewChatOpen(false)
-    const latestChats = await loadLists()
-    const sentChat = latestChats.find((chat) => chat.id === result.chatId)
-    if (!sentChat) throw new Error('The server accepted the request, but it did not return in your chat list. Refresh Chats and try again.')
-    setTab('chats')
-    setSelectedChat(sentChat)
-  }, 'Message sent. The recipient can now find your request in Chats.')
+  const sendRequest = () => {
+    if (!foundPerson || sendingRequestRef.current) return
+    sendingRequestRef.current = true
+    const signature = JSON.stringify([foundPerson.jibuId, intro.trim()])
+    const clientMessageId = pendingRequestRef.current?.signature === signature ? pendingRequestRef.current.id : crypto.randomUUID()
+    pendingRequestRef.current = { signature, id: clientMessageId }
+    void run(async () => {
+      const result = await request<{ chatId: string; status: Chat['status']; existing?: boolean }>('/requests', json({ jibuId: foundPerson.jibuId, message: intro, clientMessageId }))
+      setIntro(''); setLookupId(''); setFoundPerson(null); setNewChatOpen(false)
+      const latestChats = await loadLists()
+      const sentChat = latestChats.find((chat) => chat.id === result.chatId)
+      if (!sentChat) throw new Error('The server accepted the request, but it did not return in your chat list. Refresh Chats and try again.')
+      setTab('chats')
+      setSelectedChat(sentChat)
+      pendingRequestRef.current = null
+    }, 'Message sent. The recipient can now find your request in Chats.').finally(() => { sendingRequestRef.current = false })
+  }
   const removeContact = (person: Person) => run(() => request(`/contacts/${encodeURIComponent(person.jibuId)}`, { method: 'DELETE' }), 'Contact removed. Existing chat history is unchanged.')
   const addContactById = (event: FormEvent) => {
     event.preventDefault()
@@ -294,15 +311,38 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   }
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault()
-    if (!selectedChat || !messageDraft.trim()) return
+    if (!selectedChat || (!messageDraft.trim() && !messageImage) || sendingMessageRef.current) return
+    sendingMessageRef.current = true
     setBusy(true); setError('')
+    const body = messageDraft.trim()
+    const signature = JSON.stringify([selectedChat.id, body, messageImage?.name, messageImage?.size, messageImage?.lastModified])
+    const clientMessageId = pendingMessageRef.current?.signature === signature && pendingMessageRef.current.file === messageImage ? pendingMessageRef.current.id : crypto.randomUUID()
+    pendingMessageRef.current = { signature, id: clientMessageId, file: messageImage }
     try {
-      await request(`/chats/${selectedChat.id}/messages`, json({ body: messageDraft }))
+      const payload = new FormData()
+      payload.set('body', body)
+      payload.set('clientMessageId', clientMessageId)
+      if (messageImage) payload.set('image', messageImage)
+      const { message } = await request<{ message: Message }>(`/chats/${selectedChat.id}/messages`, { method: 'POST', body: payload })
       setMessageDraft('')
-      const result = await request<{ messages: Message[] }>(`/chats/${selectedChat.id}/messages`)
-      setMessages(result.messages); await loadLists()
+      setMessageImage(null)
+      if (messageImageInputRef.current) messageImageInputRef.current.value = ''
+      pendingMessageRef.current = null
+      setMessages((current) => current.some((row) => row.id === message.id) ? current.map((row) => row.id === message.id ? message : row) : [...current, message])
+      setChats((current) => current.map((chat) => chat.id === selectedChat.id ? { ...chat, latestMessage: message, updatedAt: message.createdAt } : chat))
     } catch (err) { setError(err instanceof Error ? err.message : 'Message could not be sent.') }
-    finally { setBusy(false) }
+    finally { sendingMessageRef.current = false; setBusy(false) }
+  }
+  const chooseMessageImage = (file?: File) => {
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setError('Choose a JPEG, PNG, or WebP image no larger than 5 MB.')
+      if (messageImageInputRef.current) messageImageInputRef.current.value = ''
+      return
+    }
+    setError('')
+    setMessageImage(file)
+    if (messageImageInputRef.current) messageImageInputRef.current.value = ''
   }
   const publishUpdate = () => run(async () => {
     const form = new FormData()
@@ -348,7 +388,15 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
 
     {!profile?.enabled ? <Card className="max-w-2xl"><CardHeader><CardTitle className="text-lg">Enable cross-business messaging</CardTitle><p className="text-sm text-muted-foreground">Your profile stays private until you opt in. Your JibuSales ID uses a country calling code and a random 10-digit number; it does not expose your phone number.</p></CardHeader><CardContent className="space-y-4"><label className="block text-sm font-medium">Country calling code<select className="mt-1 h-10 w-full rounded-lg border bg-background px-3 text-foreground sm:max-w-sm" value={countryCode} onChange={(event) => setCountryCode(event.target.value)}>{countryCodes.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}</select></label><div className="flex flex-wrap items-center gap-3"><Button disabled={busy || !canManageNetwork} onClick={() => void enableNetwork()}><UserRoundPlus className="mr-2 h-4 w-4" />Opt in and create ID</Button><span className="text-xs text-muted-foreground">Only members who opt in can be found by exact ID.</span></div></CardContent></Card> : <>
       {tab === 'chats' && <div className={`${embedded ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0'}`}>
-        {selectedChat ? <Card className={`flex h-full flex-col overflow-hidden ${embedded ? 'min-h-0 flex-1' : 'min-h-[360px]'}`}><CardHeader className="flex-row items-center gap-3 border-b px-4 py-3"><Button variant="ghost" size="icon-sm" aria-label="Back to chats" onClick={() => setSelectedChat(null)}><ChevronLeft /></Button><Avatar person={selectedChat.participant} size="sm" /><div className="min-w-0 flex-1"><CardTitle className="text-base">{selectedChat.participant.name}</CardTitle><p className="text-xs text-muted-foreground">{selectedChat.status === 'pending' ? selectedChat.incoming ? 'Message request' : 'Request sent · waiting for acceptance' : 'JibuSales Network'}</p></div><Button variant="outline" size="icon-sm" title="Report member" disabled={!canManageNetwork} onClick={() => setReportingPerson(selectedChat.participant)}><Flag /></Button><Button variant="outline" size="icon-sm" title="Block member" disabled={!canManageNetwork} onClick={() => void lookupBlock(selectedChat.participant)}><ShieldBan /></Button></CardHeader><div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/20 p-4">{messages.map((message) => { const own = message.senderId === profile.id; return <div key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${own ? 'bg-emerald-700 text-white' : 'border bg-card'}`}><p className="whitespace-pre-wrap break-words">{message.body}</p><div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${own ? 'text-emerald-100' : 'text-muted-foreground'}`}><time>{dateLabel(message.createdAt)}</time>{own && <MessageTicks deliveredAt={message.deliveredAt} readAt={message.readAt} />}</div></div></div> })}</div>{selectedChat.status === 'pending' && selectedChat.incoming ? <div className="shrink-0 border-t bg-muted/30 p-3"><p className="mb-2 text-center text-xs text-muted-foreground">Accept this request to continue the conversation.</p><div className="flex gap-2"><Button className="flex-1" disabled={busy || !canManageNetwork} onClick={() => void run(async () => { await request(`/chats/${selectedChat.id}/accept`, json({})); setSelectedChat((current) => current ? { ...current, status: 'accepted' } : current) }, 'Message request accepted.') }><Check className="mr-1.5 h-4 w-4" />Accept</Button><Button className="flex-1" variant="outline" disabled={busy || !canManageNetwork} onClick={() => void run(async () => { await request(`/chats/${selectedChat.id}/decline`, json({})); setSelectedChat(null) }, 'Message request declined.')}><X className="mr-1.5 h-4 w-4" />Decline</Button></div></div> : selectedChat.status === 'pending' ? <div className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">Your first message was sent. You can reply here after they accept.</div> : <form onSubmit={sendMessage} className="flex shrink-0 items-end gap-2 border-t p-3"><Textarea aria-label="Message" placeholder="Write a message" rows={2} maxLength={4000} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} /><Button type="submit" size="icon" disabled={busy || !canManageNetwork || !messageDraft.trim()} aria-label="Send message"><Send /></Button></form>}</Card> : <div className={`${embedded ? 'h-full min-h-0 flex-1' : 'h-full'} overflow-y-auto rounded-lg border bg-card`}><div className="border-b px-4 py-3"><h2 className="font-semibold">Chats</h2><p className="text-xs text-muted-foreground">Private conversations and new message requests.</p></div>{visibleChats.length === 0 ? <div className="grid min-h-56 place-items-center px-6 text-center"><div><MessageCircle className="mx-auto mb-3 h-9 w-9 text-muted-foreground/50" /><p className="font-medium">No conversations yet</p><p className="mt-1 text-sm text-muted-foreground">Start a chat with a JibuSales ID using the new chat button.</p></div></div> : <div className="divide-y">{visibleChats.map((chat) => <button key={chat.id} type="button" onClick={() => setSelectedChat(chat)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/60"><Avatar person={chat.participant} size="sm" /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{chat.participant.name}</span>{chat.status === 'pending' && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">{chat.incoming ? 'New message' : 'Request sent'}</span>}</span><span className="mt-0.5 flex items-center gap-1.5"><span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{chat.latestMessage?.body || 'Start the conversation'}</span>{chat.latestMessage?.senderId === profile.id && <MessageTicks deliveredAt={chat.latestMessage.deliveredAt} readAt={chat.latestMessage.readAt} />}</span></span><time className="shrink-0 text-[10px] text-muted-foreground">{dateLabel(chat.latestMessage?.createdAt || chat.updatedAt)}</time></button>)}</div>}</div>}
+        {selectedChat ? <Card className={`flex h-full flex-col overflow-hidden ${embedded ? 'min-h-0 flex-1' : 'min-h-[360px]'}`}>
+          <CardHeader className="flex-row items-center gap-3 border-b px-4 py-3"><Button variant="ghost" size="icon-sm" aria-label="Back to chats" onClick={() => { setSelectedChat(null); setMessageImage(null) }}><ChevronLeft /></Button><Avatar person={selectedChat.participant} size="sm" /><div className="min-w-0 flex-1"><CardTitle className="text-base">{selectedChat.participant.name}</CardTitle><p className="text-xs text-muted-foreground">{selectedChat.status === 'pending' ? selectedChat.incoming ? 'Message request' : 'Request sent · waiting for acceptance' : 'JibuSales Network'}</p></div><Button variant="outline" size="icon-sm" title="Report member" disabled={!canManageNetwork} onClick={() => setReportingPerson(selectedChat.participant)}><Flag /></Button><Button variant="outline" size="icon-sm" title="Block member" disabled={!canManageNetwork} onClick={() => void lookupBlock(selectedChat.participant)}><ShieldBan /></Button></CardHeader>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/20 p-4">{messages.map((message) => { const own = message.senderId === profile.id; return <div key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${own ? 'bg-emerald-700 text-white' : 'border bg-card'}`}>{message.imageUrl && <img src={message.imageUrl} alt="Shared image" className="mb-2 max-h-64 max-w-full rounded-lg object-contain" />}{message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}<div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${own ? 'text-emerald-100' : 'text-muted-foreground'}`}><time>{dateLabel(message.createdAt)}</time>{own && <MessageTicks deliveredAt={message.deliveredAt} readAt={message.readAt} />}</div></div></div> })}</div>
+          {selectedChat.status === 'pending' && selectedChat.incoming ? <div className="shrink-0 border-t bg-muted/30 p-3"><p className="mb-2 text-center text-xs text-muted-foreground">Accept this request to continue the conversation.</p><div className="flex gap-2"><Button className="flex-1" disabled={busy || !canManageNetwork} onClick={() => void run(async () => { await request(`/chats/${selectedChat.id}/accept`, json({})); setSelectedChat((current) => current ? { ...current, status: 'accepted' } : current) }, 'Message request accepted.') }><Check className="mr-1.5 h-4 w-4" />Accept</Button><Button className="flex-1" variant="outline" disabled={busy || !canManageNetwork} onClick={() => void run(async () => { await request(`/chats/${selectedChat.id}/decline`, json({})); setSelectedChat(null) }, 'Message request declined.')}><X className="mr-1.5 h-4 w-4" />Decline</Button></div></div> : selectedChat.status === 'pending' ? <div className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">Your first message was sent. You can reply here after they accept.</div> : <form onSubmit={sendMessage} className="shrink-0 border-t p-3">
+            {messageImage && <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs"><Paperclip className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">{messageImage.name}</span><button type="button" aria-label="Remove attached image" onClick={() => setMessageImage(null)}><X className="h-4 w-4" /></button></div>}
+            <input ref={messageImageInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseMessageImage(event.target.files?.[0])} />
+            <div className="flex items-end gap-2"><Button type="button" variant="ghost" size="icon" aria-label="Attach image" onClick={() => messageImageInputRef.current?.click()}><Paperclip /></Button><Textarea aria-label="Message" placeholder="Write a message" rows={2} maxLength={4000} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} /><Button type="submit" size="icon" disabled={busy || !canManageNetwork || (!messageDraft.trim() && !messageImage)} aria-label="Send message"><Send /></Button></div>
+          </form>}
+        </Card> : <div className={`${embedded ? 'h-full min-h-0 flex-1' : 'h-full'} overflow-y-auto rounded-lg border bg-card`}><div className="border-b px-4 py-3"><h2 className="font-semibold">Chats</h2><p className="text-xs text-muted-foreground">Private conversations and new message requests.</p></div>{visibleChats.length === 0 ? <div className="grid min-h-56 place-items-center px-6 text-center"><div><MessageCircle className="mx-auto mb-3 h-9 w-9 text-muted-foreground/50" /><p className="font-medium">No conversations yet</p><p className="mt-1 text-sm text-muted-foreground">Start a chat with a JibuSales ID using the new chat button.</p></div></div> : <div className="divide-y">{visibleChats.map((chat) => <button key={chat.id} type="button" onClick={() => setSelectedChat(chat)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/60"><Avatar person={chat.participant} size="sm" /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{chat.participant.name}</span>{chat.status === 'pending' && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">{chat.incoming ? 'New message' : 'Request sent'}</span>}</span><span className="mt-0.5 flex items-center gap-1.5"><span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{chat.latestMessage?.body || (chat.latestMessage?.imageUrl ? '📷 Photo' : 'Start the conversation')}</span>{chat.latestMessage?.senderId === profile.id && <MessageTicks deliveredAt={chat.latestMessage.deliveredAt} readAt={chat.latestMessage.readAt} />}</span></span><time className="shrink-0 text-[10px] text-muted-foreground">{dateLabel(chat.latestMessage?.createdAt || chat.updatedAt)}</time></button>)}</div>}</div>}
       </div>}
 
       {tab === 'updates' && <div className={`${embedded ? 'space-y-4' : 'grid gap-4 lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.5fr)]'}`}>

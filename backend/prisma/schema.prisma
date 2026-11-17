@@ -2563,6 +2563,8 @@ model BusinessMessage {
   recipientId      String
   recipient        User                      @relation("BusinessMessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   body             String
+  imageUrl          String?
+  imagePublicId     String?
   replyToMessageId String?
   replyToMessage   BusinessMessage?          @relation("BusinessMessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
   replies          BusinessMessage[]         @relation("BusinessMessageReplies")
@@ -2618,6 +2620,8 @@ model JibuNetworkMessage {
   senderId       String
   sender         User                    @relation("JibuNetworkMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   body           String
+  imageUrl       String?
+  imagePublicId  String?
   deliveredAt    DateTime?
   readAt         DateTime?
   createdAt      DateTime                @default(now())

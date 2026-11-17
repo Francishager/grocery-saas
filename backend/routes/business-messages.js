@@ -2,6 +2,8 @@ import { Router } from 'express';
 import prisma from '../src/db.js';
 import { authenticateToken, requirePermission, requireTenant } from '../middleware/auth.js';
 import { requireFeature } from '../middleware/featureCheck.js';
+import { deleteCloudinaryAsset, uploadBufferToCloudinary } from '../src/utils/cloudinaryUpload.js';
+import { parseChatImage, validClientMessageId, verifiedChatImageMime } from '../src/utils/chatImageUpload.js';
 
 const router = Router();
 const access = [authenticateToken, requireTenant, requireFeature('communication.team_messaging')];
@@ -9,7 +11,7 @@ const userFields = { id: true, fname: true, lname: true, role: true, avatar: tru
 const ONLINE_WINDOW_MS = 60_000;
 const MESSAGE_REACTION_EMOJIS = new Set(['👍', '❤️', '😂', '😮', '😢', '🙏']);
 const messageDetails = {
-  id: true, senderId: true, recipientId: true, body: true,
+  id: true, conversationId: true, senderId: true, recipientId: true, body: true, imageUrl: true,
   deliveredAt: true, readAt: true, createdAt: true,
   replyToMessage: { select: { id: true, senderId: true, body: true } },
   reactions: { select: { id: true, userId: true, emoji: true } },
@@ -172,16 +174,26 @@ router.post('/conversations/:id/messages/:messageId/reactions', requirePermissio
   res.json({ reactions });
 });
 
-router.post('/conversations/:id/messages', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), async (req, res) => {
+router.post('/conversations/:id/messages', requirePermission('canViewTeamMessaging'), requirePermission('canSendTeamMessages'), parseChatImage, async (req, res) => {
   const tenantId = req.user.tenantId || req.user.tenant_id || req.user.business_id;
   const body = String(req.body?.body || '').trim();
   const replyToMessageId = String(req.body?.replyToMessageId || '').trim() || null;
-  if (!body || body.length > 4000) return res.status(400).json({ error: 'Write a message of 1 to 4,000 characters.' });
+  const clientMessageId = String(req.body?.clientMessageId || '').trim();
+  if ((!body && !req.file) || body.length > 4000) return res.status(400).json({ error: 'Write a message of up to 4,000 characters or choose an image.' });
+  if (clientMessageId && !validClientMessageId(clientMessageId)) return res.status(400).json({ error: 'Invalid message request ID.' });
+  if (req.file && verifiedChatImageMime(req.file.buffer) !== req.file.mimetype) return res.status(400).json({ error: 'Choose a valid JPEG, PNG, or WebP image.' });
   const conversation = await prisma.businessConversation.findFirst({
     where: { id: req.params.id, tenantId, OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
     select: { id: true, participantOneId: true, participantTwoId: true },
   });
   if (!conversation) return res.status(404).json({ error: 'Conversation not found.' });
+  if (clientMessageId) {
+    const existing = await prisma.businessMessage.findUnique({ where: { id: clientMessageId }, select: messageDetails });
+    if (existing) {
+      if (existing.conversationId !== conversation.id || existing.senderId !== req.user.id) return res.status(409).json({ error: 'Message request ID has already been used.' });
+      return res.json({ message: existing });
+    }
+  }
   if (replyToMessageId) {
     const original = await prisma.businessMessage.findFirst({
       where: { id: replyToMessageId, tenantId, conversationId: conversation.id },
@@ -196,20 +208,39 @@ router.post('/conversations/:id/messages', requirePermission('canViewTeamMessagi
   });
   const now = new Date();
   const recipientOnline = Boolean(recipient?.teamMessagingLastSeenAt && now.getTime() - recipient.teamMessagingLastSeenAt.getTime() < ONLINE_WINDOW_MS);
-  const [message] = await prisma.$transaction([
-    prisma.businessMessage.create({
-      data: { tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body, replyToMessageId, deliveredAt: recipientOnline ? now : null },
-      select: messageDetails,
-    }),
-    prisma.businessConversation.update({
-      where: { id: conversation.id },
-      data: {
-        updatedAt: new Date(),
-        [conversation.participantOneId === req.user.id ? 'participantOneTypingAt' : 'participantTwoTypingAt']: null,
-      },
-    }),
-  ]);
-  res.status(201).json({ message });
+  let uploaded;
+  try {
+    if (req.file) {
+      uploaded = await uploadBufferToCloudinary(req.file.buffer, { resourceType: 'image', folder: 'jibusales/chat-messages' });
+      if (!uploaded?.secure_url || !uploaded?.public_id) throw new Error('Image upload did not return a usable asset.');
+    }
+    const [message] = await prisma.$transaction([
+      prisma.businessMessage.create({
+        data: {
+          ...(clientMessageId ? { id: clientMessageId } : {}),
+          tenantId, conversationId: conversation.id, senderId: req.user.id, recipientId, body, replyToMessageId,
+          imageUrl: uploaded?.secure_url || null, imagePublicId: uploaded?.public_id || null,
+          deliveredAt: recipientOnline ? now : null,
+        },
+        select: messageDetails,
+      }),
+      prisma.businessConversation.update({
+        where: { id: conversation.id },
+        data: {
+          updatedAt: new Date(),
+          [conversation.participantOneId === req.user.id ? 'participantOneTypingAt' : 'participantTwoTypingAt']: null,
+        },
+      }),
+    ]);
+    return res.status(201).json({ message });
+  } catch (error) {
+    if (uploaded?.public_id) await deleteCloudinaryAsset(uploaded.public_id).catch((cleanupError) => console.warn('Could not remove an unused chat image.', cleanupError.message));
+    if (clientMessageId && error?.code === 'P2002') {
+      const existing = await prisma.businessMessage.findUnique({ where: { id: clientMessageId }, select: messageDetails });
+      if (existing?.conversationId === conversation.id && existing.senderId === req.user.id) return res.json({ message: existing });
+    }
+    throw error;
+  }
 });
 
 export default router;

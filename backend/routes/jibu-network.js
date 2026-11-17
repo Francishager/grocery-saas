@@ -7,6 +7,7 @@ import { requireFeature } from '../middleware/featureCheck.js';
 import { createJibuId, isValidJibuId, normalizeJibuId, JIBU_NETWORK_DIAL_CODES } from '../src/services/jibuNetworkIdentity.js';
 import { deleteCloudinaryAsset, uploadBufferToCloudinary } from '../src/utils/cloudinaryUpload.js';
 import { sendNotificationToUser } from '../src/services/webPush.js';
+import { parseChatImage, validClientMessageId, verifiedChatImageMime } from '../src/utils/chatImageUpload.js';
 
 const router = Router();
 const statusImageUpload = multer({
@@ -32,6 +33,7 @@ const dialCodes = new Set(JIBU_NETWORK_DIAL_CODES);
 const updateBackgrounds = new Set(['emerald', 'blue', 'rose', 'amber', 'violet', 'slate']);
 const reportReasons = new Set(['spam', 'harassment', 'impersonation', 'inappropriate', 'other']);
 const publicUserSelect = { id: true, fname: true, lname: true, avatar: true, jibuId: true };
+const networkMessageSelect = { id: true, conversationId: true, senderId: true, body: true, imageUrl: true, deliveredAt: true, readAt: true, createdAt: true };
 let lastExpiredUpdateCleanupAt = 0;
 let lastExpiredRateCleanupAt = 0;
 
@@ -96,7 +98,8 @@ function requestView(row, userId) {
   const incoming = row.requestedById !== userId;
   const peer = row.participantOneId === userId ? row.participantTwo : row.participantOne;
   const latestMessage = row.messages?.[0] || null;
-  return { id: row.id, status: row.status, incoming, participant: publicUser(peer), latestMessage, updatedAt: row.updatedAt };
+  const { imagePublicId: _privateAssetId, ...visibleLatestMessage } = latestMessage || {};
+  return { id: row.id, status: row.status, incoming, participant: publicUser(peer), latestMessage: latestMessage ? visibleLatestMessage : null, updatedAt: row.updatedAt };
 }
 function notifyNetworkRecipient(userId, isRequest = false) {
   void sendNotificationToUser(userId, {
@@ -231,17 +234,31 @@ router.get('/chats', async (req, res) => {
     })
     : [];
   const unreadByConversation = new Map(unreadRows.map((row) => [row.conversationId, row._count._all]));
-  const chats = visible.map((chat) => ({ ...chat, unreadCount: unreadByConversation.get(chat.id) || 0 }));
+  const unreadMessages = visible.length
+    ? await prisma.jibuNetworkMessage.findMany({
+      where: { conversationId: { in: visible.map((chat) => chat.id) }, senderId: { not: req.user.id }, readAt: null },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: networkMessageSelect,
+    })
+    : [];
+  const latestUnreadByConversation = new Map();
+  for (const message of unreadMessages) if (!latestUnreadByConversation.has(message.conversationId)) latestUnreadByConversation.set(message.conversationId, message);
+  const chats = visible.map((chat) => ({
+    ...chat,
+    latestUnread: latestUnreadByConversation.get(chat.id) || null,
+    unreadCount: unreadByConversation.get(chat.id) || 0,
+  }));
   const unread = chats.reduce((total, chat) => total + chat.unreadCount, 0);
   res.json({ chats, unread });
 });
 
 router.post('/requests', requirePermission('canSendTeamMessages'), async (req, res) => {
-  if (!await allowNetworkRate(req.user.id, 'request', 8, 60 * 60 * 1000)) return fail(res, 429, 'You have sent several chat requests recently. Try again later.');
   const targetId = networkId(req.body?.jibuId);
   const body = String(req.body?.message || '').trim();
+  const clientMessageId = String(req.body?.clientMessageId || '').trim();
   if (!validNetworkId(targetId)) return fail(res, 400, 'Enter a complete JibuSales ID including its country code.');
   if (!body || body.length > 500) return fail(res, 400, 'Add a short introduction of 1 to 500 characters.');
+  if (clientMessageId && !validClientMessageId(clientMessageId)) return fail(res, 400, 'Invalid message request ID.');
   const [sender, recipient] = await Promise.all([
     prisma.user.findFirst({ where: { id: req.user.id, jibuNetworkEnabled: true, isActive: true }, select: { id: true } }),
     prisma.user.findFirst({ where: { jibuId: targetId, jibuNetworkEnabled: true, isActive: true }, select: { id: true } }),
@@ -249,11 +266,24 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
   if (!sender) return fail(res, 403, 'Enable your JibuSales Network profile before starting a chat.');
   if (!recipient || recipient.id === req.user.id || await blockedEitherWay(req.user.id, recipient.id)) return fail(res, 404, 'That JibuSales member is not available.');
   const [participantOneId, participantTwoId] = [sender.id, recipient.id].sort();
+  if (clientMessageId) {
+    const previousMessage = await prisma.jibuNetworkMessage.findUnique({
+      where: { id: clientMessageId },
+      include: { conversation: { select: { id: true, participantOneId: true, participantTwoId: true, status: true } } },
+    });
+    if (previousMessage) {
+      if (previousMessage.senderId !== sender.id || previousMessage.conversation.participantOneId !== participantOneId || previousMessage.conversation.participantTwoId !== participantTwoId) {
+        return fail(res, 409, 'Message request ID has already been used.');
+      }
+      return res.status(201).json({ chatId: previousMessage.conversation.id, status: previousMessage.conversation.status, existing: true });
+    }
+  }
+  if (!await allowNetworkRate(req.user.id, 'request', 8, 60 * 60 * 1000)) return fail(res, 429, 'You have sent several chat requests recently. Try again later.');
   const existing = await prisma.jibuNetworkConversation.findUnique({ where: { participantOneId_participantTwoId: { participantOneId, participantTwoId } } });
   if (existing) {
     if (existing.status === 'accepted') {
       await prisma.$transaction(async (tx) => {
-        await tx.jibuNetworkMessage.create({ data: { conversationId: existing.id, senderId: sender.id, body } });
+        await tx.jibuNetworkMessage.create({ data: { ...(clientMessageId ? { id: clientMessageId } : {}), conversationId: existing.id, senderId: sender.id, body } });
         await tx.jibuNetworkConversation.update({ where: { id: existing.id }, data: { updatedAt: new Date() } });
       });
       notifyNetworkRecipient(recipient.id);
@@ -267,7 +297,7 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
         where: { id: existing.id },
         data: { status: 'pending', requestedById: sender.id, updatedAt: new Date() },
       });
-      await tx.jibuNetworkMessage.create({ data: { conversationId: existing.id, senderId: sender.id, body } });
+      await tx.jibuNetworkMessage.create({ data: { ...(clientMessageId ? { id: clientMessageId } : {}), conversationId: existing.id, senderId: sender.id, body } });
       return updated;
     });
     notifyNetworkRecipient(recipient.id, true);
@@ -275,7 +305,7 @@ router.post('/requests', requirePermission('canSendTeamMessages'), async (req, r
   }
   const chat = await prisma.$transaction(async (tx) => {
     const created = await tx.jibuNetworkConversation.create({ data: { participantOneId, participantTwoId, requestedById: sender.id, status: 'pending' } });
-    await tx.jibuNetworkMessage.create({ data: { conversationId: created.id, senderId: sender.id, body } });
+    await tx.jibuNetworkMessage.create({ data: { ...(clientMessageId ? { id: clientMessageId } : {}), conversationId: created.id, senderId: sender.id, body } });
     return created;
   });
   notifyNetworkRecipient(recipient.id, true);
@@ -304,24 +334,59 @@ router.get('/chats/:id/messages', async (req, res) => {
   const peer = await prisma.user.findFirst({ where: { id: peerId, jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
   if (!peer || await blockedEitherWay(req.user.id, peerId)) return fail(res, 404, 'Chat not found.');
   await prisma.jibuNetworkMessage.updateMany({ where: { conversationId: chat.id, senderId: peerId, readAt: null }, data: { readAt: new Date(), deliveredAt: new Date() } });
-  const messages = (await prisma.jibuNetworkMessage.findMany({ where: { conversationId: chat.id }, orderBy: { createdAt: 'desc' }, take: 100 })).reverse();
+  const messages = (await prisma.jibuNetworkMessage.findMany({
+    where: { conversationId: chat.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100,
+    select: networkMessageSelect,
+  })).reverse();
   res.json({ messages, status: chat.status, requestedById: chat.requestedById });
 });
 
-router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), async (req, res) => {
-  if (!await allowNetworkRate(req.user.id, 'message', 60, 60_000)) return fail(res, 429, 'You are sending messages too quickly. Wait a minute and try again.');
+router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), parseChatImage, async (req, res) => {
   const body = String(req.body?.body || '').trim();
-  if (!body || body.length > 4000) return fail(res, 400, 'Write a message of 1 to 4,000 characters.');
+  const clientMessageId = String(req.body?.clientMessageId || '').trim();
+  if ((!body && !req.file) || body.length > 4000) return fail(res, 400, 'Write a message of up to 4,000 characters or choose an image.');
+  if (clientMessageId && !validClientMessageId(clientMessageId)) return fail(res, 400, 'Invalid message request ID.');
+  if (req.file && verifiedChatImageMime(req.file.buffer) !== req.file.mimetype) return fail(res, 400, 'Choose a valid JPEG, PNG, or WebP image.');
   const chat = await chatForParticipant(req.params.id, req.user.id);
   if (!chat || chat.status !== 'accepted') return fail(res, 403, 'The recipient must accept your message request before the chat opens.');
   const peerId = chat.participantOneId === req.user.id ? chat.participantTwoId : chat.participantOneId;
   const peer = await prisma.user.findFirst({ where: { id: peerId, jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
   if (!peer || await blockedEitherWay(req.user.id, peerId)) return fail(res, 404, 'Chat not found.');
-  const message = await prisma.$transaction(async (tx) => {
-    const row = await tx.jibuNetworkMessage.create({ data: { conversationId: chat.id, senderId: req.user.id, body } });
-    await tx.jibuNetworkConversation.update({ where: { id: chat.id }, data: { updatedAt: new Date() } });
-    return row;
-  });
+  if (clientMessageId) {
+    const existing = await prisma.jibuNetworkMessage.findUnique({ where: { id: clientMessageId }, select: networkMessageSelect });
+    if (existing) {
+      if (existing.conversationId !== chat.id || existing.senderId !== req.user.id) return fail(res, 409, 'Message request ID has already been used.');
+      return res.json({ message: existing });
+    }
+  }
+  if (!await allowNetworkRate(req.user.id, 'message', 60, 60_000)) return fail(res, 429, 'You are sending messages too quickly. Wait a minute and try again.');
+  let uploaded;
+  let message;
+  try {
+    if (req.file) {
+      uploaded = await uploadBufferToCloudinary(req.file.buffer, { resourceType: 'image', folder: 'jibusales/chat-messages' });
+      if (!uploaded?.secure_url || !uploaded?.public_id) throw new Error('Image upload did not return a usable asset.');
+    }
+    message = await prisma.$transaction(async (tx) => {
+      const row = await tx.jibuNetworkMessage.create({
+        data: {
+          ...(clientMessageId ? { id: clientMessageId } : {}),
+          conversationId: chat.id, senderId: req.user.id, body,
+          imageUrl: uploaded?.secure_url || null, imagePublicId: uploaded?.public_id || null,
+        },
+        select: networkMessageSelect,
+      });
+      await tx.jibuNetworkConversation.update({ where: { id: chat.id }, data: { updatedAt: new Date() } });
+      return row;
+    });
+  } catch (error) {
+    if (uploaded?.public_id) await deleteCloudinaryAsset(uploaded.public_id).catch((cleanupError) => console.warn('Could not remove an unused chat image.', cleanupError.message));
+    if (clientMessageId && error?.code === 'P2002') {
+      const existing = await prisma.jibuNetworkMessage.findUnique({ where: { id: clientMessageId }, select: networkMessageSelect });
+      if (existing?.conversationId === chat.id && existing.senderId === req.user.id) return res.json({ message: existing });
+    }
+    throw error;
+  }
   notifyNetworkRecipient(peerId);
   res.status(201).json({ message });
 });

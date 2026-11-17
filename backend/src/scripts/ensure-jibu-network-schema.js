@@ -32,6 +32,8 @@ try {
   )`);
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_messages_conversation_created_idx ON jibu_network_messages ("conversationId", "createdAt")');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_messages_sender_created_idx ON jibu_network_messages ("senderId", "createdAt")');
+  await prisma.$executeRawUnsafe('ALTER TABLE jibu_network_messages ADD COLUMN IF NOT EXISTS "imageUrl" TEXT');
+  await prisma.$executeRawUnsafe('ALTER TABLE jibu_network_messages ADD COLUMN IF NOT EXISTS "imagePublicId" TEXT');
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS jibu_network_contacts (
     id TEXT PRIMARY KEY,
