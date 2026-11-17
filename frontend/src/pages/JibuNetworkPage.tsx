@@ -415,7 +415,7 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
     </>}
     </div>
 
-    {profile?.enabled && canManageNetwork && tab === 'chats' && <Button className={`${embedded ? 'absolute bottom-[4.5rem] right-4' : 'fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-5'} z-40 h-14 w-14 rounded-full bg-emerald-700 text-white shadow-lg hover:bg-emerald-800`} aria-label="New chat" title="New chat" onClick={() => { setFoundPerson(null); setLookupId(''); setIntro(''); setNewChatOpen(true) }}><Plus className="h-6 w-6" /></Button>}
+    {profile?.enabled && canManageNetwork && tab === 'chats' && !selectedChat && <Button className={`${embedded ? 'absolute bottom-[4.5rem] right-4' : 'fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-5'} z-40 h-14 w-14 rounded-full bg-emerald-700 text-white shadow-lg hover:bg-emerald-800`} aria-label="New chat" title="New chat" onClick={() => { setFoundPerson(null); setLookupId(''); setIntro(''); setNewChatOpen(true) }}><Plus className="h-6 w-6" /></Button>}
     {profile?.enabled && canManageNetwork && <>
       <nav aria-label="Network navigation" className={`${embedded ? 'absolute inset-x-0 bottom-0' : 'fixed inset-x-0 bottom-0 md:left-64'} z-30 border-t bg-background/95 px-2 pt-2 shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur supports-[backdrop-filter]:bg-background/85`} style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.5rem)' }}>
         <div className="mx-auto grid max-w-xl grid-cols-4">

@@ -20,9 +20,6 @@ type NetworkChat = { id: string; status: 'pending' | 'accepted'; incoming: boole
 type IncomingNotice =
   | { source: 'business'; conversation: Conversation; message: Message }
   | { source: 'network'; chat: NetworkChat; message: NetworkMessage }
-type InboxEntry =
-  | { source: 'business'; id: string; participant: Person; latestMessage: Message | null; unreadCount: number; updatedAt: string }
-  | ({ source: 'network' } & NetworkChat)
 type LauncherPosition = { x: number; y: number }
 const LAUNCHER_SIZE = 48
 const LAUNCHER_MARGIN = 12
@@ -95,7 +92,6 @@ export function BusinessChatWidget() {
   const [open, setOpen] = useState(false)
   const [networkOpen, setNetworkOpen] = useState(false)
   const [newMessageMode, setNewMessageMode] = useState(false)
-  const [inboxType, setInboxType] = useState<'business' | 'network'>('business')
   const [people, setPeople] = useState<Person[]>([])
   const [peopleSearch, setPeopleSearch] = useState('')
   const [peopleLoading, setPeopleLoading] = useState(false)
@@ -232,7 +228,6 @@ export function BusinessChatWidget() {
       setReplyToMessage(null)
       setActiveMessageMenuId(null)
       setEmojiPickerOpen(false)
-      setInboxType('business')
       setSelected(conversation)
       setIncoming((current) => current?.source === 'business' && current.conversation.id === conversation.id ? null : current)
     } catch (reason) {
@@ -250,7 +245,6 @@ export function BusinessChatWidget() {
       setImageFile(null)
       setDraft('')
       pendingMessageRef.current = null
-      setInboxType('network')
       setSelectedNetwork({ ...chat, status: result.status })
       setIncoming((current) => current?.source === 'network' && current.chat.id === chat.id ? null : current)
       setReplyToMessage(null)
@@ -302,18 +296,11 @@ export function BusinessChatWidget() {
     if (longPressTimer.current !== null) window.clearTimeout(longPressTimer.current)
   }, [])
 
-  const inboxEntries = useMemo<InboxEntry[]>(() => [
-    ...conversations.map((conversation) => ({ ...conversation, source: 'business' as const })),
-    ...networkChats.map((chat) => ({ ...chat, source: 'network' as const })),
-  ].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()), [conversations, networkChats])
-  const unread = useMemo(() => inboxEntries.reduce((total, row) => total + row.unreadCount, 0), [inboxEntries])
-  const businessUnread = useMemo(() => conversations.reduce((total, row) => total + row.unreadCount, 0), [conversations])
-  const networkUnread = useMemo(() => networkChats.reduce((total, row) => total + row.unreadCount, 0), [networkChats])
+  const unread = useMemo(() => [...conversations, ...networkChats].reduce((total, row) => total + row.unreadCount, 0), [conversations, networkChats])
   const filteredPeople = useMemo(() => people.filter((person) => person.name.toLowerCase().includes(peopleSearch.toLowerCase())), [people, peopleSearch])
 
   async function startConversation(person: Person) {
     try {
-      setInboxType('business')
       const { conversation } = await api<{ conversation: Conversation }>('/conversations', { method: 'POST', body: JSON.stringify({ recipientId: person.id }) })
       const row: Conversation = { ...conversation, latestMessage: null, unreadCount: 0 }
       setConversations((current) => [row, ...current.filter((item) => item.id !== row.id)])
@@ -325,7 +312,6 @@ export function BusinessChatWidget() {
 
   async function openNewMessage() {
     setError('')
-    setInboxType('business')
     setNewMessageMode(true)
     setSelected(null)
     setSelectedNetwork(null)
@@ -559,7 +545,8 @@ export function BusinessChatWidget() {
 
   const activeMessages: (Message | NetworkMessage)[] = selectedNetwork ? networkMessages : messages
   const activePeer = selected?.participant || selectedNetwork?.participant || null
-  const visibleInboxEntries = inboxEntries.filter((entry) => entry.source === inboxType && (!peopleSearch || entry.participant.name.toLowerCase().includes(peopleSearch.toLowerCase())))
+  const visibleInboxEntries = conversations
+    .filter((conversation) => !peopleSearch || conversation.participant.name.toLowerCase().includes(peopleSearch.toLowerCase()))
 
   return createPortal(<>
     {incoming && !open && <div role="status" className="fixed bottom-[5.25rem] right-4 z-[80] w-[min(22rem,calc(100vw-2rem))] border bg-card p-3 shadow-xl sm:bottom-20">
@@ -571,15 +558,11 @@ export function BusinessChatWidget() {
       <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-card px-4">
         {activePeer ? <button type="button" aria-label="Back to chats" onClick={() => { setSelected(null); setSelectedNetwork(null); setMessages([]); setNetworkMessages([]); setReplyToMessage(null); setActiveMessageMenuId(null); setNewMessageMode(false); setDraft('') }} className="grid size-9 shrink-0 place-items-center rounded-full hover:bg-muted"><ArrowLeft className="size-5" /></button> : <div className="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-900"><MessageCircle className="size-5" /></div>}
         {activePeer && <ChatAvatar name={activePeer.name} avatar={activePeer.avatar} />}
-        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{activePeer?.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p aria-live="polite" className={cn('truncate text-xs', peerTyping ? 'font-medium text-emerald-700' : 'capitalize text-muted-foreground')}>{selected && peerTyping ? 'Typing…' : selectedNetwork ? 'JibuSales Network' : selected ? selected.participant.role.replace(/_/g, ' ') : newMessageMode ? 'Business chat' : inboxType === 'business' ? 'Private business conversations' : 'JibuSales Network conversations'}</p></div>
-        {!activePeer && inboxType === 'business' && canSend && <button type="button" aria-label={newMessageMode ? 'Back to business chats' : 'Choose a business contact'} title={newMessageMode ? 'Back to business chats' : 'New business chat'} onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
+        <div className="min-w-0 flex-1"><h2 className="truncate text-base font-semibold">{activePeer?.name || (newMessageMode ? 'New chat' : 'Chats')}</h2><p aria-live="polite" className={cn('truncate text-xs', peerTyping ? 'font-medium text-emerald-700' : 'capitalize text-muted-foreground')}>{selected && peerTyping ? 'Typing…' : selectedNetwork ? 'JibuSales Network' : selected ? selected.participant.role.replace(/_/g, ' ') : newMessageMode ? 'Business chat' : 'Private business conversations'}</p></div>
+        {!activePeer && canSend && <button type="button" aria-label={newMessageMode ? 'Back to business chats' : 'Choose a business contact'} title={newMessageMode ? 'Back to business chats' : 'New business chat'} onClick={() => newMessageMode ? setNewMessageMode(false) : void openNewMessage()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><UsersRound className="size-5" /></button>}
         {!activePeer && canView && <button type="button" aria-label="Open JibuSales Network" title="Open JibuSales Network" onClick={() => setNetworkOpen(true)} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><Globe2 className="size-5" /></button>}
         <button type="button" aria-label="Close messages" onClick={() => setOpen(false)} className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted"><X className="size-5" /></button>
       </header>
-      {!activePeer && !newMessageMode && <div role="tablist" aria-label="Conversation type" className="flex shrink-0 border-b bg-card px-2">
-        <button type="button" role="tab" aria-selected={inboxType === 'business'} onClick={() => { setInboxType('business'); setPeopleSearch('') }} className={cn('flex flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3 text-sm', inboxType === 'business' ? 'border-emerald-700 font-semibold text-emerald-800' : 'border-transparent text-muted-foreground hover:text-foreground')}>Business chats{businessUnread > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{businessUnread}</span>}</button>
-        <button type="button" role="tab" aria-selected={inboxType === 'network'} onClick={() => { setInboxType('network'); setPeopleSearch('') }} className={cn('flex flex-1 items-center justify-center gap-2 border-b-2 px-3 py-3 text-sm', inboxType === 'network' ? 'border-emerald-700 font-semibold text-emerald-800' : 'border-transparent text-muted-foreground hover:text-foreground')}>JibuSales Network{networkUnread > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{networkUnread}</span>}</button>
-      </div>}
       {!canView ? <div className="m-auto max-w-sm px-6 text-center"><UsersRound className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">Team Messaging access needed</p><p className="mt-1 text-sm text-muted-foreground">Ask your business admin to grant the “View Team Messaging” permission. Sending messages also requires “Send Team Messages”.</p></div> : (selected || selectedNetwork) ? <>
         <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-[#efeae2] bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.06)_1px,transparent_0)] [background-size:18px_18px] px-3 py-4 dark:bg-background dark:bg-none sm:px-4">
           {activeMessages.map((message) => {
@@ -632,20 +615,18 @@ export function BusinessChatWidget() {
           <div className="relative flex items-end gap-2"><button type="button" aria-label="Attach image" onClick={() => imageInputRef.current?.click()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><Paperclip className="size-5" /></button><button type="button" aria-label="Choose an emoji" aria-expanded={emojiPickerOpen} onClick={() => setEmojiPickerOpen((open) => !open)} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 transition-colors hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950"><Smile className="size-5" /></button>{emojiPickerOpen && <div role="group" aria-label="Choose an emoji" className="absolute bottom-12 left-0 z-30 grid w-64 grid-cols-8 gap-1 rounded-2xl border bg-card p-2 shadow-xl">{COMPOSER_EMOJIS.map((emoji) => <button key={emoji} type="button" aria-label={`Insert ${emoji} emoji`} onClick={() => insertEmoji(emoji)} className="grid size-7 place-items-center rounded-lg text-lg transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700">{emoji}</button>)}</div>}<textarea ref={composerRef} aria-label="Message" value={draft} onChange={(event) => changeDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm shadow-inner shadow-black/[0.02]" /><button type="submit" aria-label="Send message" disabled={(!draft.trim() && !imageFile) || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-emerald-700 to-teal-800 text-white shadow-md transition-transform hover:scale-105 disabled:opacity-50"><Send className="size-4" /></button></div>
         </form> : <p className="border-t bg-card px-4 py-3 text-xs text-muted-foreground">You can read messages but do not have permission to send them.</p>}
       </> : <>
-        <div className="shrink-0 border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input aria-label={newMessageMode ? 'Search contacts' : `Search ${inboxType === 'business' ? 'business' : 'JibuSales Network'} chats`} value={peopleSearch} onChange={(event) => setPeopleSearch(event.target.value)} placeholder={newMessageMode ? 'Search contacts' : `Search ${inboxType === 'business' ? 'business' : 'Network'} chats`} className="h-10 w-full rounded-full border-0 bg-muted/70 pl-10 pr-4 text-sm" /></div></div>
+        <div className="shrink-0 border-b p-3"><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input aria-label={newMessageMode ? 'Search contacts' : 'Search business chats'} value={peopleSearch} onChange={(event) => setPeopleSearch(event.target.value)} placeholder={newMessageMode ? 'Search contacts' : 'Search business chats'} className="h-10 w-full rounded-full border-0 bg-muted/70 pl-10 pr-4 text-sm" /></div></div>
         <div className="min-h-0 flex-1 overflow-y-auto">{newMessageMode ? filteredPeople.map((person) => <button key={person.id} type="button" onClick={() => void startConversation(person)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-emerald-50/70 dark:hover:bg-muted/60"><ChatAvatar name={person.name} avatar={person.avatar} size="lg" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{person.name}</p><p className="text-xs capitalize text-muted-foreground">{person.role.replace(/_/g, ' ')}</p></div></button>) : visibleInboxEntries.map((entry) => {
           const latest = entry.latestMessage
-          const isNetwork = entry.source === 'network'
-          const subtitle = isNetwork ? entry.status === 'pending' ? entry.incoming ? 'Message request' : 'Request sent' : 'JibuSales Network' : 'Business chat'
-          return <button key={`${entry.source}:${entry.id}`} type="button" onClick={() => isNetwork ? void loadNetworkMessages(entry) : void loadMessages(entry)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50">
+          return <button key={entry.id} type="button" onClick={() => void loadMessages(entry)} className="flex w-full items-center gap-3 border-b px-4 py-3 text-left hover:bg-muted/50">
             <ChatAvatar name={entry.participant.name} avatar={entry.participant.avatar} size="lg" />
             <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="truncate text-sm font-semibold">{entry.participant.name}</p><time className={cn('shrink-0 text-[11px]', entry.unreadCount ? 'font-medium text-emerald-800' : 'text-muted-foreground')}>{conversationTime(latest?.createdAt || entry.updatedAt)}</time></div>
-              <div className="mt-1 flex items-center justify-between gap-2"><p className={cn('truncate text-xs', entry.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground')}>{latest?.body || (latest?.imageUrl ? '📷 Photo' : subtitle)}</p><div className="flex shrink-0 items-center gap-1.5">{isNetwork && <span className="text-[10px] text-muted-foreground">{subtitle}</span>}{entry.unreadCount > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{entry.unreadCount}</span>}</div></div>
+              <div className="mt-1 flex items-center justify-between gap-2"><p className={cn('truncate text-xs', entry.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground')}>{latest?.body || (latest?.imageUrl ? '📷 Photo' : 'Business chat')}</p>{entry.unreadCount > 0 && <span className="grid min-w-5 place-items-center rounded-full bg-emerald-700 px-1.5 py-0.5 text-[10px] font-semibold text-white">{entry.unreadCount}</span>}</div>
             </div>
           </button>
         })}
-          {!newMessageMode && visibleInboxEntries.length === 0 && !peopleSearch && <div className="px-6 py-12 text-center"><MessageCircle className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-medium">{inboxType === 'business' ? 'No business chats yet' : 'No JibuSales Network chats yet'}</p><p className="mt-1 text-xs text-muted-foreground">{inboxType === 'business' ? 'Business conversations stay separate from your JibuSales Network chats.' : 'Network conversations with other JibuSales businesses appear here.'}</p>{canSend ? <button type="button" onClick={() => inboxType === 'business' ? void openNewMessage() : setNetworkOpen(true)} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-800 px-4 py-2 text-sm font-medium text-white">{inboxType === 'business' ? <><Plus className="size-4" />New business chat</> : <><Globe2 className="size-4" />Open JibuSales Network</>}</button> : <p className="mt-2 text-xs text-muted-foreground">Ask your business admin to grant “Send Team Messages” to discover contacts and start chats.</p>}</div>}
-          {!newMessageMode && visibleInboxEntries.length === 0 && Boolean(peopleSearch) && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No {inboxType === 'business' ? 'business' : 'JibuSales Network'} chats match your search.</p>}
+          {!newMessageMode && visibleInboxEntries.length === 0 && !peopleSearch && <div className="px-6 py-12 text-center"><MessageCircle className="mx-auto size-9 text-muted-foreground/50" /><p className="mt-3 text-sm font-medium">No business chats yet</p><p className="mt-1 text-xs text-muted-foreground">Business conversations stay separate from your JibuSales Network chats.</p>{canSend ? <button type="button" onClick={() => void openNewMessage()} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-800 px-4 py-2 text-sm font-medium text-white"><Plus className="size-4" />New business chat</button> : <p className="mt-2 text-xs text-muted-foreground">Ask your business admin to grant “Send Team Messages” to discover contacts and start chats.</p>}</div>}
+          {!newMessageMode && visibleInboxEntries.length === 0 && Boolean(peopleSearch) && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No business chats match your search.</p>}
           {newMessageMode && peopleLoading && <p role="status" className="px-5 py-8 text-center text-sm text-muted-foreground">Loading business contacts…</p>}
           {newMessageMode && !peopleLoading && filteredPeople.length === 0 && !error && <p className="px-5 py-8 text-center text-sm text-muted-foreground">{people.length ? 'No contacts match your search.' : 'No other active users are available in this business account.'}</p>}
         </div>

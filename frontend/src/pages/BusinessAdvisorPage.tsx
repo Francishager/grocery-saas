@@ -220,7 +220,7 @@ export default function BusinessAdvisorPage() {
         <MessageSquare className="h-5 w-5 shrink-0 text-primary" /><h1 className="text-xl font-semibold">AI Advisor</h1></div>
       <div className="flex flex-wrap items-center gap-2"><label className="text-xs">Period <select aria-label="Business data period" value={days} disabled={pending} onChange={event => setDays(Number(event.target.value))} className="h-9 rounded-md border bg-background px-2">{[7, 30, 90].map(value => <option key={value} value={value}>{value} days</option>)}</select></label>
         <AdvisorCreativeStudio key={identity} conversationId={current?.id} disabled={!canSend} days={days} ensureConversation={ensureCreativeConversation} />
-        <Button variant="outline" size="sm" disabled={pending} onClick={newChat}><Plus className="mr-1 h-4 w-4" />New chat</Button></div>
+        {!current && <Button variant="outline" size="sm" disabled={pending} onClick={newChat}><Plus className="mr-1 h-4 w-4" />New chat</Button>}</div>
     </header>
     {!online && <p role="alert" className="py-2 text-sm text-amber-700">AI Advisor needs an internet connection.</p>}
     {configured === false && <div role="alert" className="space-y-2 py-2 text-sm text-amber-700"><p>AI Advisor is not configured yet. Contact the JibuSales Support Team for help.</p><SupportContactLinks compact message="Hello JibuSales Support Team, AI Advisor is not configured for my business. Please help." /></div>}

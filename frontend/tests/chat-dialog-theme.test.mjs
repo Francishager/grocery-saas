@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const read = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const chat = read('../src/components/BusinessChatWidget.tsx');
+const advisor = read('../src/pages/BusinessAdvisorPage.tsx');
 const networkChat = read('../src/pages/JibuNetworkPage.tsx');
 const dialog = read('../src/components/ui/dialog.tsx');
 
@@ -34,11 +35,11 @@ test('chat messages show sender profile photos and expose reply and emoji contro
   assert.match(chat, /function insertEmoji\(emoji: string\)/);
 });
 
-test('business and Network chats support image captions and deduplicate sends by message ID', () => {
-  assert.match(chat, /role="tablist" aria-label="Conversation type"/);
-  assert.match(chat, /entry\.source === inboxType/);
+test('business chats support image captions and deduplicate sends by message ID without inbox tabs', () => {
+  assert.doesNotMatch(chat, /role="tablist" aria-label="Conversation type"/);
+  assert.doesNotMatch(chat, /inboxType/);
   assert.match(chat, /No business chats yet/);
-  assert.match(chat, /No JibuSales Network chats yet/);
+  assert.match(chat, /aria-label="Open JibuSales Network"/);
   assert.match(chat, /aria-label="Attach image"/);
   assert.match(chat, /message\.imageUrl && <img src=\{message\.imageUrl\}/);
   assert.match(chat, /sendingRef\.current/);
@@ -54,4 +55,12 @@ test('JibuSales Network incoming messages use the shared popup notification flow
   assert.match(chat, /latestUnread\?: NetworkMessage/);
   assert.match(chat, /sent a JibuSales Network message/);
   assert.match(chat, /loadNetworkMessages\(incoming\.chat\)/);
+});
+
+test('JibuSales Network new-chat action is hidden while a conversation is open', () => {
+  assert.match(networkChat, /profile\?\.enabled && canManageNetwork && tab === 'chats' && !selectedChat && <Button[^>]+aria-label="New chat"/);
+});
+
+test('AI Advisor new-chat action is hidden while a conversation is open', () => {
+  assert.match(advisor, /\{!current && <Button[^>]+onClick=\{newChat\}><Plus[^>]+>New chat<\/Button>\}/);
 });

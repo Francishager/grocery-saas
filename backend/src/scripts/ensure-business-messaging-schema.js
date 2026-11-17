@@ -33,6 +33,8 @@ try {
   )`);
   await prisma.$executeRawUnsafe('ALTER TABLE business_messages ADD COLUMN IF NOT EXISTS "replyToMessageId" TEXT');
   await prisma.$executeRawUnsafe('ALTER TABLE business_messages ADD COLUMN IF NOT EXISTS "deliveredAt" TIMESTAMP(3)');
+  await prisma.$executeRawUnsafe('ALTER TABLE business_messages ADD COLUMN IF NOT EXISTS "imageUrl" TEXT');
+  await prisma.$executeRawUnsafe('ALTER TABLE business_messages ADD COLUMN IF NOT EXISTS "imagePublicId" TEXT');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "business_messages_conversationId_createdAt_idx" ON business_messages ("conversationId", "createdAt")');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "business_messages_tenantId_recipientId_readAt_idx" ON business_messages ("tenantId", "recipientId", "readAt")');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "business_messages_replyToMessageId_idx" ON business_messages ("replyToMessageId")');
@@ -54,7 +56,7 @@ try {
   await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS "business_message_reactions_messageId_userId_key" ON business_message_reactions ("messageId", "userId")');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "business_message_reactions_tenantId_messageId_idx" ON business_message_reactions ("tenantId", "messageId")');
 
-  console.log('Private business messaging tables, delivery fields, replies, and reactions are ready.');
+  console.log('Private business messaging tables, delivery fields, replies, images, and reactions are ready.');
 } catch (error) {
   console.error('Unable to prepare private business messaging schema:', error.code || error.message);
   process.exitCode = 1;

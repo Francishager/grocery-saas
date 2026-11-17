@@ -50,7 +50,7 @@ test('container runs additive schema checks from its startup script without dest
   }
   assert.ok(schemaBootstrap.includes('ensure-fractional-product-stock-schema.js'));
   const businessMessagingSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-business-messaging-schema.js'), 'utf8');
-  for (const fragment of ['business_conversations', 'business_messages', 'business_message_reactions', '"deliveredAt"', '"replyToMessageId"', 'ADD COLUMN IF NOT EXISTS']) {
+  for (const fragment of ['business_conversations', 'business_messages', 'business_message_reactions', '"deliveredAt"', '"replyToMessageId"', '"imageUrl"', '"imagePublicId"', 'ADD COLUMN IF NOT EXISTS']) {
     assert.ok(businessMessagingSchema.includes(fragment), `business messaging schema should include ${fragment}`);
   }
   assert.doesNotMatch(businessMessagingSchema, /DROP TABLE|TRUNCATE|force-reset/i);
