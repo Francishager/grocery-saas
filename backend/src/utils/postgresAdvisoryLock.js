@@ -37,7 +37,7 @@ export async function withPostgresAdvisoryLock({
       acquired = result.rows[0]?.acquired === true;
     }
     if (!acquired) return { acquired: false };
-    return { acquired: true, value: await task() };
+    return { acquired: true, value: await task({ client }) };
   } finally {
     if (connected) {
       try {

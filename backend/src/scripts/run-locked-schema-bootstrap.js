@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { withPostgresAdvisoryLock } from '../utils/postgresAdvisoryLock.js';
+import { runSchemaGroup } from '../utils/runtimeSchemaBootstrap.js';
 
 const requiredScripts = [
   'ensure-user-security-schema.js',
@@ -50,25 +52,19 @@ function runScript(script) {
   });
 }
 
-async function runGroup(scripts, { optional = false } = {}) {
-  for (const script of scripts) {
-    try {
-      console.log(`=== Preparing schema: ${script} ===`);
-      await runScript(script);
-      console.log(`=== Schema ready: ${script} ===`);
-    } catch (error) {
-      if (!optional) throw error;
-      console.warn(`WARNING: optional schema step ${script} failed; continuing: ${error.message}`);
-    }
-  }
-}
-
 await withPostgresAdvisoryLock({
   key: 73110402,
   wait: true,
-  task: async () => {
+  task: async ({ client }) => {
     console.log('Acquired exclusive runtime schema preparation lock.');
+    const runGroup = (scripts, optional = false) => runSchemaGroup({
+      client,
+      scripts,
+      optional,
+      runScript,
+      readScript: (script) => readFile(new URL(`./${script}`, import.meta.url)),
+    });
     await runGroup(requiredScripts);
-    await runGroup(optionalScripts, { optional: true });
+    await runGroup(optionalScripts, true);
   },
 });

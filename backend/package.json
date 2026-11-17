@@ -16,7 +16,7 @@
     "test:provisioning": "node --test tests/tenantProvisioning.test.js",
     "test:permissions": "node --test tests/permissions.test.js tests/manualJournalPolicy.test.js tests/financialYearClosing.test.js",
     "test:platform-observability": "node --test tests/platformRuntimeMetrics.test.js",
-    "test:scaling-safety": "node --test tests/postgresAdvisoryLock.test.js",
+    "test:scaling-safety": "node --test tests/postgresAdvisoryLock.test.js tests/runtimeSchemaBootstrap.test.js",
     "test:railway-status": "node --test tests/railwayStatusService.test.js",
     "test:cloudflare-status": "node --test tests/cloudflareStatusService.test.js",
     "test:property": "node --test tests/propertyAccounting.test.js tests/propertyRentRateService.test.js tests/propertyRentPeriods.test.js tests/rentPaymentAllocation.test.js tests/rentPromiseProgress.test.js",
