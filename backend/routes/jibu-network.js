@@ -204,7 +204,8 @@ router.get('/chats', async (req, res) => {
   const rows = await prisma.jibuNetworkConversation.findMany({
     where: { OR: [{ participantOneId: req.user.id }, { participantTwoId: req.user.id }] },
     include: {
-      participantOne: { select: publicUserSelect }, participantTwo: { select: publicUserSelect },
+      participantOne: { select: { ...publicUserSelect, jibuNetworkEnabled: true } },
+      participantTwo: { select: { ...publicUserSelect, jibuNetworkEnabled: true } },
       messages: { orderBy: { createdAt: 'desc' }, take: 1 },
     },
     orderBy: { updatedAt: 'desc' }, take: 100,

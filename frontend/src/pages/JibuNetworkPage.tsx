@@ -157,18 +157,28 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
     return () => window.clearTimeout(timer)
   }, [viewingStatuses, viewingStatusIndex])
   useEffect(() => {
-    if (!selectedChat) { setMessages([]); return }
+    const selectedChatId = selectedChat?.id
+    if (!selectedChatId) { setMessages([]); return }
     let active = true
     const load = async () => {
       try {
-        const result = await request<{ messages: Message[]; status: Chat['status'] }>(`/chats/${selectedChat.id}/messages`)
-        if (active) setMessages(result.messages)
+        const result = await request<{ messages: Message[]; status: Chat['status']; requestedById: string }>(`/chats/${selectedChatId}/messages`)
+        if (active) {
+          setMessages(result.messages)
+          setSelectedChat((current) => {
+            if (!current || current.id !== selectedChatId) return current
+            const incoming = result.requestedById !== profile?.id
+            return current.status === result.status && current.incoming === incoming
+              ? current
+              : { ...current, status: result.status, incoming }
+          })
+        }
       } catch (err) { if (active) setError(err instanceof Error ? err.message : 'Could not load this chat.') }
     }
     void load()
     const timer = window.setInterval(load, 5000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [selectedChat])
+  }, [selectedChat?.id, profile?.id])
 
   const visibleChats = useMemo(() => chats.filter((chat) => chat.status !== 'declined'), [chats])
   const myStatuses = useMemo(() => updates.filter((update) => update.user.id === profile?.id), [updates, profile?.id])
