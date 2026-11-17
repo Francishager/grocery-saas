@@ -602,6 +602,7 @@ model User {
   businessMessagesSent     BusinessMessage[]         @relation("BusinessMessageSender")
   businessMessagesReceived BusinessMessage[]         @relation("BusinessMessageRecipient")
   businessMessageReactions BusinessMessageReaction[]
+  jibuNetworkMessageReactions JibuNetworkMessageReaction[] @relation("JibuNetworkMessageReactionUser")
   jibuNetworkConversationsOne JibuNetworkConversation[] @relation("JibuNetworkParticipantOne")
   jibuNetworkConversationsTwo JibuNetworkConversation[] @relation("JibuNetworkParticipantTwo")
   jibuNetworkRequests JibuNetworkConversation[] @relation("JibuNetworkRequester")
@@ -2622,13 +2623,32 @@ model JibuNetworkMessage {
   body           String
   imageUrl       String?
   imagePublicId  String?
+  replyToMessageId String?
+  replyToMessage JibuNetworkMessage?     @relation("JibuNetworkMessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies        JibuNetworkMessage[]    @relation("JibuNetworkMessageReplies")
+  reactions      JibuNetworkMessageReaction[]
   deliveredAt    DateTime?
   readAt         DateTime?
   createdAt      DateTime                @default(now())
 
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
+  @@index([replyToMessageId])
   @@map("jibu_network_messages")
+}
+
+model JibuNetworkMessageReaction {
+  id        String            @id @default(cuid())
+  messageId String
+  message   JibuNetworkMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User              @relation("JibuNetworkMessageReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime          @default(now())
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("jibu_network_message_reactions")
 }
 
 model JibuNetworkContact {
@@ -5725,6 +5745,8 @@ model Appointment {
   technician      User?              @relation("AppointmentTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
   salonStylistId  String?
   salonStylist    ServiceTechnician? @relation("SalonAppointmentStylist", fields: [salonStylistId], references: [id], onDelete: SetNull)
+  salonAssistantId String?
+  salonAssistant   ServiceTechnician? @relation("SalonAppointmentAssistant", fields: [salonAssistantId], references: [id], onDelete: SetNull)
   salonChairId    String?
   salonChair      SalonChair?        @relation(fields: [salonChairId], references: [id], onDelete: SetNull)
   bookingType     String             @default("appointment") // appointment, walk_in
@@ -5741,7 +5763,7 @@ model Appointment {
   reminderSent    Boolean            @default(false) // SMS/email reminder sent
   completedAt     DateTime?
   cancelledReason String?
-  commission      SalonCommission?
+  commissions     SalonCommission[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -5905,6 +5927,7 @@ model ServiceTechnician {
   jobCards          ServiceJobCard[]
   salonCommissions  SalonCommission[]
   salonAppointments Appointment[]     @relation("SalonAppointmentStylist")
+  assistedAppointments Appointment[]  @relation("SalonAppointmentAssistant")
 
   @@index([tenantId, branchId])
   @@index([tenantId, isActive])
@@ -5936,7 +5959,7 @@ model SalonCommission {
   id                    String             @id @default(cuid())
   tenantId              String
   tenant                Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  appointmentId         String             @unique
+  appointmentId         String
   appointment           Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   stylistId             String?
   stylist               ServiceTechnician? @relation(fields: [stylistId], references: [id], onDelete: SetNull)
@@ -5946,6 +5969,7 @@ model SalonCommission {
   commissionType        String
   commissionValue       Float
   commissionAmount      Float
+  workerRole            String             @default("stylist")
   status                String             @default("pending") // pending, approved, voided, included_in_payroll
   completedAt           DateTime
   payrollReference      String?
@@ -5960,6 +5984,7 @@ model SalonCommission {
 
   @@index([tenantId, completedAt, status])
   @@index([tenantId, stylistId, status])
+  @@unique([appointmentId, stylistId])
   @@map("salon_commissions")
 }
 

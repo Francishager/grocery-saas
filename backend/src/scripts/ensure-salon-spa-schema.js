@@ -3,6 +3,7 @@ import prisma from '../db.js';
 try {
   await prisma.$executeRawUnsafe('ALTER TABLE appointments ADD COLUMN IF NOT EXISTS "salonChairId" TEXT');
   await prisma.$executeRawUnsafe('ALTER TABLE appointments ADD COLUMN IF NOT EXISTS "salonStylistId" TEXT');
+  await prisma.$executeRawUnsafe('ALTER TABLE appointments ADD COLUMN IF NOT EXISTS "salonAssistantId" TEXT');
   await prisma.$executeRawUnsafe(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS "bookingType" TEXT NOT NULL DEFAULT 'appointment'`);
   await prisma.$executeRawUnsafe('ALTER TABLE service_technicians ADD COLUMN IF NOT EXISTS "commissionType" TEXT NOT NULL DEFAULT \'percent\'');
   await prisma.$executeRawUnsafe('ALTER TABLE service_technicians ADD COLUMN IF NOT EXISTS "commissionValue" DOUBLE PRECISION NOT NULL DEFAULT 0');
@@ -28,6 +29,11 @@ try {
     END IF;
   END $$`);
   await prisma.$executeRawUnsafe(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'appointments_salonAssistantId_fkey') THEN
+      ALTER TABLE appointments ADD CONSTRAINT "appointments_salonAssistantId_fkey" FOREIGN KEY ("salonAssistantId") REFERENCES service_technicians(id) ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+  END $$`);
+  await prisma.$executeRawUnsafe(`DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'appointments_salonStylistId_fkey') THEN
       ALTER TABLE appointments ADD CONSTRAINT "appointments_salonStylistId_fkey" FOREIGN KEY ("salonStylistId") REFERENCES service_technicians(id) ON DELETE SET NULL ON UPDATE CASCADE;
     END IF;
@@ -36,7 +42,7 @@ try {
     CREATE TABLE IF NOT EXISTS salon_commissions (
       id TEXT PRIMARY KEY,
       "tenantId" TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-      "appointmentId" TEXT NOT NULL UNIQUE REFERENCES appointments(id) ON DELETE CASCADE,
+      "appointmentId" TEXT NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
       "stylistId" TEXT REFERENCES service_technicians(id) ON DELETE SET NULL,
       "stylistName" TEXT NOT NULL,
       "serviceName" TEXT NOT NULL,
@@ -44,6 +50,7 @@ try {
       "commissionType" TEXT NOT NULL,
       "commissionValue" DOUBLE PRECISION NOT NULL,
       "commissionAmount" DOUBLE PRECISION NOT NULL,
+      "workerRole" TEXT NOT NULL DEFAULT 'stylist',
       status TEXT NOT NULL DEFAULT 'pending',
       "completedAt" TIMESTAMP(3) NOT NULL,
       "payrollReference" TEXT,
@@ -57,6 +64,14 @@ try {
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  await prisma.$executeRawUnsafe('ALTER TABLE salon_commissions ADD COLUMN IF NOT EXISTS "workerRole" TEXT NOT NULL DEFAULT \'stylist\'');
+  await prisma.$executeRawUnsafe(`DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'salon_commissions'::regclass AND conname = 'salon_commissions_appointmentId_key') THEN
+      ALTER TABLE salon_commissions DROP CONSTRAINT "salon_commissions_appointmentId_key";
+    END IF;
+  END $$`);
+  await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS salon_commissions_appointmentId_key');
+  await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS salon_commissions_appointmentId_stylistId_key ON salon_commissions("appointmentId", "stylistId")');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS salon_commissions_tenant_completed_status_idx ON salon_commissions("tenantId", "completedAt", status)');
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS salon_commissions_tenant_stylist_status_idx ON salon_commissions("tenantId", "stylistId", status)');
   await prisma.$executeRawUnsafe('ALTER TABLE salon_commissions ADD COLUMN IF NOT EXISTS "paymentJournalEntryId" TEXT');

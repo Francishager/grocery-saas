@@ -194,7 +194,7 @@ router.get('/commissions/eligible', requirePermission('canIncludeSalonCommission
     const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 1));
     const commissions = await prisma.salonCommission.findMany({
       where: { tenantId: tenantId(req), status: 'approved', completedAt: { gte: periodStart, lt: periodEnd }, stylist: { employeeId } },
-      select: { id: true, commissionAmount: true, serviceName: true, stylistName: true, completedAt: true },
+      select: { id: true, commissionAmount: true, serviceName: true, stylistName: true, workerRole: true, completedAt: true },
       orderBy: { completedAt: 'asc' },
     });
     res.json({ commissions, total: commissions.reduce((sum, item) => sum + Number(item.commissionAmount || 0), 0) });
@@ -266,7 +266,7 @@ router.post('/commissions/:id/pay', loadUserPermissions, requirePermission('canP
         tx,
         tenantId: tenantId(req),
         branchId: commission.appointment?.branchId || cashAccount.branchId || null,
-        description: `Stylist commission paid to ${commission.stylistName}`,
+        description: `Salon team commission paid to ${commission.stylistName}`,
         reference: paymentReference,
         sourceType: 'SALON_COMMISSION_DIRECT_PAYOUT',
         sourceId: commission.id,
@@ -287,7 +287,7 @@ router.post('/commissions/:id/pay', loadUserPermissions, requirePermission('canP
     }, { isolationLevel: 'Serializable', timeout: 30000 });
     res.json(result);
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message || 'Could not pay stylist commission.' });
+    res.status(error.statusCode || 500).json({ error: error.message || 'Could not pay salon team commission.' });
   }
 });
 

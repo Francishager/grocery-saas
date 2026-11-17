@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Camera, Check, CheckCheck, ChevronLeft, Clock3, Copy, Flag, Globe2, LoaderCircle, MessageCircle, MoreVertical, Paperclip, PhoneCall, Plus, Search, Send, Settings, Share2, ShieldBan, UserRoundPlus, Users, X } from 'lucide-react'
+import { Camera, Check, CheckCheck, ChevronLeft, Clock3, Copy, Flag, Globe2, LoaderCircle, MessageCircle, MoreVertical, Paperclip, PhoneCall, Plus, Reply, Search, Send, Settings, Share2, ShieldBan, Smile, UserRoundPlus, Users, X } from 'lucide-react'
 import { apiFetch, authApi } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
+import { CHAT_REACTION_EMOJIS, COMPOSER_EMOJIS } from '@/lib/chatEmojis'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -12,7 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 type Person = { id: string; name: string; avatar: string | null; jibuId: string }
 type Profile = Partial<Person> & { countryCode: string | null; enabled: boolean }
 type Chat = { id: string; status: 'pending' | 'accepted' | 'declined'; incoming: boolean; participant: Person; latestMessage: { id: string; senderId: string; body: string; imageUrl?: string | null; createdAt: string; deliveredAt: string | null; readAt: string | null } | null; updatedAt: string }
-type Message = { id: string; senderId: string; body: string; imageUrl?: string | null; createdAt: string; deliveredAt: string | null; readAt: string | null }
+type MessageReaction = { id: string; userId: string; emoji: string }
+type Message = { id: string; senderId: string; body: string; imageUrl?: string | null; createdAt: string; deliveredAt: string | null; readAt: string | null; replyToMessage?: { id: string; senderId: string; body: string } | null; reactions?: MessageReaction[] }
 type Update = { id: string; body: string; background: string; imageUrl?: string | null; createdAt: string; expiresAt: string; user: Person }
 type MainTab = 'chats' | 'updates' | 'communities' | 'calls'
 type CommunityTab = 'followers' | 'following'
@@ -40,8 +42,8 @@ const dateLabel = (value: string) => new Date(value).toLocaleString([], { dateSt
 function Avatar({ person, size = 'md' }: { person?: Person | null; size?: 'sm' | 'md' | 'lg' }) {
   const sizeClass = size === 'lg' ? 'h-14 w-14 text-lg' : size === 'sm' ? 'h-9 w-9 text-xs' : 'h-11 w-11 text-sm'
   return person?.avatar
-    ? <img src={person.avatar} alt="" className={`${sizeClass} rounded-full object-cover`} />
-    : <div className={`${sizeClass} grid shrink-0 place-items-center rounded-full bg-emerald-100 font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200`}>{person?.name?.slice(0, 1).toUpperCase() || '?'}</div>
+    ? <img src={person.avatar} alt={`${person.name}'s profile picture`} className={`${sizeClass} rounded-full object-cover`} />
+    : <div role="img" aria-label={`${person?.name || 'User'}'s profile picture`} className={`${sizeClass} grid shrink-0 place-items-center rounded-full bg-emerald-100 font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200`}>{person?.name?.slice(0, 1).toUpperCase() || '?'}</div>
 }
 
 function MessageTicks({ deliveredAt, readAt }: { deliveredAt?: string | null; readAt?: string | null }) {
@@ -56,6 +58,7 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   const canManageNetwork = user?.role === 'owner' || hasPermission('canSendTeamMessages')
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const messageImageInputRef = useRef<HTMLInputElement>(null)
+  const messageComposerRef = useRef<HTMLDivElement>(null)
   const sendingMessageRef = useRef(false)
   const pendingMessageRef = useRef<{ signature: string; id: string; file: File | null } | null>(null)
   const sendingRequestRef = useRef(false)
@@ -87,6 +90,9 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
   const [intro, setIntro] = useState('')
   const [messageDraft, setMessageDraft] = useState('')
   const [messageImage, setMessageImage] = useState<File | null>(null)
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false)
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
+  const [activeReactionMessageId, setActiveReactionMessageId] = useState<string | null>(null)
   const [statusDraft, setStatusDraft] = useState('')
   const [statusImage, setStatusImage] = useState<File | null>(null)
   const [statusImagePreview, setStatusImagePreview] = useState('')
@@ -167,6 +173,9 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
     if (!selectedChatId) { setMessages([]); setMessageImage(null); pendingMessageRef.current = null; return }
     setMessageImage(null)
     setMessageDraft('')
+    setEmojiPickerOpen(false)
+    setReplyToMessage(null)
+    setActiveReactionMessageId(null)
     pendingMessageRef.current = null
     let active = true
     const load = async () => {
@@ -315,23 +324,57 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
     sendingMessageRef.current = true
     setBusy(true); setError('')
     const body = messageDraft.trim()
-    const signature = JSON.stringify([selectedChat.id, body, messageImage?.name, messageImage?.size, messageImage?.lastModified])
+    const signature = JSON.stringify([selectedChat.id, body, replyToMessage?.id, messageImage?.name, messageImage?.size, messageImage?.lastModified])
     const clientMessageId = pendingMessageRef.current?.signature === signature && pendingMessageRef.current.file === messageImage ? pendingMessageRef.current.id : crypto.randomUUID()
     pendingMessageRef.current = { signature, id: clientMessageId, file: messageImage }
     try {
       const payload = new FormData()
       payload.set('body', body)
+      payload.set('replyToMessageId', replyToMessage?.id || '')
       payload.set('clientMessageId', clientMessageId)
       if (messageImage) payload.set('image', messageImage)
       const { message } = await request<{ message: Message }>(`/chats/${selectedChat.id}/messages`, { method: 'POST', body: payload })
       setMessageDraft('')
       setMessageImage(null)
+      setReplyToMessage(null)
+      setActiveReactionMessageId(null)
+      setEmojiPickerOpen(false)
       if (messageImageInputRef.current) messageImageInputRef.current.value = ''
       pendingMessageRef.current = null
       setMessages((current) => current.some((row) => row.id === message.id) ? current.map((row) => row.id === message.id ? message : row) : [...current, message])
       setChats((current) => current.map((chat) => chat.id === selectedChat.id ? { ...chat, latestMessage: message, updatedAt: message.createdAt } : chat))
     } catch (err) { setError(err instanceof Error ? err.message : 'Message could not be sent.') }
     finally { sendingMessageRef.current = false; setBusy(false) }
+  }
+  const prepareReply = (message: Message) => {
+    setReplyToMessage(message)
+    setActiveReactionMessageId(null)
+    window.setTimeout(() => messageComposerRef.current?.querySelector('textarea')?.focus(), 0)
+  }
+  const reactToMessage = async (message: Message, emoji: string) => {
+    if (!selectedChat || selectedChat.status !== 'accepted' || !canManageNetwork) return
+    try {
+      const { reactions } = await request<{ reactions: MessageReaction[] }>(
+        `/chats/${selectedChat.id}/messages/${message.id}/reactions`,
+        json({ emoji }),
+      )
+      setMessages((current) => current.map((row) => row.id === message.id ? { ...row, reactions } : row))
+      setActiveReactionMessageId(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reaction could not be saved.')
+    }
+  }
+  const insertMessageEmoji = (emoji: string) => {
+    const composer = messageComposerRef.current?.querySelector('textarea')
+    const start = composer?.selectionStart ?? messageDraft.length
+    const end = composer?.selectionEnd ?? messageDraft.length
+    const nextDraft = `${messageDraft.slice(0, start)}${emoji}${messageDraft.slice(end)}`
+    setMessageDraft(nextDraft)
+    setEmojiPickerOpen(false)
+    window.requestAnimationFrame(() => {
+      composer?.focus()
+      composer?.setSelectionRange(start + emoji.length, start + emoji.length)
+    })
   }
   const chooseMessageImage = (file?: File) => {
     if (!file) return
@@ -390,11 +433,39 @@ export default function JibuNetworkPage({ embedded = false, onClose }: { embedde
       {tab === 'chats' && <div className={`${embedded ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0'}`}>
         {selectedChat ? <Card className={`flex h-full flex-col overflow-hidden ${embedded ? 'min-h-0 flex-1' : 'min-h-[360px]'}`}>
           <CardHeader className="flex-row items-center gap-3 border-b px-4 py-3"><Button variant="ghost" size="icon-sm" aria-label="Back to chats" onClick={() => { setSelectedChat(null); setMessageImage(null) }}><ChevronLeft /></Button><Avatar person={selectedChat.participant} size="sm" /><div className="min-w-0 flex-1"><CardTitle className="text-base">{selectedChat.participant.name}</CardTitle><p className="text-xs text-muted-foreground">{selectedChat.status === 'pending' ? selectedChat.incoming ? 'Message request' : 'Request sent · waiting for acceptance' : 'JibuSales Network'}</p></div><Button variant="outline" size="icon-sm" title="Report member" disabled={!canManageNetwork} onClick={() => setReportingPerson(selectedChat.participant)}><Flag /></Button><Button variant="outline" size="icon-sm" title="Block member" disabled={!canManageNetwork} onClick={() => void lookupBlock(selectedChat.participant)}><ShieldBan /></Button></CardHeader>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/20 p-4">{messages.map((message) => { const own = message.senderId === profile.id; return <div key={message.id} className={`flex ${own ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${own ? 'bg-emerald-700 text-white' : 'border bg-card'}`}>{message.imageUrl && <img src={message.imageUrl} alt="Shared image" className="mb-2 max-h-64 max-w-full rounded-lg object-contain" />}{message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}<div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${own ? 'text-emerald-100' : 'text-muted-foreground'}`}><time>{dateLabel(message.createdAt)}</time>{own && <MessageTicks deliveredAt={message.deliveredAt} readAt={message.readAt} />}</div></div></div> })}</div>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/20 p-4">{messages.map((message) => {
+            const own = message.senderId === profile.id
+            const sender = own
+              ? { id: profile.id || user?.id || '', name: profile.name || user?.name || 'You', avatar: profile.avatar || user?.avatar || null, jibuId: profile.jibuId || '' }
+              : selectedChat.participant
+            const reactions = new Map<string, { count: number; mine: boolean }>()
+            for (const reaction of message.reactions || []) {
+              const current = reactions.get(reaction.emoji) || { count: 0, mine: false }
+              reactions.set(reaction.emoji, { count: current.count + 1, mine: current.mine || reaction.userId === profile.id })
+            }
+            return <div key={message.id} className={`flex items-end gap-2 ${own ? 'justify-end flex-row-reverse' : 'justify-start'}`}>
+              <Avatar person={sender} size="sm" />
+              <div className="relative min-w-0 max-w-[calc(100%_-_2.75rem)]">
+                {activeReactionMessageId === message.id && canManageNetwork && selectedChat.status === 'accepted' && <div role="group" aria-label="Choose a reaction" className={`absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg ${own ? 'right-0' : 'left-0'}`}>{CHAT_REACTION_EMOJIS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => void reactToMessage(message, emoji)} className="grid size-8 place-items-center rounded-full text-lg hover:bg-muted">{emoji}</button>)}</div>}
+                <div className={`rounded-xl px-3 py-2 text-sm ${own ? 'bg-emerald-700 text-white' : 'border bg-card'}`}>
+                  {message.replyToMessage && <div className="mb-2 rounded-r-md border-l-[3px] border-emerald-700/60 bg-black/5 px-2 py-1 dark:border-emerald-400/70 dark:bg-white/5"><p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">{message.replyToMessage.senderId === profile.id ? 'You' : selectedChat.participant.name}</p><p className="line-clamp-2 whitespace-pre-wrap break-words text-xs text-muted-foreground">{message.replyToMessage.body}</p></div>}
+                  {message.imageUrl && <img src={message.imageUrl} alt="Shared image" className="mb-2 max-h-64 max-w-full rounded-lg object-contain" />}
+                  {message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}
+                  <div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${own ? 'text-emerald-100' : 'text-muted-foreground'}`}><time>{dateLabel(message.createdAt)}</time>{own && <MessageTicks deliveredAt={message.deliveredAt} readAt={message.readAt} />}</div>
+                </div>
+                <div className={`mt-1 flex flex-wrap items-center gap-1 ${own ? 'justify-end' : 'justify-start'}`}>
+                  {[...reactions].map(([emoji, value]) => <button key={emoji} type="button" disabled={!canManageNetwork || selectedChat.status !== 'accepted'} onClick={() => void reactToMessage(message, emoji)} aria-label={`${emoji}, ${value.count} reactions`} className={`inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-60 ${value.mine ? 'border-emerald-500 bg-emerald-50' : ''}`}>{emoji}<span className="text-[11px] text-muted-foreground">{value.count}</span></button>)}
+                  <button type="button" disabled={!canManageNetwork || selectedChat.status !== 'accepted'} aria-label="Reply to message" title="Reply to message" onClick={() => prepareReply(message)} className="grid size-8 place-items-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-emerald-950 dark:hover:text-emerald-200"><Reply className="h-4 w-4" /></button>
+                  <button type="button" disabled={!canManageNetwork || selectedChat.status !== 'accepted'} aria-label="React to message" title="React to message" aria-expanded={activeReactionMessageId === message.id} onClick={() => setActiveReactionMessageId((current) => current === message.id ? null : message.id)} className="grid size-8 place-items-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-emerald-950 dark:hover:text-emerald-200"><Smile className="h-4 w-4" /></button>
+                </div>
+              </div>
+            </div>
+          })}</div>
           {selectedChat.status === 'pending' && selectedChat.incoming ? <div className="shrink-0 border-t bg-muted/30 p-3"><p className="mb-2 text-center text-xs text-muted-foreground">Accept this request to continue the conversation.</p><div className="flex gap-2"><Button className="flex-1" disabled={busy || !canManageNetwork} onClick={() => void run(async () => { await request(`/chats/${selectedChat.id}/accept`, json({})); setSelectedChat((current) => current ? { ...current, status: 'accepted' } : current) }, 'Message request accepted.') }><Check className="mr-1.5 h-4 w-4" />Accept</Button><Button className="flex-1" variant="outline" disabled={busy || !canManageNetwork} onClick={() => void run(async () => { await request(`/chats/${selectedChat.id}/decline`, json({})); setSelectedChat(null) }, 'Message request declined.')}><X className="mr-1.5 h-4 w-4" />Decline</Button></div></div> : selectedChat.status === 'pending' ? <div className="shrink-0 border-t px-4 py-3 text-center text-xs text-muted-foreground">Your first message was sent. You can reply here after they accept.</div> : <form onSubmit={sendMessage} className="shrink-0 border-t p-3">
+            {replyToMessage && <div className="mb-2 flex items-center gap-2 border-l-2 border-emerald-700 bg-muted/60 px-2 py-1.5"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-emerald-800">Replying to {replyToMessage.senderId === profile.id ? 'yourself' : selectedChat.participant.name}</p><p className="truncate text-xs text-muted-foreground">{replyToMessage.body}</p></div><button type="button" aria-label="Cancel reply" onClick={() => setReplyToMessage(null)} className="grid size-7 place-items-center rounded-full hover:bg-muted"><X className="h-4 w-4" /></button></div>}
             {messageImage && <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs"><Paperclip className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">{messageImage.name}</span><button type="button" aria-label="Remove attached image" onClick={() => setMessageImage(null)}><X className="h-4 w-4" /></button></div>}
             <input ref={messageImageInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseMessageImage(event.target.files?.[0])} />
-            <div className="flex items-end gap-2"><Button type="button" variant="ghost" size="icon" aria-label="Attach image" onClick={() => messageImageInputRef.current?.click()}><Paperclip /></Button><Textarea aria-label="Message" placeholder="Write a message" rows={2} maxLength={4000} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} /><Button type="submit" size="icon" disabled={busy || !canManageNetwork || (!messageDraft.trim() && !messageImage)} aria-label="Send message"><Send /></Button></div>
+            <div ref={messageComposerRef} className="relative flex items-end gap-2"><Button type="button" variant="ghost" size="icon" aria-label="Attach image" onClick={() => messageImageInputRef.current?.click()}><Paperclip /></Button><Button type="button" variant="ghost" size="icon" aria-label="Choose an emoji" aria-expanded={emojiPickerOpen} onClick={() => setEmojiPickerOpen((open) => !open)}><Smile /></Button>{emojiPickerOpen && <div role="group" aria-label="Choose an emoji" className="absolute bottom-12 left-10 z-30 grid w-64 grid-cols-8 gap-1 rounded-2xl border bg-card p-2 shadow-xl">{COMPOSER_EMOJIS.map((emoji) => <button key={emoji} type="button" aria-label={`Insert ${emoji} emoji`} onClick={() => insertMessageEmoji(emoji)} className="grid size-7 place-items-center rounded-lg text-lg transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700">{emoji}</button>)}</div>}<Textarea aria-label="Message" placeholder="Write a message" rows={2} maxLength={4000} value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} /><Button type="submit" size="icon" disabled={busy || !canManageNetwork || (!messageDraft.trim() && !messageImage)} aria-label="Send message"><Send /></Button></div>
           </form>}
         </Card> : <div className={`${embedded ? 'h-full min-h-0 flex-1' : 'h-full'} overflow-y-auto rounded-lg border bg-card`}><div className="border-b px-4 py-3"><h2 className="font-semibold">Chats</h2><p className="text-xs text-muted-foreground">Private conversations and new message requests.</p></div>{visibleChats.length === 0 ? <div className="grid min-h-56 place-items-center px-6 text-center"><div><MessageCircle className="mx-auto mb-3 h-9 w-9 text-muted-foreground/50" /><p className="font-medium">No conversations yet</p><p className="mt-1 text-sm text-muted-foreground">Start a chat with a JibuSales ID using the new chat button.</p></div></div> : <div className="divide-y">{visibleChats.map((chat) => <button key={chat.id} type="button" onClick={() => setSelectedChat(chat)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/60"><Avatar person={chat.participant} size="sm" /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-medium">{chat.participant.name}</span>{chat.status === 'pending' && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">{chat.incoming ? 'New message' : 'Request sent'}</span>}</span><span className="mt-0.5 flex items-center gap-1.5"><span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{chat.latestMessage?.body || (chat.latestMessage?.imageUrl ? '📷 Photo' : 'Start the conversation')}</span>{chat.latestMessage?.senderId === profile.id && <MessageTicks deliveredAt={chat.latestMessage.deliveredAt} readAt={chat.latestMessage.readAt} />}</span></span><time className="shrink-0 text-[10px] text-muted-foreground">{dateLabel(chat.latestMessage?.createdAt || chat.updatedAt)}</time></button>)}</div>}</div>}
       </div>}

@@ -34,6 +34,23 @@ try {
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_messages_sender_created_idx ON jibu_network_messages ("senderId", "createdAt")');
   await prisma.$executeRawUnsafe('ALTER TABLE jibu_network_messages ADD COLUMN IF NOT EXISTS "imageUrl" TEXT');
   await prisma.$executeRawUnsafe('ALTER TABLE jibu_network_messages ADD COLUMN IF NOT EXISTS "imagePublicId" TEXT');
+  await prisma.$executeRawUnsafe('ALTER TABLE jibu_network_messages ADD COLUMN IF NOT EXISTS "replyToMessageId" TEXT');
+  await prisma.$executeRawUnsafe(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'jibu_network_messages_replyToMessageId_fkey') THEN
+      ALTER TABLE jibu_network_messages ADD CONSTRAINT jibu_network_messages_replyToMessageId_fkey
+      FOREIGN KEY ("replyToMessageId") REFERENCES jibu_network_messages(id) ON DELETE SET NULL ON UPDATE CASCADE;
+    END IF;
+  END $$`);
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_messages_replyToMessageId_idx ON jibu_network_messages ("replyToMessageId")');
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS jibu_network_message_reactions (
+    id TEXT PRIMARY KEY,
+    "messageId" TEXT NOT NULL REFERENCES jibu_network_messages(id) ON DELETE CASCADE,
+    "userId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS jibu_network_message_reactions_messageId_userId_key ON jibu_network_message_reactions ("messageId", "userId")');
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS jibu_network_message_reactions_messageId_idx ON jibu_network_message_reactions ("messageId")');
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS jibu_network_contacts (
     id TEXT PRIMARY KEY,

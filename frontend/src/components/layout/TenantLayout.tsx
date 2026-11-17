@@ -74,7 +74,7 @@ const serviceSubItems = [
 
 const salonSubItems = [
   { to: '/tenant/salon/appointments', label: 'Appointments', icon: CalendarClock, permission: servicePagePermissions('appointments'), feature: 'salon_spa' },
-  { to: '/tenant/salon/stylists', label: 'Stylists', icon: UserCog, permission: 'canViewSalonStylist', feature: 'salon_spa' },
+  { to: '/tenant/salon/stylists', label: 'Salon Team', icon: UserCog, permission: 'canViewSalonStylist', feature: 'salon_spa' },
   { to: '/tenant/salon/chairs', label: 'Chair Schedule', icon: CalendarClock, permission: 'canViewSalonChair', feature: 'salon.chair_scheduling' },
   { to: '/tenant/salon/commissions', label: 'Stylist Commissions', icon: Award, permission: 'canViewSalonCommission', feature: 'salon.stylist_commissions' },
 ]

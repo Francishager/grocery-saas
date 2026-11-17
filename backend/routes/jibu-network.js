@@ -32,8 +32,14 @@ const statusRateLimit = async (req, res, next) => {
 const dialCodes = new Set(JIBU_NETWORK_DIAL_CODES);
 const updateBackgrounds = new Set(['emerald', 'blue', 'rose', 'amber', 'violet', 'slate']);
 const reportReasons = new Set(['spam', 'harassment', 'impersonation', 'inappropriate', 'other']);
+const messageReactionEmojis = new Set(['👍', '❤️', '😂', '😮', '😢', '🙏']);
 const publicUserSelect = { id: true, fname: true, lname: true, avatar: true, jibuId: true };
-const networkMessageSelect = { id: true, conversationId: true, senderId: true, body: true, imageUrl: true, deliveredAt: true, readAt: true, createdAt: true };
+const networkMessageSelect = {
+  id: true, conversationId: true, senderId: true, body: true, imageUrl: true,
+  replyToMessage: { select: { id: true, senderId: true, body: true } },
+  reactions: { select: { id: true, userId: true, emoji: true } },
+  deliveredAt: true, readAt: true, createdAt: true,
+};
 let lastExpiredUpdateCleanupAt = 0;
 let lastExpiredRateCleanupAt = 0;
 
@@ -343,6 +349,7 @@ router.get('/chats/:id/messages', async (req, res) => {
 
 router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), parseChatImage, async (req, res) => {
   const body = String(req.body?.body || '').trim();
+  const replyToMessageId = String(req.body?.replyToMessageId || '').trim() || null;
   const clientMessageId = String(req.body?.clientMessageId || '').trim();
   if ((!body && !req.file) || body.length > 4000) return fail(res, 400, 'Write a message of up to 4,000 characters or choose an image.');
   if (clientMessageId && !validClientMessageId(clientMessageId)) return fail(res, 400, 'Invalid message request ID.');
@@ -352,6 +359,13 @@ router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), par
   const peerId = chat.participantOneId === req.user.id ? chat.participantTwoId : chat.participantOneId;
   const peer = await prisma.user.findFirst({ where: { id: peerId, jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
   if (!peer || await blockedEitherWay(req.user.id, peerId)) return fail(res, 404, 'Chat not found.');
+  if (replyToMessageId) {
+    const original = await prisma.jibuNetworkMessage.findFirst({
+      where: { id: replyToMessageId, conversationId: chat.id },
+      select: { id: true },
+    });
+    if (!original) return fail(res, 400, 'You can only reply to a message in this chat.');
+  }
   if (clientMessageId) {
     const existing = await prisma.jibuNetworkMessage.findUnique({ where: { id: clientMessageId }, select: networkMessageSelect });
     if (existing) {
@@ -371,7 +385,7 @@ router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), par
       const row = await tx.jibuNetworkMessage.create({
         data: {
           ...(clientMessageId ? { id: clientMessageId } : {}),
-          conversationId: chat.id, senderId: req.user.id, body,
+          conversationId: chat.id, senderId: req.user.id, body, replyToMessageId,
           imageUrl: uploaded?.secure_url || null, imagePublicId: uploaded?.public_id || null,
         },
         select: networkMessageSelect,
@@ -389,6 +403,40 @@ router.post('/chats/:id/messages', requirePermission('canSendTeamMessages'), par
   }
   notifyNetworkRecipient(peerId);
   res.status(201).json({ message });
+});
+
+router.post('/chats/:id/messages/:messageId/reactions', requirePermission('canSendTeamMessages'), async (req, res) => {
+  const emoji = String(req.body?.emoji || '');
+  if (!messageReactionEmojis.has(emoji)) return fail(res, 400, 'Choose a supported reaction.');
+  const chat = await chatForParticipant(req.params.id, req.user.id);
+  if (!chat || chat.status !== 'accepted') return fail(res, 404, 'Chat not found.');
+  const peerId = chat.participantOneId === req.user.id ? chat.participantTwoId : chat.participantOneId;
+  const peer = await prisma.user.findFirst({ where: { id: peerId, jibuNetworkEnabled: true, isActive: true }, select: { id: true } });
+  if (!peer || await blockedEitherWay(req.user.id, peerId)) return fail(res, 404, 'Chat not found.');
+  const message = await prisma.jibuNetworkMessage.findFirst({
+    where: { id: req.params.messageId, conversationId: chat.id },
+    select: { id: true },
+  });
+  if (!message) return fail(res, 404, 'Message not found.');
+  const existing = await prisma.jibuNetworkMessageReaction.findUnique({
+    where: { messageId_userId: { messageId: message.id, userId: req.user.id } },
+    select: { id: true, emoji: true },
+  });
+  if (existing?.emoji === emoji) {
+    await prisma.jibuNetworkMessageReaction.delete({ where: { id: existing.id } });
+  } else {
+    await prisma.jibuNetworkMessageReaction.upsert({
+      where: { messageId_userId: { messageId: message.id, userId: req.user.id } },
+      create: { messageId: message.id, userId: req.user.id, emoji },
+      update: { emoji, createdAt: new Date() },
+    });
+  }
+  const reactions = await prisma.jibuNetworkMessageReaction.findMany({
+    where: { messageId: message.id },
+    select: { id: true, userId: true, emoji: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  res.json({ reactions });
 });
 
 router.get('/community/:list', async (req, res) => {

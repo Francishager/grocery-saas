@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, Check, CheckCheck, MessageCircle, MoreHorizontal, Paperclip, Plus, Reply, Search, Send, Smile, UsersRound, X } from 'lucide-react'
+import { ArrowLeft, Check, CheckCheck, MessageCircle, Paperclip, Plus, Reply, Search, Send, Smile, UsersRound, X } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 import { cn } from '@/lib/utils'
+import { CHAT_REACTION_EMOJIS, COMPOSER_EMOJIS } from '@/lib/chatEmojis'
 import { lazy, Suspense } from 'react'
 import { Globe2 } from 'lucide-react'
 
@@ -24,8 +25,6 @@ type LauncherPosition = { x: number; y: number }
 const LAUNCHER_SIZE = 48
 const LAUNCHER_MARGIN = 12
 const LAUNCHER_POSITION_KEY = 'business-chat-launcher-position'
-const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
-const COMPOSER_EMOJIS = ['😀', '😃', '😄', '😁', '😆', '🥰', '😍', '😘', '😊', '😉', '🤔', '😎', '🥳', '😭', '😅', '🙏', '👏', '🙌', '👍', '👎', '❤️', '🔥', '🎉', '💯']
 
 function clampLauncherPosition(position: LauncherPosition): LauncherPosition {
   return {
@@ -101,7 +100,7 @@ export function BusinessChatWidget() {
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkChat | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [networkMessages, setNetworkMessages] = useState<NetworkMessage[]>([])
-  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
+  const [replyToMessage, setReplyToMessage] = useState<Message | NetworkMessage | null>(null)
   const [activeMessageMenuId, setActiveMessageMenuId] = useState<string | null>(null)
   const [peerTyping, setPeerTyping] = useState(false)
   const [draft, setDraft] = useState('')
@@ -375,12 +374,13 @@ export function BusinessChatWidget() {
     setSending(true)
     setError('')
     const body = draft.trim()
-    const signature = JSON.stringify([selectedNetwork.id, body, imageFile?.name, imageFile?.size, imageFile?.lastModified])
+    const signature = JSON.stringify([selectedNetwork.id, body, replyToMessage?.id, imageFile?.name, imageFile?.size, imageFile?.lastModified])
     const requestId = pendingMessageRef.current?.signature === signature && pendingMessageRef.current.file === imageFile ? pendingMessageRef.current.id : crypto.randomUUID()
     pendingMessageRef.current = { signature, id: requestId, file: imageFile }
     try {
       const payload = new FormData()
       payload.set('body', body)
+      payload.set('replyToMessageId', replyToMessage?.id || '')
       payload.set('clientMessageId', requestId)
       if (imageFile) payload.set('image', imageFile)
       const { message } = await networkApi<{ message: NetworkMessage }>(`/chats/${selectedNetwork.id}/messages`, {
@@ -391,6 +391,7 @@ export function BusinessChatWidget() {
       setImageFile(null)
       if (imageInputRef.current) imageInputRef.current.value = ''
       pendingMessageRef.current = null
+      setReplyToMessage(null)
       setEmojiPickerOpen(false)
       setNetworkMessages((current) => current.some((row) => row.id === message.id) ? current.map((row) => row.id === message.id ? message : row) : [...current, message])
       await refreshConversations()
@@ -449,7 +450,7 @@ export function BusinessChatWidget() {
     longPressTimer.current = null
   }
 
-  function prepareReply(message: Message) {
+  function prepareReply(message: Message | NetworkMessage) {
     setReplyToMessage(message)
     setActiveMessageMenuId(null)
     window.setTimeout(() => composerRef.current?.focus(), 0)
@@ -468,13 +469,18 @@ export function BusinessChatWidget() {
     })
   }
 
-  async function reactToMessage(message: Message, emoji: string) {
-    if (!selected || !canSend) return
+  async function reactToMessage(message: Message | NetworkMessage, emoji: string) {
+    if ((!selected && !selectedNetwork) || !canSend || (selectedNetwork && selectedNetwork.status !== 'accepted')) return
     try {
-      const { reactions } = await api<{ reactions: MessageReaction[] }>(`/conversations/${selected.id}/messages/${message.id}/reactions`, {
-        method: 'POST', body: JSON.stringify({ emoji }),
-      })
-      setMessages((current) => current.map((row) => row.id === message.id ? { ...row, reactions } : row))
+      const { reactions } = selectedNetwork
+        ? await networkApi<{ reactions: MessageReaction[] }>(`/chats/${selectedNetwork.id}/messages/${message.id}/reactions`, {
+          method: 'POST', body: JSON.stringify({ emoji }),
+        })
+        : await api<{ reactions: MessageReaction[] }>(`/conversations/${selected?.id}/messages/${message.id}/reactions`, {
+          method: 'POST', body: JSON.stringify({ emoji }),
+        })
+      if (selectedNetwork) setNetworkMessages((current) => current.map((row) => row.id === message.id ? { ...row, reactions } : row))
+      else setMessages((current) => current.map((row) => row.id === message.id ? { ...row, reactions } : row))
       setActiveMessageMenuId(null)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Reaction could not be saved.')
@@ -579,14 +585,12 @@ export function BusinessChatWidget() {
             return <div key={message.id} className={cn('flex max-w-[94%] items-end gap-2 sm:max-w-[88%]', own ? 'ml-auto flex-row-reverse' : 'mr-auto')}>
               <ChatAvatar name={senderName} avatar={senderAvatar} size="sm" />
               <div className="relative min-w-0 max-w-[calc(100%_-_2.25rem)]">
-              {activeMessageMenuId === message.id && canSend && selected && <div className={cn('absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg', own ? 'right-0' : 'left-0')}>
-                {QUICK_REACTIONS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => void reactToMessage(message as Message, emoji)} className="grid size-8 place-items-center rounded-full text-lg hover:bg-muted">{emoji}</button>)}
-                <span className="mx-0.5 h-5 w-px bg-border" />
-                <button type="button" aria-label="Reply to message" onClick={() => prepareReply(message as Message)} className="grid size-8 place-items-center rounded-full hover:bg-muted"><Reply className="size-4" /></button>
+              {activeMessageMenuId === message.id && canSend && <div role="group" aria-label="Choose a reaction" className={cn('absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg', own ? 'right-0' : 'left-0')}>
+                {CHAT_REACTION_EMOJIS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => void reactToMessage(message, emoji)} className="grid size-8 place-items-center rounded-full text-lg hover:bg-muted">{emoji}</button>)}
               </div>}
               <div
-                onContextMenu={(event) => { if (!selected) return; event.preventDefault(); setActiveMessageMenuId(message.id) }}
-                onPointerDown={(event) => { if (selected && event.button === 0) beginMessagePress(message.id) }}
+                onContextMenu={(event) => { if (!selected && !selectedNetwork) return; event.preventDefault(); setActiveMessageMenuId(message.id) }}
+                onPointerDown={(event) => { if ((selected || selectedNetwork) && event.button === 0) beginMessagePress(message.id) }}
                 onPointerUp={endMessagePress}
                 onPointerCancel={endMessagePress}
                 onPointerLeave={endMessagePress}
@@ -595,15 +599,20 @@ export function BusinessChatWidget() {
                 {message.replyToMessage && <div className="mb-2 rounded-r-md border-l-[3px] border-emerald-700/60 bg-black/5 px-2 py-1 dark:border-emerald-400/70 dark:bg-white/5"><p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300">{message.replyToMessage.senderId === user?.id ? 'You' : activePeer?.name}</p><p className="line-clamp-2 whitespace-pre-wrap break-words text-xs text-[#53615a] dark:text-muted-foreground">{message.replyToMessage.body}</p></div>}
                 {message.imageUrl && <img src={message.imageUrl} alt="Shared image" className="mb-2 max-h-64 max-w-full rounded-lg object-contain" />}
                 {message.body && <p className="whitespace-pre-wrap break-words text-sm leading-5 text-[#17211b] dark:text-foreground">{message.body}</p>}
-                <div className="mt-1 flex items-center justify-end gap-1"><time className="text-[10px] tabular-nums text-[#667781] dark:text-muted-foreground">{conversationTime(message.createdAt)}</time>{own && <span className={cn('inline-flex items-center', message.readAt ? 'text-sky-600' : 'text-slate-500')} title={status} aria-label={status}><StatusIcon className="size-3.5" aria-hidden="true" /></span>}{!selectedNetwork && canSend && <button type="button" aria-label={`Message actions for ${message.body.slice(0, 40)}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => setActiveMessageMenuId((current) => current === message.id ? null : message.id)} className="ml-1 grid size-6 place-items-center rounded-full text-muted-foreground/70 transition-colors hover:bg-black/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 dark:hover:bg-white/10"><MoreHorizontal className="size-4" /></button>}</div>
+                <div className="mt-1 flex items-center justify-end gap-1"><time className="text-[10px] tabular-nums text-[#667781] dark:text-muted-foreground">{conversationTime(message.createdAt)}</time>{own && <span className={cn('inline-flex items-center', message.readAt ? 'text-sky-600' : 'text-slate-500')} title={status} aria-label={status}><StatusIcon className="size-3.5" aria-hidden="true" /></span>}</div>
               </div>
-              {!selectedNetwork && reactionCounts.size > 0 && <div className={cn('mt-1 flex flex-wrap gap-1', own ? 'justify-end' : 'justify-start')}>{[...reactionCounts].map(([emoji, value]) => <button key={emoji} type="button" onClick={() => void reactToMessage(message as Message, emoji)} aria-label={`${emoji}, ${value.count} reactions`} className={cn('inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-sm shadow-sm', value.mine && 'border-emerald-500 bg-emerald-50')}>{emoji}<span className="text-[11px] text-muted-foreground">{value.count}</span></button>)}</div>}
+              <div className={cn('mt-1 flex flex-wrap items-center gap-1', own ? 'justify-end' : 'justify-start')}>
+                {reactionCounts.size > 0 && [...reactionCounts].map(([emoji, value]) => <button key={emoji} type="button" disabled={!canSend || (selectedNetwork !== null && selectedNetwork.status !== 'accepted')} onClick={() => void reactToMessage(message, emoji)} aria-label={`${emoji}, ${value.count} reactions`} className={cn('inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-sm shadow-sm disabled:cursor-not-allowed disabled:opacity-60', value.mine && 'border-emerald-500 bg-emerald-50')}>{emoji}<span className="text-[11px] text-muted-foreground">{value.count}</span></button>)}
+                <button type="button" disabled={!canSend || (selectedNetwork !== null && selectedNetwork.status !== 'accepted')} aria-label="Reply to message" title="Reply to message" onClick={() => prepareReply(message)} className="grid size-8 place-items-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-emerald-950 dark:hover:text-emerald-200"><Reply className="size-4" /></button>
+                <button type="button" disabled={!canSend || (selectedNetwork !== null && selectedNetwork.status !== 'accepted')} aria-label="React to message" title="React to message" aria-expanded={activeMessageMenuId === message.id} onClick={() => setActiveMessageMenuId((current) => current === message.id ? null : message.id)} className="grid size-8 place-items-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-emerald-950 dark:hover:text-emerald-200"><Smile className="size-4" /></button>
+              </div>
             </div>
             </div>
           })}
         </div>
         {selectedNetwork?.status === 'pending' ? selectedNetwork.incoming ? <div className="flex shrink-0 gap-2 border-t bg-card p-3"><button type="button" disabled={!canSend || sending} onClick={() => void respondToNetworkRequest(false)} className="h-10 flex-1 rounded-lg border text-sm font-medium disabled:opacity-50">Decline request</button><button type="button" disabled={!canSend || sending} onClick={() => void respondToNetworkRequest(true)} className="h-10 flex-1 rounded-lg bg-emerald-800 text-sm font-medium text-white disabled:opacity-50">Accept and reply</button></div> : <p className="border-t bg-card px-4 py-3 text-center text-xs text-muted-foreground">Your message request was sent. You can chat after they accept it.</p>
         : selectedNetwork && canSend ? <form onSubmit={sendNetworkMessage} className="shrink-0 border-t bg-card p-3">
+          {replyToMessage && <div className="mb-2 flex items-center gap-2 border-l-2 border-emerald-700 bg-muted/60 px-2 py-1.5"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold text-emerald-800">Replying to {replyToMessage.senderId === user?.id ? 'yourself' : selectedNetwork.participant.name}</p><p className="truncate text-xs text-muted-foreground">{replyToMessage.body}</p></div><button type="button" aria-label="Cancel reply" onClick={() => setReplyToMessage(null)} className="grid size-7 place-items-center rounded-full hover:bg-muted"><X className="size-4" /></button></div>}
           {imageFile && <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-xs"><Paperclip className="size-4" /><span className="min-w-0 flex-1 truncate">{imageFile.name}</span><button type="button" aria-label="Remove attached image" onClick={() => setImageFile(null)}><X className="size-4" /></button></div>}
           <input ref={imageInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => chooseChatImage(event.target.files?.[0])} />
           <div className="relative flex items-end gap-2"><button type="button" aria-label="Attach image" onClick={() => imageInputRef.current?.click()} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 hover:bg-emerald-50"><Paperclip className="size-5" /></button><button type="button" aria-label="Choose an emoji" aria-expanded={emojiPickerOpen} onClick={() => setEmojiPickerOpen((open) => !open)} className="grid size-10 shrink-0 place-items-center rounded-full text-emerald-800 transition-colors hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950"><Smile className="size-5" /></button>{emojiPickerOpen && <div role="group" aria-label="Choose an emoji" className="absolute bottom-12 left-0 z-30 grid w-64 grid-cols-8 gap-1 rounded-2xl border bg-card p-2 shadow-xl">{COMPOSER_EMOJIS.map((emoji) => <button key={emoji} type="button" aria-label={`Insert ${emoji} emoji`} onClick={() => insertEmoji(emoji)} className="grid size-7 place-items-center rounded-lg text-lg transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700">{emoji}</button>)}</div>}<textarea ref={composerRef} aria-label="Message" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} maxLength={4000} rows={1} placeholder="Message" className="max-h-28 min-h-10 min-w-0 flex-1 resize-y rounded-2xl border bg-background px-4 py-2.5 text-sm shadow-inner shadow-black/[0.02]" /><button type="submit" aria-label="Send message" disabled={(!draft.trim() && !imageFile) || sending} className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-emerald-700 to-teal-800 text-white shadow-md transition-transform hover:scale-105 disabled:opacity-50"><Send className="size-4" /></button></div></form>

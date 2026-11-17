@@ -31,8 +31,18 @@ test('chat messages show sender profile photos and expose reply and emoji contro
   assert.match(chat, /function ChatAvatar/);
   assert.match(chat, /senderAvatar = own \? user\?\.avatar : activePeer\?\.avatar/);
   assert.match(chat, /aria-label="Reply to message"/);
-  assert.match(chat, /aria-label="Choose an emoji"/);
+  assert.match(chat, /aria-label="React to message"/);
   assert.match(chat, /function insertEmoji\(emoji: string\)/);
+});
+
+test('JibuSales Network chats use the shared emoji picker and show each message sender avatar', () => {
+  assert.match(networkChat, /import \{[^}]*COMPOSER_EMOJIS[^}]*\} from '@\/lib\/chatEmojis'/);
+  assert.match(networkChat, /aria-label="Choose an emoji"/);
+  assert.match(networkChat, /function insertMessageEmoji|const insertMessageEmoji/);
+  assert.match(networkChat, /<Avatar person=\{sender\} size="sm" \/>/);
+  assert.match(networkChat, /aria-label="Reply to message"/);
+  assert.match(networkChat, /aria-label="React to message"/);
+  assert.match(networkChat, /\/messages\/\$\{message\.id\}\/reactions/);
 });
 
 test('business chats support image captions and deduplicate sends by message ID without inbox tabs', () => {

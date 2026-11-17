@@ -60,7 +60,7 @@ test('completed appointments snapshot commissions and approved commissions can o
   const serviceRoutes = await read('../routes/service.js');
   const payroll = await read('../src/services/payrollService.js');
   assert.match(serviceRoutes, /saveSalonCommission\(appt\)/);
-  assert.match(serviceRoutes, /serviceRevenue, commissionType: stylist\.commissionType/);
+  assert.match(serviceRoutes, /serviceRevenue, commissionType: worker\.commissionType/);
   assert.match(payroll, /status: 'approved'/);
   assert.match(payroll, /status: 'included_in_payroll'/);
   assert.match(payroll, /claimed\.count !== ids\.length/);
@@ -74,12 +74,31 @@ test('Salon walk-ins use Salon stylist profiles and do not require an HR employe
   const migration = await read('../src/scripts/ensure-salon-spa-schema.js');
   assert.match(serviceRoutes, /bookingType === 'walk_in' \? 'Walk-in customer'/);
   assert.match(serviceRoutes, /status: bookingType === 'walk_in' \? 'in_progress' : 'scheduled'/);
-  assert.match(serviceRoutes, /salonStylistId \? \{ id: appointment\.salonStylistId \}/);
+  assert.match(serviceRoutes, /appointment\.salonStylistId\s*\?/);
   assert.match(schema, /salonStylistId\s+String\?/);
   assert.match(schema, /bookingType\s+String\s+@default\("appointment"\)/);
   assert.match(migration, /ADD COLUMN IF NOT EXISTS "salonStylistId" TEXT/);
+  assert.match(schema, /salonAssistantId\s+String\?/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "salonAssistantId" TEXT/);
   assert.match(salonRoutes, /const employeeId = String\(req\.body\.employeeId \|\| ''\)\.trim\(\) \|\| null/);
   assert.match(salonRoutes, /canPaySalonCommission/);
+});
+
+test('Salon appointments can credit a shampoo assistant independently of the stylist', async () => {
+  const serviceRoutes = await read('../routes/service.js');
+  const salonRoutes = await read('../routes/salon.js');
+  const schema = await read('../prisma/schema.prisma');
+  const migration = await read('../src/scripts/ensure-salon-spa-schema.js');
+  const salonPage = await read('../../frontend/src/pages/SalonPage.tsx');
+  assert.match(serviceRoutes, /salonAssistantId/);
+  assert.match(serviceRoutes, /salon_assistant/);
+  assert.match(serviceRoutes, /isSalonAssistantRole/);
+  assert.match(serviceRoutes, /appointmentId_stylistId/);
+  assert.match(schema, /commissions\s+SalonCommission\[\]/);
+  assert.match(schema, /@@unique\(\[appointmentId, stylistId\]\)/);
+  assert.match(migration, /DROP CONSTRAINT "salon_commissions_appointmentId_key"/);
+  assert.match(salonPage, /workerRole/);
+  assert.match(salonPage, /Salon assistant/);
 });
 
 test('direct stylist commission payouts are permission checked, idempotent GL postings and excluded from payroll', async () => {
