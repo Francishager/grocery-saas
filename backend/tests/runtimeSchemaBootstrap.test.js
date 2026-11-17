@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { runSchemaGroup } from '../src/utils/runtimeSchemaBootstrap.js';
 
 function fakeClient(initial = {}) {
@@ -84,4 +85,11 @@ test('failed optional schema step is skipped across replicas but retried on a ne
 
   assert.equal(attempts, 2);
   assert.equal(client.checksums.get('optional.js').status, 'succeeded');
+});
+
+test('JibuSales Network reply foreign key check matches PostgreSQL lowercase constraint names', async () => {
+  const ensureScript = await readFile(new URL('../src/scripts/ensure-jibu-network-schema.js', import.meta.url), 'utf8');
+  assert.match(ensureScript, /conrelid = 'jibu_network_messages'::regclass/);
+  assert.match(ensureScript, /lower\(conname\) = 'jibu_network_messages_replytomessageid_fkey'/);
+  assert.match(ensureScript, /ADD CONSTRAINT jibu_network_messages_replyToMessageId_fkey/);
 });
