@@ -582,7 +582,7 @@ export function BusinessChatWidget() {
               const current = reactionCounts.get(reaction.emoji) || { count: 0, mine: false }
               reactionCounts.set(reaction.emoji, { count: current.count + 1, mine: current.mine || reaction.userId === user?.id })
             }
-            return <div key={message.id} className={cn('flex max-w-[94%] items-end gap-2 sm:max-w-[88%]', own ? 'ml-auto flex-row-reverse' : 'mr-auto')}>
+            return <div key={message.id} className={cn('flex max-w-[94%] items-end gap-2 sm:max-w-[88%]', own ? 'ml-auto' : 'mr-auto flex-row-reverse')}>
               <ChatAvatar name={senderName} avatar={senderAvatar} size="sm" />
               <div className="relative min-w-0 max-w-[calc(100%_-_2.25rem)]">
               {activeMessageMenuId === message.id && canSend && <div role="group" aria-label="Choose a reaction" className={cn('absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg', own ? 'right-0' : 'left-0')}>
