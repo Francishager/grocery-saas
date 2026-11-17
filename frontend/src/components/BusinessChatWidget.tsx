@@ -582,9 +582,9 @@ export function BusinessChatWidget() {
               const current = reactionCounts.get(reaction.emoji) || { count: 0, mine: false }
               reactionCounts.set(reaction.emoji, { count: current.count + 1, mine: current.mine || reaction.userId === user?.id })
             }
-            return <div key={message.id} className={cn('flex max-w-[94%] items-end gap-2 sm:max-w-[88%]', own ? 'ml-auto' : 'mr-auto flex-row-reverse')}>
-              <ChatAvatar name={senderName} avatar={senderAvatar} size="sm" />
-              <div className="relative min-w-0 max-w-[calc(100%_-_2.25rem)]">
+            return <div key={message.id} className={cn('flex w-full items-end gap-2', own ? 'justify-end' : 'justify-start')}>
+              {own && <ChatAvatar name={senderName} avatar={senderAvatar} size="sm" />}
+              <div className="relative w-fit min-w-0 max-w-[calc(100%_-_2.75rem)] sm:max-w-[min(82%,38rem)]">
               {activeMessageMenuId === message.id && canSend && <div role="group" aria-label="Choose a reaction" className={cn('absolute -top-11 z-20 flex items-center gap-1 rounded-full border bg-card p-1 shadow-lg', own ? 'right-0' : 'left-0')}>
                 {CHAT_REACTION_EMOJIS.map((emoji) => <button key={emoji} type="button" aria-label={`React ${emoji}`} onClick={() => void reactToMessage(message, emoji)} className="grid size-8 place-items-center rounded-full text-lg hover:bg-muted">{emoji}</button>)}
               </div>}
@@ -606,7 +606,8 @@ export function BusinessChatWidget() {
                 <button type="button" disabled={!canSend || (selectedNetwork !== null && selectedNetwork.status !== 'accepted')} aria-label="Reply to message" title="Reply to message" onClick={() => prepareReply(message)} className="grid size-8 place-items-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-emerald-950 dark:hover:text-emerald-200"><Reply className="size-4" /></button>
                 <button type="button" disabled={!canSend || (selectedNetwork !== null && selectedNetwork.status !== 'accepted')} aria-label="React to message" title="React to message" aria-expanded={activeMessageMenuId === message.id} onClick={() => setActiveMessageMenuId((current) => current === message.id ? null : message.id)} className="grid size-8 place-items-center rounded-full border bg-card text-foreground shadow-sm transition-colors hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-emerald-950 dark:hover:text-emerald-200"><Smile className="size-4" /></button>
               </div>
-            </div>
+              </div>
+              {!own && <ChatAvatar name={senderName} avatar={senderAvatar} size="sm" />}
             </div>
           })}
         </div>

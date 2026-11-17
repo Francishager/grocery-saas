@@ -1965,8 +1965,8 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
     const where = scopedSaleWhere(req, s, { createdAt: { gte: start, lte: end } });
     const priorWhere = scopedSaleWhere(req, s, { createdAt: previousWhere });
     const [sales, saleRecords, previousSales, previousSaleRecords] = await Promise.all([
-      prisma.sale.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, cashDiscount: true, tax: true, status: true, createdAt: true, customerName: true, paymentMethod: true, items: { select: { quantity: true, product: { select: { name: true } } } }, user: { select: { id: true, fname: true, lname: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
-      salesView.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, cashDiscount: true, tax: true, paymentStatus: true, amountPaid: true, customerId: true, customer: { select: { id: true, name: true } }, status: true, createdAt: true, paymentMethod: true, items: { select: { quantity: true, product: { select: { name: true } } } }, User: { select: { id: true, fname: true, lname: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+      prisma.sale.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, cashDiscount: true, tax: true, status: true, createdAt: true, customerName: true, paymentMethod: true, items: { select: { productId: true, quantity: true, price: true, total: true, productRevenue: true, serviceRevenue: true, taxAmount: true, discount: true, cashDiscount: true, unitName: true, product: { select: { id: true, name: true, itemType: true } } } }, user: { select: { id: true, fname: true, lname: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+      salesView.findMany({ where, select: { id: true, receiptNo: true, total: true, discount: true, cashDiscount: true, tax: true, paymentStatus: true, amountPaid: true, customerId: true, customer: { select: { id: true, name: true } }, status: true, createdAt: true, paymentMethod: true, items: { select: { productId: true, quantity: true, price: true, total: true, productRevenue: true, serviceRevenue: true, taxAmount: true, discount: true, cashDiscount: true, unitName: true, product: { select: { id: true, name: true, itemType: true } } } }, User: { select: { id: true, fname: true, lname: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
       prisma.sale.aggregate({ where: priorWhere, _sum: { total: true, tax: true }, _count: true }),
       salesView.aggregate({ where: priorWhere, _sum: { total: true, tax: true }, _count: true }),
     ]);
@@ -1985,6 +1985,7 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
       return {
         ...transaction,
         details: null,
+        businessDate: localDateAt(new Date(sale.createdAt), timeZone),
         customer: sale.customer?.name || sale.customerName || 'Walk-in',
         customerId: sale.customerId || null,
         staff: userLabel(sale.user || sale.User),
@@ -1992,6 +1993,25 @@ router.get("/sales/weekly", authenticateToken, async (req, res) => {
         paymentMethod: normalizedPaymentMethod(sale.paymentMethod),
         item: (sale.items || []).map((item) => item.product?.name || 'Unknown item').join('\n') || '—',
         quantity: (sale.items || []).map((item) => Number(item.quantity || 0)).join('\n') || '—',
+        items: (sale.items || []).map((item) => {
+          const lineTotal = Number(item.total || 0);
+          const lineTax = item.taxAmount == null
+            ? allocatedAmount(sale.tax, lineTotal, (sale.items || []).reduce((sum, line) => sum + Number(line.total || 0), 0))
+            : Number(item.taxAmount || 0);
+          return {
+            productId: item.product?.id || item.productId,
+            product: item.product?.name || 'Unknown item',
+            itemType: item.product?.itemType || 'product',
+            quantity: Number(item.quantity || 0),
+            unitName: item.unitName || '',
+            unitPrice: Number(item.price || 0),
+            grossAmount: toMoney(lineTotal + lineTax),
+            revenue: saleItemProductRevenue(item),
+            serviceRevenue: saleItemServiceRevenue(item),
+            tax: toMoney(lineTax),
+            discount: toMoney(Number(item.discount || 0) + Number(item.cashDiscount || 0)),
+          };
+        }),
         grossAmount: Number(sale.total || 0),
         tax: Number(sale.tax || 0),
         discount: Number(sale.discount || 0) + Number(sale.cashDiscount || 0),

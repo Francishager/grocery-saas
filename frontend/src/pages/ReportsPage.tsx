@@ -5,7 +5,7 @@ import {
   ShoppingCart, Package, DollarSign, Users, Building2,
   CreditCard, BarChart3, Calendar, Loader2,
   FileText, Printer, Download, FileSpreadsheet, ChevronDown, Wrench, Clock, WifiOff, Fuel, Factory, X,
-  TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon
+  TrendingUp, TrendingDown, AlertTriangle, Info, Lightbulb, Award, ArrowUpRight, ArrowDownRight, DollarSign as DollarIcon, SlidersHorizontal
 } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, BarChart, Bar, PieChart, Pie, Cell, LineChart, Line } from 'recharts'
 import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
@@ -2066,6 +2066,7 @@ export default function ReportsPage() {
   const [selectedStaffId, setSelectedStaffId] = useState('')
   const [selectedDailyCustomerId, setSelectedDailyCustomerId] = useState('')
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('')
+  const [showAdvancedReportOptions, setShowAdvancedReportOptions] = useState(false)
   const [entityList, setEntityList] = useState<any[]>([])
   const [entityListLoading, setEntityListLoading] = useState(false)
   const [entityListError, setEntityListError] = useState('')
@@ -2088,6 +2089,9 @@ export default function ReportsPage() {
   const ALL_VISIBLE_REPORTS = useMemo(() => visibleCategories.flatMap(c => c.items.map(i => ({ ...i, categoryId: c.id, categoryLabel: c.label }))), [visibleCategories])
 
   const currentReport = useMemo(() => ALL_VISIBLE_REPORTS.find(r => r.id === selectedReport), [selectedReport, ALL_VISIBLE_REPORTS])
+  const isWeeklySalesReport = currentReport?.id === 'salesWeekly'
+
+  useEffect(() => setShowAdvancedReportOptions(false), [selectedReport])
 
   // Fetch entity list when report changes
   useEffect(() => {
@@ -2540,6 +2544,11 @@ export default function ReportsPage() {
                     <Button type="button" variant="ghost" size="sm" onClick={() => { setFrom(''); setTo('') }}>Current week</Button>
                   </div>
                 )}
+                {isWeeklySalesReport && (
+                  <Button type="button" variant="outline" size="sm" aria-expanded={showAdvancedReportOptions} onClick={() => setShowAdvancedReportOptions((value) => !value)}>
+                    <SlidersHorizontal className="h-4 w-4" />{showAdvancedReportOptions ? 'Fewer options' : 'More options'}
+                  </Button>
+                )}
                 {currentReport.entityType && (
                   <div>
                     <Label className="text-xs">
@@ -2577,7 +2586,7 @@ export default function ReportsPage() {
                     )}
                   </div>
                 )}
-                {currentReport.showBranchFilter && branchList.length > 0 && (
+                {currentReport.showBranchFilter && branchList.length > 0 && (!isWeeklySalesReport || showAdvancedReportOptions) && (
                   <div>
                     <Label className="text-xs">Branch</Label>
                     <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
@@ -2630,19 +2639,21 @@ export default function ReportsPage() {
                     <Button type="button" variant="outline" size="sm" onClick={() => { setFrom(''); setTo(''); setSelectedBranchId(''); setSelectedStaffId(''); setSelectedDailyCustomerId(''); setSelectedPaymentMethod('') }}>Reset Filters</Button>
                   </>
                 )}
-                <div>
-                  <Label htmlFor="from" className="text-xs">From</Label>
-                  <Input id="from" type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 w-auto" />
-                </div>
-                <div>
-                  <Label htmlFor="to" className="text-xs">To</Label>
-                  <Input id="to" type="date" value={to} onChange={e => setTo(e.target.value)} className="h-9 w-auto" />
-                </div>
+                {(!isWeeklySalesReport || showAdvancedReportOptions) && <>
+                  <div>
+                    <Label htmlFor="from" className="text-xs">From</Label>
+                    <Input id="from" type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 w-auto" />
+                  </div>
+                  <div>
+                    <Label htmlFor="to" className="text-xs">To</Label>
+                    <Input id="to" type="date" value={to} onChange={e => setTo(e.target.value)} className="h-9 w-auto" />
+                  </div>
+                </>}
                 <Button onClick={loadReport} disabled={loading} size="sm">
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
                   Generate
                 </Button>
-                {canExport && (
+                {canExport && (!isWeeklySalesReport || showAdvancedReportOptions) && (
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>
                       <Download className="h-4 w-4" />
@@ -2663,10 +2674,10 @@ export default function ReportsPage() {
                     </DropdownMenu.Portal>
                   </DropdownMenu.Root>
                 )}
-                <Button onClick={handlePrint} variant="outline" size="sm">
+                {(!isWeeklySalesReport || showAdvancedReportOptions) && <Button onClick={handlePrint} variant="outline" size="sm">
                   <Printer className="h-4 w-4" />
                   Print
-                </Button>
+                </Button>}
               </div>
             </div>
 
@@ -2737,7 +2748,7 @@ export default function ReportsPage() {
                     {currentReport.id === 'executiveSummary' && <ExecutiveSummaryReport data={reportData} />}
                     {currentReport.renderType === 'dailyBusiness' && <DailyBusinessReport data={reportData} />}
                     {currentReport.id === 'salesWeekly' && <WeeklySalesCharts data={reportData} />}
-                    {currentReport.renderType === 'enriched' && <EnrichedReport data={reportData} summaryKeys={currentReport.id === 'salesWeekly' ? [] : currentReport.summaryKeys} />}
+                    {currentReport.renderType === 'enriched' && currentReport.id !== 'salesWeekly' && <EnrichedReport data={reportData} summaryKeys={currentReport.summaryKeys} />}
                     {currentReport.renderType === 'summary' && (
                       <>
                         {currentReport.id === 'salesSummary' ? (

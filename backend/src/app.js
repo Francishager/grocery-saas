@@ -229,7 +229,7 @@ app.use("/api/inventory", inventoryRoutes);
 app.use("/api/trash", trashRoutes);
 const scheduledTaskRuns = new Set();
 async function runSingletonScheduledTask(name, lockKey, task) {
-  const run = withPostgresAdvisoryLock({ key: lockKey, task });
+  const run = withPostgresAdvisoryLock({ key: lockKey, task: () => task() });
   scheduledTaskRuns.add(run);
   try {
     await run;
