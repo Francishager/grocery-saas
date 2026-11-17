@@ -56,12 +56,21 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   });
   assert.equal(result.receivablesOutstanding, 88);
   assert.equal(result.receivablesCount, 1);
+  assert.equal(result.customerWithBalanceCount, 1);
+  assert.equal(result.customerWithoutBalanceCount, 0);
   assert.equal(result.revenue, 200);
   assert.equal(result.taxCollected, 36);
   assert.equal(result.salesCount, 2);
   assert.equal(result.cogs, 40);
   assert.equal(result.grossProfit, 160);
   assert.equal(result.netProfit, 155);
+
+  let restrictedResult;
+  await handler({ user: { role: 'owner', tenantId: 'tenant', permissions: ['canViewCustomer'] }, query: {} }, {
+    json(value) { restrictedResult = value; }, status(code) { throw new Error(`Unexpected HTTP ${code}`); },
+  });
+  assert.equal(restrictedResult.customerWithBalanceCount, null);
+  assert.equal(restrictedResult.customerWithoutBalanceCount, null);
 });
 
 test('dashboard responses cannot be reused as cached financial balances', () => {

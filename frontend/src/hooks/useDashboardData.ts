@@ -30,6 +30,8 @@ function maskKpis(value: DashboardKpis, access: DashboardDataAccess): DashboardK
     lowStockCount: access.inventory ? value.lowStockCount : null,
     expiringCount: access.inventory ? value.expiringCount : null,
     customerCount: access.customers ? value.customerCount : null,
+    customerWithBalanceCount: access.customers ? value.customerWithBalanceCount : null,
+    customerWithoutBalanceCount: access.customers ? value.customerWithoutBalanceCount : null,
     receivablesOutstanding: access.receivables ? value.receivablesOutstanding : null,
     receivablesCount: access.receivables ? value.receivablesCount : null,
   }

@@ -1217,6 +1217,8 @@ export interface DashboardKpis {
   lowStockCount: number | null
   expiringCount?: number | null
   customerCount: number | null
+  customerWithBalanceCount?: number | null
+  customerWithoutBalanceCount?: number | null
   receivablesOutstanding: number | null
   receivablesCount: number | null
 }

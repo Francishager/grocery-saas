@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown, ChevronDown, ChevronUp } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { RefreshCw } from 'lucide-react'
 import { useDashboardData } from '@/hooks/useDashboardData'
@@ -12,6 +12,7 @@ import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { chartAxisLine, chartAxisTick, chartGrid, chartTooltip } from '@/lib/chartTheme'
 import { useOnlineStatus } from '@/db/hooks'
 import { SupportContactLinks } from '@/components/SupportContactLinks'
+import { useNavigate } from 'react-router-dom'
 
 const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#84cc16', '#6366f1', '#14b8a6']
 
@@ -39,6 +40,39 @@ function ModuleSnapshotCard({ title, description, metrics, accent }: { title: st
         {expanded ? <>Show less <ChevronUp className="h-3.5 w-3.5" /></> : <>All {metrics.length} indicators <ChevronDown className="h-3.5 w-3.5" /></>}
       </button>}
     </CardContent>
+  </Card>
+}
+
+type DashboardDrilldown = { label: string; value: ReactNode; href: string }
+
+function DashboardMetricCard({ title, value, caption, icon, accent, details }: {
+  title: string
+  value: ReactNode
+  caption: string
+  icon: ReactNode
+  accent: string
+  details: DashboardDrilldown[]
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const navigate = useNavigate()
+
+  return <Card className={`overflow-hidden border-l-4 ${accent} transition-shadow hover:shadow-md`}>
+    <button type="button" aria-expanded={expanded} onClick={() => setExpanded(open => !open)}
+      className="flex min-h-[122px] w-full items-start justify-between gap-3 p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><span>{title}</span>{icon}</span>
+        <span className="mt-2 block truncate text-2xl font-bold tabular-nums text-foreground">{value}</span>
+        <span className="mt-1 block text-xs text-muted-foreground">{caption}</span>
+      </span>
+      <ChevronRight className={`mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-90' : ''}`} aria-hidden="true" />
+    </button>
+    {expanded && <div className="border-t bg-muted/20 px-2 py-1.5">
+      {details.map(detail => <button key={detail.label} type="button" onClick={() => navigate(detail.href)}
+        className="flex min-h-10 w-full items-center justify-between gap-3 rounded-sm px-2 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <span className="min-w-0 truncate text-muted-foreground">{detail.label}</span>
+        <span className="flex shrink-0 items-center gap-1 font-semibold tabular-nums">{detail.value}<ChevronRight className="size-3.5 text-muted-foreground" aria-hidden="true" /></span>
+      </button>)}
+    </div>}
   </Card>
 }
 
@@ -420,137 +454,51 @@ export default function DashboardPage() {
       <section aria-label="Business performance" className="space-y-3">
       <div><h2 className="text-lg font-semibold">Business performance</h2><p className="text-sm text-muted-foreground">Key financial and trading indicators for this month.</p></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {hasFeature('sales') && canViewSalesDashboard && (
-        <Card className="border-l-4 border-l-blue-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(k.revenue)}</div>
-            {k.revenueChange != null && (
-              <p className={`text-xs flex items-center gap-1 ${k.revenueChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {k.revenueChange >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                {Math.abs(k.revenueChange)}% vs last month
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('sales') && canViewSalesDashboard && <DashboardMetricCard title="Revenue" value={formatCurrency(k.revenue)}
+          caption={k.revenueChange == null ? 'This month' : `${Math.abs(k.revenueChange)}% ${k.revenueChange >= 0 ? 'up' : 'down'} vs last month`}
+          icon={<DollarSign className="size-4 text-blue-500" />} accent="border-l-blue-500"
+          details={[{ label: 'Sales transactions', value: Number(k.salesCount || 0).toLocaleString(), href: '/tenant/sales' }, ...(k.totalDiscount != null ? [{ label: 'Discounts given', value: formatCurrency(k.totalDiscount), href: '/tenant/reports?reportId=salesSummary' }] : [])]} />}
 
-        {hasFeature('accounting') && canViewFinancialDashboard && (
-        <Card className="border-l-4 border-l-green-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Net Profit</CardTitle>
-            <PiggyBank className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${k.netProfit >= 0 ? 'text-green-700' : 'text-red-600'}`}>{formatCurrency(k.netProfit)}</div>
-            <p className="text-xs text-muted-foreground">{profitMargin}% margin</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('accounting') && canViewFinancialDashboard && <DashboardMetricCard title="Net Profit" value={<span className={k.netProfit >= 0 ? 'text-green-700' : 'text-red-600'}>{formatCurrency(k.netProfit)}</span>}
+          caption={`${profitMargin}% margin`} icon={<PiggyBank className="size-4 text-green-600" />} accent="border-l-green-500"
+          details={[{ label: 'Gross profit', value: formatCurrency(k.grossProfit), href: '/tenant/reports?reportId=financialProfitLoss' }, ...(k.expenses != null ? [{ label: 'Operating expenses', value: formatCurrency(k.expenses), href: '/tenant/reports?reportId=expenses' }] : [])]} />}
 
-        {hasFeature('sales') && canViewSalesDashboard && (
-        <Card className="border-l-4 border-l-purple-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Sales</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{k.salesCount}</div>
-            <p className="text-xs text-muted-foreground">transactions this month</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('sales') && canViewSalesDashboard && <DashboardMetricCard title="Sales" value={Number(k.salesCount || 0).toLocaleString()}
+          caption="Transactions this month" icon={<ShoppingCart className="size-4 text-purple-600" />} accent="border-l-purple-500"
+          details={[{ label: 'Revenue', value: formatCurrency(k.revenue), href: '/tenant/sales' }, ...(k.totalDiscount != null ? [{ label: 'Discounts', value: formatCurrency(k.totalDiscount), href: '/tenant/reports?reportId=salesSummary' }] : [])]} />}
 
-        {hasFeature('settings.taxes') && hasPermission('canViewTax') && (
-        <Card className="border-l-4 border-l-orange-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tax Collected</CardTitle>
-            <Receipt className="h-4 w-4 text-orange-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(k.taxCollected)}</div>
-            <p className="text-xs text-muted-foreground">VAT/tax this period</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('settings.taxes') && hasPermission('canViewTax') && <DashboardMetricCard title="Tax Collected" value={formatCurrency(k.taxCollected)}
+          caption="VAT and other sales taxes this month" icon={<Receipt className="size-4 text-orange-500" />} accent="border-l-orange-500"
+          details={[{ label: 'Tax collected', value: formatCurrency(k.taxCollected), href: '/tenant/reports?reportId=financialTax' }, { label: 'Tax report', value: 'View tax summary', href: '/tenant/reports?reportId=financialTax' }]} />}
       </div>
 
       {/* KPI Cards Row 2 — only show for enabled features */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {hasFeature('accounting') && canViewFinancialDashboard && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Gross Profit</CardTitle>
-            <Banknote className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">{formatCurrency(k.grossProfit)}</div>
-            <p className="text-xs text-muted-foreground">Revenue - COGS</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('accounting') && canViewFinancialDashboard && <DashboardMetricCard title="Gross Profit" value={formatCurrency(k.grossProfit)}
+          caption="Revenue less cost of sales" icon={<Banknote className="size-4 text-muted-foreground" />} accent="border-l-slate-400"
+          details={[{ label: 'Revenue', value: formatCurrency(k.revenue), href: '/tenant/reports?reportId=financialProfitLoss' }, { label: 'Cost of sales', value: formatCurrency(k.cogs), href: '/tenant/reports?reportId=financialProfitLoss' }]} />}
 
-        {hasFeature('accounting') && canViewFinancialDashboard && (
-        <Card className="border-l-4 border-l-amber-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Cost of Sales (COGS)</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-amber-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">{formatCurrency(k.cogs)}</div>
-            <p className="text-xs text-muted-foreground">Cost of inventory sold; separate from operating expenses</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('accounting') && canViewFinancialDashboard && <DashboardMetricCard title="Cost of Sales (COGS)" value={formatCurrency(k.cogs)}
+          caption="Inventory cost recognized on sales" icon={<ShoppingCart className="size-4 text-amber-600" />} accent="border-l-amber-500"
+          details={[{ label: 'Gross profit', value: formatCurrency(k.grossProfit), href: '/tenant/reports?reportId=financialProfitLoss' }, { label: 'Cost of sales', value: formatCurrency(k.cogs), href: '/tenant/reports?reportId=financialProfitLoss' }]} />}
 
-        {hasFeature('expenses') && hasPermission('canViewExpense') && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Operating Expenses</CardTitle>
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">{formatCurrency(k.expenses)}</div>
-            <p className="text-xs text-muted-foreground">Running costs, excluding Cost of Sales (COGS)</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('expenses') && hasPermission('canViewExpense') && <DashboardMetricCard title="Operating Expenses" value={formatCurrency(k.expenses)}
+          caption="Running costs, excluding cost of sales" icon={<CreditCard className="size-4 text-muted-foreground" />} accent="border-l-slate-400"
+          details={[{ label: 'Expenses this month', value: formatCurrency(k.expenses), href: '/tenant/accounting/expenses' }, ...(canViewFinancialDashboard ? [{ label: 'Profit and loss', value: 'View financial report', href: '/tenant/reports?reportId=financialProfitLoss' }] : [])]} />}
 
-        {hasFeature('receivables') && hasPermission('canViewReceivable') && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Receivables</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">{k.receivablesOutstanding == null ? 'Unavailable offline' : formatCurrency(k.receivablesOutstanding)}</div>
-            <p className="text-xs text-muted-foreground">{k.receivablesCount == null ? 'Connect to refresh' : `${k.receivablesCount} customers with outstanding balances`}</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('receivables') && hasPermission('canViewReceivable') && <DashboardMetricCard title="Receivables" value={k.receivablesOutstanding == null ? 'Unavailable offline' : formatCurrency(k.receivablesOutstanding)}
+          caption={k.receivablesCount == null ? 'Connect to refresh' : `${Number(k.receivablesCount).toLocaleString()} customers with balances due`}
+          icon={<DollarSign className="size-4 text-muted-foreground" />} accent="border-l-indigo-500"
+          details={[{ label: 'Customers with amount due', value: k.receivablesCount == null ? '—' : Number(k.receivablesCount).toLocaleString(), href: '/tenant/receivables/customers' }, { label: 'Outstanding total', value: k.receivablesOutstanding == null ? '—' : formatCurrency(k.receivablesOutstanding), href: '/tenant/reports?reportId=customersReceivables' }]} />}
 
-        {hasFeature('inventory') && hasPermission('canViewProduct') && (
-        <Card className="border-l-4 border-l-cyan-500">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-sm font-medium">Inventory items</CardTitle><Package className="h-4 w-4 text-cyan-600" /></CardHeader>
-          <CardContent><div className="text-xl font-bold">{k.productCount == null ? '—' : Number(k.productCount).toLocaleString()}</div><p className="text-xs text-muted-foreground">{k.lowStockCount == null ? 'Stock alerts unavailable' : `${Number(k.lowStockCount).toLocaleString()} low-stock alerts`}</p></CardContent>
-        </Card>
-        )}
+        {hasFeature('inventory') && hasPermission('canViewProduct') && <DashboardMetricCard title="Inventory items" value={k.productCount == null ? '—' : Number(k.productCount).toLocaleString()}
+          caption={k.lowStockCount == null ? 'Stock alerts unavailable' : `${Number(k.lowStockCount).toLocaleString()} low-stock alerts`}
+          icon={<Package className="size-4 text-cyan-600" />} accent="border-l-cyan-500"
+          details={[{ label: 'Low-stock alerts', value: k.lowStockCount == null ? '—' : Number(k.lowStockCount).toLocaleString(), href: '/tenant/inventory/products' }, ...(k.expiringCount != null ? [{ label: 'Expiring within 60 days', value: Number(k.expiringCount).toLocaleString(), href: '/tenant/inventory/products' }] : [])]} />}
 
-        {hasFeature('customers') && hasPermission('canViewCustomer') && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Customers</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl font-bold">{k.customerCount}</div>
-            <p className="text-xs text-muted-foreground">Active customer records</p>
-          </CardContent>
-        </Card>
-        )}
+        {hasFeature('customers') && hasPermission('canViewCustomer') && <DashboardMetricCard title="Customers" value={k.customerCount == null ? '—' : Number(k.customerCount).toLocaleString()}
+          caption="Active customer records" icon={<Users className="size-4 text-muted-foreground" />} accent="border-l-slate-400"
+          details={[...(k.customerWithBalanceCount != null ? [{ label: 'Customers with amount due', value: Number(k.customerWithBalanceCount).toLocaleString(), href: '/tenant/receivables/customers' }] : []), ...(k.customerWithoutBalanceCount != null ? [{ label: 'Customers with no amount due', value: Number(k.customerWithoutBalanceCount).toLocaleString(), href: '/tenant/receivables/customers' }] : []), { label: 'Open customer list', value: 'View customers', href: '/tenant/receivables/customers' }]} />}
       </div>
       </section>
 

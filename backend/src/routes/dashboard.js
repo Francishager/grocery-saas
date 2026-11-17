@@ -219,6 +219,8 @@ router.get("/kpis", authenticateToken, async (req, res) => {
       lowStockCount: canViewInventory ? lowStockProducts : null,
       expiringCount: canViewInventory ? expiringProducts : null,
       customerCount: canViewCustomers ? customers : null,
+      customerWithBalanceCount: canViewCustomers && hasPermission(req, 'canViewCustomerBalance') ? receivables._count : null,
+      customerWithoutBalanceCount: canViewCustomers && hasPermission(req, 'canViewCustomerBalance') ? Math.max(0, customers - receivables._count) : null,
       receivablesOutstanding: canViewReceivables ? receivables._sum.balance || 0 : null,
       receivablesCount: canViewReceivables ? receivables._count : null,
     });
