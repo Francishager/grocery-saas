@@ -92,12 +92,12 @@ export default function WeeklySalesCharts({ data }: { data: any }) {
       </Card>
 
       <Card className="min-w-0">
-        <CardHeader className="gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div><CardTitle className="text-base">Explore daily sales</CardTitle><p className="mt-1 text-sm text-muted-foreground">Choose a day or product to inspect the underlying sale lines.</p></div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(170px,240px)_minmax(170px,240px)]">
-            <Input value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products" aria-label="Search weekly sales products" />
+        <CardHeader className="min-w-0 gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0"><CardTitle className="text-base">Explore daily sales</CardTitle><p className="mt-1 text-sm text-muted-foreground">Choose a day or product to inspect the underlying sale lines.</p></div>
+          <div className="grid w-full min-w-0 gap-2 sm:w-auto sm:grid-cols-2">
+            <Input className="min-w-0 w-full sm:min-w-[170px] sm:max-w-[240px]" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} placeholder="Search products" aria-label="Search weekly sales products" />
             <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-              <SelectTrigger aria-label="Filter weekly sales by product"><SelectValue placeholder="All products" /></SelectTrigger>
+              <SelectTrigger className="min-w-0 w-full sm:min-w-[170px] sm:max-w-[240px]" aria-label="Filter weekly sales by product"><SelectValue placeholder="All products" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All products</SelectItem>
                 {filteredProducts.map((product) => <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>)}
@@ -107,24 +107,24 @@ export default function WeeklySalesCharts({ data }: { data: any }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex gap-2 overflow-x-auto pb-1" aria-label="Select a week day">
-            <button type="button" aria-pressed={selectedDate === 'all'} onClick={() => setSelectedDate('all')} className={`min-w-24 rounded-md border px-3 py-2 text-left text-sm ${selectedDate === 'all' ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
-              <span className="block font-medium">All days</span><span className="mt-1 block text-xs text-muted-foreground">{rows.reduce((sum: number, row: any) => sum + Number(row.salesCount || 0), 0)} sales</span>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 2xl:grid-cols-8" role="group" aria-label="Select a week day">
+            <button type="button" aria-pressed={selectedDate === 'all'} onClick={() => setSelectedDate('all')} className={`min-w-0 rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:px-3 ${selectedDate === 'all' ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
+              <span className="block truncate font-medium">All days</span><span className="mt-1 block break-words text-xs text-muted-foreground">{rows.reduce((sum: number, row: any) => sum + Number(row.salesCount || 0), 0)} sales</span>
             </button>
             {rows.map((row: any) => (
-              <button key={row.date} type="button" aria-pressed={selectedDate === row.date} onClick={() => setSelectedDate(row.date)} className={`min-w-24 rounded-md border px-3 py-2 text-left text-sm ${selectedDate === row.date ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
-                <span className="block whitespace-nowrap font-medium">{row.label}</span><span className="mt-1 block whitespace-nowrap text-xs text-muted-foreground">{row.salesCount} sales · {money(row.revenue)}</span>
+              <button key={row.date} type="button" aria-pressed={selectedDate === row.date} onClick={() => setSelectedDate(row.date)} className={`min-w-0 rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:px-3 ${selectedDate === row.date ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
+                <span className="block truncate font-medium">{row.label}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{row.salesCount} sales · {money(row.revenue)}</span>
               </button>
             ))}
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-2 gap-2 xl:grid-cols-4">
             {[
               ['Sale lines', detailRows.length.toLocaleString()],
               ['Quantity', Number(detailSummary.quantity.toFixed(3)).toLocaleString()],
               ['Sales incl. tax', money(detailSummary.gross)],
               ['Net revenue', money(detailSummary.revenue)],
-            ].map(([label, value]) => <div key={label} className="rounded-md border px-3 py-2"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-semibold tabular-nums">{value}</p></div>)}
+            ].map(([label, value]) => <div key={label} className="min-w-0 rounded-md border px-2.5 py-2 sm:px-3"><p className="break-words text-xs text-muted-foreground">{label}</p><p className="mt-1 break-words text-sm font-semibold tabular-nums sm:text-base">{value}</p></div>)}
           </div>
 
           <div>
