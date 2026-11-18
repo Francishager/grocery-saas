@@ -41,7 +41,7 @@ const fixtures = {
   'audit.js': dataUrl('export const auditLog = async () => {}; export const logTenantActivity = async () => {};'),
   'rateLimit.js': dataUrl('export const createRateLimiter = () => (_req, _res, next) => next();'),
   'trashService.js': dataUrl('export const moveToTrash = async () => {}; export const trashedRecordIds = async () => []; export const assertOutsideTrash = async () => {};'),
-  'node:crypto': dataUrl('export const randomInt = (min, max) => min + 1;'),
+  'node:crypto': dataUrl("export const randomInt = (min, max) => min + 1; export const randomBytes = () => ({ toString: () => 'Secure-temporary-pass_123456789' });"),
   cloudinary: dataUrl('export default { v2: { config() {} } };'),
 };
 async function isolatedModule(relative) {
@@ -65,7 +65,7 @@ const handler = (router, method, path) => router.stack.find(layer => layer.route
 const login = handler(authRouter, 'post', '/login');
 const refresh = handler(authRouter, 'post', '/refresh');
 const updateStaff = handler(staffRouter, 'patch', '/:id');
-const generateStaffResetCode = handler(staffRouter, 'post', '/:id/reset-password-code');
+const resetStaffPassword = handler(staffRouter, 'post', '/:id/reset-password');
 const updateSettings = handler(settingsRouter, 'put', '/');
 
 beforeEach(() => {
@@ -186,21 +186,22 @@ test('staff update route retains canEditStaff permission enforcement', async () 
   assert.equal(denied.next, false);
 });
 
-test('only the business owner can generate a reset code for staff in their own tenant', async () => {
-  const denied = await call(generateStaffResetCode, { user: staff, params: { id: staff.id } });
+test('only the business owner can reset a staff password in their own tenant', async () => {
+  const denied = await call(resetStaffPassword, { user: staff, params: { id: staff.id } });
   assert.equal(denied.status, 403);
   assert.equal(updates.length, 0);
 
-  const crossTenant = await call(generateStaffResetCode, { user: { ...owner(), tenantId: 'business-b' }, params: { id: staff.id } });
+  const crossTenant = await call(resetStaffPassword, { user: { ...owner(), tenantId: 'business-b' }, params: { id: staff.id } });
   assert.equal(crossTenant.status, 404);
   assert.equal(updates.length, 0);
 
-  const result = await call(generateStaffResetCode, { user: owner(), params: { id: staff.id }, ip: '127.0.0.1' });
+  const result = await call(resetStaffPassword, { user: owner(), params: { id: staff.id }, ip: '127.0.0.1' });
   assert.equal(result.status, 200);
   assert.equal(result.headers['Cache-Control'], 'no-store');
-  assert.match(result.body.otp, /^\d{6}$/);
+  assert.equal(result.body.temporaryPassword, 'Secure-temporary-pass_123456789');
   assert.equal(result.body.email, staff.email);
   assert.equal(updates.length, 1);
-  assert.equal(updates[0].otpCode, result.body.otp);
-  assert.equal(new Date(updates[0].otpExpires).getTime() - Date.now(), 15 * 60 * 1000);
+  assert.equal(updates[0].otpCode, null);
+  assert.equal(updates[0].otpExpires, null);
+  assert.equal(await require('bcryptjs').compare(result.body.temporaryPassword, updates[0].password), true);
 });

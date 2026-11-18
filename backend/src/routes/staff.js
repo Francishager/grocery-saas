@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { moveToTrash, trashedRecordIds, assertOutsideTrash } from '../services/trashService.js';
 import bcrypt from "bcryptjs";
-import { randomInt } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
@@ -23,11 +23,11 @@ import {
 const router = Router();
 
 const staffRoles = new Set(["manager", "accountant", "attendant"]);
-const staffResetCodeLimiter = createRateLimiter({
+const staffPasswordResetLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 3,
   keyGenerator: (req) => `${req.user?.id || 'unknown'}:${req.params?.id || 'unknown'}`,
-  policyName: 'staff-reset-code',
+  policyName: 'staff-password-reset',
 });
 
 // Get permission keys and role defaults
@@ -115,12 +115,12 @@ router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req
   }
 });
 
-router.post("/:id/reset-password-code", authenticateToken, staffResetCodeLimiter, async (req, res) => {
+router.post("/:id/reset-password", authenticateToken, staffPasswordResetLimiter, async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const tenantId = tenantIdFromUser(req.user);
     if (req.user?.role !== 'owner' || !tenantId) {
-      return res.status(403).json({ error: 'Only the business owner can generate staff reset codes.' });
+      return res.status(403).json({ error: 'Only the business owner can reset a staff password.' });
     }
 
     const staff = await prisma.user.findFirst({
@@ -130,27 +130,27 @@ router.post("/:id/reset-password-code", authenticateToken, staffResetCodeLimiter
     if (!staff) return res.status(404).json({ error: 'Staff member not found in this business.' });
     if (!staff.email) return res.status(400).json({ error: 'This staff member has no email address.' });
 
-    const otp = String(randomInt(100000, 1000000));
-    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
-    await prisma.user.update({ where: { id: staff.id }, data: { otpCode: otp, otpExpires } });
+    const temporaryPassword = randomBytes(20).toString('base64url');
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 12);
+    await prisma.user.update({ where: { id: staff.id }, data: { password: hashedPassword, otpCode: null, otpExpires: null } });
     await auditLog({
       tenantId,
       userId: req.user.id,
       userEmail: req.user.email || '',
       subjectUserId: staff.id,
       subjectEmail: staff.email,
-      action: 'staff_password_reset_code_generated',
+      action: 'staff_password_reset_by_owner',
       model: 'User',
       recordId: staff.id,
-      changes: { data: { action: 'staff_password_reset_code_generated', expiresAt: otpExpires.toISOString() } },
+      changes: { data: { action: 'staff_password_reset_by_owner' } },
       ip: req.ip || req.connection?.remoteAddress,
       severity: 'critical',
     }).catch(() => {});
 
-    return res.json({ email: staff.email, otp, expiresAt: otpExpires.toISOString(), message: 'A new reset code was generated. The previous code is no longer valid.' });
+    return res.json({ email: staff.email, temporaryPassword, message: 'Staff password reset. Share the temporary password securely and ask the staff member to change it after signing in.' });
   } catch (error) {
-    console.error('Generate staff password reset code failed:', error?.code || error?.name || 'UNKNOWN_ERROR');
-    return res.status(500).json({ error: 'Could not generate a staff password reset code.' });
+    console.error('Reset staff password failed:', error?.code || error?.name || 'UNKNOWN_ERROR');
+    return res.status(500).json({ error: 'Could not reset the staff password.' });
   }
 });
 
