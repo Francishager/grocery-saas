@@ -9,7 +9,7 @@ import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
 import { validateWorkingHours, workingHoursAdmin } from "../utils/workingHours.js";
 import { auditLog } from "../utils/audit.js";
-import { createRateLimiter } from "../../middleware/rateLimit.js";
+import { createRateLimiter } from "../middleware/rateLimit.js";
 import {
   ALL_PERMISSION_KEYS as PERM_KEYS,
   PERMISSION_CATEGORIES,
