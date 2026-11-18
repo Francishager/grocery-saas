@@ -27,8 +27,8 @@ function ModuleSnapshotCard({ title, description, metrics, accent }: { title: st
       <CardTitle className="text-sm font-semibold">{title}</CardTitle>
       <CardDescription className="line-clamp-1 text-xs">{description}</CardDescription>
     </CardHeader>
-    <CardContent className="px-4 pb-3 pt-1">
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+    <CardContent className="relative px-4 pb-3 pt-1">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 pr-9">
         {visibleMetrics.map(metric => <div key={metric.label} className="min-w-0">
           <p className="truncate text-[11px] font-medium text-muted-foreground">{metric.label}</p>
           <p className="mt-0.5 truncate text-lg font-semibold tabular-nums leading-tight">{metric.value ?? '—'}</p>
@@ -36,7 +36,7 @@ function ModuleSnapshotCard({ title, description, metrics, accent }: { title: st
         </div>)}
       </div>
       {metrics.length > 2 && <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title} details`}
-        className="mx-auto mt-2 flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
       </button>}
     </CardContent>
@@ -56,14 +56,16 @@ function DashboardMetricCard({ title, value, caption, icon, accent, details }: {
     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
       <CardTitle className="text-sm font-medium">{title}</CardTitle>{icon}
     </CardHeader>
-    <CardContent>
-      <div className="text-xl font-bold tabular-nums">{value}</div>
-      <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
+    <CardContent className="relative">
+      <div className="min-w-0 pr-9">
+        <div className="text-xl font-bold tabular-nums">{value}</div>
+        <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
+        {expanded && <div className="mt-1 space-y-2 border-t pt-3 text-sm">{details}</div>}
+      </div>
       <button type="button" onClick={() => setExpanded(current => !current)} aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${title} details`}
-        className="mx-auto mt-2 flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        className="absolute right-2 top-1/2 flex size-8 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
       </button>
-      {expanded && <div className="mt-1 space-y-2 border-t pt-3 text-sm">{details}</div>}
     </CardContent>
   </Card>
 }
@@ -530,7 +532,7 @@ export default function DashboardPage() {
             k.customerWithBalanceCount != null ? <div className="space-y-1">
               <button type="button" onClick={() => void openOwingCustomerList()} aria-label={`View ${Number(k.customerWithBalanceCount).toLocaleString()} customers with an amount due`}
                 className="flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-2 text-left text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <span>Customers with amount due</span><span className="inline-flex items-center gap-1 font-semibold tabular-nums">{Number(k.customerWithBalanceCount).toLocaleString()}<ChevronRight className="size-4" /></span>
+                <span>Customers with amount due</span><span className="font-semibold tabular-nums">{Number(k.customerWithBalanceCount).toLocaleString()}</span>
               </button>
               <div className="flex justify-between gap-3 px-2 text-muted-foreground"><span>Customers without amount due</span><span className="font-medium tabular-nums">{Number(k.customerWithoutBalanceCount || 0).toLocaleString()}</span></div>
             </div> : <p className="text-xs text-muted-foreground">Customer balance details are restricted for this account.</p>
