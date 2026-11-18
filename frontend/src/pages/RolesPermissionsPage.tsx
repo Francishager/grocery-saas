@@ -439,8 +439,9 @@ export default function RolesPermissionsPage() {
   const [cashAccounts, setCashAccounts] = useState<any[]>([])
   const [dropdownId, setDropdownId] = useState<string | null>(null)
   const [createdPassword, setCreatedPassword] = useState<{ name: string; email: string; password: string } | null>(null)
-  const [generatedStaffPassword, setGeneratedStaffPassword] = useState<{ staffId: string; name: string; email: string; password: string } | null>(null)
-  const [generatingResetFor, setGeneratingResetFor] = useState<string | null>(null)
+  const [staffPasswordResetResult, setStaffPasswordResetResult] = useState<{ staffId: string; email: string; password: string } | null>(null)
+  const [staffPasswordDraft, setStaffPasswordDraft] = useState({ password: '', confirmPassword: '' })
+  const [resettingPasswordFor, setResettingPasswordFor] = useState<string | null>(null)
   const [permSearch, setPermSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -464,22 +465,34 @@ export default function RolesPermissionsPage() {
 
   const resetStaffPassword = async (member: any) => {
     if (user?.role !== 'owner') return
-    if (!(await appConfirm(`Reset ${member.name || member.email}'s password now? Their current password will stop working. Share the temporary password securely and ask them to change it after signing in.`))) return
-    setGeneratingResetFor(member.id)
+    if (staffPasswordDraft.password.length < 12) {
+      toast({ title: 'Password too short', description: 'Use at least 12 characters.', variant: 'destructive' })
+      return
+    }
+    if (staffPasswordDraft.password !== staffPasswordDraft.confirmPassword) {
+      toast({ title: 'Passwords do not match', description: 'Confirm the new password and try again.', variant: 'destructive' })
+      return
+    }
+    if (!(await appConfirm(`Set the password entered for ${member.name || member.email}? Their current password will stop working for future sign-ins.`))) return
+    setResettingPasswordFor(member.id)
     try {
-      const response = await apiFetch(`/api/staff/${member.id}/reset-password`, { method: 'POST' })
+      const response = await apiFetch(`/api/staff/${member.id}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({ password: staffPasswordDraft.password }),
+      })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'Could not reset the staff password.')
-      setGeneratedStaffPassword({ staffId: member.id, name: member.name || member.email, email: payload.email, password: payload.temporaryPassword })
+      setStaffPasswordResetResult({ staffId: member.id, email: payload.email, password: staffPasswordDraft.password })
+      setStaffPasswordDraft({ password: '', confirmPassword: '' })
       try {
-        await navigator.clipboard.writeText(payload.temporaryPassword)
-        toast({ title: 'Password reset and temporary password copied' })
+        await navigator.clipboard.writeText(staffPasswordDraft.password)
+        toast({ title: 'Staff password changed and copied' })
       } catch {
-        toast({ title: 'Password reset', description: 'The temporary password is shown below. Copy it securely before closing this form.' })
+        toast({ title: 'Staff password changed', description: 'The password is shown below. Copy it securely before closing this form.' })
       }
     } catch (error: any) {
       toast({ title: 'Password not reset', description: error?.message || 'Please try again.', variant: 'destructive' })
-    } finally { setGeneratingResetFor(null) }
+    } finally { setResettingPasswordFor(null) }
   }
 
   useEffect(() => {
@@ -580,7 +593,8 @@ export default function RolesPermissionsPage() {
   }
 
   const startEdit = (s: any) => {
-    setGeneratedStaffPassword(null)
+    setStaffPasswordResetResult(null)
+    setStaffPasswordDraft({ password: '', confirmPassword: '' })
     setEditingId(s.id)
     setEditForm({ name: s.name || '', email: s.email || '', phone: s.phone || '', role: s.role || 'attendant', branchId: s.branchId || '', cashAccountId: s.cashAccountId || '' })
     setDropdownId(null)
@@ -590,7 +604,7 @@ export default function RolesPermissionsPage() {
     try {
       await staffApi.update(id, editForm)
       toast({ title: 'Staff updated' })
-      setGeneratedStaffPassword(null)
+      setStaffPasswordResetResult(null)
       setEditingId(null)
       loadStaff()
     } catch (err: any) {
@@ -791,25 +805,29 @@ export default function RolesPermissionsPage() {
                       </div>
                       <div className="flex gap-2">
                         <Button onClick={() => handleSaveEdit(s.id)} size="sm">Save</Button>
-                        <Button onClick={() => { setGeneratedStaffPassword(null); setEditingId(null) }} variant="outline" size="sm">Cancel</Button>
+                        <Button onClick={() => { setStaffPasswordResetResult(null); setStaffPasswordDraft({ password: '', confirmPassword: '' }); setEditingId(null) }} variant="outline" size="sm">Cancel</Button>
                       </div>
                       {user?.role === 'owner' && s.role !== 'owner' && (
                         <div className="space-y-2 rounded-md border p-3">
                           <div>
                             <p className="text-sm font-medium">Reset staff password</p>
-                            <p className="text-xs text-muted-foreground">Reset the password directly. The staff member’s current password will stop working immediately.</p>
+                            <p className="text-xs text-muted-foreground">Enter and confirm a new password. The current password will stop working for future sign-ins.</p>
                           </div>
-                          <Button type="button" variant="outline" size="sm" onClick={() => void resetStaffPassword(s)} disabled={generatingResetFor === s.id}>
-                            {generatingResetFor === s.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
-                            Reset password
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <div className="space-y-1"><Label htmlFor={`staff-new-password-${s.id}`} className="text-xs">New password</Label><Input id={`staff-new-password-${s.id}`} type="password" autoComplete="new-password" minLength={12} value={staffPasswordDraft.password} onChange={event => setStaffPasswordDraft(draft => ({ ...draft, password: event.target.value }))} /></div>
+                            <div className="space-y-1"><Label htmlFor={`staff-confirm-password-${s.id}`} className="text-xs">Confirm password</Label><Input id={`staff-confirm-password-${s.id}`} type="password" autoComplete="new-password" minLength={12} value={staffPasswordDraft.confirmPassword} onChange={event => setStaffPasswordDraft(draft => ({ ...draft, confirmPassword: event.target.value }))} /></div>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={() => void resetStaffPassword(s)} disabled={resettingPasswordFor === s.id || !staffPasswordDraft.password || !staffPasswordDraft.confirmPassword}>
+                            {resettingPasswordFor === s.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <KeyRound className="mr-2 h-4 w-4" />}
+                            Set new password
                           </Button>
-                          {generatedStaffPassword?.staffId === s.id && (
+                          {staffPasswordResetResult?.staffId === s.id && (
                             <div className="space-y-2 rounded-md bg-muted/40 p-3">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <code className="break-all text-sm font-semibold">{generatedStaffPassword.password}</code>
-                                <Button type="button" variant="outline" size="sm" onClick={() => { void navigator.clipboard.writeText(generatedStaffPassword.password).then(() => toast({ title: 'Temporary password copied' })).catch(() => toast({ title: 'Could not access clipboard', description: 'Select and copy the password manually.', variant: 'destructive' })) }}><Copy className="mr-2 h-4 w-4" />Copy password</Button>
+                                <code className="break-all text-sm font-semibold">{staffPasswordResetResult.password}</code>
+                                <Button type="button" variant="outline" size="sm" onClick={() => { void navigator.clipboard.writeText(staffPasswordResetResult.password).then(() => toast({ title: 'Password copied' })).catch(() => toast({ title: 'Could not access clipboard', description: 'Select and copy the password manually.', variant: 'destructive' })) }}><Copy className="mr-2 h-4 w-4" />Copy password</Button>
                               </div>
-                              <p className="text-xs text-muted-foreground">For {generatedStaffPassword.email}. This password is shown only now. Share it securely and ask the staff member to change it after signing in.</p>
+                              <p className="text-xs text-muted-foreground">Password updated for {staffPasswordResetResult.email}. Copy and share it securely before closing this form.</p>
                             </div>
                           )}
                         </div>

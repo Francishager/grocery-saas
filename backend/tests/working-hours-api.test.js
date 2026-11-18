@@ -41,7 +41,7 @@ const fixtures = {
   'audit.js': dataUrl('export const auditLog = async () => {}; export const logTenantActivity = async () => {};'),
   'rateLimit.js': dataUrl('export const createRateLimiter = () => (_req, _res, next) => next();'),
   'trashService.js': dataUrl('export const moveToTrash = async () => {}; export const trashedRecordIds = async () => []; export const assertOutsideTrash = async () => {};'),
-  'node:crypto': dataUrl("export const randomInt = (min, max) => min + 1; export const randomBytes = () => ({ toString: () => 'Secure-temporary-pass_123456789' });"),
+  'node:crypto': dataUrl('export const randomInt = (min, max) => min + 1;'),
   cloudinary: dataUrl('export default { v2: { config() {} } };'),
 };
 async function isolatedModule(relative) {
@@ -186,7 +186,7 @@ test('staff update route retains canEditStaff permission enforcement', async () 
   assert.equal(denied.next, false);
 });
 
-test('only the business owner can reset a staff password in their own tenant', async () => {
+test('only the business owner can set a staff password in their own tenant', async () => {
   const denied = await call(resetStaffPassword, { user: staff, params: { id: staff.id } });
   assert.equal(denied.status, 403);
   assert.equal(updates.length, 0);
@@ -195,13 +195,14 @@ test('only the business owner can reset a staff password in their own tenant', a
   assert.equal(crossTenant.status, 404);
   assert.equal(updates.length, 0);
 
-  const result = await call(resetStaffPassword, { user: owner(), params: { id: staff.id }, ip: '127.0.0.1' });
+  const chosenPassword = 'Owner-chosen-password-123';
+  const result = await call(resetStaffPassword, { user: owner(), params: { id: staff.id }, body: { password: chosenPassword }, ip: '127.0.0.1' });
   assert.equal(result.status, 200);
   assert.equal(result.headers['Cache-Control'], 'no-store');
-  assert.equal(result.body.temporaryPassword, 'Secure-temporary-pass_123456789');
+  assert.equal(result.body.temporaryPassword, undefined);
   assert.equal(result.body.email, staff.email);
   assert.equal(updates.length, 1);
   assert.equal(updates[0].otpCode, null);
   assert.equal(updates[0].otpExpires, null);
-  assert.equal(await require('bcryptjs').compare(result.body.temporaryPassword, updates[0].password), true);
+  assert.equal(await require('bcryptjs').compare(chosenPassword, updates[0].password), true);
 });

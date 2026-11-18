@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { moveToTrash, trashedRecordIds, assertOutsideTrash } from '../services/trashService.js';
 import bcrypt from "bcryptjs";
-import { randomBytes } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
@@ -130,8 +129,9 @@ router.post("/:id/reset-password", authenticateToken, staffPasswordResetLimiter,
     if (!staff) return res.status(404).json({ error: 'Staff member not found in this business.' });
     if (!staff.email) return res.status(400).json({ error: 'This staff member has no email address.' });
 
-    const temporaryPassword = randomBytes(20).toString('base64url');
-    const hashedPassword = await bcrypt.hash(temporaryPassword, 12);
+    const password = String(req.body?.password || '');
+    if (password.length < 12) return res.status(400).json({ error: 'Password must be at least 12 characters.' });
+    const hashedPassword = await bcrypt.hash(password, 12);
     await prisma.user.update({ where: { id: staff.id }, data: { password: hashedPassword, otpCode: null, otpExpires: null } });
     await auditLog({
       tenantId,
@@ -147,7 +147,7 @@ router.post("/:id/reset-password", authenticateToken, staffPasswordResetLimiter,
       severity: 'critical',
     }).catch(() => {});
 
-    return res.json({ email: staff.email, temporaryPassword, message: 'Staff password reset. Share the temporary password securely and ask the staff member to change it after signing in.' });
+    return res.json({ email: staff.email, message: 'Staff password reset successfully.' });
   } catch (error) {
     console.error('Reset staff password failed:', error?.code || error?.name || 'UNKNOWN_ERROR');
     return res.status(500).json({ error: 'Could not reset the staff password.' });
