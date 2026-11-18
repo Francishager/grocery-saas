@@ -34,11 +34,12 @@ const fixtures = {
   'featureCheck.js': dataUrl('export const getTenantFeatures = async () => new Set(); export const hasFeatureAccess = () => true;'),
   'permissions.js': dataUrl(`export const ROLE_DEFAULTS = {}, ALL_PERMISSION_KEYS = [], PERMISSION_CATEGORIES = [], PERMISSION_METADATA = {};
     export const resolveEffectivePermissions = (user, row) => user.role === 'owner' ? ['*'] : Object.keys(row || {}).filter(key => row[key] === true);
-    export const normalizePermissionRecord = value => value; export const permissionAllowedForTenant = () => true;`),
+    export const normalizePermissionRecord = value => value; export const permissionAllowedForTenant = () => true; export const LEGACY_COMBINED_PERMISSION_KEYS = [];`),
   'branchAccess.js': dataUrl('export const tenantIdFromUser = user => user.tenantId;'),
   'usageLimits.js': dataUrl('export const checkUsageLimit = async () => ({ allowed: true });'),
   'mailer.js': dataUrl('export const sendMail = async () => {};'),
   'audit.js': dataUrl('export const auditLog = async () => {}; export const logTenantActivity = async () => {};'),
+  'rateLimit.js': dataUrl('export const createRateLimiter = () => (_req, _res, next) => next();'),
   'trashService.js': dataUrl('export const moveToTrash = async () => {}; export const trashedRecordIds = async () => []; export const assertOutsideTrash = async () => {};'),
   'node:crypto': dataUrl('export const randomInt = (min, max) => min + 1;'),
   cloudinary: dataUrl('export default { v2: { config() {} } };'),
@@ -64,6 +65,7 @@ const handler = (router, method, path) => router.stack.find(layer => layer.route
 const login = handler(authRouter, 'post', '/login');
 const refresh = handler(authRouter, 'post', '/refresh');
 const updateStaff = handler(staffRouter, 'patch', '/:id');
+const generateStaffResetCode = handler(staffRouter, 'post', '/:id/reset-password-code');
 const updateSettings = handler(settingsRouter, 'put', '/');
 
 beforeEach(() => {
@@ -76,8 +78,8 @@ beforeEach(() => {
 });
 afterEach(() => mock.timers.reset());
 async function call(action, request = {}) {
-  const result = { status: 200, body: undefined, next: false };
-  const res = { status(value) { result.status = value; return this; }, json(value) { result.body = value; return this; } };
+  const result = { status: 200, body: undefined, next: false, headers: {} };
+  const res = { status(value) { result.status = value; return this; }, set(name, value) { result.headers[name] = value; return this; }, json(value) { result.body = value; return this; } };
   await action(request, res, () => { result.next = true; });
   return result;
 }
@@ -182,4 +184,23 @@ test('staff update route retains canEditStaff permission enforcement', async () 
   const denied = await call(check, { user: { ...staff, permissions: [] } });
   assert.equal(denied.status, 403);
   assert.equal(denied.next, false);
+});
+
+test('only the business owner can generate a reset code for staff in their own tenant', async () => {
+  const denied = await call(generateStaffResetCode, { user: staff, params: { id: staff.id } });
+  assert.equal(denied.status, 403);
+  assert.equal(updates.length, 0);
+
+  const crossTenant = await call(generateStaffResetCode, { user: { ...owner(), tenantId: 'business-b' }, params: { id: staff.id } });
+  assert.equal(crossTenant.status, 404);
+  assert.equal(updates.length, 0);
+
+  const result = await call(generateStaffResetCode, { user: owner(), params: { id: staff.id }, ip: '127.0.0.1' });
+  assert.equal(result.status, 200);
+  assert.equal(result.headers['Cache-Control'], 'no-store');
+  assert.match(result.body.otp, /^\d{6}$/);
+  assert.equal(result.body.email, staff.email);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].otpCode, result.body.otp);
+  assert.equal(new Date(updates[0].otpExpires).getTime() - Date.now(), 15 * 60 * 1000);
 });

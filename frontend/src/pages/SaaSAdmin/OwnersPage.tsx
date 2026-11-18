@@ -3,7 +3,7 @@ import { apiFetch } from '../../lib/api'
 import React, { useState, useEffect } from 'react'
 import { usePagination } from '@/hooks/usePagination'
 import { Pagination } from '@/components/Pagination'
-import { Users, Search, Mail, Key, Loader2, RefreshCw, X } from 'lucide-react'
+import { Users, Search, Mail, Key, KeyRound, Copy, Loader2, RefreshCw, X } from 'lucide-react'
 
 interface Owner {
   id: string; name: string; email: string; role: string; isActive: boolean; lastLogin: string | null; createdAt: string
@@ -17,6 +17,8 @@ export const OwnersPage: React.FC = () => {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Owner | null>(null)
   const [resetting, setResetting] = useState<string | null>(null)
+  const [resetCodeTarget, setResetCodeTarget] = useState<Owner | null>(null)
+  const [generatedReset, setGeneratedReset] = useState<{ owner: Owner; otp: string; expiresAt: string } | null>(null)
 
   const fetchOwners = async () => {
     setLoading(true)
@@ -39,6 +41,20 @@ export const OwnersPage: React.FC = () => {
       if (!res.ok) throw new Error([payload.error, payload.detail].filter(Boolean).join(' '))
       appNotify(payload.message || 'Password reset code sent to the owner.')
     } catch (error: any) { appNotify(error.message || 'Password reset email could not be sent.') }
+    setResetting(null)
+  }
+
+  const handleGenerateResetCode = async () => {
+    const owner = resetCodeTarget
+    if (!owner) return
+    setResetCodeTarget(null)
+    setResetting(owner.id)
+    try {
+      const res = await apiFetch(`/api/admin/owners/${owner.id}/reset-password-code`, { method: 'POST' })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload.error || 'Could not generate the reset code.')
+      setGeneratedReset({ owner, otp: payload.otp, expiresAt: payload.expiresAt })
+    } catch (error: any) { appNotify(error.message || 'Could not generate the reset code.') }
     setResetting(null)
   }
 
@@ -98,6 +114,9 @@ export const OwnersPage: React.FC = () => {
                       <button onClick={() => handleResetPassword(o.id)} disabled={resetting === o.id} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Reset Password">
                         {resetting === o.id ? <Loader2 size={16} className="animate-spin" /> : <Key size={16} />}
                       </button>
+                      <button onClick={() => setResetCodeTarget(o)} disabled={resetting === o.id} className="p-1 text-amber-700 hover:bg-amber-50 rounded" title="Generate reset code if email was not received" aria-label={`Generate password reset code for ${o.name}`}>
+                        {resetting === o.id ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -131,6 +150,36 @@ export const OwnersPage: React.FC = () => {
               <button onClick={() => handleResetPassword(selected.id)} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2"><Key size={16} /> Reset Password</button>
               <button onClick={() => setSelected(null)} className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-50">Close</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {resetCodeTarget && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-reset-code-title">
+          <div className="w-full max-w-md rounded-lg border bg-white p-6 shadow-xl">
+            <h2 id="confirm-reset-code-title" className="text-lg font-semibold">Generate a reset code?</h2>
+            <p className="mt-2 text-sm text-gray-600">This creates a new code for {resetCodeTarget.name} and invalidates any earlier code. Verify the owner's identity through a trusted channel before sharing it.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setResetCodeTarget(null)} className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={() => void handleGenerateResetCode()} className="inline-flex items-center gap-2 rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800"><KeyRound size={16} />Generate code</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {generatedReset && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="generated-reset-title">
+          <div className="w-full max-w-md rounded-lg border bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div><h2 id="generated-reset-title" className="text-lg font-semibold">Password reset code</h2><p className="mt-1 text-sm text-gray-600">For {generatedReset.owner.name} · {generatedReset.owner.email}</p></div>
+              <button type="button" onClick={() => setGeneratedReset(null)} aria-label="Close reset code" className="rounded p-1 text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3 rounded-md border bg-gray-50 px-4 py-3">
+              <code className="text-2xl font-semibold tracking-[0.2em] text-gray-900">{generatedReset.otp}</code>
+              <button type="button" onClick={() => { void navigator.clipboard.writeText(generatedReset.otp).then(() => appNotify('Reset code copied.')).catch(() => appNotify('Could not access the clipboard; select and copy the code.')) }} className="inline-flex min-h-10 items-center gap-2 rounded-md border bg-white px-3 text-sm font-medium hover:bg-gray-50"><Copy size={15} />Copy</button>
+            </div>
+            <p className="mt-3 text-xs text-gray-600">Expires {new Date(generatedReset.expiresAt).toLocaleString()}. Generating this code invalidated the previous code. Verify the owner’s identity before sharing it, and ask them to reset their password promptly.</p>
+            <div className="mt-5 flex justify-end"><button type="button" onClick={() => setGeneratedReset(null)} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Done</button></div>
           </div>
         </div>
       )}

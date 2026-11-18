@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { moveToTrash, trashedRecordIds, assertOutsideTrash } from '../services/trashService.js';
 import bcrypt from "bcryptjs";
+import { randomInt } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../db.js";
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
@@ -8,6 +9,7 @@ import { tenantIdFromUser } from "../utils/branchAccess.js";
 import { checkUsageLimit } from "../utils/usageLimits.js";
 import { validateWorkingHours, workingHoursAdmin } from "../utils/workingHours.js";
 import { auditLog } from "../utils/audit.js";
+import { createRateLimiter } from "../../middleware/rateLimit.js";
 import {
   ALL_PERMISSION_KEYS as PERM_KEYS,
   PERMISSION_CATEGORIES,
@@ -21,6 +23,12 @@ import {
 const router = Router();
 
 const staffRoles = new Set(["manager", "accountant", "attendant"]);
+const staffResetCodeLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => `${req.user?.id || 'unknown'}:${req.params?.id || 'unknown'}`,
+  policyName: 'staff-reset-code',
+});
 
 // Get permission keys and role defaults
 router.get("/permissions/schema", authenticateToken, requirePermission("canViewStaff"), (req, res) => {
@@ -104,6 +112,45 @@ router.get("/", authenticateToken, requirePermission("canViewStaff"), async (req
   } catch (err) {
     console.error("List staff error:", err);
     res.status(500).json({ error: "Failed to load staff" });
+  }
+});
+
+router.post("/:id/reset-password-code", authenticateToken, staffResetCodeLimiter, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const tenantId = tenantIdFromUser(req.user);
+    if (req.user?.role !== 'owner' || !tenantId) {
+      return res.status(403).json({ error: 'Only the business owner can generate staff reset codes.' });
+    }
+
+    const staff = await prisma.user.findFirst({
+      where: { id: req.params.id, tenantId, role: { in: [...staffRoles] } },
+      select: { id: true, email: true, fname: true, tenantId: true },
+    });
+    if (!staff) return res.status(404).json({ error: 'Staff member not found in this business.' });
+    if (!staff.email) return res.status(400).json({ error: 'This staff member has no email address.' });
+
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await prisma.user.update({ where: { id: staff.id }, data: { otpCode: otp, otpExpires } });
+    await auditLog({
+      tenantId,
+      userId: req.user.id,
+      userEmail: req.user.email || '',
+      subjectUserId: staff.id,
+      subjectEmail: staff.email,
+      action: 'staff_password_reset_code_generated',
+      model: 'User',
+      recordId: staff.id,
+      changes: { data: { action: 'staff_password_reset_code_generated', expiresAt: otpExpires.toISOString() } },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: 'critical',
+    }).catch(() => {});
+
+    return res.json({ email: staff.email, otp, expiresAt: otpExpires.toISOString(), message: 'A new reset code was generated. The previous code is no longer valid.' });
+  } catch (error) {
+    console.error('Generate staff password reset code failed:', error?.code || error?.name || 'UNKNOWN_ERROR');
+    return res.status(500).json({ error: 'Could not generate a staff password reset code.' });
   }
 });
 

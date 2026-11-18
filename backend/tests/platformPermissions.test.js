@@ -16,5 +16,6 @@ test('platform job presets are narrow and route permissions distinguish view fro
   assert.equal(platformPermissionForRequest('POST', '/api/admin/businesses'), 'manage_tenants');
   assert.equal(platformPermissionForRequest('GET', '/api/admin/subscription-payments'), 'view_tenant_billing');
   assert.equal(platformPermissionForRequest('POST', '/api/admin/subscription-payments/x/cancel'), 'manage_tenant_billing');
+  assert.equal(platformPermissionForRequest('POST', '/api/admin/owners/owner-id/reset-password-code'), 'reset_business_owner_password');
   assert.equal(platformPermissionForRequest('DELETE', '/api/unknown-admin-data'), null);
 });

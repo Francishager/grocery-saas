@@ -13,9 +13,16 @@ import { cancelManualSubscriptionPayment, extendSettledSubscriptionTerm, getRefu
 import { ensureTenantAccountingSetup } from "../services/tenantAccountingSetupService.js";
 import { buildOwnerWelcomeEmail } from "../services/ownerWelcomeEmail.js";
 import { PLATFORM_JOB_PRESETS, PLATFORM_PERMISSION_DEFINITIONS, canDelegatePlatformPermissions, sanitizePlatformPermissions } from "../utils/platformPermissions.js";
+import { createRateLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
 const VALID_TENANT_STATUSES = new Set(["active", "suspended", "cancelled", "trial"]);
+const ownerResetCodeLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: req => `${req.user?.id || 'unknown'}:${req.params?.id || 'unknown'}`,
+  policyName: 'owner-reset-code',
+});
 
 router.post("/email/test", authenticateToken, requirePlatformAdmin, async (req, res) => {
   const recipient = String(req.user?.email || "").trim();
@@ -576,6 +583,36 @@ router.post("/owners/:id/reset-password", authenticateToken, requirePlatformAdmi
     const detail = [err?.code, err?.responseCode, err?.message].filter(Boolean).join(" | ");
     console.error("Business owner password reset email failed:", detail || "Unknown email transport error");
     res.status(502).json({ error: "Password reset email could not be sent.", detail: detail || "Check the backend mail transport logs." });
+  }
+});
+
+router.post("/owners/:id/reset-password-code", authenticateToken, requirePlatformAdmin, ownerResetCodeLimiter, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, email: true, fname: true, tenantId: true, role: true } });
+    if (!user || user.role !== 'owner') return res.status(404).json({ error: 'Business owner not found.' });
+    if (!user.email) return res.status(400).json({ error: 'This business owner has no email address.' });
+
+    const otp = String(randomInt(100000, 1000000));
+    const otpExpires = new Date(Date.now() + 15 * 60 * 1000);
+    await prisma.user.update({ where: { id: user.id }, data: { otpCode: otp, otpExpires } });
+    await auditLog({
+      tenantId: 'platform',
+      targetTenantId: user.tenantId || null,
+      userId: req.user?.id || 'unknown',
+      userEmail: req.user?.email || '',
+      action: 'reset_sensitive',
+      model: 'User',
+      recordId: user.id,
+      changes: { data: { action: 'password_reset_code_generated_for_admin_delivery', targetTenant: user.tenantId, expiresAt: otpExpires.toISOString() } },
+      ip: req.ip || req.connection?.remoteAddress,
+      severity: 'critical',
+    }).catch(() => {});
+
+    return res.json({ email: user.email, otp, expiresAt: otpExpires.toISOString(), message: 'A new reset code was generated. The previous code is no longer valid.' });
+  } catch (error) {
+    console.error('Generate business owner password reset code failed:', error?.code || error?.name || 'UNKNOWN_ERROR');
+    return res.status(500).json({ error: 'Could not generate a password reset code.' });
   }
 });
 

@@ -4,6 +4,7 @@ export const PLATFORM_PERMISSION_DEFINITIONS = [
   { id: 'suspend_tenants', name: 'Suspend or activate businesses', description: 'Change a business tenant account status.', category: 'Tenant operations' },
   { id: 'invite_business_owners', name: 'Onboard business owners', description: 'Invite or manage business-owner onboarding.', category: 'Tenant operations' },
   { id: 'view_platform_users', name: 'View platform users', description: 'View SaaS platform users and business owners.', category: 'Tenant operations' },
+  { id: 'reset_business_owner_password', name: 'Generate owner password reset codes', description: 'Generate one-time password reset codes for business owners when email delivery fails.', category: 'Tenant operations' },
   { id: 'view_tenant_billing', name: 'View subscriptions and payments', description: 'View subscription details and the payment ledger.', category: 'Billing' },
   { id: 'manage_tenant_billing', name: 'Manage subscriptions and payments', description: 'Record/cancel manual receipts and manage tenant billing.', category: 'Billing' },
   { id: 'manage_plans', name: 'Manage subscription plans', description: 'Create, update, and assign subscription plans.', category: 'Billing' },
@@ -49,6 +50,7 @@ export function platformPermissionForRequest(method, requestPath) {
   if (/\/subscriptions(?:\/|$)/.test(pathname)) return verb === 'GET' && !/\/payments/.test(pathname) ? 'view_tenant_billing' : 'manage_tenant_billing';
   if (/\/(?:metrics|stats)$/.test(pathname)) return 'view_platform_analytics';
   if (/\/businesses$/.test(pathname)) return verb === 'GET' ? 'view_all_tenants' : 'manage_tenants';
+  if (/\/owners\/[^/]+\/reset-password-code$/.test(pathname)) return 'reset_business_owner_password';
   if (/\/owners(?:\/|$)/.test(pathname)) return verb === 'GET' ? 'view_platform_users' : 'invite_business_owners';
   if (/\/invitations(?:\/|$)/.test(pathname)) return 'invite_business_owners';
   if (/\/tenants(?:\/|$)/.test(pathname)) {

@@ -1,6 +1,6 @@
 import { appConfirm } from '@/lib/appFeedback'
 import { useEffect, useState, useRef } from 'react'
-import { Shield, Plus, MoreVertical, Edit, Ban, Key, Trash2, CheckCheck, Square, Wallet } from 'lucide-react'
+import { Shield, Plus, MoreVertical, Edit, Ban, Key, KeyRound, Copy, Trash2, CheckCheck, Square, Wallet, X } from 'lucide-react'
 import { staffApi, branchesApi } from '@/lib/api'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -439,6 +439,7 @@ export default function RolesPermissionsPage() {
   const [cashAccounts, setCashAccounts] = useState<any[]>([])
   const [dropdownId, setDropdownId] = useState<string | null>(null)
   const [createdPassword, setCreatedPassword] = useState<{ name: string; email: string; password: string } | null>(null)
+  const [generatedStaffReset, setGeneratedStaffReset] = useState<{ name: string; email: string; otp: string; expiresAt: string } | null>(null)
   const [permSearch, setPermSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -458,6 +459,20 @@ export default function RolesPermissionsPage() {
     } catch (error: any) {
       toast({ title: 'Working hours not saved', description: error?.message, variant: 'destructive' })
     } finally { setSavingHours(null) }
+  }
+
+  const generateStaffResetCode = async (member: any) => {
+    setDropdownId(null)
+    if (user?.role !== 'owner') return
+    if (!(await appConfirm(`Generate a new password reset code for ${member.name || member.email}? This invalidates any earlier code. Verify the staff member's identity before sharing it.`))) return
+    try {
+      const response = await apiFetch(`/api/staff/${member.id}/reset-password-code`, { method: 'POST' })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'Could not generate a password reset code.')
+      setGeneratedStaffReset({ name: member.name || member.email, email: payload.email, otp: payload.otp, expiresAt: payload.expiresAt })
+    } catch (error: any) {
+      toast({ title: 'Reset code not generated', description: error?.message || 'Please try again.', variant: 'destructive' })
+    }
   }
 
   useEffect(() => {
@@ -810,6 +825,11 @@ export default function RolesPermissionsPage() {
                               <button onClick={() => { togglePermissions(s.id); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
                                 <Key className="h-3.5 w-3.5" /> Permissions
                               </button>
+                              {user?.role === 'owner' && s.role !== 'owner' && (
+                                <button onClick={() => void generateStaffResetCode(s)} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted">
+                                  <KeyRound className="h-3.5 w-3.5" /> Generate reset code
+                                </button>
+                              )}
                               <button onClick={() => { handleDeactivate(s.id); setDropdownId(null) }} className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-muted text-orange-600">
                                 <Ban className="h-3.5 w-3.5" /> {s.isActive ? 'Suspend' : 'Reactivate'}
                               </button>
@@ -855,6 +875,23 @@ export default function RolesPermissionsPage() {
           )}
         </CardContent>
       </Card>
+
+      {generatedStaffReset && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="staff-reset-code-title">
+          <div className="w-full max-w-md rounded-lg border bg-background p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div><h2 id="staff-reset-code-title" className="text-lg font-semibold">Staff password reset code</h2><p className="mt-1 text-sm text-muted-foreground">For {generatedStaffReset.name} · {generatedStaffReset.email}</p></div>
+              <button type="button" onClick={() => setGeneratedStaffReset(null)} aria-label="Close reset code" className="rounded p-1 text-muted-foreground hover:bg-muted"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="mt-5 flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-4 py-3">
+              <code className="text-2xl font-semibold tracking-[0.2em]">{generatedStaffReset.otp}</code>
+              <Button type="button" variant="outline" onClick={() => { void navigator.clipboard.writeText(generatedStaffReset.otp).then(() => toast({ title: 'Reset code copied' })).catch(() => toast({ title: 'Could not access clipboard', description: 'Select and copy the code manually.', variant: 'destructive' })) }}><Copy className="mr-2 h-4 w-4" />Copy</Button>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">Expires {new Date(generatedStaffReset.expiresAt).toLocaleString()}. The previous code is invalid. Verify the staff member's identity before sharing it, and ask them to reset their password promptly using the Forgot Password page.</p>
+            <div className="mt-5 flex justify-end"><Button type="button" onClick={() => setGeneratedStaffReset(null)}>Done</Button></div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
