@@ -107,13 +107,17 @@ export default function WeeklySalesCharts({ data }: { data: any }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 2xl:grid-cols-8" role="group" aria-label="Select a week day">
-            <button type="button" aria-pressed={selectedDate === 'all'} onClick={() => setSelectedDate('all')} className={`min-w-0 rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:px-3 ${selectedDate === 'all' ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
-              <span className="block truncate font-medium">All days</span><span className="mt-1 block break-words text-xs text-muted-foreground">{rows.reduce((sum: number, row: any) => sum + Number(row.salesCount || 0), 0)} sales</span>
+          <div className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2 snap-x snap-mandatory" role="group" aria-label="Select a week day">
+            <button type="button" aria-pressed={selectedDate === 'all'} onClick={() => setSelectedDate('all')} className={`w-36 shrink-0 snap-start rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:w-40 sm:px-3 lg:w-44 ${selectedDate === 'all' ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
+              <span className="block truncate font-medium">All days</span>
+              <span className="mt-1 block truncate text-xs text-muted-foreground">{rows.reduce((sum: number, row: any) => sum + Number(row.salesCount || 0), 0)} sales</span>
+              <span className="mt-0.5 block min-w-0 truncate text-xs font-semibold tabular-nums text-foreground" title={money(summary.totalRevenue)}>{money(summary.totalRevenue)}</span>
             </button>
             {rows.map((row: any) => (
-              <button key={row.date} type="button" aria-pressed={selectedDate === row.date} onClick={() => setSelectedDate(row.date)} className={`min-w-0 rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:px-3 ${selectedDate === row.date ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
-                <span className="block truncate font-medium">{row.label}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{row.salesCount} sales · {money(row.revenue)}</span>
+              <button key={row.date} type="button" aria-pressed={selectedDate === row.date} onClick={() => setSelectedDate(row.date)} className={`w-36 shrink-0 snap-start rounded-md border px-2.5 py-2 text-left text-sm transition-colors sm:w-40 sm:px-3 lg:w-44 ${selectedDate === row.date ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted'}`}>
+                <span className="block truncate font-medium">{row.label}</span>
+                <span className="mt-1 block truncate text-xs text-muted-foreground">{row.salesCount} sales</span>
+                <span className="mt-0.5 block min-w-0 truncate text-xs font-semibold tabular-nums text-foreground" title={money(row.revenue)}>{money(row.revenue)}</span>
               </button>
             ))}
           </div>
