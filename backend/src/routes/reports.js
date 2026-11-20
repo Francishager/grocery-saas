@@ -20,7 +20,7 @@ import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js
 import { LEGACY_REPORT_GROUP_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
 import { expenseDateWhere, cashMovementDirection, loadJournalExpenseRows, summarizeCashMovements, accountCashBalances, loadLedgerBalances, ledgerBalanceSheet, postedJournalWhere } from '../utils/reportAccounting.js';
 import { aggregateInventorySales, calendarDaysBetween, inventoryQuantityChange, isExplicitDamageReason, summarizeInventoryMovements } from '../utils/inventoryReportHelpers.js';
-import { customerWalletDepositReferenceKeys, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement } from '../utils/customerWalletReporting.js';
+import { customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement } from '../utils/customerWalletReporting.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -3395,7 +3395,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     if (!customerId) {
       const saleUserFilter = saleVisibilityFilter(req);
       const [customersRaw, sales, payments, withdrawals, creditNotes, saleReturns] = await Promise.all([
-        prisma.customer.findMany({ where: scopedWhere(s), orderBy: { name: "asc" } }),
+        prisma.customer.findMany({ where: scopedWhere(s), orderBy: { name: "asc" }, include: { wallet: { select: { migratedLegacyAmount: true, createdAt: true } } } }),
         prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerWithdrawal.findMany({ where: scopedWhere(s, { ...df(req), walletId: null }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
@@ -3405,17 +3405,19 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
 
       const transactions = [
-        ...customers.filter((customer) => positiveOpeningBalance(customer) > 0).map((customer) => ({
+        ...customers.filter((customer) => Number(customer.openingBalance || 0) !== 0).map((customer) => ({
           id: `opening-${customer.id}`,
           date: openingBalanceDate(customer),
-          type: "Opening Balance",
+          type: Number(customer.openingBalance) < 0 ? "Customer Credit Opening Balance" : "Opening Balance",
           description: `Opening Balance - ${customer.name}`,
-          debit: positiveOpeningBalance(customer),
-          credit: 0,
+          debit: Math.max(0, Number(customer.openingBalance || 0)),
+          credit: Math.max(0, -Number(customer.openingBalance || 0)),
           reference: "-",
           details: customer.openingBalanceNote || "-",
           paymentMethod: "-",
         })),
+        ...customers.map((customer) => customerWalletReclassificationStatementRow(customer, customer.wallet))
+          .filter(Boolean),
         ...sales.map((sale) => ({
           id: sale.id,
           date: sale.createdAt,
@@ -3498,7 +3500,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       return;
     }
 
-    const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }) });
+    const customer = await prisma.customer.findFirst({ where: scopedWhere(s, { id: customerId }), include: { wallet: { select: { migratedLegacyAmount: true, createdAt: true } } } });
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
     const saleUserFilter = saleVisibilityFilter(req);
@@ -3531,23 +3533,25 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
 
     // Compile all transactions chronologically
     const transactions = [];
-    const openingBalanceAmount = positiveOpeningBalance(customer);
+    const openingBalanceAmount = toMoney(customer.openingBalance);
     
     // Add opening balance as first transaction
-    if (openingBalanceAmount > 0) {
+    if (openingBalanceAmount !== 0) {
       transactions.push({
         id: `opening-${customer.id}`,
         date: openingBalanceDate(customer),
-        type: "Opening Balance",
+        type: openingBalanceAmount < 0 ? "Customer Credit Opening Balance" : "Opening Balance",
         description: "Opening Balance",
-        debit: openingBalanceAmount,
-        credit: 0,
+        debit: Math.max(0, openingBalanceAmount),
+        credit: Math.max(0, -openingBalanceAmount),
         reference: "-",
         details: customer.openingBalanceNote || "-",
         paymentMethod: "-",
         relatedId: null,
       });
     }
+    const walletReclassification = customerWalletReclassificationStatementRow(customer, customer.wallet)
+    if (walletReclassification) transactions.push(walletReclassification)
 
     // Add sales as debits (charges). Sale totals are already net of invoice discounts.
     sales.forEach((sale) => {
@@ -3636,12 +3640,9 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
 
     // Calculate running balances - START with opening balance
-    let runningBalance = openingBalanceAmount;
+    let runningBalance = 0;
     transactions.forEach((txn) => {
-      // Skip opening balance transaction in calculation (it's already in runningBalance)
-      if (txn.type !== "Opening Balance") {
-        runningBalance = runningBalance + txn.debit - txn.credit;
-      }
+      runningBalance = runningBalance + txn.debit - txn.credit;
       txn.balance = runningBalance;
     });
 

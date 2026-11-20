@@ -15,6 +15,7 @@ import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict, findStrongCustomerIdentityDuplicates } from '../src/utils/customerIdentity.js'
 import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
+import { customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances } from '../src/utils/customerWalletReporting.js'
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
@@ -832,7 +833,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
             include: {
               user: userSelect,
               payment: { select: { amount: true, currency: true, foreignAmount: true, paymentMethod: true, mobileProvider: true, phoneNumber: true, transactionId: true, reference: true, notes: true, createdAt: true } },
-            }, orderBy: { createdAt: 'desc' }, take: 100,
+            }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100,
           }) : Promise.resolve([]),
         ])
       }
@@ -866,7 +867,10 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       profileCustomer.wallet = {
         active: Boolean(wallet?.isActive),
         ...(access.viewWallet && { balance: walletBalance }),
-        ...(access.viewWallet && { migratedLegacyAmount: toMoney(wallet?.migratedLegacyAmount), transactions: walletTransactions }),
+        ...(access.viewWallet && {
+          migratedLegacyAmount: toMoney(wallet?.migratedLegacyAmount),
+          transactions: customerWalletTransactionsWithBalances(walletTransactions, walletBalance),
+        }),
       }
     }
 
@@ -907,6 +911,22 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         items: [],
         sortOrder: 0
       })
+    }
+    if (access.balance) {
+      const reclassification = customerWalletReclassificationStatementRow(customer, wallet)
+      if (reclassification) {
+        rows.push({
+          ...reclassification,
+          source: 'customer_wallet_reclassification',
+          balanceImpact: reclassification.debit - reclassification.credit,
+          affectsBalance: true,
+          status: 'system',
+          branch: customer.branch?.name || '',
+          staff: 'System',
+          items: [],
+          sortOrder: 5,
+        })
+      }
     }
 
     receivableSales.forEach((sale) => {
@@ -1540,9 +1560,9 @@ router.get('/customers/:id/wallet', authenticateToken, requirePermission('canVie
     if (!wallet) return res.json({ active: false, balance: 0, transactions: [], migrated: false })
     const [balance, transactions] = await Promise.all([
       getCustomerWalletBalance(prisma, scope.tenantId, wallet.id),
-      prisma.customerWalletTransaction.findMany({ where: { tenantId: scope.tenantId, walletId: wallet.id }, include: { user: { select: { id: true, fname: true, lname: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }),
+      prisma.customerWalletTransaction.findMany({ where: { tenantId: scope.tenantId, walletId: wallet.id }, include: { user: { select: { id: true, fname: true, lname: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }),
     ])
-    res.json({ active: wallet.isActive, balance, migratedLegacyAmount: Number(wallet.migratedLegacyAmount || 0), migrated, transactions })
+    res.json({ active: wallet.isActive, balance, migratedLegacyAmount: Number(wallet.migratedLegacyAmount || 0), migrated, transactions: customerWalletTransactionsWithBalances(transactions, balance) })
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
     handleBranchError(res, error, 'Failed to load customer wallet')

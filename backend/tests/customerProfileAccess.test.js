@@ -99,9 +99,14 @@ test('customer history permission groups do not expose other transaction categor
     { source: 'customer_withdrawal' },
     { source: 'customer_activity' },
     { source: 'opening_balance' },
+    { source: 'customer_wallet_reclassification' },
   ]
   const access = customerProfileAccess(['canViewCustomerPaymentsHistory', 'canViewCustomerReturnsHistory'])
   assert.deepEqual(filterCustomerHistoryRows(rows, access).map((row) => row.source), ['customer_payment', 'sale_return'])
+  const balanceAccess = customerProfileAccess(['canViewCustomerBalance'])
+  assert.deepEqual(filterCustomerHistoryRows(rows, balanceAccess).map((row) => row.source), ['opening_balance', 'customer_wallet_reclassification'])
+  const walletAccess = customerProfileAccess(['canViewCustomerWallet'])
+  assert.deepEqual(filterCustomerHistoryRows([{ source: 'customer_wallet' }], walletAccess), [])
 })
 
 test('historical rental receivables and collections follow customer sales/payment or business-activity permissions', () => {
