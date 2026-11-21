@@ -20,12 +20,16 @@ const updateServiceWorker = registerSW({
   onRegisteredSW: (_serviceWorkerUrl, registration) => {
     if (!registration) return
     const checkForUpdates = () => {
-      if (document.visibilityState === 'visible') void registration.update().catch(() => undefined)
+      if (navigator.onLine && document.visibilityState === 'visible') void registration.update().catch(() => undefined)
     }
+    if (registration.waiting && navigator.serviceWorker.controller) notifyPwaUpdateAvailable()
+    checkForUpdates()
     window.setInterval(checkForUpdates, 5 * 60 * 1000)
     window.addEventListener('focus', checkForUpdates)
     document.addEventListener('visibilitychange', checkForUpdates)
+    window.addEventListener('online', checkForUpdates)
   },
+  onRegisterError: (error) => console.warn('JibuSales app update checks could not start:', error),
 })
 setPwaUpdateServiceWorker(updateServiceWorker)
 
