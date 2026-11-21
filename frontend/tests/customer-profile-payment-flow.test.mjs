@@ -76,12 +76,16 @@ test('credit sales apply active wallet funds and tell staff the wallet amount us
 test('customer-profile payment dialog stays above its overlay and records an optional note', () => {
   assert.match(paymentDialog, /className="z-\[110\]/);
   assert.match(paymentDialog, /<Textarea id="profilePaymentNotes"[\s\S]*?value=\{notes\}/);
-  assert.match(paymentDialog, /notes: notes\.trim\(\) \|\| 'Payment recorded from customer profile'/);
+  assert.match(paymentDialog, /notes: notes\.trim\(\) \|\| 'Payment recorded from customer account'/);
 });
 
 test('customer payment notes flow into profile receipt and reprint details', () => {
   assert.match(historyDialog, /notes\?: string \| null/);
   assert.match(historyDialog, /isPayment && row\.notes \? \[\{ label: 'Note', value: row\.notes \}\]/);
+  assert.match(historyDialog, /label: isPayment \? 'Cashier' : 'Staff', value: row\.staff/);
+  assert.match(backendReceivables, /createdBy: userSelect/);
+  assert.match(backendReceivables, /staff: userName\(payment\.createdBy\)/);
+  assert.match(backendReceivables, /createdById: req\.user\.id/);
 });
 
 test('customer receipts include payment method and any mobile-money details', () => {

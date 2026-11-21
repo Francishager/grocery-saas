@@ -376,7 +376,7 @@ function customerActivityReceipt(row: CustomerHistoryTransaction, customerName?:
     ...(isPayment && row.phoneNumber ? [{ label: 'Mobile money number', value: row.phoneNumber }] : []),
     ...(isPayment && row.transactionId ? [{ label: 'Transaction ID', value: row.transactionId }] : []),
     ...(isPayment && row.notes ? [{ label: 'Note', value: row.notes }] : []),
-    { label: 'Staff', value: row.staff },
+    { label: isPayment ? 'Cashier' : 'Staff', value: row.staff },
     ...(!isCreditNote && !isReturn ? [
       { label: 'Debit', value: row.debit ? formatCurrency(Number(row.debit)) : '' },
       { label: 'Credit', value: row.credit ? formatCurrency(Number(row.credit)) : '' },

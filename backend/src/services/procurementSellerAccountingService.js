@@ -153,7 +153,7 @@ export async function approveProcurementSupplierPayment(client, { approval, tran
   const userId = await sellerPostingUser(client, invoice.sellerTenantId)
   const settlementAccountId = transactionAccountId || config.marketplaceSettlementAccountId
   const payment = await client.customerPayment.create({ data: {
-    tenantId: invoice.sellerTenantId, branchId: sale.branchId, customerId: sale.customerId, saleId: sale.id,
+    tenantId: invoice.sellerTenantId, branchId: sale.branchId, customerId: sale.customerId, createdById: userId, saleId: sale.id,
     amount, paymentMethod: paymentMethod || 'procurement_settlement', reference: supplierPayment.reference || supplierPayment.id,
     transactionId: supplierPayment.transactionId || null, idempotencyKey, allocationMode: 'explicit',
     notes: transactionAccountId

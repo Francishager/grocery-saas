@@ -650,6 +650,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         where: scopedWhere(scope, { customerId: id }),
         include: {
           branch: { select: { id: true, name: true } },
+          createdBy: userSelect,
           sale: {
             select: {
               id: true,
@@ -1127,7 +1128,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         notes: payment.notes || null,
         status: 'paid',
         branch: payment.branch?.name || '',
-        staff: '',
+        staff: userName(payment.createdBy),
         items: (payment.sale?.items || []).map((item) => ({
           id: item.id,
           productId: item.productId,
@@ -1695,6 +1696,7 @@ router.post('/wallet/deposits', authenticateToken, requirePermission('canDeposit
       const walletAmount = toMoney(depositAllocation.walletAmount)
       const payment = await tx.customerPayment.create({ data: {
         tenantId: scope.tenantId, branchId: scope.branchId, customerId,
+        createdById: req.user.id,
         amount: baseAmount, currency: fx.currency, foreignAmount, exchangeRateToBase: fx.rateToBase,
         exchangeRateAsOf: fx.rateDate, exchangeRateSource: fx.provider, paymentMethod,
         mobileProvider: paymentMethod === 'mobile_money' ? provider : null,
@@ -2440,6 +2442,7 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
             tenantId: scope.tenantId,
             branchId: scope.branchId,
             customerId,
+            createdById: req.user.id,
             saleId: createdSale.id,
             amount: paid,
             currency: fx.currency,
@@ -2894,7 +2897,8 @@ router.get('/payments', authenticateToken, requirePermission('canViewReceivable'
         take: Number(limit),
         include: {
           customer: { select: { id: true, name: true, phone: true } },
-          sale: { select: { id: true, receiptNo: true } }
+          sale: { select: { id: true, receiptNo: true } },
+          createdBy: userSelect
         },
         orderBy: { createdAt: 'desc' }
       }),
@@ -3136,6 +3140,7 @@ router.post('/payments', authenticateToken, requirePermission('canRecordCustomer
           tenantId: scope.tenantId,
           branchId: scope.branchId,
           customerId,
+          createdById: req.user.id,
           saleId,
           amount: paidAmount,
           currency: fx.currency,

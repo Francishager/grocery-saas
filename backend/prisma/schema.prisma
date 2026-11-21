@@ -516,6 +516,7 @@ model User {
   // =========================
   ownedTenants                 Tenant[]                @relation("TenantOwner")
   tenantMemberships            TenantMembership[]
+  customerPaymentsCreated      CustomerPayment[]         @relation("CustomerPaymentCreator")
   securityPasskeys             SecurityPasskey[]
   securityChallenges           UserSecurityChallenge[]
   securitySetupCompletedAt     DateTime?
@@ -1888,6 +1889,8 @@ model CustomerPayment {
   branch                     Branch?                     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   customerId                 String
   customer                   Customer                    @relation(fields: [customerId], references: [id])
+  createdById                String?
+  createdBy                  User?                       @relation("CustomerPaymentCreator", fields: [createdById], references: [id], onDelete: SetNull)
   saleId                     String?
   sale                       SaleRecord?                 @relation(fields: [saleId], references: [id])
   amount                     Float

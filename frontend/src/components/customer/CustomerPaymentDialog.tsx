@@ -167,7 +167,7 @@ export default function CustomerPaymentDialog({
           mobileProvider: method === 'mobile_money' ? mobileProvider : undefined,
           phoneNumber: method === 'mobile_money' ? phoneNumber : undefined,
           transactionId: ['mobile_money', 'card'].includes(method) ? transactionId : undefined,
-          notes: notes.trim() || 'Payment recorded from customer profile',
+          notes: notes.trim() || 'Payment recorded from customer account',
         }),
       })
       const result = await response.json().catch(() => ({}))
