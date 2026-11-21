@@ -18,6 +18,7 @@ const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97
 
 type ModuleDashboardMetric = { label: string; value: string | number; detail?: string }
 type OwingCustomer = { id: string; name: string; phone?: string | null; maskedPhone?: string | null; balance: number }
+type WalletCustomer = { id: string; name: string; branch?: string | null; balance: number }
 
 function ModuleSnapshotCard({ title, description, metrics, accent }: { title: string; description: string; metrics: ModuleDashboardMetric[]; accent: string }) {
   const [expanded, setExpanded] = useState(false)
@@ -87,9 +88,14 @@ export default function DashboardPage() {
   const [owingLoading, setOwingLoading] = useState(false)
   const [owingError, setOwingError] = useState('')
   const [owingListIncomplete, setOwingListIncomplete] = useState(false)
+  const [walletDialogOpen, setWalletDialogOpen] = useState(false)
+  const [walletCustomers, setWalletCustomers] = useState<WalletCustomer[]>([])
+  const [walletLoading, setWalletLoading] = useState(false)
+  const [walletError, setWalletError] = useState('')
   const { toast } = useToast()
   const online = useOnlineStatus()
   const dashboardEnabled = Boolean(user?.tenantId) && hasFeature('dashboard')
+  const canViewCustomerWallet = hasFeature('customers.wallet') && hasPermission('canViewCustomerWallet')
   const canViewSalesDashboard = hasPermission('canViewSale') || hasPermission('canViewReportSalesSummary') || hasPermission('canViewReportSalesDaily')
   const canViewFinancialDashboard = hasFeature('reports.financial') && hasPermission('canViewReportFinancialProfitLoss')
   const dashboardAccess = {
@@ -98,6 +104,7 @@ export default function DashboardPage() {
     expenses: hasPermission('canViewExpense'),
     inventory: hasPermission('canViewProduct'),
     customers: hasPermission('canViewCustomer'),
+    wallets: canViewCustomerWallet,
     receivables: hasPermission('canViewReceivable'),
     tax: hasPermission('canViewTax'),
   }
@@ -134,6 +141,27 @@ export default function DashboardPage() {
       setOwingError(error instanceof Error ? error.message : 'Could not load customers with an amount due.')
     } finally {
       setOwingLoading(false)
+    }
+  }
+
+  const openWalletCustomerList = async () => {
+    if (!canViewCustomerWallet || !hasPermission('canViewCustomer')) return
+    setWalletDialogOpen(true)
+    setWalletError('')
+    if (!online) {
+      setWalletError('Connect to the internet to load current customer wallet balances.')
+      return
+    }
+    setWalletLoading(true)
+    try {
+      const response = await apiFetch('/api/dashboard/wallet-balances')
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data?.error || 'Could not load customer wallet balances.')
+      setWalletCustomers(Array.isArray(data.rows) ? data.rows : [])
+    } catch (error) {
+      setWalletError(error instanceof Error ? error.message : 'Could not load customer wallet balances.')
+    } finally {
+      setWalletLoading(false)
     }
   }
   useEffect(() => {
@@ -520,6 +548,15 @@ export default function DashboardPage() {
             <div className="flex justify-between gap-3"><span className="text-muted-foreground">Customers owing</span><span className="font-medium tabular-nums">{Number(k.receivablesCount || 0).toLocaleString()}</span></div>
           </>} />}
 
+        {canViewCustomerWallet && <DashboardMetricCard title="Customer Wallet Funds" value={k.customerWalletFunds == null ? '—' : formatCurrency(k.customerWalletFunds)}
+          caption="Funds currently held on behalf of customers" icon={<PiggyBank className="size-4 text-emerald-600" />} accent="border-l-emerald-500" details={<>
+            <div className="flex justify-between gap-3"><span className="text-muted-foreground">Customers with wallet funds</span><span className="font-medium tabular-nums">{Number(k.customerWalletCustomerCount || 0).toLocaleString()}</span></div>
+            <p className="text-xs text-muted-foreground">Customer wallet liability; not sales revenue. The wallet total is separate from receivables and cash at hand.</p>
+            {hasPermission('canViewCustomer') && <button type="button" onClick={() => void openWalletCustomerList()} className="flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-2 text-left text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <span>View customer wallet balances</span><ChevronRight className="size-4" />
+            </button>}
+          </>} />}
+
         {hasFeature('inventory') && hasPermission('canViewProduct') && <DashboardMetricCard title="Inventory items" value={k.productCount == null ? '—' : Number(k.productCount).toLocaleString()}
           caption={k.lowStockCount == null ? 'Stock alerts unavailable' : `${Number(k.lowStockCount).toLocaleString()} low-stock alerts`}
           icon={<Package className="size-4 text-cyan-600" />} accent="border-l-cyan-500" details={<>
@@ -862,6 +899,25 @@ export default function DashboardPage() {
                   <div className="shrink-0 text-right"><p className="text-[11px] text-muted-foreground">Amount due</p><p className="text-sm font-semibold tabular-nums text-red-700 dark:text-red-300">{formatCurrency(Number(customer.balance || 0))}</p></div>
                 </div>)}
                 {owingListIncomplete && <p role="status" className="px-5 py-3 text-xs text-amber-800 dark:text-amber-200">Showing customers from the first 10,000 records. Additional customer balances may not appear in this list.</p>}
+              </div>}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={walletDialogOpen} onOpenChange={setWalletDialogOpen}>
+        <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-b px-5 py-4 pr-12">
+            <DialogTitle>Customer wallet balances</DialogTitle>
+            <DialogDescription>{Number(k.customerWalletCustomerCount || 0).toLocaleString()} customers have funds held in active wallets.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[min(60vh,34rem)] overflow-y-auto">
+            {walletLoading ? <p role="status" className="px-5 py-10 text-center text-sm text-muted-foreground">Loading wallet balances…</p>
+              : walletError ? <div className="space-y-3 px-5 py-10 text-center"><p role="alert" className="text-sm text-destructive">{walletError}</p><button type="button" onClick={() => void openWalletCustomerList()} className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">Retry</button></div>
+              : walletCustomers.length === 0 ? <p className="px-5 py-10 text-center text-sm text-muted-foreground">No active customer wallets currently have funds.</p>
+              : <div className="divide-y">
+                {walletCustomers.map(customer => <div key={customer.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{customer.name}</p>{customer.branch && <p className="mt-0.5 truncate text-xs text-muted-foreground">{customer.branch}</p>}</div>
+                  <div className="shrink-0 text-right"><p className="text-[11px] text-muted-foreground">Wallet funds</p><p className="text-sm font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{formatCurrency(Number(customer.balance || 0))}</p></div>
+                </div>)}
               </div>}
           </div>
         </DialogContent>

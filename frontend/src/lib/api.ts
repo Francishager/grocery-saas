@@ -1219,6 +1219,8 @@ export interface DashboardKpis {
   customerCount: number | null
   customerWithBalanceCount?: number | null
   customerWithoutBalanceCount?: number | null
+    customerWalletFunds?: number | null
+    customerWalletCustomerCount?: number | null
   receivablesOutstanding: number | null
   receivablesCount: number | null
 }

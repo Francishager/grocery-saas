@@ -9,6 +9,7 @@ export interface DashboardDataAccess {
   expenses: boolean
   inventory: boolean
   customers: boolean
+  wallets: boolean
   receivables: boolean
   tax: boolean
 }
@@ -32,6 +33,8 @@ function maskKpis(value: DashboardKpis, access: DashboardDataAccess): DashboardK
     customerCount: access.customers ? value.customerCount : null,
     customerWithBalanceCount: access.customers ? value.customerWithBalanceCount : null,
     customerWithoutBalanceCount: access.customers ? value.customerWithoutBalanceCount : null,
+    customerWalletFunds: access.wallets ? value.customerWalletFunds : null,
+    customerWalletCustomerCount: access.wallets ? value.customerWalletCustomerCount : null,
     receivablesOutstanding: access.receivables ? value.receivablesOutstanding : null,
     receivablesCount: access.receivables ? value.receivablesCount : null,
   }
@@ -106,7 +109,7 @@ export function useDashboardData(enabled: boolean, online: boolean, scopeKey: st
       ...(access.sales || access.finance ? [section(dashboardApi.getDailyPerformance(controller.signal), setDailyPerf)] : []),
     ])
     if (current()) setRefreshing(false)
-  }, [enabled, online, scopeKey, access.sales, access.finance, access.expenses, access.inventory, access.customers, access.receivables, access.tax])
+  }, [enabled, online, scopeKey, access.sales, access.finance, access.expenses, access.inventory, access.customers, access.wallets, access.receivables, access.tax])
 
   useEffect(() => {
     setKpis(null)

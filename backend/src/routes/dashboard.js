@@ -121,6 +121,45 @@ function mergePaymentMethods(groups) {
   return Array.from(map.values()).sort((a, b) => b.total - a.total);
 }
 
+async function customerWalletDashboardData(scope) {
+  const where = {
+    tenantId: scope.tenantId,
+    isActive: true,
+    ...(scope.branchId ? { OR: [{ branchId: scope.branchId }, { branchId: null }] } : {}),
+  };
+  const wallets = await prisma.customerWallet.findMany({
+    where,
+    select: {
+      id: true,
+      customer: { select: { id: true, name: true } },
+      branch: { select: { name: true } },
+    },
+  });
+  if (!wallets.length) return { total: 0, customerCount: 0, rows: [] };
+
+  const transactions = await prisma.customerWalletTransaction.groupBy({
+    by: ['walletId', 'direction'],
+    where: { tenantId: scope.tenantId, walletId: { in: wallets.map(wallet => wallet.id) } },
+    _sum: { amount: true },
+  });
+  const balances = new Map();
+  for (const transaction of transactions) {
+    const direction = transaction.direction === 'in' ? 1 : -1;
+    balances.set(transaction.walletId, (balances.get(transaction.walletId) || 0) + direction * Number(transaction._sum?.amount || 0));
+  }
+  const rows = wallets.map(wallet => ({
+    id: wallet.customer.id,
+    name: wallet.customer.name,
+    branch: wallet.branch?.name || null,
+    balance: Math.max(0, Math.round((balances.get(wallet.id) || 0) * 100) / 100),
+  })).filter(row => row.balance > 0.009).sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    total: Math.round(rows.reduce((sum, row) => sum + row.balance, 0) * 100) / 100,
+    customerCount: rows.length,
+    rows,
+  };
+}
+
 // Dashboard KPIs
 router.get("/kpis", authenticateToken, async (req, res) => {
   if (!req.user?.tenantId) return res.status(403).json({ error: "Business account required" });
@@ -131,6 +170,7 @@ router.get("/kpis", authenticateToken, async (req, res) => {
     const salesEnabled = hasFeatureAccess(tenantFeatures, 'sales');
     const inventoryEnabled = hasFeatureAccess(tenantFeatures, 'inventory');
     const customersEnabled = hasFeatureAccess(tenantFeatures, 'customers');
+    const customerWalletEnabled = hasFeatureAccess(tenantFeatures, 'customers.wallet');
     const receivablesEnabled = hasFeatureAccess(tenantFeatures, 'receivables');
     const expensesEnabled = hasFeatureAccess(tenantFeatures, 'expenses');
     const taxEnabled = hasFeatureAccess(tenantFeatures, 'settings.taxes');
@@ -184,6 +224,8 @@ router.get("/kpis", authenticateToken, async (req, res) => {
     // The reconciliation reads several related tables; keep it out of the broad
     // dashboard fan-out so hosted databases do not exhaust their connection pool.
     const receivables = await outstandingCustomerSummary(prisma, scope);
+    const canViewCustomerWallet = customerWalletEnabled && hasPermission(req, 'canViewCustomerWallet');
+    const walletOverview = canViewCustomerWallet ? await customerWalletDashboardData(scope) : null;
 
     const revenueThisMonth = aggregateRevenue(salesThisMonth) + aggregateRevenue(saleRecordsThisMonth);
     const revenueLastMonth = aggregateRevenue(salesLastMonth) + aggregateRevenue(saleRecordsLastMonth);
@@ -221,11 +263,25 @@ router.get("/kpis", authenticateToken, async (req, res) => {
       customerCount: canViewCustomers ? customers : null,
       customerWithBalanceCount: canViewCustomers && hasPermission(req, 'canViewCustomerBalance') ? receivables._count : null,
       customerWithoutBalanceCount: canViewCustomers && hasPermission(req, 'canViewCustomerBalance') ? Math.max(0, customers - receivables._count) : null,
+      customerWalletFunds: walletOverview?.total ?? null,
+      customerWalletCustomerCount: walletOverview?.customerCount ?? null,
       receivablesOutstanding: canViewReceivables ? receivables._sum.balance || 0 : null,
       receivablesCount: canViewReceivables ? receivables._count : null,
     });
   } catch (err) {
     console.error("Dashboard KPIs error:", err);
+    handleBranchError(res, err);
+  }
+});
+
+router.get('/wallet-balances', authenticateToken, requirePermission('canViewCustomerWallet'), requireFeature('customers.wallet'), async (req, res) => {
+  if (!req.user?.tenantId) return res.status(403).json({ error: 'Business account required' });
+  if (!hasPermission(req, 'canViewCustomer')) return res.status(403).json({ error: 'Customer view permission is required to view wallet holders.' });
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const overview = await customerWalletDashboardData(scope);
+    res.json(overview);
+  } catch (err) {
     handleBranchError(res, err);
   }
 });

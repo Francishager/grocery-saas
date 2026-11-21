@@ -4,10 +4,10 @@ const prisma = {};
 prisma.tenant = { findUnique: async () => ({ planId: null, plan: { features: [] } }) };
 prisma.planFeature = { findMany: async () => [] };
 prisma.tenantFeature = { findMany: async () => [
-  'reports.financial', 'sales', 'inventory', 'customers', 'receivables', 'expenses', 'settings.taxes',
+  'reports.financial', 'sales', 'inventory', 'customers', 'customers.wallet', 'receivables', 'expenses', 'settings.taxes',
 ].map((name) => ({ enabled: true, feature: { name } })) };
 for (const model of ['sale', 'saleRecord', 'creditNote', 'customer', 'customerPayment',
-  'customerPaymentAllocation', 'customerCreditApplication', 'customerWithdrawal', 'saleReturn', 'purchase', 'supplierPurchase', 'expense', 'journalEntry', 'product']) {
+  'customerPaymentAllocation', 'customerCreditApplication', 'customerWithdrawal', 'customerWallet', 'customerWalletTransaction', 'saleReturn', 'purchase', 'supplierPurchase', 'expense', 'journalEntry', 'product']) {
   prisma[model] = Object.fromEntries(['aggregate', 'findMany', 'groupBy', 'count'].map((method) =>
     [method, async () => { throw new Error(`Unexpected query: ${model}.${method}`); }]));
 }
@@ -49,6 +49,15 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   t.mock.method(prisma.expense, 'aggregate', async () => ({ _sum: { amount: 5 } }));
   t.mock.method(prisma.journalEntry, 'findMany', async () => []);
   t.mock.method(prisma.product, 'count', async () => 0);
+  t.mock.method(prisma.customerWallet, 'findMany', async () => [
+    { id: 'wallet-a', customer: { id: 'customer-a', name: 'A Customer' }, branch: { name: 'Main' } },
+    { id: 'wallet-b', customer: { id: 'customer-b', name: 'B Customer' }, branch: null },
+  ]);
+  t.mock.method(prisma.customerWalletTransaction, 'groupBy', async () => [
+    { walletId: 'wallet-a', direction: 'in', _sum: { amount: 100 } },
+    { walletId: 'wallet-a', direction: 'out', _sum: { amount: 30 } },
+    { walletId: 'wallet-b', direction: 'in', _sum: { amount: 50 } },
+  ]);
   const handler = dashboard.stack.find((layer) => layer.route?.path === '/kpis').route.stack.at(-1).handle;
   let result;
   await handler({ user: { role: 'owner', tenantId: 'tenant', permissions: ['*'] }, query: {} }, {
@@ -58,6 +67,8 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   assert.equal(result.receivablesCount, 1);
   assert.equal(result.customerWithBalanceCount, 1);
   assert.equal(result.customerWithoutBalanceCount, 0);
+  assert.equal(result.customerWalletFunds, 120);
+  assert.equal(result.customerWalletCustomerCount, 2);
   assert.equal(result.revenue, 200);
   assert.equal(result.taxCollected, 36);
   assert.equal(result.salesCount, 2);
@@ -71,6 +82,8 @@ test('dashboard recomputes legacy receivables and excludes reversed sales and sa
   });
   assert.equal(restrictedResult.customerWithBalanceCount, null);
   assert.equal(restrictedResult.customerWithoutBalanceCount, null);
+  assert.equal(restrictedResult.customerWalletFunds, null);
+  assert.equal(restrictedResult.customerWalletCustomerCount, null);
 });
 
 test('dashboard responses cannot be reused as cached financial balances', () => {
