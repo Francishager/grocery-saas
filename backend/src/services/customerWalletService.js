@@ -6,6 +6,10 @@ import { linkedCashAccountId } from '../utils/accountingSync.js'
 const money = value => Math.round((Number(value) || 0) * 100) / 100
 const WALLET_ACCOUNT_MARKER = 'JibuSales system accounting role: customerWalletAccountId'
 
+export function legacyCustomerCreditToReclassify(balance) {
+  return money(Math.max(0, -(Number(balance) || 0)))
+}
+
 export async function getCustomerWalletBalance(client, tenantId, walletId) {
   if (!walletId) return 0
   const groups = await client.customerWalletTransaction.groupBy({
@@ -41,6 +45,48 @@ export async function ensureCustomerWalletAccount(client, tenantId) {
     isSystemManaged: true,
     description: WALLET_ACCOUNT_MARKER,
   } })
+}
+
+async function migrateLegacyCustomerCredit(client, { scope, customer, wallet, userId, branchId, amount }) {
+  const migratedAmount = money(amount)
+  if (migratedAmount <= 0) return wallet
+  await ensureTenantAccountingSetup(client, { tenantId: scope.tenantId, userId, enableNewSetups: false })
+  const config = await getReceivablesAccountingConfig(client, scope.tenantId)
+  const walletAccount = await ensureCustomerWalletAccount(client, scope.tenantId)
+  if (!config?.customerAdvancesAccountId) throw Object.assign(new Error('Customer Advances accounting is not configured. Configure receivables accounting before migrating customer funds.'), { statusCode: 409 })
+  const advancesAccount = await client.account.findFirst({
+    where: { id: config.customerAdvancesAccountId, tenantId: scope.tenantId, isActive: true },
+    include: { _count: { select: { children: true } } },
+  })
+  if (!advancesAccount || advancesAccount.type !== 'liability' || advancesAccount.parentId || advancesAccount._count?.children || linkedCashAccountId(advancesAccount)) {
+    throw Object.assign(new Error('Customer Advances must be an active, postable liability account before legacy customer funds can be migrated.'), { statusCode: 409 })
+  }
+
+  const transaction = await client.customerWalletTransaction.create({ data: {
+    tenantId: scope.tenantId,
+    branchId: branchId || customer.branchId || wallet.branchId || null,
+    walletId: wallet.id,
+    userId: userId || null,
+    kind: 'legacy_opening',
+    direction: 'in',
+    amount: migratedAmount,
+    reference: `WALLET-RECLASS-${Date.now()}`,
+    sourceType: 'legacy_customer_credit',
+    sourceId: customer.id,
+    notes: 'Existing customer credit reclassified into the customer wallet. No new cash was received.',
+  } })
+  wallet = await client.customerWallet.update({ where: { id: wallet.id }, data: { migratedLegacyAmount: { increment: migratedAmount } } })
+  await postWalletJournal(client, {
+    tenantId: scope.tenantId, branchId: branchId || customer.branchId || null, userId,
+    sourceType: 'CUSTOMER_WALLET_LEGACY_MIGRATION', sourceId: transaction.id,
+    reference: transaction.reference,
+    description: `Reclassify existing customer credit into wallet for ${customer.name}`,
+    lines: [
+      { accountId: advancesAccount.id, debit: migratedAmount, credit: 0, description: 'Reclassify existing customer advance' },
+      { accountId: walletAccount.id, debit: 0, credit: migratedAmount, description: 'Recognize customer wallet liability' },
+    ],
+  })
+  return wallet
 }
 
 async function postWalletJournal(client, { tenantId, branchId, userId, sourceType, sourceId, date, reference, description, lines }) {
@@ -84,15 +130,24 @@ async function postWalletJournal(client, { tenantId, branchId, userId, sourceTyp
 
 export async function openCustomerWallet(client, { scope, customerId, userId, branchId, allowLegacyMigration = true }) {
   await client.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
-  let wallet = await client.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId } })
-  if (wallet?.isActive) {
-    const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
-    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated: false }
-  }
   const customer = await client.customer.findFirst({ where: { id: customerId, tenantId: scope.tenantId } })
   if (!customer) throw Object.assign(new Error('Customer not found'), { statusCode: 404 })
+  let wallet = await client.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId } })
+  if (wallet?.isActive) {
+    let migrated = false
+    if (allowLegacyMigration) {
+      const prior = await calculateCustomerReceivableBalance(client, scope, customerId)
+      const amount = legacyCustomerCreditToReclassify(prior?.balance)
+      if (amount > 0) {
+        wallet = await migrateLegacyCustomerCredit(client, { scope, customer, wallet, userId, branchId, amount })
+        migrated = true
+      }
+    }
+    const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
+    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated }
+  }
 
-  // Reactivation must not replay the legacy migration or duplicate its opening liability.
+  // The customer row lock makes catch-up migration idempotent across concurrent profile loads.
   if (wallet) {
     wallet = await client.customerWallet.update({
       where: { id: wallet.id },
@@ -100,63 +155,36 @@ export async function openCustomerWallet(client, { scope, customerId, userId, br
     })
     await ensureTenantAccountingSetup(client, { tenantId: scope.tenantId, userId, enableNewSetups: false })
     await ensureCustomerWalletAccount(client, scope.tenantId)
+    let migrated = false
+    if (allowLegacyMigration) {
+      const prior = await calculateCustomerReceivableBalance(client, scope, customerId)
+      const amount = legacyCustomerCreditToReclassify(prior?.balance)
+      if (amount > 0) {
+        wallet = await migrateLegacyCustomerCredit(client, { scope, customer, wallet, userId, branchId, amount })
+        migrated = true
+      }
+    }
     const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
-    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated: false }
+    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated }
   }
 
   const prior = allowLegacyMigration ? await calculateCustomerReceivableBalance(client, scope, customerId) : null
-  const candidate = money(Math.max(0, -(Number(prior?.balance) || 0)))
-  const migratedLegacyAmount = candidate
+  const migratedLegacyAmount = legacyCustomerCreditToReclassify(prior?.balance)
 
   wallet = await client.customerWallet.create({ data: {
     tenantId: scope.tenantId,
     customerId,
     branchId: branchId || customer.branchId || null,
     createdById: userId || null,
-    migratedLegacyAmount,
+    migratedLegacyAmount: 0,
   } })
   await client.customer.update({ where: { id: customerId }, data: { walletEnabled: true } })
-  await ensureTenantAccountingSetup(client, { tenantId: scope.tenantId, userId, enableNewSetups: false })
   await ensureCustomerWalletAccount(client, scope.tenantId)
-  let balance = 0
   if (migratedLegacyAmount > 0) {
-    await client.customerWalletTransaction.create({ data: {
-      tenantId: scope.tenantId,
-      branchId: branchId || customer.branchId || null,
-      walletId: wallet.id,
-      userId: userId || null,
-      kind: 'legacy_opening',
-      direction: 'in',
-      amount: migratedLegacyAmount,
-      reference: `WALLET-OPEN-${customerId.slice(-10)}`,
-      sourceType: 'legacy_customer_credit',
-      sourceId: customerId,
-      notes: 'Opening wallet balance migrated from the verified customer credit balance. No cash was received at migration.',
-    } })
-    const config = await getReceivablesAccountingConfig(client, scope.tenantId)
-    const walletAccount = await ensureCustomerWalletAccount(client, scope.tenantId)
-    if (!config?.customerAdvancesAccountId) throw Object.assign(new Error('Customer Advances accounting is not configured. Configure receivables accounting before migrating customer funds.'), { statusCode: 409 })
-    const advancesAccount = await client.account.findFirst({
-      where: { id: config.customerAdvancesAccountId, tenantId: scope.tenantId, isActive: true },
-      include: { _count: { select: { children: true } } },
-    })
-    if (!advancesAccount || advancesAccount.type !== 'liability' || advancesAccount.parentId || advancesAccount._count?.children || linkedCashAccountId(advancesAccount)) {
-      throw Object.assign(new Error('Customer Advances must be an active, postable liability account before legacy customer funds can be migrated.'), { statusCode: 409 })
-    }
-    await postWalletJournal(client, {
-      tenantId: scope.tenantId, branchId: branchId || customer.branchId || null, userId,
-      sourceType: 'CUSTOMER_WALLET_LEGACY_MIGRATION', sourceId: wallet.id,
-      reference: wallet.id,
-      description: `Reclassify verified customer credit into wallet for ${customer.name}`,
-      lines: [
-        { accountId: advancesAccount.id, debit: migratedLegacyAmount, credit: 0, description: 'Reclassify legacy customer advance' },
-        { accountId: walletAccount.id, debit: 0, credit: migratedLegacyAmount, description: 'Recognize migrated customer wallet liability' },
-      ],
-    })
-    balance = migratedLegacyAmount
+    wallet = await migrateLegacyCustomerCredit(client, { scope, customer, wallet, userId, branchId, amount: migratedLegacyAmount })
   }
   const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
-  return { wallet, balance, receivableBalance: receivable?.balance ?? 0, migrated: migratedLegacyAmount > 0 }
+  return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated: migratedLegacyAmount > 0 }
 }
 
 export async function recordCustomerWalletOpeningBalance(client, { scope, customerId, userId, branchId, amount, date, reference, customerName }) {

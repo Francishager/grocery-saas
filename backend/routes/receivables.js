@@ -825,6 +825,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           allowLegacyMigration: legacyFunds > 0,
         }))
         wallet = opened.wallet
+      } else if (wallet?.isActive) {
+        const reconciledWallet = await prisma.$transaction(tx => openCustomerWallet(tx, {
+          scope, customerId: id, userId: req.user.id, branchId: customer.branchId,
+        }))
+        wallet = reconciledWallet.wallet
       }
       if (wallet) {
         resolvedBalanceSnapshot = await reconcileCustomerReceivableBalance(prisma, scope, id);
@@ -1568,6 +1573,10 @@ router.get('/customers/:id/wallet', authenticateToken, requirePermission('canVie
         wallet = result.wallet
         migrated = result.migrated
       }
+    } else if (wallet.isActive) {
+      const result = await prisma.$transaction(tx => openCustomerWallet(tx, { scope, customerId: customer.id, userId: req.user.id, branchId: customer.branchId }))
+      wallet = result.wallet
+      migrated = result.migrated
     }
     if (!wallet) return res.json({ active: false, balance: 0, transactions: [], migrated: false })
     await reconcileCustomerReceivableBalance(prisma, scope, customer.id)
@@ -2231,6 +2240,10 @@ router.post('/sales', authenticateToken, requirePermission('canCreateReceivable'
       if (walletFeatureEnabledForTenant && !activeWallet && Number(customerBalanceBefore?.balance) < -0.009) {
         const opened = await openCustomerWallet(tx, { scope, customerId, userId: req.user.id, branchId: customer.branchId })
         activeWallet = opened.wallet
+        customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
+      } else if (activeWallet) {
+        const reconciledWallet = await openCustomerWallet(tx, { scope, customerId, userId: req.user.id, branchId: customer.branchId })
+        activeWallet = reconciledWallet.wallet
         customerBalanceBefore = await calculateCustomerReceivableBalance(tx, scope, customerId)
       }
       const walletBalanceBefore = activeWallet ? await getCustomerWalletBalance(tx, scope.tenantId, activeWallet.id) : 0

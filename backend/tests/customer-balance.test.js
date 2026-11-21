@@ -6,6 +6,7 @@ import {
   getCustomerReceivableBalanceMap,
   reconcileCustomerReceivableBalance,
 } from '../src/utils/customerBalance.js';
+import { legacyCustomerCreditToReclassify } from '../src/services/customerWalletService.js';
 
 function makeClient({ customer, sales, payments = [], allocations = [], creditNotes = [], creditApplications = [], returns = [], wallets = [], walletTransactions = [], withdrawals = [] }) {
   return {
@@ -367,6 +368,31 @@ test('credit-note balance applied to a new sale reallocates credit without chang
   assert.equal(result.balance, 0);
   assert.equal(result.components.salePayments, 100);
   assert.equal(result.components.creditNotes, 0);
+});
+
+test('an already-active wallet catches up only the remaining customer-account credit', async () => {
+  const wallet = { id: 'wallet-catchup', customerId: customer.id, migratedLegacyAmount: 50, isActive: true }
+  const payment = { id: 'old-customer-funds', customerId: customer.id, saleId: null, amount: 80, allocationMode: 'explicit' }
+  const data = makeClient({
+    customer,
+    sales: [],
+    payments: [payment],
+    allocations: [{ paymentId: payment.id, customerId: customer.id, targetType: 'customer_account', amount: 80 }],
+    wallets: [wallet],
+    walletTransactions: [{ walletId: wallet.id, direction: 'in', _sum: { amount: 50 } }],
+  })
+
+  const before = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id)
+  const catchUp = legacyCustomerCreditToReclassify(before.balance)
+  const afterMigration = await calculateCustomerReceivableBalance({
+    ...data,
+    customerWallet: { findFirst: async () => ({ ...wallet, migratedLegacyAmount: wallet.migratedLegacyAmount + catchUp }) },
+  }, { tenantId: 'tenant' }, customer.id)
+
+  assert.equal(before.balance, -30)
+  assert.equal(catchUp, 30)
+  assert.equal(afterMigration.balance, 0)
+  assert.equal(legacyCustomerCreditToReclassify(afterMigration.balance), 0)
 });
 
 test('existing customer advance applied to a sale is not counted as cash twice', async () => {
