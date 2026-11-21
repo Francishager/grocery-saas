@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingCart, Users, Receipt, CreditCard, ArrowUpRight, ArrowDownRight, Banknote, PiggyBank, WalletCards, LayoutDashboard, WifiOff, CalendarDays, Award, TrendingDown as TrendDown, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { RefreshCw } from 'lucide-react'
 import { useDashboardData } from '@/hooks/useDashboardData'
@@ -549,12 +549,10 @@ export default function DashboardPage() {
           </>} />}
 
         {canViewCustomerWallet && <DashboardMetricCard title="Customer Wallet Funds" value={k.customerWalletFunds == null ? '—' : formatCurrency(k.customerWalletFunds)}
-          caption="Funds currently held on behalf of customers" icon={<PiggyBank className="size-4 text-emerald-600" />} accent="border-l-emerald-500" details={<>
-            <div className="flex justify-between gap-3"><span className="text-muted-foreground">Customers with wallet funds</span><span className="font-medium tabular-nums">{Number(k.customerWalletCustomerCount || 0).toLocaleString()}</span></div>
-            <p className="text-xs text-muted-foreground">Customer wallet liability; not sales revenue. The wallet total is separate from receivables and cash at hand.</p>
-            {hasPermission('canViewCustomer') && <button type="button" onClick={() => void openWalletCustomerList()} className="flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-2 text-left text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <span>View customer wallet balances</span><ChevronRight className="size-4" />
-            </button>}
+          caption="Funds currently held on behalf of customers" icon={<WalletCards className="size-4 text-fuchsia-700 dark:text-fuchsia-300" />} accent="border-l-fuchsia-600" details={<>
+            <div className="flex justify-between gap-3"><span className="text-muted-foreground">Customer balances</span>{hasPermission('canViewCustomer')
+              ? <button type="button" onClick={() => void openWalletCustomerList()} aria-label={`View wallet balances for ${Number(k.customerWalletCustomerCount || 0).toLocaleString()} customers`} className="rounded-sm font-semibold tabular-nums text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{Number(k.customerWalletCustomerCount || 0).toLocaleString()}</button>
+              : <span className="font-medium tabular-nums">{Number(k.customerWalletCustomerCount || 0).toLocaleString()}</span>}</div>
           </>} />}
 
         {hasFeature('inventory') && hasPermission('canViewProduct') && <DashboardMetricCard title="Inventory items" value={k.productCount == null ? '—' : Number(k.productCount).toLocaleString()}
