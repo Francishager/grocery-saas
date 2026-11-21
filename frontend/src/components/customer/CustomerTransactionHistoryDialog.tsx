@@ -108,7 +108,7 @@ type CustomerHistoryResponse = {
     trustScore?: number
     availableForWithdrawal?: number
     canDelete?: boolean
-    wallet?: { active: boolean; balance?: number; migratedLegacyAmount?: number; transactions?: Array<{ id: string; kind: string; direction: string; amount: number; balanceAfter?: number; reference?: string | null; paymentMethod?: string | null; notes?: string | null; createdAt: string; paymentId?: string | null; payment?: { paymentMethod: string; mobileProvider?: string | null; phoneNumber?: string | null; transactionId?: string | null; notes?: string | null; reference?: string | null; currency?: string | null; foreignAmount?: number | null } | null }> }
+    wallet?: { active: boolean; balance?: number; migratedLegacyAmount?: number; summary?: { deposits: number; openingFunds: number; withdrawals: number; appliedToSales: number; totalCredits: number; totalDebits: number; balance: number }; transactions?: Array<{ id: string; kind: string; direction: string; amount: number; balanceAfter?: number; reference?: string | null; paymentMethod?: string | null; notes?: string | null; createdAt: string; paymentId?: string | null; payment?: { paymentMethod: string; mobileProvider?: string | null; phoneNumber?: string | null; transactionId?: string | null; notes?: string | null; reference?: string | null; currency?: string | null; foreignAmount?: number | null } | null }> }
   }
   summary: {
     currentBalance?: number
@@ -1129,7 +1129,7 @@ export default function CustomerTransactionHistoryDialog({
                   {data.access.balance && data.access.creditLimit && metric(canViewRent ? 'Available trade credit' : 'Available credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700')}
                 {data.access.sales && metric(canViewRent ? 'Sales on trade account' : 'Sales on account', data.summary.receivableSales)}
                 {data.access.sales && metric(canViewRent ? 'Counter sales' : 'Cash sales', data.summary.cashSales)}
-                {data.access.payments && metric(canViewRent ? 'Trade account payments' : 'Customer payments', data.summary.payments, 'text-green-700')}
+                {data.access.payments && metric(canViewRent ? 'Trade account payments' : 'Trade payments', data.summary.payments, 'text-green-700')}
                 {data.access.withdrawals && metric(canViewRent ? 'Trade account withdrawals' : 'Customer withdrawals', data.summary.withdrawals)}
                 {data.access.creditNotes && metric(canViewRent ? 'Trade credit notes' : 'Credit notes', data.summary.creditNotes, 'text-green-700')}
                 {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}
@@ -1141,7 +1141,7 @@ export default function CustomerTransactionHistoryDialog({
                   {data.access.creditLimit && metric('Trade credit limit', data.customer.creditLimit)}
                   {data.access.balance && data.access.creditLimit && metric('Available trade credit', data.summary.availableCredit)}
                   {data.access.sales && hasCommercialHistory && metric('Sales on account', data.summary.receivableSales)}
-                  {data.access.payments && hasCommercialHistory && metric('Customer payments', data.summary.payments, 'text-green-700')}
+                  {data.access.payments && hasCommercialHistory && metric('Trade payments', data.summary.payments, 'text-green-700')}
                   {data.access.withdrawals && hasCommercialHistory && metric('Customer withdrawals', data.summary.withdrawals)}
                   {data.access.creditNotes && hasCommercialHistory && metric('Credit notes', data.summary.creditNotes, 'text-green-700')}
                   {data.access.returns && hasCommercialHistory && metric('Sales returns', data.summary.returns)}
@@ -1501,10 +1501,15 @@ export default function CustomerTransactionHistoryDialog({
                 </div>
                 <div className="overflow-x-auto rounded-md border"><table className="min-w-[760px] w-full text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-3 py-2">Payment date</th><th className="px-3 py-2">Property / unit</th><th className="px-3 py-2">Receipt</th><th className="px-3 py-2">Method</th><th className="px-3 py-2 text-right">Amount collected</th></tr></thead><tbody>{rentalPayments.map(row => <tr key={row.id} className="border-t"><td className="px-3 py-2">{formatDisplayDate(row.date)}</td><td className="px-3 py-2">{row.description}</td><td className="px-3 py-2">{row.reference || '—'}</td><td className="px-3 py-2 capitalize">{normalizeText(row.paymentMethod) || '—'}</td><td className="px-3 py-2 text-right font-medium">{formatCurrency(row.credit)}</td></tr>)}{!rentalPayments.length && <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No rent payments have been recorded for these agreements.</td></tr>}</tbody></table></div>
               </> : <>
+              {data.access.viewWallet && data.customer.wallet?.active && <p className="text-sm text-muted-foreground">Trade payments settle invoices or customer-account balances. Wallet deposits, opening funds, and wallet use are shown separately so they reconcile to the wallet balance.</p>}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {data.access.sales && metric(canViewRent ? 'Sales on trade account' : 'Sales on account', data.summary.receivableSales)}
                 {data.access.sales && metric(canViewRent ? 'Counter sales' : 'Cash sales', data.summary.cashSales)}
-                {data.access.payments && metric(canViewRent ? 'Trade account payments received' : 'Customer payments received', data.summary.payments, 'text-green-700')}
+                {data.access.payments && metric(canViewRent ? 'Trade account payments received' : 'Trade payments received', data.summary.payments, 'text-green-700')}
+                {data.access.viewWallet && data.customer.wallet?.active && metric('Wallet deposits received', data.customer.wallet.summary?.deposits ?? 0, 'text-emerald-700')}
+                {data.access.viewWallet && data.customer.wallet?.active && metric('Wallet opening funds', data.customer.wallet.summary?.openingFunds ?? 0)}
+                {data.access.viewWallet && data.customer.wallet?.active && metric('Wallet withdrawals / sales use', data.customer.wallet.summary?.totalDebits ?? 0)}
+                {data.access.viewWallet && data.customer.wallet?.active && metric('Wallet balance', data.customer.wallet.balance ?? 0, 'text-emerald-700')}
                 {data.access.withdrawals && metric(canViewRent ? 'Trade account withdrawals' : 'Customer withdrawals', data.summary.withdrawals)}
                 {data.access.creditNotes && metric(canViewRent ? 'Trade credit notes' : 'Credit notes', data.summary.creditNotes, 'text-green-700')}
                 {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}

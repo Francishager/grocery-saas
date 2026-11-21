@@ -2,6 +2,37 @@ export function isCustomerWalletDeposit(payment) {
   return (payment?.allocations || []).some((allocation) => allocation?.targetType === 'customer_wallet')
 }
 
+export function summarizeCustomerWalletMovements(groups = []) {
+  const summary = {
+    deposits: 0,
+    openingFunds: 0,
+    withdrawals: 0,
+    appliedToSales: 0,
+    otherCredits: 0,
+    otherDebits: 0,
+    totalCredits: 0,
+    totalDebits: 0,
+    balance: 0,
+  }
+  for (const group of Array.isArray(groups) ? groups : []) {
+    const amount = Math.round((Number(group?._sum?.amount) || 0) * 100) / 100
+    if (group?.direction === 'in') {
+      summary.totalCredits += amount
+      if (group.kind === 'deposit') summary.deposits += amount
+      else if (['opening_balance', 'legacy_opening'].includes(group.kind)) summary.openingFunds += amount
+      else summary.otherCredits += amount
+    } else if (group?.direction === 'out') {
+      summary.totalDebits += amount
+      if (group.kind === 'withdrawal') summary.withdrawals += amount
+      else if (group.kind === 'sale_application') summary.appliedToSales += amount
+      else summary.otherDebits += amount
+    }
+  }
+  for (const key of Object.keys(summary)) summary[key] = Math.round(summary[key] * 100) / 100
+  summary.balance = Math.round((summary.totalCredits - summary.totalDebits) * 100) / 100
+  return summary
+}
+
 export function customerWalletDepositReferenceKeys(payments = []) {
   return new Set((Array.isArray(payments) ? payments : [])
     .filter(isCustomerWalletDeposit)

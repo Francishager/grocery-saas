@@ -1,6 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement } from '../src/utils/customerWalletReporting.js';
+import { customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement, summarizeCustomerWalletMovements } from '../src/utils/customerWalletReporting.js';
+
+test('wallet reconciliation distinguishes deposits, non-cash opening funds, withdrawals, and sale applications', () => {
+  const summary = summarizeCustomerWalletMovements([
+    { direction: 'in', kind: 'deposit', _sum: { amount: 100 } },
+    { direction: 'in', kind: 'legacy_opening', _sum: { amount: 25 } },
+    { direction: 'out', kind: 'withdrawal', _sum: { amount: 10 } },
+    { direction: 'out', kind: 'sale_application', _sum: { amount: 30 } },
+  ]);
+
+  assert.deepEqual(summary, {
+    deposits: 100,
+    openingFunds: 25,
+    withdrawals: 10,
+    appliedToSales: 30,
+    otherCredits: 0,
+    otherDebits: 0,
+    totalCredits: 125,
+    totalDebits: 40,
+    balance: 85,
+  });
+});
 
 test('wallet deposit detection uses its explicit allocation target', () => {
   assert.equal(isCustomerWalletDeposit({ allocations: [{ targetType: 'customer_wallet' }] }), true);

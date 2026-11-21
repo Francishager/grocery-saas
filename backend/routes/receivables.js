@@ -15,7 +15,7 @@ import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict, findStrongCustomerIdentityDuplicates } from '../src/utils/customerIdentity.js'
 import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
-import { customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances } from '../src/utils/customerWalletReporting.js'
+import { customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances, summarizeCustomerWalletMovements } from '../src/utils/customerWalletReporting.js'
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { customerOpeningBalanceLines, getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, receiptCollectionLines, saleRecognitionLines } from '../src/services/receivablesAccountingService.js'
@@ -815,6 +815,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     let wallet = null
     let walletTransactions = []
     let walletBalance = 0
+    let walletSummary = summarizeCustomerWalletMovements()
     if (walletFeatureEnabled) {
       wallet = await prisma.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId: id } })
       const legacyFunds = Math.max(0, -toMoney(balanceSnapshot?.balance ?? customer.balance))
@@ -827,7 +828,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       }
       if (wallet) {
         resolvedBalanceSnapshot = await reconcileCustomerReceivableBalance(prisma, scope, id);
-        [walletBalance, walletTransactions] = await Promise.all([
+        [walletBalance, walletTransactions, walletSummary] = await Promise.all([
           getCustomerWalletBalance(prisma, scope.tenantId, wallet.id),
           access.viewWallet ? prisma.customerWalletTransaction.findMany({
             where: { tenantId: scope.tenantId, walletId: wallet.id },
@@ -836,7 +837,13 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
               payment: { select: { amount: true, currency: true, foreignAmount: true, paymentMethod: true, mobileProvider: true, phoneNumber: true, transactionId: true, reference: true, notes: true, createdAt: true } },
             }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100,
           }) : Promise.resolve([]),
+          access.viewWallet ? prisma.customerWalletTransaction.groupBy({
+            by: ['direction', 'kind'],
+            where: { tenantId: scope.tenantId, walletId: wallet.id },
+            _sum: { amount: true },
+          }).then(summarizeCustomerWalletMovements) : Promise.resolve(summarizeCustomerWalletMovements()),
         ])
+        walletSummary.balance = walletBalance
       }
     }
     const reconciledCustomer = { ...customer, balance: resolvedBalanceSnapshot?.balance ?? toMoney(customer.balance) }
@@ -869,6 +876,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       profileCustomer.wallet = {
         active: Boolean(wallet?.isActive),
         ...(access.viewWallet && { balance: walletBalance }),
+        ...(access.viewWallet && { summary: walletSummary }),
         ...(access.viewWallet && {
           migratedLegacyAmount: toMoney(wallet?.migratedLegacyAmount),
           transactions: customerWalletTransactionsWithBalances(walletTransactions, walletBalance),
