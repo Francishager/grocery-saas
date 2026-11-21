@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import {
   calculateCustomerReceivableBalance,
   getCustomerReceivableBalanceMap,
+  reconcileCustomerReceivableBalance,
 } from '../src/utils/customerBalance.js';
 
 function makeClient({ customer, sales, payments = [], allocations = [], creditNotes = [], creditApplications = [], returns = [], wallets = [], walletTransactions = [], withdrawals = [] }) {
   return {
     customer: {
       findFirst: async () => customer,
+      update: async ({ data }) => ({ ...customer, ...data }),
     },
     saleRecord: {
       findMany: async () => sales,
@@ -52,6 +54,7 @@ function makeClient({ customer, sales, payments = [], allocations = [], creditNo
     },
     customerWallet: {
       findMany: async () => wallets,
+      findFirst: async () => wallets[0] || null,
     },
     customerWalletTransaction: {
       groupBy: async () => walletTransactions,
@@ -322,6 +325,24 @@ test('wallet withdrawals reduce wallet funds without creating a customer receiva
 
   assert.equal(result[1].balance, 0)
   assert.equal(result[1].components.customerWalletBalance, 65)
+})
+
+test('wallet deposits stay out of current receivables and reconciliation persists only the receivable balance', async () => {
+  const wallet = { id: 'wallet-separate', customerId: customer.id, migratedLegacyAmount: 0, isActive: true }
+  const data = makeClient({
+    customer,
+    sales: [sale({ total: 100, subtotal: 100, amountPaid: 20 })],
+    payments: [{ id: 'wallet-deposit', customerId: customer.id, saleId: null, amount: 75, allocationMode: 'explicit' }],
+    allocations: [{ id: 'wallet-deposit-allocation', paymentId: 'wallet-deposit', customerId: customer.id, saleId: null, targetType: 'customer_wallet', amount: 75 }],
+    wallets: [wallet],
+    walletTransactions: [{ walletId: wallet.id, direction: 'in', _sum: { amount: 75 } }],
+  })
+
+  const result = await reconcileCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id)
+
+  assert.equal(result.balance, 80)
+  assert.equal(result.components.customerWalletBalance, 75)
+  assert.equal(result.customer.balance, 80)
 })
 
 test('credit-note balance applied to a new sale reallocates credit without changing total customer balance', async () => {

@@ -1,6 +1,6 @@
 import { ensureTenantAccountingSetup } from './tenantAccountingSetupService.js'
 import { getReceivablesAccountingConfig } from './receivablesAccountingService.js'
-import { calculateCustomerReceivableBalance } from '../utils/customerBalance.js'
+import { calculateCustomerReceivableBalance, reconcileCustomerReceivableBalance } from '../utils/customerBalance.js'
 import { linkedCashAccountId } from '../utils/accountingSync.js'
 
 const money = value => Math.round((Number(value) || 0) * 100) / 100
@@ -85,7 +85,10 @@ async function postWalletJournal(client, { tenantId, branchId, userId, sourceTyp
 export async function openCustomerWallet(client, { scope, customerId, userId, branchId, allowLegacyMigration = true }) {
   await client.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
   let wallet = await client.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId } })
-  if (wallet?.isActive) return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), migrated: false }
+  if (wallet?.isActive) {
+    const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
+    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated: false }
+  }
   const customer = await client.customer.findFirst({ where: { id: customerId, tenantId: scope.tenantId } })
   if (!customer) throw Object.assign(new Error('Customer not found'), { statusCode: 404 })
 
@@ -97,7 +100,8 @@ export async function openCustomerWallet(client, { scope, customerId, userId, br
     })
     await ensureTenantAccountingSetup(client, { tenantId: scope.tenantId, userId, enableNewSetups: false })
     await ensureCustomerWalletAccount(client, scope.tenantId)
-    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), migrated: false }
+    const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
+    return { wallet, balance: await getCustomerWalletBalance(client, scope.tenantId, wallet.id), receivableBalance: receivable?.balance ?? 0, migrated: false }
   }
 
   const prior = allowLegacyMigration ? await calculateCustomerReceivableBalance(client, scope, customerId) : null
@@ -151,7 +155,8 @@ export async function openCustomerWallet(client, { scope, customerId, userId, br
     })
     balance = migratedLegacyAmount
   }
-  return { wallet, balance, migrated: migratedLegacyAmount > 0 }
+  const receivable = await reconcileCustomerReceivableBalance(client, scope, customerId)
+  return { wallet, balance, receivableBalance: receivable?.balance ?? 0, migrated: migratedLegacyAmount > 0 }
 }
 
 export async function recordCustomerWalletOpeningBalance(client, { scope, customerId, userId, branchId, amount, date, reference, customerName }) {

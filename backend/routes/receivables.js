@@ -823,9 +823,9 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           allowLegacyMigration: legacyFunds > 0,
         }))
         wallet = opened.wallet
-        resolvedBalanceSnapshot = await calculateCustomerReceivableBalance(prisma, scope, id)
       }
       if (wallet) {
+        resolvedBalanceSnapshot = await reconcileCustomerReceivableBalance(prisma, scope, id);
         [walletBalance, walletTransactions] = await Promise.all([
           getCustomerWalletBalance(prisma, scope.tenantId, wallet.id),
           access.viewWallet ? prisma.customerWalletTransaction.findMany({
@@ -1558,6 +1558,7 @@ router.get('/customers/:id/wallet', authenticateToken, requirePermission('canVie
       }
     }
     if (!wallet) return res.json({ active: false, balance: 0, transactions: [], migrated: false })
+    await reconcileCustomerReceivableBalance(prisma, scope, customer.id)
     const [balance, transactions] = await Promise.all([
       getCustomerWalletBalance(prisma, scope.tenantId, wallet.id),
       prisma.customerWalletTransaction.findMany({ where: { tenantId: scope.tenantId, walletId: wallet.id }, include: { user: { select: { id: true, fname: true, lname: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100 }),
