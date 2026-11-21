@@ -68,6 +68,7 @@ type CustomerCreditHistory = {
   currentBalance: number
   receivableExposure: number
   customerFunds: number
+  walletBalance?: number
   creditLimit?: number
   availableLimit?: number
   utilizationPercent?: number | null
@@ -1049,7 +1050,7 @@ export default function CustomerTransactionHistoryDialog({
                   {metric('Rent charged', totalRentCharged)}
                   {metric('Rent collected', totalRentCollected, 'text-green-700')}
                 </> : <>
-                  {data.access.balance ? metric('Current balance', data.summary.currentBalance) : maskedMetric('Current balance')}
+                  {data.access.balance ? metric('Receivable balance', data.summary.currentBalance) : maskedMetric('Receivable balance')}
                   {data.access.creditLimit && metric('Credit limit', data.customer.creditLimit)}
                   {data.access.balance ? metric('Opening balance', data.summary.openingBalance ?? data.customer.openingBalance) : maskedMetric('Opening balance')}
                 </>}
@@ -1124,7 +1125,7 @@ export default function CustomerTransactionHistoryDialog({
                   {countMetric('Active tenancies', activeTenancies.length)}
                   {countMetric('Rental ledger entries', rentalData?.entries.length)}
                 </> : <>
-                {data.access.balance && metric(canViewRent ? 'Trade receivables balance' : 'Current balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
+                {data.access.balance && metric(canViewRent ? 'Trade receivables balance' : 'Receivable balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
                   {data.access.balance && data.access.creditLimit && metric(canViewRent ? 'Available trade credit' : 'Available credit', data.summary.availableCredit, Number(data.summary.availableCredit || 0) >= 0 ? 'text-green-700' : 'text-red-700')}
                 {data.access.sales && metric(canViewRent ? 'Sales on trade account' : 'Sales on account', data.summary.receivableSales)}
                 {data.access.sales && metric(canViewRent ? 'Counter sales' : 'Cash sales', data.summary.cashSales)}
@@ -1507,7 +1508,7 @@ export default function CustomerTransactionHistoryDialog({
                 {data.access.withdrawals && metric(canViewRent ? 'Trade account withdrawals' : 'Customer withdrawals', data.summary.withdrawals)}
                 {data.access.creditNotes && metric(canViewRent ? 'Trade credit notes' : 'Credit notes', data.summary.creditNotes, 'text-green-700')}
                 {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}
-                {data.access.balance && metric(canViewRent ? 'Trade receivables balance' : 'Current balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
+                  {data.access.balance && metric(canViewRent ? 'Trade receivables balance' : 'Receivable balance', data.summary.currentBalance, Number(data.summary.currentBalance || 0) > 0 ? 'text-red-700' : 'text-green-700')}
               </div>
               <div className="overflow-x-auto rounded-md border">
                 <table className="min-w-[860px] w-full text-sm">
@@ -1576,6 +1577,7 @@ export default function CustomerTransactionHistoryDialog({
                 <div className="grid content-start gap-3 sm:grid-cols-2">
                   {metric(canViewRent ? 'Trade receivables exposure' : 'Receivable exposure', data.creditHistory!.receivableExposure, 'text-red-700')}
                   {metric(canViewRent ? 'Funds on trade account' : 'Customer funds on account', data.creditHistory!.customerFunds, 'text-emerald-700')}
+                  {data.access.viewWallet && data.customer.wallet?.active && metric('Customer wallet balance', data.creditHistory!.walletBalance ?? data.customer.wallet.balance, 'text-emerald-700')}
                   {data.access.creditLimit && metric(canViewRent ? 'Trade credit limit' : 'Credit limit', data.creditHistory!.creditLimit)}
                   {data.access.creditLimit && metric(canViewRent ? 'Trade limit remaining' : 'Limit remaining', data.creditHistory!.availableLimit, 'text-emerald-700')}
                   <div className="rounded-md border bg-muted/20 p-4 sm:col-span-2">
@@ -1592,6 +1594,7 @@ export default function CustomerTransactionHistoryDialog({
                     </div>
                     <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{data.access.creditLimit ? 'Limit use measures exposure, ageing shows what is past due, and trust summarizes repayment behavior. Read these signals together; high utilization alone does not mean late payment.' : 'Ageing shows what is past due, and trust summarizes repayment behavior.'}</p>
                   </div>
+                  {!canViewRent && <p className="text-xs text-muted-foreground sm:col-span-2">Funds on account exclude wallet savings. Wallet balance is tracked separately.</p>}
                 </div>
                 {data.access.creditLimit && <CreditUtilizationGauge percent={data.creditHistory!.utilizationPercent ?? null} availableLimit={data.creditHistory!.availableLimit ?? 0} trustScore={Number(data.customer.trustScore || 0)} />}
               </section>

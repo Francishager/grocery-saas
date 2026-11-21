@@ -1787,7 +1787,7 @@ export default function ReceivablesPage() {
                     {canViewCustomerCreditLimit && <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Credit limit</th>}
                     {canViewCustomerBalance && <>
                       <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Opening balance</th>
-                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Balance</th>
+                      <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Receivable balance</th>
                       <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Trust</th>
                     </>}
                     {canViewCustomerBalance && canViewCustomerCreditLimit && <th scope="col" className="whitespace-nowrap px-3 py-3 text-right">Available credit</th>}
@@ -1822,10 +1822,10 @@ export default function ReceivablesPage() {
                       {canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.creditLimit || 0)}</td>}
                       {canViewCustomerBalance && <>
                         <td className="whitespace-nowrap px-3 py-3 text-right">{formatCurrency(customer.openingBalance || 0)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(customer.balance || 0)}{Number(customer.rentalBalance || 0) > 0 && <span className="mt-1 block text-xs font-normal text-amber-700">Rent due: {formatCurrency(Number(customer.rentalBalance))}</span>}</td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-red-600">{formatCurrency(Math.max(0, Number(customer.balance || 0)))}{Number(customer.rentalBalance || 0) > 0 && <span className="mt-1 block text-xs font-normal text-amber-700">Rent due: {formatCurrency(Number(customer.rentalBalance))}</span>}</td>
                         <td className={`whitespace-nowrap px-3 py-3 text-right font-semibold ${getTrustScoreColor(customer.trustScore || 0)}`}>{customer.trustScore || 0}/100</td>
                       </>}
-                      {canViewCustomerBalance && canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Number(customer.balance || 0))}</td>}
+                      {canViewCustomerBalance && canViewCustomerCreditLimit && <td className="whitespace-nowrap px-3 py-3 text-right font-medium text-green-700">{formatCurrency(Number(customer.creditLimit || 0) - Math.max(0, Number(customer.balance || 0)))}</td>}
                       <td className="whitespace-nowrap px-3 py-3">{getStatusBadge(customer.status || 'active')}</td>
                     </tr>
                   ))}
@@ -2197,8 +2197,8 @@ export default function ReceivablesPage() {
                           {selectedSaleCustomer.phone && <span className="text-xs text-muted-foreground">{selectedSaleCustomer.phone}</span>}
                         </span>
                         <span className="shrink-0 text-right">
-                          <span className={`block font-semibold ${Number(selectedSaleCustomer.balance || 0) < 0 ? 'text-emerald-700' : Number(selectedSaleCustomer.balance || 0) > 0 ? 'text-red-600' : ''}`}>{formatCurrency(selectedSaleCustomer.balance || 0)}</span>
-                          <span className="text-xs text-muted-foreground">Current balance</span>
+                          <span className={`block font-semibold ${Number(selectedSaleCustomer.balance || 0) > 0 ? 'text-red-600' : ''}`}>{formatCurrency(Math.max(0, Number(selectedSaleCustomer.balance || 0)))}</span>
+                          <span className="text-xs text-muted-foreground">Receivable balance</span>
                         </span>
                       </div>
               {canViewCustomerCreditLimit && <p className="mt-1 text-xs text-muted-foreground">Credit limit: {formatCurrency(selectedSaleCustomer.creditLimit || 0)}</p>}
@@ -2208,7 +2208,7 @@ export default function ReceivablesPage() {
                           {formatCurrency(saleCreditAppliedPreview)} customer credit will be applied automatically. Remaining on this invoice: {formatCurrency(saleBalanceAfterCredit)}. No cash withdrawal or receipt will be recorded.
                         </p>
                       )}
-                      {canViewCustomerCreditLimit && Number(selectedSaleCustomer.balance || 0) + saleBalanceAfterPayment > 0.01 && saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
+                      {canViewCustomerCreditLimit && Math.max(0, Number(selectedSaleCustomer.balance || 0)) + saleBalanceAfterPayment > 0.01 && saleBalanceAfterPayment > 0 && Number(selectedSaleCustomer.creditLimit || 0) <= 0 && (
                         <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
                           Set a credit limit for this customer before recording a credit sale.
                         </p>

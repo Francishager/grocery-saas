@@ -28,6 +28,7 @@ import { allocatePharmacySaleBatches } from '../src/services/pharmacyBatchServic
 import {
   attachCustomerReceivableBalances,
   calculateCustomerReceivableBalance,
+  customerReceivablePosition,
   reconcileCustomerReceivableBalance,
   effectiveCreditNoteRows
 } from '../src/utils/customerBalance.js'
@@ -844,6 +845,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     const canViewTrustScore = access.balance
       || (propertyManagementEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewPropertyStatements') || req.userPermissions?.canViewPropertyStatements === true))
       || (rentalFeatureEnabled && (effectivePermissions.includes('*') || effectivePermissions.includes('canViewRental') || req.userPermissions?.canViewRental === true))
+    const { receivableBalance, customerFundsOnAccount } = customerReceivablePosition(reconciledCustomer.balance)
     let tenantPropertyAddress = null
     if (propertyManagementEnabled && access.address) {
       try {
@@ -1491,22 +1493,24 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         ...totals,
         transactionCount: transactions.length,
         ...(access.balance && {
-          currentBalance: toMoney(reconciledCustomer.balance),
+          currentBalance: receivableBalance,
+          customerFundsOnAccount,
           computedBalance: balanceSnapshot?.balance ?? runningBalance,
           openingBalance: toMoney(customer.openingBalance),
           openingBalanceDate: customer.openingBalanceDate,
           openingBalanceNote: customer.openingBalanceNote,
         }),
-        ...(access.balance && access.creditLimit && { availableCredit: toMoney(customer.creditLimit) - toMoney(reconciledCustomer.balance) }),
+        ...(access.balance && access.creditLimit && { availableCredit: toMoney(customer.creditLimit) - receivableBalance }),
         ...(access.withdraw && { availableForWithdrawal: Math.max(0, -toMoney(reconciledCustomer.balance)) }),
         lastTransactionDate: transactions[0]?.date || null
       },
       ...(access.creditHistory && {
         creditHistory: {
           asOf: now,
-          currentBalance: toMoney(reconciledCustomer.balance),
-          receivableExposure: Math.max(0, toMoney(reconciledCustomer.balance)),
-          customerFunds: Math.max(0, -toMoney(reconciledCustomer.balance)) + walletBalance,
+          currentBalance: receivableBalance,
+          receivableExposure: receivableBalance,
+          customerFunds: customerFundsOnAccount,
+          ...(access.viewWallet && { walletBalance }),
           ...(access.creditLimit && {
             creditLimit: toMoney(customer.creditLimit),
             availableLimit: Math.max(0, toMoney(customer.creditLimit) - Math.max(0, toMoney(reconciledCustomer.balance))),

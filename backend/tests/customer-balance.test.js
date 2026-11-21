@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   calculateCustomerReceivableBalance,
+  customerReceivablePosition,
   getCustomerReceivableBalanceMap,
   reconcileCustomerReceivableBalance,
 } from '../src/utils/customerBalance.js';
@@ -343,6 +344,11 @@ test('wallet deposits stay out of current receivables and reconciliation persist
   assert.equal(result.balance, 80)
   assert.equal(result.components.customerWalletBalance, 75)
   assert.equal(result.customer.balance, 80)
+})
+
+test('customer-facing receivable position keeps funds on account out of current amount due', () => {
+  assert.deepEqual(customerReceivablePosition(-75), { receivableBalance: 0, customerFundsOnAccount: 75 })
+  assert.deepEqual(customerReceivablePosition(80), { receivableBalance: 80, customerFundsOnAccount: 0 })
 })
 
 test('credit-note balance applied to a new sale reallocates credit without changing total customer balance', async () => {

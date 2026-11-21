@@ -7,6 +7,14 @@ const toMoney = (value, fallback = 0) => {
 
 const roundMoney = (value) => Math.round(toMoney(value) * 100) / 100;
 
+export function customerReceivablePosition(netBalance) {
+  const balance = roundMoney(netBalance)
+  return {
+    receivableBalance: Math.max(0, balance),
+    customerFundsOnAccount: Math.max(0, -balance),
+  }
+}
+
 let propertySaleSchemaWarningLogged = false
 const isMissingPropertySaleSchema = error => {
   const detail = `${error?.message || ''} ${error?.meta?.table || ''} ${error?.meta?.column || ''}`.toLowerCase()
