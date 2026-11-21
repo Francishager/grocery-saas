@@ -23,6 +23,11 @@ export function allocateCustomerReceipt(amount, sales, preferredSaleId = null) {
   return { allocations, unallocated: remaining }
 }
 
+export function allocateWalletDeposit(amount, sales) {
+  const { allocations, unallocated } = allocateCustomerReceipt(amount, sales)
+  return { receivableAllocations: allocations, walletAmount: unallocated }
+}
+
 export function allocateCustomerReceiptToRentals(amount, rentals) {
   let remaining = Math.max(0, money(amount))
   const allocations = []

@@ -20,7 +20,7 @@ import { saleJobInclude, saleJobReportRow } from '../services/saleServiceJobs.js
 import { LEGACY_REPORT_GROUP_PERMISSION_KEYS, userHasReportAccess } from '../utils/permissions.js';
 import { expenseDateWhere, cashMovementDirection, loadJournalExpenseRows, summarizeCashMovements, accountCashBalances, loadLedgerBalances, ledgerBalanceSheet, postedJournalWhere } from '../utils/reportAccounting.js';
 import { aggregateInventorySales, calendarDaysBetween, inventoryQuantityChange, isExplicitDamageReason, summarizeInventoryMovements } from '../utils/inventoryReportHelpers.js';
-import { customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement } from '../utils/customerWalletReporting.js';
+import { customerReceivablePaymentAmount, customerWalletDepositAmount, customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement } from '../utils/customerWalletReporting.js';
 
 const router = Router();
 const salesView = createReceivableSalesView(prisma);
@@ -601,7 +601,7 @@ function financialExpenseDetailRow(expense) {
 }
 
 function financialCustomerPaymentRow(payment) {
-  const amount = toMoney(payment?.amount || 0);
+  const amount = customerReceivablePaymentAmount(payment);
   return {
     id: `customer-payment-${payment?.id}`,
     sourceId: payment?.id,
@@ -631,7 +631,7 @@ function financialCustomerPaymentRow(payment) {
 }
 
 function financialWalletDepositRow(payment) {
-  const amount = toMoney(payment?.amount || 0);
+  const amount = customerWalletDepositAmount(payment);
   return {
     id: `wallet-deposit-${payment?.id}`,
     sourceId: payment?.id,
@@ -778,7 +778,7 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
     salesView.findMany({ where: saleWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, customer: { select: { id: true, name: true, phone: true } }, branch: { select: { id: true, name: true } }, items: { include: { product: { select: { id: true, name: true, sku: true, cost: true } } } } }, orderBy: { createdAt: "asc" } }),
     prisma.expense.findMany({ where: expenseWhere, include: { User: { select: { id: true, fname: true, lname: true, email: true } }, branch: { select: { id: true, name: true } }, cashAccount: { select: { id: true, name: true, type: true } } }, orderBy: { date: "asc" } }),
     journalExpenseRows(scope, journalDateWhere),
-    prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } }, allocations: { select: { targetType: true } } }, orderBy: { createdAt: "asc" } }),
+    prisma.customerPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { customer: { select: { id: true, name: true, phone: true } }, sale: { select: { id: true, receiptNo: true } }, branch: { select: { id: true, name: true } }, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.customerWithdrawal.findMany({ where: scopedWhere(scope, { ...createdWhere, walletId: { not: null } }), select: { id: true, reference: true, amount: true, createdAt: true, customer: { select: { name: true } }, branch: { select: { name: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.supplierPayment.findMany({ where: scopedWhere(scope, createdWhere), include: { supplier: { select: { id: true, name: true, phone: true } }, purchase: { select: { id: true, refNo: true } }, branch: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
     prisma.cashTransaction.findMany({ where: { tenantId: scope.tenantId, ...createdWhere, account: { tenantId: scope.tenantId, ...(scope.branchId ? { OR: [{ branchId: scope.branchId }, { branchId: null }] } : {}) } }, include: { account: { select: { id: true, name: true, type: true, balance: true, branch: { select: { id: true, name: true } } } }, User: { select: { id: true, fname: true, lname: true, email: true } } }, orderBy: { createdAt: "asc" } }),
@@ -798,8 +798,8 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
     if (movement.reference && !movementByReference.has(movement.reference)) movementByReference.set(movement.reference, movement);
     if (!movementByReference.has(movement.id)) movementByReference.set(movement.id, movement);
   });
-  const walletDepositPayments = customerPayments.filter(isCustomerWalletDeposit)
-  const receivablePayments = customerPayments.filter((payment) => !isCustomerWalletDeposit(payment))
+  const walletDepositPayments = customerPayments.filter((payment) => customerWalletDepositAmount(payment) > 0)
+  const receivablePayments = customerPayments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
   const customerPaymentRows = receivablePayments.map((payment) => {
     const movement = [payment.reference, payment.id, payment.transactionId]
       .filter(Boolean)
@@ -824,11 +824,29 @@ async function loadFinancialReportData(req, scope, createdAtRange = null) {
   })).filter((row) => row.amount > 0);
   const supplierPaymentRows = supplierPayments.map(financialSupplierPaymentRow).filter((row) => row.amount > 0);
   const walletDepositReferences = customerWalletDepositReferenceKeys(walletDepositPayments)
-  const cashRows = cashTransactions.map((movement) => financialCashMovementRow(
-    movement,
-    isCustomerWalletDepositMovement(movement, walletDepositReferences),
-    isCustomerWalletWithdrawalMovement(movement, walletWithdrawalReferences),
-  )).filter((row) => row.amount > 0);
+  const paymentByReference = new Map()
+  customerPayments.forEach((payment) => [payment.id, payment.reference, payment.transactionId]
+    .filter(Boolean).forEach((reference) => paymentByReference.set(String(reference), payment)))
+  const cashRows = cashTransactions.flatMap((movement) => {
+    const payment = [movement.id, movement.reference].filter(Boolean)
+      .map((reference) => paymentByReference.get(String(reference))).find(Boolean)
+    const isWalletDeposit = isCustomerWalletDepositMovement(movement, walletDepositReferences)
+    const walletAmount = payment ? customerWalletDepositAmount(payment) : 0
+    const receivableAmount = payment ? customerReceivablePaymentAmount(payment) : 0
+    if (isWalletDeposit && walletAmount > 0 && receivableAmount > 0) {
+      const collectionRow = financialCashMovementRow(movement)
+      const walletRow = financialCashMovementRow(movement, true)
+      return [
+        { ...collectionRow, id: `${collectionRow.id}-receivable`, amount: receivableAmount, debit: receivableAmount, details: 'Customer receipt applied to outstanding receivables' },
+        { ...walletRow, id: `${walletRow.id}-wallet`, amount: walletAmount, debit: walletAmount, details: 'Customer receipt retained as wallet funds' },
+      ]
+    }
+    return [financialCashMovementRow(
+      movement,
+      isWalletDeposit,
+      isCustomerWalletWithdrawalMovement(movement, walletWithdrawalReferences),
+    )]
+  }).filter((row) => row.amount > 0)
   const taxPaymentRows = taxPayments.map(financialTaxPaymentRow).filter((row) => row.amount > 0);
 
   return { sales, saleRecords, expenses, journalRows: uniqueJournalRows, saleRows, receivableSaleRows, revenueRows: [...saleRows, ...receivableSaleRows], cogsRows, taxRows, discountRows, expenseRows, customerPaymentRows, walletDepositRows, walletWithdrawalRows, supplierPaymentRows, cashRows, taxPaymentRows };
@@ -1121,7 +1139,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
           customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
           sale: { select: { id: true, receiptNo: true } },
           branch: { select: { id: true, name: true } },
-          allocations: { select: { targetType: true } },
+          allocations: { select: { targetType: true, amount: true } },
         },
         orderBy: { createdAt: "asc" },
       }),
@@ -1622,34 +1640,36 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       if (!paymentMethodMatches(method, requestedMethod)) continue;
       const paymentMovement = findMatchingMovement(payment.reference, payment.id, payment.transactionId);
       if (userId && paymentMovement?.userId !== userId) continue;
-      if (isCustomerWalletDeposit(payment)) {
-        walletDepositTotal += Number(payment.amount || 0);
+      const walletAmount = customerWalletDepositAmount(payment)
+      const receivableAmount = customerReceivablePaymentAmount(payment)
+      if (walletAmount > 0) {
+        walletDepositTotal += walletAmount
         walletDepositCount += 1;
         transactionRows.push({
-          id: payment.id,
+          id: `wallet-${payment.id}`,
           kind: 'wallet-deposit',
           date: payment.createdAt,
           reference: customerPaymentDisplayReference(payment),
           customer: payment.customer?.name || 'Unknown customer',
           customerId: payment.customerId,
-          amount: Number(payment.amount || 0),
-          debit: Number(payment.amount || 0),
+          amount: walletAmount,
+          debit: walletAmount,
           credit: 0,
           paymentMethod: method,
           staff: paymentMovement?.User ? userLabel(paymentMovement.User) : 'Recorded deposit',
           staffId: paymentMovement?.User?.id || null,
           branch: payment.branch?.name || '',
           notes: payment.notes || null,
-          walletLiabilityIncrease: Number(payment.amount || 0),
+          walletLiabilityIncrease: walletAmount,
         });
-        continue;
       }
+      if (receivableAmount <= 0) continue
       if (isPaidAtSaleCustomerPayment(payment)) continue;
-      debtCollections += Number(payment.amount || 0);
+      debtCollections += receivableAmount;
       const paymentStaff = paymentMovement?.User || null;
-      if (paymentStaff) addStaff(paymentStaff, { collections: payment.amount });
+      if (paymentStaff) addStaff(paymentStaff, { collections: receivableAmount });
       const customer = addCustomer(payment.customer);
-      customer.payments += Number(payment.amount || 0);
+      customer.payments += receivableAmount;
       const row = {
         id: payment.id,
         kind: "collection",
@@ -1658,8 +1678,8 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         customer: payment.customer?.name || "Unknown customer",
         customerId: payment.customerId,
         customerBalance: Number(payment.customer?.balance || 0),
-        amount: payment.amount,
-        debit: payment.amount,
+        amount: receivableAmount,
+        debit: receivableAmount,
         credit: 0,
         paymentMethod: method,
         staff: paymentStaff ? userLabel(paymentStaff) : "Recorded payment",
@@ -2907,7 +2927,7 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
       // Expenses
       prisma.expense.findMany({ where: scopedExpenseWhere(s, { ...expenseDateWhere(dateRangeFromQuery(req)), ...branchFilter }), select: { id: true, reference: true, category: true, amount: true, date: true, createdAt: true }, orderBy: { date: "desc" } }),
       // Customer payments
-      prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter, allocations: { none: { targetType: 'customer_wallet' } } }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
+      prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), ...customerFilter, ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "desc" } }),
       // Supplier payments
       prisma.supplierPayment.findMany({ where: scopedWhere(s, { ...df(req), ...branchFilter }), select: { id: true, amount: true, paymentMethod: true, createdAt: true }, orderBy: { createdAt: "desc" } }),
       // Credit notes
@@ -2998,10 +3018,18 @@ router.get("/financial/general-ledger", authenticateToken, async (req, res) => {
         { date: x.date, account: "Cash/Bank", description: "Expense payment", debit: 0, credit: x.amount },
       ]),
       // Customer payments: debit Cash, credit Accounts Receivable
-      ...customerPayments.flatMap((x) => [
-        { date: x.createdAt, account: "Cash", description: "Customer Payment", debit: x.amount, credit: 0 },
-        { date: x.createdAt, account: "Accounts Receivable", description: "Customer Payment", debit: 0, credit: x.amount },
-      ]),
+      ...customerPayments.flatMap((x) => {
+        const amount = customerReceivablePaymentAmount(x)
+        const walletAmount = customerWalletDepositAmount(x)
+        return amount > 0 ? [
+          { date: x.createdAt, account: "Cash", description: "Customer Payment", debit: Number(x.amount || 0), credit: 0 },
+          { date: x.createdAt, account: "Accounts Receivable", description: "Customer Payment", debit: 0, credit: amount },
+          ...(walletAmount > 0 ? [{ date: x.createdAt, account: "Customer Wallet Liability", description: "Customer Wallet Deposit", debit: 0, credit: walletAmount }] : []),
+        ] : walletAmount > 0 ? [
+          { date: x.createdAt, account: "Cash", description: "Customer Wallet Deposit", debit: walletAmount, credit: 0 },
+          { date: x.createdAt, account: "Customer Wallet Liability", description: "Customer Wallet Deposit", debit: 0, credit: walletAmount },
+        ] : []
+      }),
       // Supplier payments: debit Accounts Payable, credit Cash
       ...supplierPayments.flatMap((x) => [
         { date: x.createdAt, account: "Accounts Payable", description: "Supplier Payment", debit: x.amount, credit: 0 },
@@ -3211,9 +3239,9 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         select: { id: true, receiptNo: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true, createdAt: true, paymentMethod: true, customer: { select: { id: true, name: true } } },
       }),
       prisma.customerPayment.findMany({
-        where: scopedWhere(s, { ...custFilter, ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }),
+        where: scopedWhere(s, { ...custFilter, ...df(req) }),
         orderBy: { createdAt: "asc" },
-        select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true, customer: { select: { id: true, name: true } } },
+        select: { id: true, amount: true, paymentMethod: true, reference: true, createdAt: true, customer: { select: { id: true, name: true } }, allocations: { select: { targetType: true, amount: true } } },
       }),
       prisma.customerWithdrawal.findMany({
         where: scopedWhere(s, { ...custFilter, ...df(req), walletId: null }),
@@ -3251,8 +3279,8 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         select: { total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true, createdAt: true },
       }),
       prisma.customerPayment.findMany({
-        where: scopedWhere(s, { ...custFilter, allocations: { none: { targetType: 'customer_wallet' } } }),
-        select: { amount: true, createdAt: true },
+        where: scopedWhere(s, { ...custFilter }),
+        select: { amount: true, createdAt: true, allocations: { select: { targetType: true, amount: true } } },
       }),
       prisma.customerWithdrawal.findMany({
         where: scopedWhere(s, { ...custFilter, walletId: null }),
@@ -3275,7 +3303,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     const openingBalance = (fromDate
       ? openingCustomers.filter((x) => new Date(openingBalanceDate(x)) < fromDate).reduce((a, x) => a + positiveOpeningBalance(x), 0) +
         allSales.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + receivableSaleNetTotal(x), 0) -
-        allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0) -
+        allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + customerReceivablePaymentAmount(x), 0) -
         openingCreditNotes.reduce((a, x) => a + x.effectiveAmount, 0) -
         allSaleReturns.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.total, 0) +
         allWithdrawals.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + x.amount, 0)
@@ -3311,12 +3339,14 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
       });
     }
     for (const payment of payments) {
+      const receivableAmount = customerReceivablePaymentAmount(payment)
+      if (receivableAmount <= 0) continue
       entries.push({
         date: payment.createdAt,
         refNo: customerPaymentDisplayReference(payment),
         description: customerId ? "Payment" : `Payment — ${payment.customer?.name || 'N/A'}`,
         debit: 0,
-        credit: payment.amount,
+        credit: receivableAmount,
         balance: 0,
       });
     }
@@ -3397,12 +3427,13 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       const [customersRaw, sales, payments, withdrawals, creditNotes, saleReturns] = await Promise.all([
         prisma.customer.findMany({ where: scopedWhere(s), orderBy: { name: "asc" }, include: { wallet: { select: { migratedLegacyAmount: true, createdAt: true } } } }),
         prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
-        prisma.customerPayment.findMany({ where: scopedWhere(s, { ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+        prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } }, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerWithdrawal.findMany({ where: scopedWhere(s, { ...df(req), walletId: null }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { not: "cancelled" } }), include: { customer: { select: { id: true, name: true } }, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: "completed" }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
       ]);
       const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
+      const tradePayments = payments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
 
       const transactions = [
         ...customers.filter((customer) => Number(customer.openingBalance || 0) !== 0).map((customer) => ({
@@ -3429,13 +3460,13 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           details: `Status: ${sale.paymentStatus}, Paid: ${sale.amountPaid}, Balance: ${sale.balance}`,
           paymentMethod: sale.paymentMethod || "-",
         })),
-        ...payments.map((payment) => ({
+        ...tradePayments.map((payment) => ({
           id: `payment-${payment.id}`,
           date: payment.createdAt,
           type: "Payment Received",
           description: `Payment Received - ${payment.customer?.name || "N/A"}`,
           debit: 0,
-          credit: Number(payment.amount || 0),
+          credit: customerReceivablePaymentAmount(payment),
           reference: customerPaymentDisplayReference(payment),
           details: `Method: ${payment.paymentMethod}`,
           paymentMethod: payment.paymentMethod,
@@ -3487,7 +3518,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         summary: {
           openingBalance: customers.reduce((a, x) => a + positiveOpeningBalance(x), 0),
           totalSales: sales.reduce((a, x) => a + receivableSaleNetTotal(x), 0),
-          totalPayments: payments.reduce((a, x) => a + Number(x.amount || 0), 0),
+          totalPayments: tradePayments.reduce((a, x) => a + customerReceivablePaymentAmount(x), 0),
           totalWithdrawals: withdrawals.reduce((a, x) => a + Number(x.amount || 0), 0),
           totalCreditNotes: effectiveCreditNoteRows(creditNotes).reduce((a, x) => a + x.effectiveAmount, 0),
           totalSaleReturns: saleReturns.reduce((a, x) => a + Number(x.total || 0), 0),
@@ -3511,8 +3542,9 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
       }),
       prisma.customerPayment.findMany({
-        where: scopedWhere(s, { customerId, ...df(req), allocations: { none: { targetType: 'customer_wallet' } } }),
+        where: scopedWhere(s, { customerId, ...df(req) }),
         orderBy: { createdAt: "asc" },
+        include: { allocations: { select: { targetType: true, amount: true } } },
       }),
       prisma.customerWithdrawal.findMany({
         where: scopedWhere(s, { customerId, ...df(req), walletId: null }),
@@ -3530,6 +3562,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       }),
 
     ]);
+    const tradePayments = payments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
 
     // Compile all transactions chronologically
     const transactions = [];
@@ -3571,14 +3604,14 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     });
 
     // Add payments as credits
-    payments.forEach((payment) => {
+    tradePayments.forEach((payment) => {
       transactions.push({
         id: `payment-${payment.id}`,
         date: payment.createdAt,
         type: "Payment Received",
         description: "Payment Received",
         debit: 0,
-        credit: payment.amount,
+        credit: customerReceivablePaymentAmount(payment),
         reference: customerPaymentDisplayReference(payment),
         details: `Method: ${payment.paymentMethod}`,
         paymentMethod: payment.paymentMethod,
@@ -3647,7 +3680,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     });
 
     const totalSales = sales.reduce((a, x) => a + receivableSaleNetTotal(x), 0);
-    const totalPayments = payments.reduce((a, x) => a + x.amount, 0);
+    const totalPayments = tradePayments.reduce((a, x) => a + customerReceivablePaymentAmount(x), 0);
     const totalWithdrawals = withdrawals.reduce((a, x) => a + x.amount, 0);
     const totalCreditNotes = creditNoteRows.reduce((a, x) => a + x.effectiveAmount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
@@ -4596,7 +4629,7 @@ router.get("/receivables/aging", authenticateToken, async (req, res) => {
 router.get("/receivables/collection", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } }, branch: { select: { name: true } }, allocations: { select: { targetType: true } } }, orderBy: { createdAt: "desc" } });
+    const payments = await prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { receiptNo: true } }, branch: { select: { name: true } }, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "desc" } });
     const accounts = await paymentAccountDetails(s.tenantId, payments, 'receipt');
     const paymentReferences = payments.flatMap((payment) => [payment.reference, payment.id, payment.transactionId]).filter(Boolean);
     const movements = paymentReferences.length ? await prisma.cashTransaction.findMany({
@@ -4609,8 +4642,8 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
       if (movement.reference && !movementByPaymentRef.has(movement.reference)) movementByPaymentRef.set(movement.reference, movement);
       if (!movementByPaymentRef.has(movement.id)) movementByPaymentRef.set(movement.id, movement);
     });
-    const receivablePayments = payments.filter((payment) => !isCustomerWalletDeposit(payment))
-    const walletDeposits = payments.filter(isCustomerWalletDeposit)
+    const receivablePayments = payments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
+    const walletDeposits = payments.filter((payment) => customerWalletDepositAmount(payment) > 0)
     const data = receivablePayments.map((p) => {
       const account = accounts.get(p.id);
       const movement = [p.reference, p.id, p.transactionId].filter(Boolean).map((ref) => movementByPaymentRef.get(ref)).find(Boolean);
@@ -4620,7 +4653,7 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
         branch: p.branch?.name || "Unassigned",
         staff: movement ? userLabel(movement.User) : "",
         invoice: p.sale?.receiptNo || '—',
-        amount: p.amount,
+        amount: customerReceivablePaymentAmount(p),
         paymentMethod: p.paymentMethod || "cash",
         mobileProvider: p.mobileProvider || null,
         phoneNumber: p.phoneNumber || null,
@@ -4638,7 +4671,7 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
       createdAt: payment.createdAt,
       customer: payment.customer?.name || 'Unknown customer',
       branch: payment.branch?.name || 'Unassigned',
-      amount: payment.amount,
+      amount: customerWalletDepositAmount(payment),
       paymentMethod: payment.paymentMethod || 'cash',
       reference: customerPaymentDisplayReference(payment),
       notes: payment.notes || null,
@@ -4646,7 +4679,7 @@ router.get("/receivables/collection", authenticateToken, async (req, res) => {
       count: data.length,
       totalCollected: data.reduce((sum, payment) => sum + payment.amount, 0),
       walletDepositCount: walletDeposits.length,
-      totalWalletDeposits: walletDeposits.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+      totalWalletDeposits: walletDeposits.reduce((sum, payment) => sum + customerWalletDepositAmount(payment), 0),
     } });
   } catch (err) { handleBranchError(res, err); }
 });

@@ -10,7 +10,7 @@ import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync
 import { attachRepaymentTrustScores, getRepaymentTrustScore } from '../src/utils/customerCreditScore.js'
 import { createReceivableSalesView } from '../src/utils/receivableSalesView.js'
 import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
-import { allocateCustomerReceipt, allocateCustomerReceiptToRentals } from '../src/utils/customerReceiptAllocation.js'
+import { allocateCustomerReceipt, allocateCustomerReceiptToRentals, allocateWalletDeposit } from '../src/utils/customerReceiptAllocation.js'
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict, findStrongCustomerIdentityDuplicates } from '../src/utils/customerIdentity.js'
@@ -670,8 +670,12 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
             },
           },
           allocations: {
-            where: { targetType: { in: ['rental', 'customer_wallet'] } },
-            select: { targetType: true, amount: true, rental: { select: { rentalNo: true, historicalReference: true } } },
+            where: { targetType: { in: ['sale', 'rental', 'customer_wallet', 'customer_account'] } },
+            select: {
+              targetType: true, amount: true,
+              sale: { select: { receiptNo: true } },
+              rental: { select: { rentalNo: true, historicalReference: true } },
+            },
           },
         },
         orderBy: { createdAt: 'asc' },
@@ -839,7 +843,11 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
             where: { tenantId: scope.tenantId, walletId: wallet.id },
             include: {
               user: userSelect,
-              payment: { select: { amount: true, currency: true, foreignAmount: true, paymentMethod: true, mobileProvider: true, phoneNumber: true, transactionId: true, reference: true, notes: true, createdAt: true } },
+              payment: { select: {
+                amount: true, currency: true, foreignAmount: true, paymentMethod: true, mobileProvider: true,
+                phoneNumber: true, transactionId: true, reference: true, notes: true, createdAt: true,
+                allocations: { select: { targetType: true, amount: true, sale: { select: { receiptNo: true } } } },
+              } },
             }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 100,
           }) : Promise.resolve([]),
           access.viewWallet ? prisma.customerWalletTransaction.groupBy({
@@ -1077,28 +1085,41 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     })
 
     payments.forEach((payment) => {
-      const walletDeposit = (payment.allocations || []).some(allocation => allocation.targetType === 'customer_wallet')
+      const allocations = payment.allocations || []
+      const walletDepositAmount = toMoney(allocations
+        .filter(allocation => allocation.targetType === 'customer_wallet')
+        .reduce((sum, allocation) => sum + toMoney(allocation.amount), 0))
+      const receivableApplied = toMoney(allocations
+        .filter(allocation => allocation.targetType !== 'customer_wallet')
+        .reduce((sum, allocation) => sum + toMoney(allocation.amount), 0))
+      const walletOnlyPayment = walletDepositAmount > 0 && receivableApplied <= 0
       rows.push({
         id: payment.id,
-        source: walletDeposit ? 'customer_wallet' : 'customer_payment',
-        type: walletDeposit ? 'Wallet Deposit' : 'Payment',
+        source: walletOnlyPayment ? 'customer_wallet' : 'customer_payment',
+        type: walletOnlyPayment ? 'Wallet Deposit' : 'Payment',
         date: payment.createdAt,
         reference: customerPaymentDisplayReference(payment),
-        originalReference: payment.sale?.receiptNo || payment.allocations?.find(allocation => allocation.targetType === 'rental')?.rental?.historicalReference || payment.allocations?.find(allocation => allocation.targetType === 'rental')?.rental?.rentalNo || null,
+        originalReference: payment.sale?.receiptNo || allocations.find(allocation => allocation.targetType === 'sale')?.sale?.receiptNo || allocations.find(allocation => allocation.targetType === 'rental')?.rental?.historicalReference || allocations.find(allocation => allocation.targetType === 'rental')?.rental?.rentalNo || null,
         description: (() => {
-          const linkedRentals = (payment.allocations || []).map((allocation) => {
-            const reference = allocation.rental?.historicalReference || allocation.rental?.rentalNo
+          const linkedSales = allocations.filter(allocation => allocation.targetType === 'sale').map(allocation => {
+            const reference = allocation.sale?.receiptNo
             return reference ? `${reference} (${toMoney(allocation.amount).toLocaleString('en-GB')})` : null
           }).filter(Boolean)
+          const linkedRentals = allocations.map((allocation) => {
+            const reference = allocation.rental?.historicalReference || allocation.rental?.rentalNo
+            return allocation.targetType === 'rental' && reference ? `${reference} (${toMoney(allocation.amount).toLocaleString('en-GB')})` : null
+          }).filter(Boolean)
           const saleText = payment.sale?.receiptNo ? `Payment for ${payment.sale.receiptNo}` : ''
+          const allocatedSalesText = linkedSales.length ? `Applied to credit sales ${linkedSales.join(', ')}` : ''
           const rentalText = linkedRentals.length ? `Applied to rental ${linkedRentals.join(', ')}` : ''
-          return [walletDeposit ? 'Deposited to customer wallet' : '', saleText, rentalText, !walletDeposit && !saleText && !rentalText ? payment.notes || 'Customer payment' : ''].filter(Boolean).join(' · ')
+          const walletText = walletDepositAmount > 0 ? `Wallet portion ${walletDepositAmount.toLocaleString('en-GB')}` : ''
+          return [walletOnlyPayment ? 'Deposited to customer wallet' : '', saleText, allocatedSalesText, rentalText, walletText, !walletOnlyPayment && !saleText && !allocatedSalesText && !rentalText ? payment.notes || 'Customer payment' : ''].filter(Boolean).join(' · ')
         })(),
         debit: 0,
         credit: toMoney(payment.amount),
         amount: toMoney(payment.amount),
-        balanceImpact: walletDeposit ? 0 : -toMoney(payment.amount),
-        affectsBalance: !walletDeposit,
+        balanceImpact: walletOnlyPayment ? 0 : -toMoney(allocations.length ? receivableApplied : payment.amount),
+        affectsBalance: !walletOnlyPayment,
         paymentMethod: payment.paymentMethod,
         mobileProvider: payment.mobileProvider || null,
         phoneNumber: payment.phoneNumber || null,
@@ -1626,17 +1647,52 @@ router.post('/wallet/deposits', authenticateToken, requirePermission('canDeposit
     if (paymentMethod === 'card' && !txnId) return res.status(400).json({ error: 'Card deposits require a transaction ID.' })
     const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160) || null
     if (idempotencyKey) {
-      const existing = await prisma.customerWalletTransaction.findFirst({ where: { tenantId: scope.tenantId, idempotencyKey }, include: { payment: true } })
+      const existing = await prisma.customerPayment.findFirst({ where: { tenantId: scope.tenantId, idempotencyKey }, include: { allocations: true } })
       if (existing) {
         const mayViewBalance = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerWallet') || req.userPermissions?.canViewCustomerWallet === true
-        return res.status(200).json({ transaction: existing, payment: existing.payment, ...(mayViewBalance && { balance: await getCustomerWalletBalance(prisma, scope.tenantId, wallet.id) }), duplicate: true })
+        return res.status(200).json({ payment: existing, ...(mayViewBalance && { balance: await getCustomerWalletBalance(prisma, scope.tenantId, wallet.id) }), duplicate: true })
       }
     }
     const account = await resolveReceiptCashAccount(prisma, scope, req, paymentMethod, cashAccountId, 'wallet deposits')
     if (String(account.currency || fx.baseCurrency).toUpperCase() !== fx.baseCurrency) return res.status(409).json({ error: `Select a ${fx.baseCurrency} transaction account.` })
     const receiptReference = String(reference || '').trim() || `WAL-${Date.now()}`
     const result = await prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${wallet.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const opened = await openCustomerWallet(tx, { scope, customerId, userId: req.user.id, branchId: customer.branchId })
+      const activeWallet = opened.wallet
+      await tx.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${activeWallet.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const candidateSales = await tx.saleRecord.findMany({
+        where: { tenantId: scope.tenantId, branchId: scope.branchId, customerId, status: 'completed' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, total: true, balance: true, amountPaid: true, legacyPaidAmountAtCutover: true, legacySaleAmountPaidAtCutover: true, legacyLinkedPaymentsAtCutover: true, createdAt: true },
+      })
+      const candidateSaleIds = candidateSales.map(row => row.id)
+      const [allocationGroups, legacyPaymentGroups, creditApplicationGroups] = candidateSaleIds.length
+        ? await Promise.all([
+          tx.customerPaymentAllocation.groupBy({ by: ['saleId'], where: { tenantId: scope.tenantId, saleId: { in: candidateSaleIds }, targetType: 'sale' }, _sum: { amount: true } }),
+          tx.customerPayment.groupBy({ by: ['saleId'], where: { tenantId: scope.tenantId, customerId, saleId: { in: candidateSaleIds }, allocationMode: 'legacy' }, _sum: { amount: true } }),
+          tx.customerCreditApplication.groupBy({ by: ['saleId'], where: { tenantId: scope.tenantId, customerId, saleId: { in: candidateSaleIds } }, _sum: { amount: true } }),
+        ])
+        : [[], [], []]
+      const allocatedBySale = new Map(allocationGroups.map(row => [row.saleId, toMoney(row._sum.amount)]))
+      const legacyPaymentsBySale = new Map(legacyPaymentGroups.map(row => [row.saleId, toMoney(row._sum.amount)]))
+      const creditApplicationsBySale = new Map(creditApplicationGroups.map(row => [row.saleId, toMoney(row._sum.amount)]))
+      const openSales = candidateSales.map(row => {
+        const recordedPaid = toMoney(row.amountPaid)
+        const legacyReceipts = toMoney(legacyPaymentsBySale.get(row.id))
+        const allocatedBefore = toMoney(allocatedBySale.get(row.id))
+        const creditAppliedBefore = toMoney(creditApplicationsBySale.get(row.id))
+        const legacyBaseline = row.legacyPaidAmountAtCutover == null
+          ? Math.max(legacyReceipts, recordedPaid - allocatedBefore - creditAppliedBefore)
+          : toMoney(row.legacyPaidAmountAtCutover)
+        const legacyPaidIncrease = Math.max(0, legacyBaseline - recordedPaid)
+        const effectiveBalance = Math.max(0, toMoney(row.balance) - legacyPaidIncrease)
+        const calculatedDue = Math.max(0, toMoney(row.total) - legacyBaseline - allocatedBefore - creditAppliedBefore)
+        return { ...row, recordedPaid, legacyReceipts, legacyBaseline, allocatedBefore, creditAppliedBefore, openAmount: Math.min(effectiveBalance, calculatedDue) }
+      })
+      const depositAllocation = allocateWalletDeposit(baseAmount, openSales)
+      const receivableApplied = toMoney(depositAllocation.receivableAllocations.reduce((sum, row) => sum + row.amount, 0))
+      const walletAmount = toMoney(depositAllocation.walletAmount)
       const payment = await tx.customerPayment.create({ data: {
         tenantId: scope.tenantId, branchId: scope.branchId, customerId,
         amount: baseAmount, currency: fx.currency, foreignAmount, exchangeRateToBase: fx.rateToBase,
@@ -1646,33 +1702,84 @@ router.post('/wallet/deposits', authenticateToken, requirePermission('canDeposit
         transactionId: ['mobile_money', 'card'].includes(paymentMethod) ? txnId : null,
         reference: receiptReference, idempotencyKey, allocationMode: 'explicit', notes: notes || null,
       } })
-      await tx.customerPaymentAllocation.create({ data: { tenantId: scope.tenantId, customerId, paymentId: payment.id, targetType: 'customer_wallet', amount: baseAmount, createdById: req.user.id } })
+      const allocationBySale = new Map(depositAllocation.receivableAllocations.map(row => [row.saleId, row.amount]))
+      for (const allocation of depositAllocation.receivableAllocations) {
+        await tx.customerPaymentAllocation.create({ data: {
+          tenantId: scope.tenantId, customerId, paymentId: payment.id, saleId: allocation.saleId,
+          targetType: 'sale', amount: allocation.amount, createdById: req.user.id,
+        } })
+      }
+      if (walletAmount > 0) {
+        await tx.customerPaymentAllocation.create({ data: {
+          tenantId: scope.tenantId, customerId, paymentId: payment.id, targetType: 'customer_wallet',
+          amount: walletAmount, createdById: req.user.id,
+        } })
+      }
+      for (const sale of openSales) {
+        const applied = toMoney(allocationBySale.get(sale.id))
+        if (applied <= 0) continue
+        if (sale.legacyPaidAmountAtCutover == null) {
+          await tx.saleRecord.update({ where: { id: sale.id }, data: {
+            legacyPaidAmountAtCutover: sale.legacyBaseline,
+            legacySaleAmountPaidAtCutover: sale.recordedPaid,
+            legacyLinkedPaymentsAtCutover: sale.legacyReceipts,
+          } })
+        }
+        const nextPaid = sale.legacyBaseline + sale.allocatedBefore + sale.creditAppliedBefore + applied
+        const nextBalance = Math.max(0, sale.openAmount - applied)
+        await tx.saleRecord.update({ where: { id: sale.id }, data: {
+          amountPaid: nextPaid, balance: nextBalance,
+          paymentStatus: nextBalance <= 0.01 ? 'paid' : 'partial',
+        } })
+      }
+
       const updatedAccount = await tx.cashAccount.update({ where: { id: account.id }, data: { balance: { increment: baseAmount } } })
       await tx.cashTransaction.create({ data: {
         tenantId: scope.tenantId, accountId: account.id, type: 'receipt', amount: baseAmount,
         balanceAfter: updatedAccount.balance, currency: fx.currency, foreignAmount,
         exchangeRateToBase: fx.rateToBase, exchangeRateAsOf: fx.rateDate, exchangeRateSource: fx.provider,
-        reference: receiptReference, description: `Customer wallet deposit: ${customer.name}`, userId: req.user.id,
+        reference: receiptReference,
+        description: `Customer payment: ${customer.name}${walletAmount > 0 ? `; wallet portion ${walletAmount}` : ''}`,
+        userId: req.user.id,
       } })
       await syncLinkedTransactionAccountBalance(tx, scope.tenantId, account.id)
       const cashLedger = await tx.account.findFirst({ where: { tenantId: scope.tenantId, description: { contains: `cashAccount:${account.id}` }, isActive: true } })
+      const arConfig = await getReceivablesAccountingConfig(tx, scope.tenantId)
       const walletAccount = await ensureCustomerWalletAccount(tx, scope.tenantId)
+      if (receivableApplied > 0 && !arConfig?.receivableAccountId) throw Object.assign(new Error('Customer receivables accounting is not configured; the deposit cannot be applied to credit sales.'), { statusCode: 409 })
+      const receivableAccount = receivableApplied > 0
+        ? await tx.account.findFirst({ where: { id: arConfig?.receivableAccountId, tenantId: scope.tenantId, isActive: true } })
+        : null
       if (!cashLedger) throw Object.assign(new Error(`No linked chart account exists for ${account.name}. Link it in Accounting before recording this deposit.`), { statusCode: 409 })
-      await postWalletJournalEntry(tx, { tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id, sourceType: 'CUSTOMER_WALLET_DEPOSIT', sourceId: payment.id, reference: receiptReference, description: `Customer wallet deposit ${receiptReference}`, lines: [
-        { accountId: cashLedger.id, debit: baseAmount, credit: 0, description: 'Cash received into transaction account' },
-        { accountId: walletAccount.id, debit: 0, credit: baseAmount, description: 'Increase customer wallet liability' },
-      ] })
-      const walletTransaction = await tx.customerWalletTransaction.create({ data: {
-        tenantId: scope.tenantId, branchId: scope.branchId, walletId: wallet.id, userId: req.user.id,
-        paymentId: payment.id, kind: 'deposit', direction: 'in', amount: baseAmount,
+      if (receivableApplied > 0 && (!receivableAccount || receivableAccount.type !== 'asset' || receivableAccount.parentId)) throw Object.assign(new Error('The customer receivables accounting account is not configured as an active posting account.'), { statusCode: 409 })
+      const journalLines = [{ accountId: cashLedger.id, debit: baseAmount, credit: 0, description: 'Cash received from customer' }]
+      if (receivableApplied > 0) journalLines.push({ accountId: receivableAccount.id, debit: 0, credit: receivableApplied, description: 'Customer deposit applied to outstanding credit sales' })
+      if (walletAmount > 0) journalLines.push({ accountId: walletAccount.id, debit: 0, credit: walletAmount, description: 'Excess customer deposit held in wallet' })
+      await postWalletJournalEntry(tx, {
+        tenantId: scope.tenantId, branchId: scope.branchId, userId: req.user.id,
+        sourceType: 'CUSTOMER_WALLET_DEPOSIT', sourceId: payment.id, reference: receiptReference,
+        description: `Customer payment allocation ${receiptReference}`, lines: journalLines,
+      })
+      const walletTransaction = walletAmount > 0 ? await tx.customerWalletTransaction.create({ data: {
+        tenantId: scope.tenantId, branchId: scope.branchId, walletId: activeWallet.id, userId: req.user.id,
+        paymentId: payment.id, kind: 'deposit', direction: 'in', amount: walletAmount,
         reference: receiptReference, idempotencyKey, paymentMethod, notes: notes || null,
-      } })
-      await reconcileCustomerReceivableBalance(tx, scope, customerId)
+      } }) : null
+      const receivable = await reconcileCustomerReceivableBalance(tx, scope, customerId)
       const mayViewBalance = req.user?.permissions?.includes('*') || req.user?.permissions?.includes('canViewCustomerWallet') || req.userPermissions?.canViewCustomerWallet === true
-      return { payment, walletTransaction, ...(mayViewBalance ? { balance: await getCustomerWalletBalance(tx, scope.tenantId, wallet.id) } : {}) }
+      return {
+        payment, walletTransaction, receivableApplied, walletAmount,
+        ...(mayViewBalance && { balance: await getCustomerWalletBalance(tx, scope.tenantId, activeWallet.id) }),
+        receivableBalance: receivable?.balance ?? 0,
+      }
     }, { isolationLevel: 'Serializable', timeout: 20000 })
     res.status(201).json({ ...result, baseCurrency: fx.baseCurrency })
   } catch (error) {
+    const retryKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').replace(/[^A-Za-z0-9:_-]/g, '').slice(0, 160)
+    if (error.code === 'P2002' && retryKey) {
+      const existing = await prisma.customerPayment.findFirst({ where: { tenantId: tenantIdFromUser(req.user), idempotencyKey: retryKey } })
+      if (existing) return res.status(200).json({ payment: existing, duplicate: true })
+    }
     if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
     handleBranchError(res, error, 'Failed to record customer wallet deposit')
   }

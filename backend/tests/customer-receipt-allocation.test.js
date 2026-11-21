@@ -1,6 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allocateCustomerReceipt, allocateCustomerReceiptToRentals } from '../src/utils/customerReceiptAllocation.js'
+import { allocateCustomerReceipt, allocateCustomerReceiptToRentals, allocateWalletDeposit } from '../src/utils/customerReceiptAllocation.js'
+
+test('wallet deposit settles oldest open credit sales first and sends only the excess to wallet', () => {
+  assert.deepEqual(allocateWalletDeposit(150, [
+    { id: 'old-sale', openAmount: 80 },
+    { id: 'new-sale', openAmount: 40 },
+  ]), {
+    receivableAllocations: [
+      { saleId: 'old-sale', amount: 80 },
+      { saleId: 'new-sale', amount: 40 },
+    ],
+    walletAmount: 30,
+  })
+})
 
 test('allocates receipts to open sales oldest-first and leaves only the excess unallocated', () => {
   const result = allocateCustomerReceipt(160, [

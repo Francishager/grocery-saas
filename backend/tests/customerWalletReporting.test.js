@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement, summarizeCustomerWalletMovements } from '../src/utils/customerWalletReporting.js';
+import { customerReceivablePaymentAmount, customerWalletDepositAmount, customerWalletDepositReferenceKeys, customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances, customerWalletWithdrawalReferenceKeys, isCustomerWalletDeposit, isCustomerWalletDepositMovement, isCustomerWalletWithdrawalMovement, summarizeCustomerWalletMovements } from '../src/utils/customerWalletReporting.js';
 
 test('wallet reconciliation distinguishes deposits, non-cash opening funds, withdrawals, and sale applications', () => {
   const summary = summarizeCustomerWalletMovements([
@@ -24,14 +24,25 @@ test('wallet reconciliation distinguishes deposits, non-cash opening funds, with
 });
 
 test('wallet deposit detection uses its explicit allocation target', () => {
-  assert.equal(isCustomerWalletDeposit({ allocations: [{ targetType: 'customer_wallet' }] }), true);
+  assert.equal(isCustomerWalletDeposit({ amount: 25, allocations: [{ targetType: 'customer_wallet', amount: 25 }] }), true);
   assert.equal(isCustomerWalletDeposit({ allocations: [{ targetType: 'sale' }] }), false);
   assert.equal(isCustomerWalletDeposit({ allocations: [] }), false);
 });
 
+test('split customer deposits distinguish debt collection from wallet savings', () => {
+  const payment = { amount: 150, allocations: [
+    { targetType: 'sale', amount: 120 },
+    { targetType: 'customer_wallet', amount: 30 },
+  ] }
+  assert.equal(customerReceivablePaymentAmount(payment), 120)
+  assert.equal(customerWalletDepositAmount(payment), 30)
+  assert.equal(isCustomerWalletDeposit(payment), false)
+  assert.equal(isCustomerWalletDeposit({ amount: 30, allocations: [{ targetType: 'customer_wallet', amount: 30 }] }), true)
+});
+
 test('wallet deposit cash movements match payment IDs and references', () => {
   const references = customerWalletDepositReferenceKeys([
-    { id: 'payment-1', reference: 'WALLET-1', transactionId: 'txn-1', allocations: [{ targetType: 'customer_wallet' }] },
+    { id: 'payment-1', reference: 'WALLET-1', transactionId: 'txn-1', amount: 100, allocations: [{ targetType: 'customer_wallet', amount: 100 }] },
     { id: 'payment-2', allocations: [{ targetType: 'sale' }] },
   ]);
   assert.equal(isCustomerWalletDepositMovement({ id: 'cash-1', reference: 'WALLET-1' }, references), true);

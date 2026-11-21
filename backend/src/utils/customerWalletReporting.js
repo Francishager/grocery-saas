@@ -1,5 +1,25 @@
 export function isCustomerWalletDeposit(payment) {
-  return (payment?.allocations || []).some((allocation) => allocation?.targetType === 'customer_wallet')
+  return customerWalletDepositAmount(payment) > 0 && customerReceivablePaymentAmount(payment) <= 0
+}
+
+export function customerWalletDepositAmount(payment) {
+  const allocations = (payment?.allocations || []).filter((allocation) => allocation?.targetType === 'customer_wallet')
+  const allocated = roundMoney(allocations.reduce((sum, allocation) => sum + (Number(allocation?.amount) || 0), 0))
+  return allocated <= 0 && allocations.length && allocations.length === (payment?.allocations || []).length
+    ? roundMoney(payment?.amount || 0)
+    : allocated
+}
+
+export function customerReceivablePaymentAmount(payment) {
+  const allocations = payment?.allocations || []
+  if (!allocations.length) return roundMoney(payment?.amount || 0)
+  return roundMoney(allocations
+    .filter((allocation) => allocation?.targetType !== 'customer_wallet')
+    .reduce((sum, allocation) => sum + (Number(allocation?.amount) || 0), 0))
+}
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100
 }
 
 export function summarizeCustomerWalletMovements(groups = []) {
@@ -35,7 +55,7 @@ export function summarizeCustomerWalletMovements(groups = []) {
 
 export function customerWalletDepositReferenceKeys(payments = []) {
   return new Set((Array.isArray(payments) ? payments : [])
-    .filter(isCustomerWalletDeposit)
+    .filter((payment) => customerWalletDepositAmount(payment) > 0)
     .flatMap((payment) => [payment.id, payment.reference, payment.transactionId].filter(Boolean).map(String)))
 }
 

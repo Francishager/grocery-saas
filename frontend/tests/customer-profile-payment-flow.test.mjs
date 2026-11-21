@@ -19,6 +19,7 @@ const saasPlans = source('../src/pages/SaaSAdmin/PlansPage.tsx');
 const receiptSettings = source('../src/pages/ReceiptSettingsPage.tsx');
 const browserReceiptPrint = source('../src/lib/receiptPrint.ts');
 const backendReceivables = source('../../backend/routes/receivables.js');
+const backendCustomerCredit = source('../../backend/src/services/customerCreditApplicationService.js');
 const backendReceipts = source('../../backend/src/routes/receipts.js');
 const mobileApp = source('../../mobile/src/app/index.tsx');
 
@@ -53,6 +54,23 @@ test('receivables payment modal scrolls on mobile and saves the entered note', (
   assert.match(receivablesPage, /max-h-\[calc\(100dvh-1rem\)\].*overflow-y-auto.*overscroll-contain/);
   assert.match(receivablesPage, /<Textarea[\s\S]*?id="customerPaymentNotes"[\s\S]*?value=\{paymentNotes\}/);
   assert.match(receivablesPage, /notes: paymentNotes\.trim\(\) \|\| \(walletDepositMode \? 'Customer wallet deposit' : 'Payment recorded via dashboard'\)/);
+});
+
+test('wallet deposits explain and report credit-sale settlement before wallet remainder', () => {
+  assert.match(receivablesPage, /Any outstanding credit-sale balance is settled first\. Only the remaining amount is added to the customer wallet\./);
+  assert.match(receivablesPage, /paymentResult\?\.receivableApplied/);
+  assert.match(receivablesPage, /paymentResult\?\.walletAmount/);
+  assert.match(backendReceivables, /allocateWalletDeposit\(baseAmount, openSales\)/);
+  assert.match(backendReceivables, /targetType: 'customer_wallet',[\s\S]*?amount: walletAmount/);
+});
+
+test('credit sales apply active wallet funds and tell staff the wallet amount used', () => {
+  assert.match(backendReceivables, /useWallet: walletFeatureEnabledForTenant/);
+  assert.match(backendReceivables, /CUSTOMER_WALLET_SALE_APPLICATION/);
+  assert.match(backendCustomerCredit, /kind: 'sale_application', direction: 'out'/);
+  assert.match(backendCustomerCredit, /walletAvailable - amount/);
+  assert.match(receivablesPage, /walletCreditApplied/);
+  assert.match(receivablesPage, /from the customer wallet was applied to this sale/);
 });
 
 test('customer-profile payment dialog stays above its overlay and records an optional note', () => {

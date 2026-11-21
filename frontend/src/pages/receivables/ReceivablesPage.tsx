@@ -927,10 +927,15 @@ export default function ReceivablesPage() {
       }
 
       const createdSale = await response.json()
+      const walletCreditApplied = Number((createdSale.creditApplications || [])
+        .filter((application: any) => application.sourceType === 'wallet')
+        .reduce((sum: number, application: any) => sum + Number(application.amount || 0), 0))
       toast({
         title: 'Success',
-        description: createdSale.creditApplied > 0
-          ? `${formatCurrency(createdSale.creditApplied)} of existing customer credit was applied without moving cash. Print or download the invoice from the details window.`
+        description: walletCreditApplied > 0
+          ? `${formatCurrency(walletCreditApplied)} from the customer wallet was applied to this sale. The wallet balance and amount due were updated; no cash moved for the wallet portion. Print or download the invoice from the details window.`
+          : createdSale.creditApplied > 0
+            ? `${formatCurrency(createdSale.creditApplied)} of existing customer credit was applied without moving cash. Print or download the invoice from the details window.`
           : 'Sale recorded successfully. Print or download the invoice from the details window.'
       })
       setShowSaleModal(false)
@@ -1039,9 +1044,13 @@ export default function ReceivablesPage() {
         throw new Error(await readResponseError(response, 'Failed to record payment'))
       }
 
+      const paymentResult = await response.json().catch(() => null)
+
       toast({
         title: 'Success',
-        description: 'Payment recorded successfully'
+        description: walletDepositMode && !selectedSale
+          ? `${formatCurrency(Number(paymentResult?.receivableApplied || 0))} applied to outstanding credit sales; ${formatCurrency(Number(paymentResult?.walletAmount || 0))} added to the customer wallet.`
+          : 'Payment recorded successfully'
       })
       setShowPaymentModal(false)
       setSelectedCustomer(null)
@@ -2434,6 +2443,7 @@ export default function ReceivablesPage() {
                     ? (hasPermission('canViewCustomerWallet') ? `Wallet balance: ${formatCurrency(Number(selectedCustomer.walletBalance || 0))}` : 'Wallet is active; deposits are recorded as customer-held funds.')
                     : `Balance: ${Number(selectedSale?.balance ?? selectedCustomer.balance ?? 0).toFixed(2)}`}
                 </p>
+                {walletDepositMode && !selectedSale && <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">Any outstanding credit-sale balance is settled first. Only the remaining amount is added to the customer wallet.</p>}
               </div>
               
               <div>
