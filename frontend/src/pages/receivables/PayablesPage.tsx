@@ -404,7 +404,7 @@ export default function PayablesPage() {
 
       toast({
         title: 'Success',
-        description: 'Purchase recorded successfully'
+        description: 'Purchase recorded. Stock-tracked item quantities have been added to inventory.'
       })
       setShowPurchaseModal(false)
       setPurchaseForm({
@@ -417,7 +417,7 @@ export default function PayablesPage() {
       setPurchaseRateToBase(1)
       setPurchaseUnitsPerBase(1)
       setPurchaseItems([createEmptyPurchaseItem()])
-      loadPurchases()
+      await Promise.all([loadPurchases(), loadProducts()])
       if (activeTab === 'suppliers') loadSuppliers()
       loadSupplierOptions()
       loadPayablesSummary()
@@ -832,7 +832,7 @@ export default function PayablesPage() {
       {/* Purchase Modal */}
       {showPurchaseModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6">
+          <div className="min-w-0 w-full max-w-4xl max-h-[90vh] overflow-x-hidden overflow-y-auto rounded-lg bg-white p-4 sm:p-6">
             <h3 className="text-lg font-semibold mb-4">New Supplier Purchase</h3>
             <form onSubmit={createPurchase} className="space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
@@ -886,8 +886,9 @@ export default function PayablesPage() {
                   const isService = selectedItemType === 'service'
                   const isRental = selectedItemType === 'rental'
                   return (
-                  <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_100px_140px_40px]">
+                  <div key={index} className="grid min-w-0 w-full grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_6rem_minmax(0,8.75rem)_2.5rem]">
                     <FormSelectSearch
+                      containerClassName="min-w-0 w-full"
                       options={products.map((product) => {
                         const pType = (product as any)?.itemType || 'product'
                         const typeLabel = pType === 'service' ? 'Service' : pType === 'rental' ? 'Rental' : 'Product'
@@ -903,7 +904,7 @@ export default function PayablesPage() {
                       searchPlaceholder="Search item, SKU, barcode, size, brand..."
                       emptyText="No matching items found"
                       clearable={false}
-                      className="h-10 w-full border-input bg-background text-foreground"
+                      className="h-10 min-w-0 w-full border-input bg-background text-foreground"
                     />
                     <Input
                       type="number"
@@ -911,6 +912,7 @@ export default function PayablesPage() {
                       value={item.quantity}
                       onChange={(event) => updatePurchaseItem(index, { quantity: event.target.value })}
                       placeholder={isService ? 'Hours' : isRental ? 'Periods' : 'Qty'}
+                      className="min-w-0 w-full"
                     />
                     <Input
                       type="number"
@@ -919,6 +921,7 @@ export default function PayablesPage() {
                       value={item.cost}
                       onChange={(event) => updatePurchaseItem(index, { cost: event.target.value })}
                       placeholder="Unit cost"
+                      className="min-w-0 w-full"
                     />
                     <Button
                       type="button"
@@ -926,6 +929,7 @@ export default function PayablesPage() {
                       size="icon"
                       disabled={purchaseItems.length === 1}
                       onClick={() => setPurchaseItems((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                      className="justify-self-end sm:justify-self-auto"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
