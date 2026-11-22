@@ -415,6 +415,7 @@ export default function CustomerTransactionHistoryDialog({
   onDeleteCustomer,
   viewMode = 'profile',
   presentation = 'dialog',
+  refreshKey = 0,
 }: {
   customer: CustomerHistoryTarget | null
   open: boolean
@@ -425,6 +426,7 @@ export default function CustomerTransactionHistoryDialog({
   onDeleteCustomer?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   viewMode?: 'profile' | 'details'
   presentation?: 'dialog' | 'page'
+  refreshKey?: number
 }) {
   const navigate = useNavigate()
   const [data, setData] = useState<CustomerHistoryResponse | null>(null)
@@ -577,7 +579,7 @@ export default function CustomerTransactionHistoryDialog({
 
     loadHistory()
     return () => controller.abort()
-  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile, walletReload])
+  }, [open, customer?.id, viewMode, rentalReload, canLoadRentalProfile, canLoadHouseholdProfile, walletReload, refreshKey])
 
   useEffect(() => {
     if (!open || !customer?.id || !canViewRentPaymentPlans) {

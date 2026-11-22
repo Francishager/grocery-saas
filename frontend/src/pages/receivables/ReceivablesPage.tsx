@@ -4,6 +4,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -252,7 +253,7 @@ export default function ReceivablesPage() {
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
   const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
-  const returnToCustomerProfileRef = React.useRef<CustomerHistoryTarget | null>(null)
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [customerDetails, setCustomerDetails] = useState<CustomerHistoryTarget | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [withdrawalAmount, setWithdrawalAmount] = useState('')
@@ -1165,8 +1166,6 @@ export default function ReceivablesPage() {
         title: 'Success',
         description: 'Withdrawal recorded successfully'
       })
-      const returnToProfile = returnToCustomerProfileRef.current
-      returnToCustomerProfileRef.current = null
       setShowWithdrawalModal(false)
       setSelectedCustomer(null)
       setWalletWithdrawalMode(false)
@@ -1176,7 +1175,7 @@ export default function ReceivablesPage() {
       setPhoneNumber('')
       setTransactionId('')
       setSelectedCashAccountId(null)
-      if (returnToProfile) setHistoryCustomer(returnToProfile)
+      if (walletWithdrawalMode) setHistoryRefreshKey((current) => current + 1)
       if (activeTab === 'customers') loadCustomers()
       loadCustomerOptions()
       loadSales()
@@ -2125,6 +2124,7 @@ export default function ReceivablesPage() {
       <CustomerTransactionHistoryDialog
         customer={historyCustomer}
         open={!!historyCustomer}
+        refreshKey={historyRefreshKey}
         onOpenChange={(open) => {
           if (!open) setHistoryCustomer(null)
         }}
@@ -2138,7 +2138,6 @@ export default function ReceivablesPage() {
           setShowPaymentModal(true)
         }}
         onWithdraw={(profile) => {
-          returnToCustomerProfileRef.current = profile
           const walletBalance = customerWalletBalance(profile)
           setSelectedCustomer({ ...profile, ...(hasPermission('canViewCustomerWallet') && walletBalance !== undefined ? { walletBalance } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
           setSelectedSale(null)
@@ -2149,7 +2148,6 @@ export default function ReceivablesPage() {
           setPhoneNumber('')
           setTransactionId('')
           setSelectedCashAccountId(null)
-          setHistoryCustomer(null)
           setShowWithdrawalModal(true)
         }}
       />
@@ -2630,9 +2628,20 @@ export default function ReceivablesPage() {
 
       {/* Withdrawal Modal */}
         {showWithdrawalModal && selectedCustomer && (walletWithdrawalMode ? hasPermission('canWithdrawCustomerWallet') : canCreateWithdrawal) && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto p-6">
-            <h3 className="text-lg font-semibold mb-4">{walletWithdrawalMode ? 'Withdraw from Customer Wallet' : 'Record Withdrawal'}</h3>
+        <Dialog open={showWithdrawalModal} onOpenChange={(open) => {
+          setShowWithdrawalModal(open)
+          if (!open) {
+            setSelectedCustomer(null)
+            setWalletWithdrawalMode(false)
+            setWithdrawalAmount('')
+            setSelectedCashAccountId(null)
+          }
+        }}>
+          <DialogContent className="z-[120] max-h-[90dvh] max-w-md overflow-y-auto" showCloseButton>
+            <DialogHeader>
+              <DialogTitle>{walletWithdrawalMode ? 'Withdraw from Customer Wallet' : 'Record Withdrawal'}</DialogTitle>
+              <DialogDescription>{walletWithdrawalMode ? 'The customer profile stays open behind this form. The payout is recorded against the selected business account.' : 'Record a customer funds withdrawal.'}</DialogDescription>
+            </DialogHeader>
             <form
               className="space-y-4"
               onSubmit={(event) => {
@@ -2780,6 +2789,11 @@ export default function ReceivablesPage() {
                     )}
                   </SelectContent>
                 </Select>
+                {cashAccounts.length === 0 && (
+                  <p role="alert" className="mt-2 text-sm text-destructive">
+                    No payout account is available for this payment method. Check that the business has an active matching account and that you have permission to use it.
+                  </p>
+                )}
               </div>
 
               <div className="rounded-md border p-4 text-sm">
@@ -2800,8 +2814,6 @@ export default function ReceivablesPage() {
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    const returnToProfile = returnToCustomerProfileRef.current
-                    returnToCustomerProfileRef.current = null
                     setShowWithdrawalModal(false)
                     setSelectedCustomer(null)
                     setWalletWithdrawalMode(false)
@@ -2811,7 +2823,6 @@ export default function ReceivablesPage() {
                     setPhoneNumber('')
                     setTransactionId('')
                     setSelectedCashAccountId(null)
-                    if (returnToProfile) setHistoryCustomer(returnToProfile)
                   }}
                 >
                   Cancel
@@ -2832,8 +2843,8 @@ export default function ReceivablesPage() {
               </div>
               </fieldset>
             </form>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {selectedSaleDetail && (

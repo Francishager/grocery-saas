@@ -64,12 +64,15 @@ test('wallet deposits explain and report credit-sale settlement before wallet re
   assert.match(backendReceivables, /targetType: 'customer_wallet',[\s\S]*?amount: walletAmount/);
 });
 
-test('wallet withdrawal uses the profile ledger balance, refreshes stale amounts, and returns to the same profile', () => {
+test('wallet withdrawal uses the profile ledger balance, keeps the profile open, and refreshes stale amounts', () => {
   assert.match(historyDialog, /walletBalance: data\.creditHistory\?\.walletBalance \?\? data\.customer\.wallet\.balance/);
   assert.match(receivablesPage, /const customerWalletBalance = \(profile: any\)/);
   assert.match(receivablesPage, /Number\.isFinite\(Number\(error\.availableFunds\)\)/);
-  assert.match(receivablesPage, /returnToCustomerProfileRef\.current = profile/);
-  assert.match(receivablesPage, /if \(returnToProfile\) setHistoryCustomer\(returnToProfile\)/);
+  assert.match(receivablesPage, /refreshKey=\{historyRefreshKey\}/);
+  assert.match(receivablesPage, /<Dialog open=\{showWithdrawalModal\}/);
+  const withdrawHandler = receivablesPage.match(/onWithdraw=\{\(profile\) => \{([\s\S]*?)\n        \}\}/)?.[1] || '';
+  assert.ok(withdrawHandler);
+  assert.doesNotMatch(withdrawHandler, /setHistoryCustomer\(null\)/);
   assert.match(backendReceivables, /availableFunds: currentBalance/);
   assert.match(backendReceivables, /Number\.isFinite\(error\.availableFunds\)/);
 });
