@@ -158,6 +158,17 @@ const availableCustomerFunds = (customer: Pick<Customer, 'balance' | 'availableF
     ? Math.max(0, parseAmount(customer.availableForWithdrawal))
     : Math.max(0, -parseAmount(customer?.balance))
 
+const customerWalletBalance = (profile: any): number | undefined => {
+  const candidates = [
+    profile?.wallet?.balance,
+    profile?.wallet?.summary?.balance,
+    profile?.creditHistory?.walletBalance,
+    profile?.walletBalance,
+  ]
+  const value = candidates.find((candidate) => candidate !== null && candidate !== undefined && Number.isFinite(Number(candidate)))
+  return value === undefined ? undefined : Math.max(0, Number(value))
+}
+
 const searchText = (...values: unknown[]) =>
   values
     .filter((value) => value !== null && value !== undefined)
@@ -241,6 +252,7 @@ export default function ReceivablesPage() {
   const [selectedSale, setSelectedSale] = useState<any | null>(null)
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null)
   const [historyCustomer, setHistoryCustomer] = useState<CustomerHistoryTarget | null>(null)
+  const returnToCustomerProfileRef = React.useRef<CustomerHistoryTarget | null>(null)
   const [customerDetails, setCustomerDetails] = useState<CustomerHistoryTarget | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [withdrawalAmount, setWithdrawalAmount] = useState('')
@@ -1148,6 +1160,8 @@ export default function ReceivablesPage() {
         title: 'Success',
         description: 'Withdrawal recorded successfully'
       })
+      const returnToProfile = returnToCustomerProfileRef.current
+      returnToCustomerProfileRef.current = null
       setShowWithdrawalModal(false)
       setSelectedCustomer(null)
       setWalletWithdrawalMode(false)
@@ -1157,6 +1171,7 @@ export default function ReceivablesPage() {
       setPhoneNumber('')
       setTransactionId('')
       setSelectedCashAccountId(null)
+      if (returnToProfile) setHistoryCustomer(returnToProfile)
       if (activeTab === 'customers') loadCustomers()
       loadCustomerOptions()
       loadSales()
@@ -1686,7 +1701,7 @@ export default function ReceivablesPage() {
   const withdrawalAccountBalanceAfter = selectedWithdrawalAccount ? withdrawalAccountBalance - withdrawalValue : null
   const canViewWithdrawalFunds = !walletWithdrawalMode || hasPermission('canViewCustomerWallet')
   const withdrawalAvailableFunds = walletWithdrawalMode
-    ? (canViewWithdrawalFunds ? Math.max(0, parseAmount(selectedCustomer?.walletBalance)) : Number.POSITIVE_INFINITY)
+    ? (canViewWithdrawalFunds && selectedCustomer?.walletBalance != null ? Math.max(0, parseAmount(selectedCustomer.walletBalance)) : Number.POSITIVE_INFINITY)
     : availableCustomerFunds(selectedCustomer)
   const withdrawalCustomerFundsAfter = Number.isFinite(withdrawalAvailableFunds) ? Math.max(0, withdrawalAvailableFunds - withdrawalValue) : null
   const withdrawalLimit = selectedWithdrawalAccount ? Math.min(withdrawalAvailableFunds, Math.max(0, withdrawalAccountBalance)) : withdrawalAvailableFunds
@@ -2118,7 +2133,9 @@ export default function ReceivablesPage() {
           setShowPaymentModal(true)
         }}
         onWithdraw={(profile) => {
-          setSelectedCustomer({ ...profile, ...(hasPermission('canViewCustomerWallet') ? { walletBalance: Number(profile.walletBalance ?? (profile.wallet as any)?.balance ?? 0) } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
+          returnToCustomerProfileRef.current = profile
+          const walletBalance = customerWalletBalance(profile)
+          setSelectedCustomer({ ...profile, ...(hasPermission('canViewCustomerWallet') && walletBalance !== undefined ? { walletBalance } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
           setSelectedSale(null)
           setWalletWithdrawalMode(Boolean(profile.walletWithdrawal))
           setWithdrawalAmount('')
@@ -2624,7 +2641,9 @@ export default function ReceivablesPage() {
                 <p className="font-medium">{selectedCustomer.name}</p>
                 <p className="text-sm text-muted-foreground">
                   {walletWithdrawalMode
-                    ? (canViewWithdrawalFunds ? `Available wallet funds: ${formatCurrency(withdrawalAvailableFunds)}` : 'Wallet is active. Available funds are checked securely when you submit.')
+                    ? (canViewWithdrawalFunds && Number.isFinite(withdrawalAvailableFunds)
+                      ? `Customer wallet balance: ${formatCurrency(withdrawalAvailableFunds)}`
+                      : 'Wallet is active. Available funds are checked securely when you submit.')
                     : `Available customer funds: ${formatCurrency(withdrawalAvailableFunds)}`}
                 </p>
               </div>
@@ -2646,9 +2665,14 @@ export default function ReceivablesPage() {
                 />
                 <p id="withdrawalFundsLimit" className={Number.isFinite(withdrawalAvailableFunds) && withdrawalValue > withdrawalAvailableFunds ? 'mt-1 text-sm text-red-600' : 'mt-1 text-sm text-muted-foreground'}>
                   {Number.isFinite(withdrawalAvailableFunds)
-                    ? (withdrawalValue > withdrawalAvailableFunds ? 'Withdrawal exceeds available customer funds. ' : 'Maximum withdrawal: ')
-                    : 'Wallet funds are validated securely when the withdrawal is submitted.'}
+                    ? (withdrawalValue > withdrawalAvailableFunds
+                      ? `Withdrawal exceeds ${walletWithdrawalMode ? 'wallet' : 'customer'} funds. `
+                      : `${selectedWithdrawalAccount ? 'Maximum payable from selected account' : 'Maximum withdrawal'}: `)
+                    : 'Available funds are validated securely when the withdrawal is submitted.'}
                   {Number.isFinite(withdrawalLimit) && formatCurrency(withdrawalLimit)}
+                  {walletWithdrawalMode && selectedWithdrawalAccount && Number.isFinite(withdrawalAvailableFunds) && withdrawalAccountBalance < withdrawalAvailableFunds && (
+                    <span className="block mt-1">The selected payout account has {formatCurrency(Math.max(0, withdrawalAccountBalance))}; choose an account with enough funds or enter a lower amount.</span>
+                  )}
                 </p>
               </div>
 
@@ -2771,6 +2795,8 @@ export default function ReceivablesPage() {
                   type="button"
                   variant="outline"
                   onClick={() => {
+                    const returnToProfile = returnToCustomerProfileRef.current
+                    returnToCustomerProfileRef.current = null
                     setShowWithdrawalModal(false)
                     setSelectedCustomer(null)
                     setWalletWithdrawalMode(false)
@@ -2780,6 +2806,7 @@ export default function ReceivablesPage() {
                     setPhoneNumber('')
                     setTransactionId('')
                     setSelectedCashAccountId(null)
+                    if (returnToProfile) setHistoryCustomer(returnToProfile)
                   }}
                 >
                   Cancel
