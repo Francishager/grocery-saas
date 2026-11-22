@@ -14,11 +14,11 @@ import { cn } from '@/lib/utils'
 import { useJWTAuth } from '@/contexts/JWTAuthContext'
 import { useFeatureAccess } from '@/services/featureAccessService'
 
-interface Pump { id: string; name: string; tankId: string | null; tank?: FuelTank | null; nozzleCount: number; isActive: boolean }
-interface FuelTank { id: string; name: string; fuelType: string; capacity: number; currentStock: number; unitCost: number; isActive: boolean; pumps?: Pump[] }
+interface Pump { id: string; name: string; tankId: string | null; branchId?: string | null; tank?: FuelTank | null; nozzleCount: number; isActive: boolean }
+interface FuelTank { id: string; name: string; fuelType: string; branchId?: string | null; capacity: number; currentStock: number; unitCost: number; isActive: boolean; pumps?: Pump[] }
 interface Delivery { id: string; tankId: string; tank?: FuelTank; supplierName: string | null; supplier?: { id: string; name: string } | null; supplierPurchase?: { id: string; refNo: string; total: number; balance: number; paymentStatus: string } | null; invoiceNo: string | null; litres: number; unitCost: number; totalCost: number; deliveryDate: string }
 interface MeterReading { id: string; pumpId: string; pump?: Pump; shiftId?: string | null; openingReading: number; closingReading: number; litresSold: number; amount: number; readingDate: string }
-interface ShiftReport { id: string; shiftNo: string; branchId?: string | null; pump?: Pump | null; pumpId?: string; salesMode: string; user: { id: string; fname?: string; lname?: string }; fuelSales?: { sale: { receiptNo: string; total: number; status: string; customer?: { name: string } | null } }[]; openingReading: number; closingReading: number; litresSold: number; cashSales: number; mobileSales: number; creditSales: number; totalSales: number; expectedFuelSales: number; actualTenderTotal: number; reportedSalesTotal: number; reconciliationVariance: number; varianceReason: string | null; lubricantSales: number; carWashIncome: number; expenses: number; netAmount: number; status: string; startDate: string; endDate: string | null }
+interface ShiftReport { id: string; shiftNo: string; branchId?: string | null; pump?: Pump | null; pumpId?: string; salesMode: string; user: { id: string; fname?: string; lname?: string }; fuelSales?: { vehicle?: { registration: string } | null; sale: { receiptNo: string; total: number; status: string; customer?: { name: string } | null } }[]; openingReading: number; closingReading: number; litresSold: number; cashSales: number; mobileSales: number; creditSales: number; totalSales: number; expectedFuelSales: number; actualTenderTotal: number; reportedSalesTotal: number; reconciliationVariance: number; varianceReason: string | null; lubricantSales: number; carWashIncome: number; expenses: number; netAmount: number; status: string; startDate: string; endDate: string | null }
 interface DipstickReading { id: string; tankId: string; tank?: FuelTank; readingDate: string; dipstickLevel: number; bookStock: number; variance: number; attendant: string | null; notes: string | null }
 interface Pricing { id: string; fuelType: string; pumpPrice: number; costPrice: number; margin: number; effectiveDate: string; notes: string | null }
 interface Compliance { id: string; inspectionDate: string; type: string; result: string; nextDue: string | null; notes: string | null }
@@ -26,7 +26,9 @@ interface StockMovement { id: string; movementType: string; litresDelta: number;
 interface StockAdjustment { id: string; tankId: string; tank?: { name: string; fuelType: string }; litresDelta: number; reason: string; status: string; requestedById: string; reviewNote: string | null; requestedAt: string }
 interface FuelPaymentAccount { id: string; name: string; type: string; balance: number; currency: string }
 interface FuelSupplier { id: string; name: string }
-interface FuelCustomer { id: string; name: string; phone?: string | null; balance: number; creditLimit: number }
+interface FuelCustomer { id: string; name: string; phone?: string | null; branchId?: string | null; balance: number; creditLimit: number }
+interface FuelVehicle { id: string; branchId?: string | null; registration: string; makeModel?: string | null; fuelType?: string | null; customerId?: string | null; customer?: { id: string; name: string } | null; isAuthorized: boolean; isActive: boolean; notes?: string | null }
+interface FuelMaintenanceRecord { id: string; branchId?: string | null; assetType: string; assetId?: string | null; assetName: string; activityType: string; status: string; dueAt: string; completedAt?: string | null; notes?: string | null }
 const newRequestKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
 export default function FuelStationPage() {
@@ -45,6 +47,8 @@ export default function FuelStationPage() {
   const [paymentAccounts, setPaymentAccounts] = useState<FuelPaymentAccount[]>([])
   const [suppliers, setSuppliers] = useState<FuelSupplier[]>([])
   const [customers, setCustomers] = useState<FuelCustomer[]>([])
+  const [vehicles, setVehicles] = useState<FuelVehicle[]>([])
+  const [maintenanceRecords, setMaintenanceRecords] = useState<FuelMaintenanceRecord[]>([])
   const [movementTank, setMovementTank] = useState<FuelTank | null>(null)
   const [showMovementModal, setShowMovementModal] = useState(false)
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false)
@@ -65,7 +69,7 @@ export default function FuelStationPage() {
   const [showFuelCreditModal, setShowFuelCreditModal] = useState(false)
   const [savingFuelSale, setSavingFuelSale] = useState(false)
   const [closingShift, setClosingShift] = useState<ShiftReport | null>(null)
-  const [fuelCreditForm, setFuelCreditForm] = useState({ shiftId: '', customerId: '', litres: 0, unitPrice: 0 })
+  const [fuelCreditForm, setFuelCreditForm] = useState({ shiftId: '', customerId: '', vehicleId: '', litres: 0, unitPrice: 0 })
   const [fuelCreditRequestKey, setFuelCreditRequestKey] = useState(newRequestKey)
   const [pumpForm, setPumpForm] = useState({ name: '', tankId: '', nozzleCount: 1 })
   const [tankForm, setTankForm] = useState({ name: '', fuelType: 'petrol', capacity: 0, currentStock: 0, unitCost: 0 })
@@ -76,6 +80,11 @@ export default function FuelStationPage() {
   const [dipstickForm, setDipstickForm] = useState({ tankId: '', readingDate: '', dipstickLevel: 0, bookStock: 0, attendant: '', notes: '' })
   const [pricingForm, setPricingForm] = useState({ fuelType: 'petrol', pumpPrice: 0, costPrice: 0, effectiveDate: '', notes: '' })
   const [complianceForm, setComplianceForm] = useState({ type: 'environmental', result: 'pass', inspectionDate: '', nextDue: '', notes: '' })
+  const [showVehicleModal, setShowVehicleModal] = useState(false)
+  const [savingVehicle, setSavingVehicle] = useState(false)
+  const [vehicleForm, setVehicleForm] = useState({ registration: '', makeModel: '', customerId: '', branchId: '', fuelType: '', notes: '', isAuthorized: true })
+  const [maintenanceForm, setMaintenanceForm] = useState({ assetType: 'pump', assetId: '', assetName: '', branchId: '', activityType: 'maintenance', dueAt: '', notes: '', status: 'scheduled' })
+  const [savingMaintenance, setSavingMaintenance] = useState(false)
   const { toast } = useToast()
   const { hasPermission, user } = useJWTAuth()
   const { hasFeature } = useFeatureAccess()
@@ -86,9 +95,10 @@ export default function FuelStationPage() {
     return payload
   }
   const isOwner = user?.role === 'owner' || user?.role === 'saas_admin'
-  const currentFeature = tab === 'tanks' ? 'fuel_station.pumps' : tab === 'deliveries' ? 'fuel_station.deliveries' : tab === 'meter_readings' ? 'fuel_station.meter_readings' : tab === 'dipstick' ? 'fuel_station.dipstick' : tab === 'shifts' ? 'fuel_station.shift_reports' : tab === 'pricing' ? 'fuel_station.pricing' : tab === 'compliance' ? 'fuel_station.compliance' : 'fuel_station'
+  const currentFeature = tab === 'tanks' ? 'fuel_station.pumps' : tab === 'deliveries' ? 'fuel_station.deliveries' : tab === 'meter_readings' ? 'fuel_station.meter_readings' : tab === 'dipstick' ? 'fuel_station.dipstick' : tab === 'shifts' ? 'fuel_station.shift_reports' : tab === 'pricing' ? 'fuel_station.pricing' : tab === 'compliance' ? 'fuel_station.compliance' : tab === 'fleet' ? 'fuel_station.fleet' : tab === 'maintenance' ? 'fuel_station.maintenance' : 'fuel_station'
   const canViewCurrentTab = hasFeature(currentFeature) && (isOwner || hasPermission('canViewFuelStation'))
   const canCreateCurrentTab = hasFeature(currentFeature) && (isOwner || hasPermission('canCreateFuelStation'))
+  const canEditCurrentTab = hasFeature(currentFeature) && (isOwner || hasPermission('canEditFuelStation'))
   const canEditFuel = hasFeature('fuel_station.pumps') && (isOwner || hasPermission('canEditFuelStation'))
   const canDeleteFuel = hasFeature('fuel_station.pumps') && (isOwner || hasPermission('canDeleteFuelStation'))
   const selectedPump = pumps.find(pump => pump.id === meterForm.pumpId)
@@ -98,7 +108,7 @@ export default function FuelStationPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, tk, d, r, s, ds, pr, cp, adjustments, accounts, supplierRows, customerRows] = await Promise.all([
+      const [p, tk, d, r, s, ds, pr, cp, adjustments, accounts, supplierRows, customerRows, vehicleRows, maintenanceRows] = await Promise.all([
         apiFetch('/api/fuel/pumps').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/tanks').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/deliveries').then(r => r.json()).catch(() => []),
@@ -111,6 +121,8 @@ export default function FuelStationPage() {
         apiFetch('/api/fuel/payment-accounts').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/suppliers').then(r => r.json()).catch(() => []),
         apiFetch('/api/fuel/customers').then(r => r.json()).catch(() => []),
+        apiFetch('/api/fuel/vehicles').then(r => r.json()).catch(() => []),
+        apiFetch('/api/fuel/maintenance').then(r => r.json()).catch(() => []),
       ])
       setPumps(Array.isArray(p) ? p : [])
       setTanks(Array.isArray(tk) ? tk : [])
@@ -124,6 +136,8 @@ export default function FuelStationPage() {
       setPaymentAccounts(Array.isArray(accounts) ? accounts : [])
       setSuppliers(Array.isArray(supplierRows) ? supplierRows : [])
       setCustomers(Array.isArray(customerRows) ? customerRows : [])
+      setVehicles(Array.isArray(vehicleRows) ? vehicleRows : [])
+      setMaintenanceRecords(Array.isArray(maintenanceRows) ? maintenanceRows : [])
     } catch (e) { console.error(e) } finally { setLoading(false) }
   }, [])
 
@@ -164,8 +178,46 @@ export default function FuelStationPage() {
       const shift = shifts.find(row => row.id === fuelCreditForm.shiftId)
       const sale = await requestJson('/api/fuel/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fuelCreditForm, branchId: shift?.branchId, idempotencyKey: fuelCreditRequestKey }) })
       toast({ title: `Fuel invoice ${sale.receiptNo} recorded to customer receivables`, description: Number(sale.creditApplied || 0) > 0 ? `${Number(sale.creditApplied).toLocaleString()} customer credit applied; no cash was withdrawn or received.` : undefined })
-      setShowFuelCreditModal(false); setFuelCreditForm({ shiftId: '', customerId: '', litres: 0, unitPrice: 0 }); setFuelCreditRequestKey(newRequestKey()); loadData()
+      setShowFuelCreditModal(false); setFuelCreditForm({ shiftId: '', customerId: '', vehicleId: '', litres: 0, unitPrice: 0 }); setFuelCreditRequestKey(newRequestKey()); loadData()
     } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not record fuel credit sale' }) } finally { setSavingFuelSale(false) }
+  }
+  const createFuelVehicle = async () => {
+    if (!vehicleForm.registration.trim()) { toast({ variant: 'destructive', title: 'Vehicle registration is required' }); return }
+    setSavingVehicle(true)
+    try {
+      await requestJson('/api/fuel/vehicles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(vehicleForm) })
+      setVehicleForm({ registration: '', makeModel: '', customerId: '', branchId: '', fuelType: '', notes: '', isAuthorized: true })
+      setShowVehicleModal(false)
+      toast({ title: 'Vehicle added to fleet' })
+      loadData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not add vehicle' }) } finally { setSavingVehicle(false) }
+  }
+  const createMaintenanceRecord = async () => {
+    if (!maintenanceForm.dueAt) { toast({ variant: 'destructive', title: 'Due date is required' }); return }
+    if (maintenanceForm.assetType !== 'station' && !maintenanceForm.assetId) { toast({ variant: 'destructive', title: 'Select a tank or pump' }); return }
+    if (maintenanceForm.assetType === 'station' && !maintenanceForm.assetName.trim()) { toast({ variant: 'destructive', title: 'Station or equipment name is required' }); return }
+    setSavingMaintenance(true)
+    try {
+      await requestJson('/api/fuel/maintenance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(maintenanceForm) })
+      setMaintenanceForm({ assetType: 'pump', assetId: '', assetName: '', branchId: '', activityType: 'maintenance', dueAt: '', notes: '', status: 'scheduled' })
+      toast({ title: 'Maintenance activity recorded' })
+      loadData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not save maintenance record' }) } finally { setSavingMaintenance(false) }
+  }
+  const completeMaintenanceRecord = async (id: string) => {
+    try {
+      const record = maintenanceRecords.find(row => row.id === id)
+      await requestJson(`/api/fuel/maintenance/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'completed', branchId: record?.branchId }) })
+      toast({ title: 'Maintenance marked complete' })
+      loadData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not update maintenance' }) }
+  }
+  const toggleVehicleAuthorization = async (vehicle: FuelVehicle) => {
+    try {
+      await requestJson(`/api/fuel/vehicles/${vehicle.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isAuthorized: !vehicle.isAuthorized, branchId: vehicle.branchId }) })
+      toast({ title: vehicle.isAuthorized ? 'Vehicle fueling blocked' : 'Vehicle authorized to fuel' })
+      loadData()
+    } catch (error) { toast({ variant: 'destructive', title: error instanceof Error ? error.message : 'Could not update vehicle authorization' }) }
   }
   const createMeterReading = async () => {
     if (!meterForm.pumpId) { toast({ variant: 'destructive', title: 'Select a pump' }); return }
@@ -276,6 +328,8 @@ export default function FuelStationPage() {
             tab === 'shifts' ? 'Shift reports and closures' :
             tab === 'pricing' ? 'Fuel price management' :
             tab === 'compliance' ? 'Environmental compliance tracking' :
+            tab === 'fleet' ? 'Register vehicles and control authorized customer fueling' :
+            tab === 'maintenance' ? 'Track inspection, service, and calibration due dates' :
             'Fuel station management'
           }</p>
         </div>
@@ -289,6 +343,7 @@ export default function FuelStationPage() {
           {tab === 'dipstick' && canCreateCurrentTab && <Button onClick={() => setShowDipstickModal(true)}><Plus className="mr-1 h-4 w-4" /> Record Dipstick</Button>}
           {tab === 'pricing' && canCreateCurrentTab && <Button onClick={() => setShowPricingModal(true)}><Plus className="mr-1 h-4 w-4" /> Set Price</Button>}
           {tab === 'compliance' && canCreateCurrentTab && <Button onClick={() => setShowComplianceModal(true)}><Plus className="mr-1 h-4 w-4" /> Log Inspection</Button>}
+          {tab === 'fleet' && canCreateCurrentTab && <Button onClick={() => setShowVehicleModal(true)}><Plus className="mr-1 h-4 w-4" /> Add Vehicle</Button>}
           {tab === 'shifts' && canCreateCurrentTab && <>
             <Button variant="outline" onClick={() => setShowFuelCreditModal(true)} disabled={!hasPermission('canCreateReceivable') && !isOwner}><Plus className="mr-1 h-4 w-4" /> Customer Credit Sale</Button>
             <Button onClick={() => setShowShiftModal(true)}><Plus className="mr-1 h-4 w-4" /> New Shift</Button>
@@ -416,7 +471,7 @@ export default function FuelStationPage() {
               <tbody>
                 {shifts.map(s => (
                   <tr key={s.id} className="border-t">
-                    <td className="p-2 font-medium">{s.shiftNo}{Boolean(s.fuelSales?.length) && <div className="mt-1 space-y-0.5 font-normal text-xs text-muted-foreground">{s.fuelSales?.filter(row => row.sale.status === 'completed').map(row => <div key={row.sale.receiptNo}>{row.sale.customer?.name || 'Customer'} · {row.sale.receiptNo} · {Number(row.sale.total).toLocaleString()}</div>)}</div>}</td>
+                    <td className="p-2 font-medium">{s.shiftNo}{Boolean(s.fuelSales?.length) && <div className="mt-1 space-y-0.5 font-normal text-xs text-muted-foreground">{s.fuelSales?.filter(row => row.sale.status === 'completed').map(row => <div key={row.sale.receiptNo}>{row.sale.customer?.name || 'Customer'}{row.vehicle?.registration ? ` · ${row.vehicle.registration}` : ''} · {row.sale.receiptNo} · {Number(row.sale.total).toLocaleString()}</div>)}</div>}</td>
                     <td className="p-2">{s.pump?.name || 'All'}</td>
                     <td className="p-2 text-right">{s.litresSold.toFixed(1)}L</td>
                     <td className="p-2 text-right">{s.totalSales.toFixed(0)}</td>
@@ -527,6 +582,66 @@ export default function FuelStationPage() {
           </div>
       </div>
 
+      <div className={cn('space-y-4', tab !== 'fleet' && 'hidden')}>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card><CardContent className="pt-5"><p className="text-2xl font-semibold">{vehicles.length}</p><p className="text-sm text-muted-foreground">Registered vehicles</p></CardContent></Card>
+          <Card><CardContent className="pt-5"><p className="text-2xl font-semibold">{vehicles.filter(row => row.isActive && row.isAuthorized).length}</p><p className="text-sm text-muted-foreground">Authorized to fuel</p></CardContent></Card>
+          <Card><CardContent className="pt-5"><p className="text-2xl font-semibold">{vehicles.filter(row => !row.isActive || !row.isAuthorized).length}</p><p className="text-sm text-muted-foreground">Inactive or blocked</p></CardContent></Card>
+        </div>
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-muted"><tr><th className="p-2 text-left">Registration</th><th className="p-2 text-left">Vehicle</th><th className="p-2 text-left">Customer</th><th className="p-2 text-left">Fuel type</th><th className="p-2 text-left">Authorization</th><th className="p-2 text-left">Status</th><th className="p-2"></th></tr></thead>
+            <tbody>
+              {vehicles.length === 0 && <tr className="border-t"><td colSpan={7} className="p-8 text-center text-muted-foreground">No fleet vehicles yet. Add a vehicle to associate it with customer fuel invoices.</td></tr>}
+              {vehicles.map(vehicle => <tr key={vehicle.id} className="border-t"><td className="p-2 font-medium">{vehicle.registration}</td><td className="p-2">{vehicle.makeModel || '—'}</td><td className="p-2">{vehicle.customer?.name || 'Unassigned'}</td><td className="p-2 capitalize">{vehicle.fuelType || 'Any'}</td><td className="p-2"><Badge variant={vehicle.isAuthorized ? 'default' : 'destructive'}>{vehicle.isAuthorized ? 'Authorized' : 'Blocked'}</Badge></td><td className="p-2"><Badge variant={vehicle.isActive ? 'secondary' : 'outline'}>{vehicle.isActive ? 'Active' : 'Inactive'}</Badge></td><td className="p-2">{canEditCurrentTab && vehicle.isActive && <Button size="sm" variant="outline" onClick={() => toggleVehicleAuthorization(vehicle)}>{vehicle.isAuthorized ? 'Block' : 'Authorize'}</Button>}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className={cn('space-y-4', tab !== 'maintenance' && 'hidden')}>
+        {canCreateCurrentTab && <Card>
+          <CardHeader><CardTitle className="text-base">Schedule inspection, maintenance, or calibration</CardTitle></CardHeader>
+          <CardContent>
+            <form id="fuel-maintenance-form" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" onSubmit={event => { event.preventDefault(); createMaintenanceRecord() }}>
+              <div><Label>Asset</Label><Select value={maintenanceForm.assetType} onValueChange={assetType => setMaintenanceForm({ ...maintenanceForm, assetType, assetId: '', assetName: '', branchId: '' })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pump">Pump</SelectItem><SelectItem value="tank">Tank</SelectItem><SelectItem value="station">Other station equipment</SelectItem></SelectContent></Select></div>
+              {maintenanceForm.assetType !== 'station' ? <div><Label>{maintenanceForm.assetType === 'pump' ? 'Pump' : 'Tank'}</Label><Select value={maintenanceForm.assetId} onValueChange={assetId => { const asset = (maintenanceForm.assetType === 'pump' ? pumps : tanks).find(row => row.id === assetId); setMaintenanceForm({ ...maintenanceForm, assetId, branchId: asset?.branchId || '' }) }}><SelectTrigger><SelectValue placeholder={`Select ${maintenanceForm.assetType}`} /></SelectTrigger><SelectContent>{(maintenanceForm.assetType === 'pump' ? pumps : tanks).map(asset => <SelectItem key={asset.id} value={asset.id}>{asset.name}</SelectItem>)}</SelectContent></Select></div> : <div><Label>Equipment name</Label><Input value={maintenanceForm.assetName} onChange={event => setMaintenanceForm({ ...maintenanceForm, assetName: event.target.value })} placeholder="Generator, price board, etc." /></div>}
+              <div><Label>Activity</Label><Select value={maintenanceForm.activityType} onValueChange={activityType => setMaintenanceForm({ ...maintenanceForm, activityType })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="maintenance">Maintenance / service</SelectItem><SelectItem value="calibration">Calibration</SelectItem><SelectItem value="inspection">Inspection</SelectItem></SelectContent></Select></div>
+              <div><Label>Due date</Label><Input required type="date" value={maintenanceForm.dueAt} onChange={event => setMaintenanceForm({ ...maintenanceForm, dueAt: event.target.value })} /></div>
+              <div className="sm:col-span-2"><Label>Work details</Label><Input value={maintenanceForm.notes} onChange={event => setMaintenanceForm({ ...maintenanceForm, notes: event.target.value })} placeholder="Work required, provider, or reference" /></div>
+              <div className="sm:col-span-2 lg:col-span-3"><Button type="submit" disabled={savingMaintenance}>{savingMaintenance ? 'Saving…' : 'Schedule Activity'}</Button></div>
+            </form>
+          </CardContent>
+        </Card>}
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted"><tr><th className="p-2 text-left">Due</th><th className="p-2 text-left">Asset</th><th className="p-2 text-left">Activity</th><th className="p-2 text-left">Details</th><th className="p-2 text-left">Status</th><th className="p-2"></th></tr></thead>
+            <tbody>
+              {maintenanceRecords.length === 0 && <tr className="border-t"><td colSpan={6} className="p-8 text-center text-muted-foreground">No maintenance activities recorded.</td></tr>}
+              {maintenanceRecords.map(record => {
+                const overdue = record.status === 'scheduled' && new Date(record.dueAt).getTime() < new Date(new Date().toDateString()).getTime()
+                return <tr key={record.id} className="border-t"><td className="p-2">{new Date(record.dueAt).toLocaleDateString()}</td><td className="p-2">{record.assetName}<div className="text-xs capitalize text-muted-foreground">{record.assetType}</div></td><td className="p-2 capitalize">{record.activityType}</td><td className="p-2">{record.notes || '—'}</td><td className="p-2"><Badge variant={overdue ? 'destructive' : record.status === 'completed' ? 'default' : 'secondary'}>{overdue ? 'Overdue' : record.status}</Badge></td><td className="p-2">{canEditCurrentTab && record.status === 'scheduled' && <Button size="sm" variant="outline" onClick={() => completeMaintenanceRecord(record.id)}>Mark complete</Button>}</td></tr>
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={showVehicleModal} onOpenChange={setShowVehicleModal}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader><DialogTitle>Add fleet vehicle</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Registration number</Label><Input autoCapitalize="characters" value={vehicleForm.registration} onChange={event => setVehicleForm({ ...vehicleForm, registration: event.target.value.toUpperCase() })} placeholder="UAB 123X" /></div>
+            <div><Label>Make / model</Label><Input value={vehicleForm.makeModel} onChange={event => setVehicleForm({ ...vehicleForm, makeModel: event.target.value })} placeholder="Optional" /></div>
+            <div><Label>Customer (optional)</Label><Select value={vehicleForm.customerId || '__none'} onValueChange={value => { const customer = customers.find(row => row.id === value); setVehicleForm({ ...vehicleForm, customerId: value === '__none' ? '' : value, branchId: customer?.branchId || '' }) }}><SelectTrigger><SelectValue placeholder="Any customer" /></SelectTrigger><SelectContent><SelectItem value="__none">No customer linked</SelectItem>{customers.map(customer => <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Allowed fuel type (optional)</Label><Select value={vehicleForm.fuelType || '__any'} onValueChange={value => setVehicleForm({ ...vehicleForm, fuelType: value === '__any' ? '' : value })}><SelectTrigger><SelectValue placeholder="Any fuel" /></SelectTrigger><SelectContent><SelectItem value="__any">Any fuel</SelectItem>{['petrol', 'diesel', 'kerosene', 'gas'].map(type => <SelectItem key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Notes</Label><Input value={vehicleForm.notes} onChange={event => setVehicleForm({ ...vehicleForm, notes: event.target.value })} /></div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={vehicleForm.isAuthorized} onChange={event => setVehicleForm({ ...vehicleForm, isAuthorized: event.target.checked })} /> Authorized for fueling</label>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowVehicleModal(false)}>Cancel</Button><Button onClick={createFuelVehicle} disabled={savingVehicle}>{savingVehicle ? 'Saving…' : 'Add vehicle'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Tank Modal */}
       <Dialog open={showTankModal} onOpenChange={setShowTankModal}>
         <DialogContent>
@@ -608,12 +723,20 @@ export default function FuelStationPage() {
               </Select>
             </div>
             <div><Label>Customer</Label>
-              <Select value={fuelCreditForm.customerId} onValueChange={v => setFuelCreditForm({ ...fuelCreditForm, customerId: v })}>
+              <Select value={fuelCreditForm.customerId} onValueChange={v => setFuelCreditForm({ ...fuelCreditForm, customerId: v, vehicleId: '' })}>
                 <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger><SelectContent>
                   {customers.map(customer => <SelectItem key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` · ${customer.phone}` : ''}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
+            {hasFeature('fuel_station.fleet') && <div><Label>Vehicle (optional)</Label>
+              <Select value={fuelCreditForm.vehicleId || '__none'} onValueChange={value => setFuelCreditForm({ ...fuelCreditForm, vehicleId: value === '__none' ? '' : value })}>
+                <SelectTrigger><SelectValue placeholder="No vehicle linked" /></SelectTrigger><SelectContent>
+                  <SelectItem value="__none">No vehicle linked</SelectItem>
+                  {vehicles.filter(vehicle => vehicle.isActive && vehicle.isAuthorized && (!vehicle.customerId || vehicle.customerId === fuelCreditForm.customerId)).map(vehicle => <SelectItem key={vehicle.id} value={vehicle.id}>{vehicle.registration}{vehicle.makeModel ? ` · ${vehicle.makeModel}` : ''}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>}
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Litres</Label><Input type="number" min="0.01" step="0.01" value={fuelCreditForm.litres || ''} onChange={e => setFuelCreditForm({ ...fuelCreditForm, litres: Number(e.target.value) })} /></div>
               <div><Label>Unit Price</Label><Input type="number" min="0.01" step="0.01" value={fuelCreditForm.unitPrice || ''} onChange={e => setFuelCreditForm({ ...fuelCreditForm, unitPrice: Number(e.target.value) })} /></div>

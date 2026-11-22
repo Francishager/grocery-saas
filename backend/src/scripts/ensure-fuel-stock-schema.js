@@ -13,13 +13,15 @@ try {
   for (const tank of tanks) {
     const user = await prisma.user.findFirst({ where: { tenantId: tank.tenantId, isActive: true }, orderBy: [{ role: 'asc' }, { createdAt: 'asc' }], select: { id: true } });
     if (!user) continue;
+    const openingValue = Number(tank.currentStock) * Number(tank.unitCost);
+    if (!Number.isFinite(openingValue) || openingValue <= 0) continue;
     const created = await prisma.$transaction(async tx => {
       const accounts = await ensureFuelAccountingAccounts(tx, tank.tenantId);
       const result = await postFuelJournal(tx, {
         tenantId: tank.tenantId, userId: user.id, branchId: tank.branchId,
         sourceType: 'FUEL_TANK_OPENING', sourceId: `${tank.tenantId}:${tank.id}`,
         reference: tank.name, description: `Fuel stock snapshot at accounting activation: ${tank.name}`,
-        lines: fuelOpeningLines(accounts, Number(tank.currentStock) * Number(tank.unitCost)),
+        lines: fuelOpeningLines(accounts, openingValue),
       });
       return !result.alreadyPosted;
     }, { timeout: 30000, isolationLevel: 'Serializable' });

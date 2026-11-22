@@ -254,6 +254,8 @@ const MODULES = [
       { name: 'fuel_station.shift_reports', displayName: 'Shift Reports' },
       { name: 'fuel_station.pricing', displayName: 'Price Management' },
       { name: 'fuel_station.compliance', displayName: 'Environmental Compliance' },
+      { name: 'fuel_station.fleet', displayName: 'Fleet & Vehicle Authorization' },
+      { name: 'fuel_station.maintenance', displayName: 'Equipment Maintenance & Calibration' },
       { name: 'fuel_station.reports', displayName: 'Fuel Station Reports' },
     ]
   },

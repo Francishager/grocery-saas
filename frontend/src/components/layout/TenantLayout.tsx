@@ -49,6 +49,8 @@ const fuelStationSubItems = [
   { to: '/tenant/fuel-station/shifts', label: 'Shift Reports', icon: ClipboardIcon, permission: 'canViewFuelStation', feature: 'fuel_station.shift_reports' },
   { to: '/tenant/fuel-station/pricing', label: 'Price Management', icon: Tags, permission: 'canViewFuelStation', feature: 'fuel_station.pricing' },
   { to: '/tenant/fuel-station/compliance', label: 'Compliance', icon: ClipboardCheck, permission: 'canViewFuelStation', feature: 'fuel_station.compliance' },
+  { to: '/tenant/fuel-station/fleet', label: 'Fleet & Vehicles', icon: Truck, permission: 'canViewFuelStation', feature: 'fuel_station.fleet' },
+  { to: '/tenant/fuel-station/maintenance', label: 'Maintenance & Calibration', icon: WrenchIcon, permission: 'canViewFuelStation', feature: 'fuel_station.maintenance' },
 ]
 
 const receivablesSubItems = [

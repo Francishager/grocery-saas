@@ -59,6 +59,8 @@ model Branch {
   fuelDipstickReadings  FuelDipstickReading[]
   fuelPricing           FuelPricing[]
   fuelCompliance        FuelCompliance[]
+  fuelVehicles          FuelVehicle[]
+  fuelMaintenance       FuelMaintenanceRecord[]
   productionOrders      ProductionOrder[]
   farmFields            FarmField[]
   livestock             Livestock[]
@@ -260,6 +262,8 @@ model Tenant {
   fuelDipstickReadings FuelDipstickReading[]
   fuelPricing          FuelPricing[]
   fuelCompliance       FuelCompliance[]
+  fuelVehicles         FuelVehicle[]
+  fuelMaintenance      FuelMaintenanceRecord[]
 
   // =====================
   // MANUFACTURING
@@ -1771,6 +1775,7 @@ model Customer {
   deliveries                      Delivery[]
   restaurantOrders                RestaurantOrder[]
   appointments                    Appointment[]
+  fuelVehicles                    FuelVehicle[]
   workOrders                      WorkOrder[]
   serviceContracts                ServiceContract[]
   serviceFeedback                 ServiceFeedback[]
@@ -5456,6 +5461,8 @@ model FuelSale {
   shift          FuelShiftReport @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   saleId         String          @unique
   sale           SaleRecord      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  vehicleId      String?
+  vehicle        FuelVehicle?    @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   idempotencyKey String?         @unique
   litres         Float
   unitPrice      Float
@@ -5465,6 +5472,53 @@ model FuelSale {
   @@map("fuel_sales")
 }
 
+model FuelVehicle {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  registration String
+  makeModel    String?
+  fuelType     String?
+  notes        String?
+  isAuthorized Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  fuelSales FuelSale[]
+
+  @@unique([tenantId, registration])
+  @@index([tenantId, branchId, isActive])
+  @@index([tenantId, customerId])
+  @@map("fuel_vehicles")
+}
+
+model FuelMaintenanceRecord {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assetType    String
+  assetId      String?
+  assetName    String
+  activityType String
+  status       String   @default("scheduled")
+  dueAt        DateTime
+  completedAt  DateTime?
+  notes        String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, branchId, status, dueAt])
+  @@index([tenantId, assetType, assetId, dueAt])
+  @@map("fuel_maintenance_records")
+}
 model FuelDipstickReading {
   id            String   @id @default(cuid())
   tenantId      String

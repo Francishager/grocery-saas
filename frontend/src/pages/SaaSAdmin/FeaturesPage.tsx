@@ -249,6 +249,8 @@ const MODULES = [
       { name: 'fuel_station.lubricants', displayName: 'Lubricants & Dry Stock' },
       { name: 'fuel_station.convenience', displayName: 'Convenience Shop' },
       { name: 'fuel_station.compliance', displayName: 'Environmental Compliance' },
+      { name: 'fuel_station.fleet', displayName: 'Fleet & Vehicle Authorization' },
+      { name: 'fuel_station.maintenance', displayName: 'Equipment Maintenance & Calibration' },
       { name: 'fuel_station.reports', displayName: 'Fuel Station Reports' },
     ]
   },

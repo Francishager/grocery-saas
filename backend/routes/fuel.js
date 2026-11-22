@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import prisma from "../src/db.js";
 import { authenticateToken, requirePermission, loadUserPermissions, canUseTransactionAccountForPayment } from "../middleware/auth.js";
 import { requireFeature } from "../middleware/featureCheck.js";
+import { getTenantFeatures, hasFeatureAccess } from "../middleware/featureCheck.js";
 import { customerProfileAccess, maskCustomerPhone } from "../src/utils/customerProfileAccess.js";
 import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync.js";
 import { fuelDeliveryValuation, fuelMeterSaleValuation, fuelShiftReconciliation } from "../src/utils/fuelAccounting.js";
@@ -11,6 +12,7 @@ import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from ".
 import { calculateCustomerReceivableBalance, reconcileCustomerReceivableBalance } from "../src/utils/customerBalance.js";
 import { getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, validateReceivablesAccountingConfig } from "../src/services/receivablesAccountingService.js";
 import { applyAvailableCustomerCredit } from "../src/services/customerCreditApplicationService.js";
+import { fuelVehicleInvoiceError } from "../src/utils/fuelFleet.js";
 import { resolveBranchScope, scopedWhere } from "../src/utils/branchAccess.js";
 
 const router = Router();
@@ -64,7 +66,7 @@ router.get('/customers', authenticateToken, loadUserPermissions, requirePermissi
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
     const customers = await prisma.customer.findMany({
       where: scopedWhere(scope, { status: 'active' }),
-      select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+      select: { id: true, name: true, phone: true, balance: true, creditLimit: true, branchId: true },
       orderBy: { name: 'asc' },
     });
     const access = customerProfileAccess(req.user?.permissions);
@@ -73,8 +75,134 @@ router.get('/customers', authenticateToken, loadUserPermissions, requirePermissi
       name: customer.name,
       ...(access.phone ? { phone: customer.phone } : { maskedPhone: maskCustomerPhone(customer.phone) }),
       ...(access.balance && { balance: customer.balance, creditLimit: customer.creditLimit }),
+      branchId: customer.branchId,
     })));
   } catch (e) { res.status(500).json({ error: 'Could not load customers for fuel credit invoices.' }); }
+});
+
+router.get('/vehicles', authenticateToken, loadUserPermissions, requirePermission('canViewFuelStation'), requireFeature('fuel_station.fleet'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const rows = await prisma.fuelVehicle.findMany({
+      where: scopedWhere(scope, { tenantId: t(req) }),
+      include: { customer: { select: { id: true, name: true } } },
+      orderBy: [{ isActive: 'desc' }, { registration: 'asc' }],
+    });
+    res.json(rows);
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message || 'Could not load fleet vehicles.' }); }
+});
+
+router.post('/vehicles', authenticateToken, loadUserPermissions, requirePermission('canCreateFuelStation'), requireFeature('fuel_station.fleet'), async (req, res) => {
+  try {
+    const tenantId = t(req);
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: false });
+    const registration = String(req.body?.registration || '').trim().toUpperCase();
+    const customerId = req.body?.customerId ? String(req.body.customerId) : null;
+    if (!registration) return res.status(400).json({ error: 'Vehicle registration is required.' });
+    if (registration.length > 32) return res.status(400).json({ error: 'Vehicle registration must be 32 characters or fewer.' });
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: customerId, tenantId, status: 'active' }), select: { id: true } });
+      if (!customer) return res.status(400).json({ error: 'Select an active customer in the selected branch.' });
+    }
+    const vehicle = await prisma.fuelVehicle.create({ data: {
+      tenantId, branchId: scope.branchId || null, customerId, registration,
+      makeModel: String(req.body?.makeModel || '').trim() || null,
+      fuelType: String(req.body?.fuelType || '').trim().toLowerCase() || null,
+      notes: String(req.body?.notes || '').trim() || null,
+      isAuthorized: req.body?.isAuthorized !== false,
+    }, include: { customer: { select: { id: true, name: true } } } });
+    res.status(201).json(vehicle);
+  } catch (error) {
+    res.status(error.code === 'P2002' ? 409 : (error.statusCode || 500)).json({ error: error.code === 'P2002' ? 'That vehicle registration is already on this business fleet.' : error.message || 'Could not add fleet vehicle.' });
+  }
+});
+
+router.put('/vehicles/:id', authenticateToken, loadUserPermissions, requirePermission('canEditFuelStation'), requireFeature('fuel_station.fleet'), async (req, res) => {
+  try {
+    const tenantId = t(req);
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: false });
+    const existing = await prisma.fuelVehicle.findFirst({ where: scopedWhere(scope, { id: req.params.id, tenantId }) });
+    if (!existing) return res.status(404).json({ error: 'Vehicle not found in the selected business or branch.' });
+    const customerId = req.body?.customerId === '' || req.body?.customerId === null ? null : String(req.body?.customerId || existing.customerId || '') || null;
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: scopedWhere(scope, { id: customerId, tenantId, status: 'active' }), select: { id: true } });
+      if (!customer) return res.status(400).json({ error: 'Select an active customer in the selected branch.' });
+    }
+    const vehicle = await prisma.fuelVehicle.update({ where: { id: existing.id }, data: {
+      registration: req.body?.registration === undefined ? existing.registration : String(req.body.registration).trim().toUpperCase(),
+      makeModel: req.body?.makeModel === undefined ? existing.makeModel : String(req.body.makeModel || '').trim() || null,
+      fuelType: req.body?.fuelType === undefined ? existing.fuelType : String(req.body.fuelType || '').trim().toLowerCase() || null,
+      notes: req.body?.notes === undefined ? existing.notes : String(req.body.notes || '').trim() || null,
+      customerId,
+      isAuthorized: req.body?.isAuthorized === undefined ? existing.isAuthorized : Boolean(req.body.isAuthorized),
+      isActive: req.body?.isActive === undefined ? existing.isActive : Boolean(req.body.isActive),
+    }, include: { customer: { select: { id: true, name: true } } } });
+    res.json(vehicle);
+  } catch (error) {
+    res.status(error.code === 'P2002' ? 409 : (error.statusCode || 500)).json({ error: error.code === 'P2002' ? 'That vehicle registration is already on this business fleet.' : error.message || 'Could not update fleet vehicle.' });
+  }
+});
+
+router.get('/maintenance', authenticateToken, loadUserPermissions, requirePermission('canViewFuelStation'), requireFeature('fuel_station.maintenance'), async (req, res) => {
+  try {
+    const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
+    const rows = await prisma.fuelMaintenanceRecord.findMany({
+      where: scopedWhere(scope, { tenantId: t(req) }),
+      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
+    });
+    res.json(rows);
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message || 'Could not load maintenance schedule.' }); }
+});
+
+router.post('/maintenance', authenticateToken, loadUserPermissions, requirePermission('canCreateFuelStation'), requireFeature('fuel_station.maintenance'), async (req, res) => {
+  try {
+    const tenantId = t(req);
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: false });
+    const assetType = String(req.body?.assetType || '').toLowerCase();
+    const activityType = String(req.body?.activityType || '').toLowerCase();
+    const dueAt = new Date(req.body?.dueAt);
+    if (!['tank', 'pump', 'station'].includes(assetType)) return res.status(400).json({ error: 'Choose a tank, pump, or station asset.' });
+    if (!['maintenance', 'calibration', 'inspection'].includes(activityType)) return res.status(400).json({ error: 'Choose maintenance, calibration, or inspection.' });
+    if (!Number.isFinite(dueAt.getTime())) return res.status(400).json({ error: 'A valid due or completion date is required.' });
+    let assetName = String(req.body?.assetName || '').trim();
+    let assetId = req.body?.assetId ? String(req.body.assetId) : null;
+    if (assetType === 'tank') {
+      const tank = assetId && await prisma.fuelTank.findFirst({ where: scopedWhere(scope, { id: assetId, tenantId }) });
+      if (!tank) return res.status(400).json({ error: 'Select a fuel tank in the selected branch.' });
+      assetName = tank.name;
+    } else if (assetType === 'pump') {
+      const pump = assetId && await prisma.fuelPump.findFirst({ where: scopedWhere(scope, { id: assetId, tenantId }), include: { tank: true } });
+      if (!pump) return res.status(400).json({ error: 'Select a fuel pump in the selected branch.' });
+      assetName = pump.name;
+    } else {
+      assetId = null;
+      assetName = assetName || 'Station';
+    }
+    const completed = req.body?.status === 'completed';
+    const record = await prisma.fuelMaintenanceRecord.create({ data: {
+      tenantId, branchId: scope.branchId || null, assetType, assetId, assetName, activityType,
+      dueAt, status: completed ? 'completed' : 'scheduled', completedAt: completed ? new Date() : null,
+      notes: String(req.body?.notes || '').trim() || null, createdById: req.user.id,
+    } });
+    res.status(201).json(record);
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message || 'Could not schedule maintenance.' }); }
+});
+
+router.put('/maintenance/:id', authenticateToken, loadUserPermissions, requirePermission('canEditFuelStation'), requireFeature('fuel_station.maintenance'), async (req, res) => {
+  try {
+    const tenantId = t(req);
+    const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: false });
+    const existing = await prisma.fuelMaintenanceRecord.findFirst({ where: scopedWhere(scope, { id: req.params.id, tenantId }) });
+    if (!existing) return res.status(404).json({ error: 'Maintenance record not found in the selected business or branch.' });
+    const status = String(req.body?.status || existing.status);
+    if (!['scheduled', 'completed', 'cancelled'].includes(status)) return res.status(400).json({ error: 'Invalid maintenance status.' });
+    const record = await prisma.fuelMaintenanceRecord.update({ where: { id: existing.id }, data: {
+      status,
+      completedAt: status === 'completed' ? (existing.completedAt || new Date()) : null,
+      notes: req.body?.notes === undefined ? existing.notes : String(req.body.notes || '').trim() || null,
+    } });
+    res.json(record);
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message || 'Could not update maintenance record.' }); }
 });
 
 router.post('/sales', authenticateToken, loadUserPermissions, requirePermission('canCreateFuelStation'), requirePermission('canCreateReceivable'), requireFeature('fuel_station.shift_reports'), async (req, res) => {
@@ -83,6 +211,7 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
     const scope = await resolveBranchScope(prisma, req, { source: 'body', requireBranch: true, allowOwnerAll: false });
     const customerId = String(req.body?.customerId || '');
     const shiftId = String(req.body?.shiftId || '');
+    const vehicleId = req.body?.vehicleId ? String(req.body.vehicleId) : null;
     const idempotencyKey = String(req.body?.idempotencyKey || randomUUID()).trim();
     const litres = Number(req.body?.litres);
     const unitPrice = Number(req.body?.unitPrice);
@@ -90,9 +219,13 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
     if (idempotencyKey.length > 120) return res.status(400).json({ error: 'Sale request key is invalid.' });
     if (!Number.isFinite(litres) || litres <= 0 || !Number.isFinite(unitPrice) || unitPrice <= 0) return res.status(400).json({ error: 'Litres and unit price must be greater than zero.' });
     if (req.body?.dueDate && Number.isNaN(new Date(req.body.dueDate).getTime())) return res.status(400).json({ error: 'Customer invoice due date is invalid.' });
+    if (vehicleId) {
+      const features = req.tenantFeatures || await getTenantFeatures(tenantId);
+      if (!hasFeatureAccess(features, 'fuel_station.fleet')) return res.status(403).json({ error: 'Fleet vehicle assignment is not enabled for this business.', code: 'FEATURE_NOT_ENABLED' });
+    }
     const sale = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${idempotencyKey}))`;
-      const priorRequest = await tx.fuelSale.findUnique({ where: { idempotencyKey }, include: { sale: { include: { customer: true, creditApplications: true, fuelSale: { include: { tank: true, shift: true } } } } } });
+      const priorRequest = await tx.fuelSale.findUnique({ where: { idempotencyKey }, include: { sale: { include: { customer: true, creditApplications: true, fuelSale: { include: { tank: true, shift: true, vehicle: true } } } } } });
       if (priorRequest?.tenantId === tenantId) return { ...priorRequest.sale, creditApplied: (priorRequest.sale.creditApplications || []).reduce((sum, application) => sum + Number(application.amount || 0), 0) };
       if (priorRequest) throw Object.assign(new Error('Sale request key has already been used.'), { statusCode: 409 });
       await tx.$queryRaw`SELECT "id" FROM "fuel_shift_reports" WHERE "id" = ${shiftId} AND "tenantId" = ${tenantId} FOR UPDATE`;
@@ -103,6 +236,12 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
       if (!customer) throw Object.assign(new Error('Active customer not found for this business.'), { statusCode: 404 });
       await tx.$queryRaw`SELECT id FROM customers WHERE id = ${customerId} AND "tenantId" = ${tenantId} FOR UPDATE`;
       if (customer.branchId && customer.branchId !== scope.branchId) throw Object.assign(new Error('Customer is assigned to a different branch.'), { statusCode: 400 });
+      let vehicle = null;
+      if (vehicleId) {
+        vehicle = await tx.fuelVehicle.findFirst({ where: scopedWhere(scope, { id: vehicleId, tenantId, isActive: true, isAuthorized: true }) });
+        const vehicleError = fuelVehicleInvoiceError(vehicle, { customerId, fuelType: shift.pump.tank.fuelType });
+        if (vehicleError) throw Object.assign(new Error(vehicleError), { statusCode: 400 });
+      }
       const measured = await tx.fuelMeterReading.aggregate({ where: { tenantId, shiftId }, _sum: { litresSold: true } });
       const alreadyInvoiced = await tx.fuelSale.aggregate({ where: { tenantId, shiftId }, _sum: { litres: true } });
       const availableLitres = Number(measured._sum.litresSold || 0) - Number(alreadyInvoiced._sum.litres || 0);
@@ -126,7 +265,7 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
         dueDate: req.body?.dueDate ? new Date(req.body.dueDate) : new Date(Date.now() + 30 * 86400000),
         notes: `Fuel credit invoice: ${litres} L ${shift.pump.tank.fuelType} from ${shift.pump.tank.name}`,
       } });
-      await tx.fuelSale.create({ data: { tenantId, branchId: scope.branchId, tankId: shift.pump.tank.id, shiftId, saleId: created.id, litres, unitPrice, idempotencyKey } });
+      await tx.fuelSale.create({ data: { tenantId, branchId: scope.branchId, tankId: shift.pump.tank.id, shiftId, saleId: created.id, vehicleId: vehicle?.id || null, litres, unitPrice, idempotencyKey } });
       await postReceivablesJournal(tx, {
         tenantId, branchId: scope.branchId, userId: req.user.id,
         sourceType: 'FUEL_CUSTOMER_INVOICE', sourceId: created.id, date: created.createdAt,
@@ -148,7 +287,7 @@ router.post('/sales', authenticateToken, loadUserPermissions, requirePermission(
         });
       }
       await reconcileCustomerReceivableBalance(tx, scope, customerId);
-      const updatedSale = await tx.saleRecord.findUnique({ where: { id: created.id }, include: { customer: true, creditApplications: true, fuelSale: { include: { tank: true, shift: true } } } });
+      const updatedSale = await tx.saleRecord.findUnique({ where: { id: created.id }, include: { customer: true, creditApplications: true, fuelSale: { include: { tank: true, shift: true, vehicle: true } } } });
       return { ...updatedSale, creditApplied: application.amount };
     }, { isolationLevel: 'Serializable' });
     res.status(201).json(sale);
@@ -406,7 +545,7 @@ router.post("/meter-readings", authenticateToken, requirePermission("canCreateFu
 router.get("/shifts", authenticateToken, requirePermission("canViewFuelStation"), requireFeature("fuel_station.shift_reports"), async (req, res) => {
   try {
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
-    const shifts = await prisma.fuelShiftReport.findMany({ where: scopedWhere(scope), include: { pump: { include: { tank: true } }, user: true, fuelSales: { include: { sale: { select: { id: true, receiptNo: true, total: true, status: true, customer: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
+    const shifts = await prisma.fuelShiftReport.findMany({ where: scopedWhere(scope), include: { pump: { include: { tank: true } }, user: true, fuelSales: { include: { vehicle: { select: { registration: true } }, sale: { select: { id: true, receiptNo: true, total: true, status: true, customer: { select: { id: true, name: true } } } } } } }, orderBy: { createdAt: "desc" } });
     res.json(shifts);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

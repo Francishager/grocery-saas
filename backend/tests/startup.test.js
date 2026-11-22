@@ -31,9 +31,13 @@ test('container runs additive schema checks from its startup script without dest
     'ensure-property-tenancy-alternate-phone-schema.js',
     'ensure-property-tenant-notes-schema.js',
     'ensure-customer-credit-applications-schema.js',
+    'ensure-customer-payment-creator-schema.js',
     'ensure-customer-alternate-phone-schema.js',
     'ensure-user-theme-schema.js',
     'ensure-fractional-product-stock-schema.js',
+    'ensure-fuel-stock-schema.js',
+    'ensure-fuel-subledger-schema.js',
+    'ensure-fuel-fleet-maintenance-schema.js',
     'ensure-salon-spa-schema.js',
     'ensure-tenant-memberships-schema.js',
     'ensure-bar-feature.js',
@@ -49,6 +53,18 @@ test('container runs additive schema checks from its startup script without dest
     assert.ok(schemaBootstrap.includes(migration));
   }
   assert.ok(schemaBootstrap.includes('ensure-fractional-product-stock-schema.js'));
+  const customerPaymentCreatorSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-customer-payment-creator-schema.js'), 'utf8');
+  assert.match(customerPaymentCreatorSchema, /ADD COLUMN IF NOT EXISTS "createdById" TEXT/);
+  assert.match(customerPaymentCreatorSchema, /WHERE payment\."createdById" IS NULL/);
+  assert.match(customerPaymentCreatorSchema, /information_schema\.columns/);
+  assert.doesNotMatch(customerPaymentCreatorSchema, /DROP TABLE|TRUNCATE|force-reset/i);
+  const fuelFleetSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-fuel-fleet-maintenance-schema.js'), 'utf8');
+  for (const fragment of ['CREATE TABLE IF NOT EXISTS "fuel_vehicles"', 'CREATE TABLE IF NOT EXISTS "fuel_maintenance_records"', 'ADD COLUMN IF NOT EXISTS "vehicleId"', 'fuel_station.fleet', 'fuel_station.maintenance']) {
+    assert.ok(fuelFleetSchema.includes(fragment), `fuel schema should include ${fragment}`);
+  }
+  assert.doesNotMatch(fuelFleetSchema, /DROP TABLE|TRUNCATE|force-reset/i);
+  const fuelStockSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-fuel-stock-schema.js'), 'utf8');
+  assert.match(fuelStockSchema, /!Number\.isFinite\(openingValue\) \|\| openingValue <= 0/);
   const businessMessagingSchema = fs.readFileSync(path.resolve(__dirname, '../src/scripts/ensure-business-messaging-schema.js'), 'utf8');
   for (const fragment of ['business_conversations', 'business_messages', 'business_message_reactions', '"deliveredAt"', '"replyToMessageId"', '"imageUrl"', '"imagePublicId"', 'ADD COLUMN IF NOT EXISTS']) {
     assert.ok(businessMessagingSchema.includes(fragment), `business messaging schema should include ${fragment}`);

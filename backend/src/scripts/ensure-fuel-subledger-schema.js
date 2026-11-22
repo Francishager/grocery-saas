@@ -40,9 +40,16 @@ try {
     await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '15s'");
     for (const statement of statements) await tx.$executeRawUnsafe(statement);
     for (const [name, statement] of constraints) {
-      await tx.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}') THEN ${statement}; END IF; END $$`);
+      const table = statement.match(/ALTER TABLE "([^"]+)"/)?.[1];
+      if (!table) throw new Error(`Cannot determine table for fuel constraint ${name}`);
+      await tx.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}' AND conrelid = '"${table}"'::regclass) THEN ${statement}; END IF; END $$`);
     }
   }, { timeout: 30000 });
+  const [schemaReady] = await prisma.$queryRaw`SELECT
+    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'fuel_deliveries' AND column_name = 'supplierId')
+    AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'fuel_shift_reports' AND column_name = 'salesMode')
+    AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'fuel_sales') AS ready`;
+  if (!schemaReady?.ready) throw new Error('Fuel supplier and sales schema verification failed');
   console.log('Fuel customer and supplier subledger links are ready.');
 } catch (error) {
   console.error('Unable to prepare fuel subledger schema.', error.code || '');

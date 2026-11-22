@@ -27,6 +27,13 @@ try {
   SET "createdById" = matched_cashiers.user_id
   FROM matched_cashiers
   WHERE payment.id = matched_cashiers.payment_id`)
+  const [column] = await prisma.$queryRaw`SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'customer_payments'
+      AND column_name = 'createdById'
+  ) AS present`
+  if (!column?.present) throw new Error('customer_payments.createdById was not created')
   console.log('Customer payment cashier attribution is ready.')
 } catch (error) {
   console.error('Unable to prepare customer payment cashier attribution:', error.code || error.message)

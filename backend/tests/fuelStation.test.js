@@ -2,6 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fuelDeliveryValuation, fuelMeterSaleValuation, fuelShiftReconciliation } from '../src/utils/fuelAccounting.js'
 import { fuelShiftJournalLines } from '../src/services/fuelAccountingService.js'
+import { fuelVehicleInvoiceError } from '../src/utils/fuelFleet.js'
+
+test('fleet invoice validation allows only authorized vehicles matching customer and fuel type', () => {
+  const vehicle = { isActive: true, isAuthorized: true, customerId: 'customer-1', fuelType: 'diesel' }
+  assert.equal(fuelVehicleInvoiceError(vehicle, { customerId: 'customer-1', fuelType: 'diesel' }), null)
+  assert.match(fuelVehicleInvoiceError({ ...vehicle, isAuthorized: false }, { customerId: 'customer-1', fuelType: 'diesel' }), /unauthorized/)
+  assert.match(fuelVehicleInvoiceError(vehicle, { customerId: 'customer-2', fuelType: 'diesel' }), /different customer/)
+  assert.match(fuelVehicleInvoiceError(vehicle, { customerId: 'customer-1', fuelType: 'petrol' }), /registered for diesel/)
+  assert.match(fuelVehicleInvoiceError(null, { customerId: 'customer-1', fuelType: 'diesel' }), /unauthorized/)
+})
 
 test('fuel delivery uses weighted-average tank cost instead of replacing prior cost', () => {
   const result = fuelDeliveryValuation({ stockLitres: 1000, unitCost: 5000, deliveryLitres: 500, deliveryUnitCost: 5600 })
