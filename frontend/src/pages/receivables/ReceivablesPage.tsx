@@ -160,10 +160,10 @@ const availableCustomerFunds = (customer: Pick<Customer, 'balance' | 'availableF
 
 const customerWalletBalance = (profile: any): number | undefined => {
   const candidates = [
+    profile?.walletBalance,
+    profile?.creditHistory?.walletBalance,
     profile?.wallet?.balance,
     profile?.wallet?.summary?.balance,
-    profile?.creditHistory?.walletBalance,
-    profile?.walletBalance,
   ]
   const value = candidates.find((candidate) => candidate !== null && candidate !== undefined && Number.isFinite(Number(candidate)))
   return value === undefined ? undefined : Math.max(0, Number(value))
@@ -1149,6 +1149,11 @@ export default function ReceivablesPage() {
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}))
+        if (walletWithdrawalMode && Number.isFinite(Number(error.availableFunds))) {
+          setSelectedCustomer((current) => current?.id === targetCustomer.id
+            ? { ...current, walletBalance: Math.max(0, Number(error.availableFunds)) }
+            : current)
+        }
         if (typeof error.currentBalance === 'number' && Number.isFinite(error.currentBalance)) {
           setSelectedCustomer((current) => current?.id === targetCustomer.id ? { ...current, balance: error.currentBalance } : current)
           setCustomers((current) => current.map((customer) => customer.id === targetCustomer.id ? { ...customer, balance: error.currentBalance } : customer))

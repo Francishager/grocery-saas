@@ -64,6 +64,16 @@ test('wallet deposits explain and report credit-sale settlement before wallet re
   assert.match(backendReceivables, /targetType: 'customer_wallet',[\s\S]*?amount: walletAmount/);
 });
 
+test('wallet withdrawal uses the profile ledger balance, refreshes stale amounts, and returns to the same profile', () => {
+  assert.match(historyDialog, /walletBalance: data\.creditHistory\?\.walletBalance \?\? data\.customer\.wallet\.balance/);
+  assert.match(receivablesPage, /const customerWalletBalance = \(profile: any\)/);
+  assert.match(receivablesPage, /Number\.isFinite\(Number\(error\.availableFunds\)\)/);
+  assert.match(receivablesPage, /returnToCustomerProfileRef\.current = profile/);
+  assert.match(receivablesPage, /if \(returnToProfile\) setHistoryCustomer\(returnToProfile\)/);
+  assert.match(backendReceivables, /availableFunds: currentBalance/);
+  assert.match(backendReceivables, /Number\.isFinite\(error\.availableFunds\)/);
+});
+
 test('credit sales apply active wallet funds and tell staff the wallet amount used', () => {
   assert.match(backendReceivables, /useWallet: walletFeatureEnabledForTenant/);
   assert.match(backendReceivables, /CUSTOMER_WALLET_SALE_APPLICATION/);

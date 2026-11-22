@@ -1811,7 +1811,11 @@ router.post('/wallet/withdrawals', authenticateToken, requirePermission('canWith
     const withdrawal = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${wallet.id} AND "tenantId" = ${tenantId} FOR UPDATE`
       const currentBalance = await getCustomerWalletBalance(tx, tenantId, wallet.id)
-      if (withdrawalAmount > currentBalance + 0.009) throw Object.assign(new Error('Withdrawal exceeds available wallet funds.'), { statusCode: 400, code: 'INSUFFICIENT_CUSTOMER_WALLET_FUNDS' })
+      if (withdrawalAmount > currentBalance + 0.009) throw Object.assign(new Error('Withdrawal exceeds available wallet funds.'), {
+        statusCode: 400,
+        code: 'INSUFFICIENT_CUSTOMER_WALLET_FUNDS',
+        availableFunds: currentBalance,
+      })
       const debited = await tx.cashAccount.updateMany({ where: { id: account.id, tenantId, isActive: true, balance: { gte: withdrawalAmount } }, data: { balance: { decrement: withdrawalAmount } } })
       if (debited.count !== 1) throw Object.assign(new Error(`Insufficient available balance in ${account.name}.`), { statusCode: 400, code: 'INSUFFICIENT_ACCOUNT_BALANCE' })
       const updatedAccount = await tx.cashAccount.findUnique({ where: { id: account.id } })
@@ -1841,7 +1845,7 @@ router.post('/wallet/withdrawals', authenticateToken, requirePermission('canWith
     }, { isolationLevel: 'Serializable', timeout: 20000 })
     res.status(201).json(withdrawal)
   } catch (error) {
-    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code })
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code, ...(Number.isFinite(error.availableFunds) ? { availableFunds: error.availableFunds } : {}) })
     handleBranchError(res, error, 'Failed to record customer wallet withdrawal')
   }
 })

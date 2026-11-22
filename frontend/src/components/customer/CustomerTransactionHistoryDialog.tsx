@@ -1160,7 +1160,12 @@ export default function CustomerTransactionHistoryDialog({
               <div className="flex flex-wrap gap-2 border-b pb-4">
                 {data.access.activateWallet && !data.customer.wallet?.active && <Button size="sm" variant="outline" disabled={walletActionLoading} onClick={activateCustomerWallet}>{walletActionLoading ? 'Opening wallet…' : 'Activate wallet'}</Button>}
                 {data.access.depositWallet && data.customer.wallet?.active && onRecordPayment && <Button size="sm" onClick={() => onRecordPayment({ ...data.customer, ...data.summary, walletDeposit: true })}><Wallet className="mr-1 h-4 w-4" />Deposit</Button>}
-                {data.access.withdrawWallet && data.customer.wallet?.active && onWithdraw && <Button size="sm" variant="outline" onClick={() => onWithdraw({ ...data.customer, ...data.summary, walletWithdrawal: true })}>Withdraw</Button>}
+                {data.access.withdrawWallet && data.customer.wallet?.active && onWithdraw && <Button size="sm" variant="outline" onClick={() => onWithdraw({
+                  ...data.customer,
+                  ...data.summary,
+                  walletBalance: data.creditHistory?.walletBalance ?? data.customer.wallet.balance ?? data.customer.wallet.summary?.balance,
+                  walletWithdrawal: true,
+                })}>Withdraw</Button>}
                 {walletActionError && <p role="alert" className="w-full text-sm text-destructive">{walletActionError}</p>}
                 {(hasRentalTenancies ? canEditRentalDetails : data.access.edit) && onEditCustomer && (
                   <Button size="sm" variant="outline" onClick={() => onEditCustomer({ ...data.customer, ...data.summary, ...(hasRentalTenancies ? { rentalTenancies: rentalData?.tenancies } : {}) })}>
