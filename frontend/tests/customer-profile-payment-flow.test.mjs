@@ -7,6 +7,7 @@ const source = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.ur
 const profilePage = source('../src/pages/receivables/CustomerProfilePage.tsx');
 const paymentDialog = source('../src/components/customer/CustomerPaymentDialog.tsx');
 const receivablesPage = source('../src/pages/receivables/ReceivablesPage.tsx');
+const authContext = source('../src/contexts/JWTAuthContext.tsx');
 const historyDialog = source('../src/components/customer/CustomerTransactionHistoryDialog.tsx');
 const transactionReceipt = source('../src/lib/transactionReceipt.ts');
 const transactionReceiptButton = source('../src/components/TransactionReceiptButton.tsx');
@@ -70,6 +71,8 @@ test('wallet withdrawal uses the profile ledger balance, keeps the profile open,
   assert.match(receivablesPage, /Number\.isFinite\(Number\(error\.availableFunds\)\)/);
   assert.match(receivablesPage, /refreshKey=\{historyRefreshKey\}/);
   assert.match(receivablesPage, /actionPanel=\{showWithdrawalModal && walletWithdrawalMode/);
+  assert.doesNotMatch(receivablesPage, /actionPanel=\{showWithdrawalModal && walletWithdrawalMode && selectedCustomer && hasPermission/);
+  assert.match(receivablesPage, /if \(!walletWithdrawalMode && !canCreateWithdrawal\)/);
   assert.match(receivablesPage, /id="walletWithdrawalAmount"/);
   assert.match(historyDialog, /\{actionPanel\}[\s\S]*?\{content\}/);
   const withdrawHandler = receivablesPage.match(/onWithdraw=\{\(profile\) => \{([\s\S]*?)\n        \}\}/)?.[1] || '';
@@ -77,6 +80,15 @@ test('wallet withdrawal uses the profile ledger balance, keeps the profile open,
   assert.doesNotMatch(withdrawHandler, /setHistoryCustomer\(null\)/);
   assert.match(backendReceivables, /availableFunds: currentBalance/);
   assert.match(backendReceivables, /Number\.isFinite\(error\.availableFunds\)/);
+});
+
+test('withdrawal defaults to the user cash account and owners retain all permissions', () => {
+  assert.match(receivablesPage, /const assignedAccount = filteredAccounts\.find/);
+  assert.match(receivablesPage, /const userAssignedAccount = filteredAccounts\.find\([\s\S]*?acc\.assignedStaffId[\s\S]*?user\?\.id/);
+  assert.match(receivablesPage, /const defaultCashAccount = filteredAccounts\.find\([\s\S]*?=== 'cash'/);
+  assert.match(receivablesPage, /const defaultAccount = assignedAccount \|\| userAssignedAccount \|\| defaultCashAccount/);
+  assert.match(receivablesPage, /setSelectedCashAccountId\(defaultAccount\?\.id \? String\(defaultAccount\.id\) : null\)/);
+  assert.match(authContext, /user\.role === 'owner' \|\| user\.role === 'saas_admin'\) return true/);
 });
 
 test('credit sales apply active wallet funds and tell staff the wallet amount used', () => {

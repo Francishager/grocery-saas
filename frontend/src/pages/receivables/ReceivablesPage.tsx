@@ -792,13 +792,10 @@ export default function ReceivablesPage() {
         setCashAccounts(filteredAccounts)
         
         const assignedAccount = filteredAccounts.find((acc: any) => assignedCashAccountId && String(acc.id) === String(assignedCashAccountId))
-        if (assignedAccount) {
-          setSelectedCashAccountId(assignedAccount.id)
-        } else if (filteredAccounts?.length === 1) {
-          setSelectedCashAccountId(filteredAccounts[0].id)
-        } else if (filteredAccounts?.length === 0) {
-          setSelectedCashAccountId(null)
-        }
+        const userAssignedAccount = filteredAccounts.find((acc: any) => acc.assignedStaffId && String(acc.assignedStaffId) === String(user?.id))
+        const defaultCashAccount = filteredAccounts.find((acc: any) => String(acc.type || '').toLowerCase() === 'cash')
+        const defaultAccount = assignedAccount || userAssignedAccount || defaultCashAccount || (filteredAccounts.length === 1 ? filteredAccounts[0] : null)
+        setSelectedCashAccountId(defaultAccount?.id ? String(defaultAccount.id) : null)
       }
     } catch (error) {
       console.error('Failed to load cash accounts:', error)
@@ -1092,11 +1089,14 @@ export default function ReceivablesPage() {
   }
   const recordWithdrawal = async () => {
     if (savingWithdrawalRef.current) return
-    if (walletWithdrawalMode ? !hasPermission('canWithdrawCustomerWallet') : !canCreateWithdrawal) {
+    // Wallet actions are exposed by the permission-filtered profile response; the API
+    // remains authoritative when the withdrawal is submitted. Avoid a stale local
+    // permission cache overriding that server decision.
+    if (!walletWithdrawalMode && !canCreateWithdrawal) {
       toast({
         variant: 'destructive',
         title: 'You do not have permission to record customer withdrawals',
-        description: walletWithdrawalMode ? 'Required permission: canWithdrawCustomerWallet' : 'Required permission: canCreateWithdrawal',
+        description: 'Required permission: canCreateWithdrawal',
       })
       return
     }
@@ -2124,7 +2124,7 @@ export default function ReceivablesPage() {
         customer={historyCustomer}
         open={!!historyCustomer}
         refreshKey={historyRefreshKey}
-        actionPanel={showWithdrawalModal && walletWithdrawalMode && selectedCustomer && hasPermission('canWithdrawCustomerWallet') ? (
+        actionPanel={showWithdrawalModal && walletWithdrawalMode && selectedCustomer ? (
           <section aria-label="Customer wallet withdrawal" className="mb-4 rounded-lg border border-primary/30 bg-background p-4 shadow-sm sm:p-5">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
