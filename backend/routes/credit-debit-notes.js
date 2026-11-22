@@ -7,6 +7,8 @@ import { reconcileCustomerReceivableBalance, receivableSaleNetTotal } from '../s
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { returnItemTaxAmount } from '../src/utils/saleTaxAllocation.js'
 import { creditNoteRecognitionLines, customerRefundLines, getReceivablesAccountingConfig, postReceivablesJournal, reverseReceivablesJournal } from '../src/services/receivablesAccountingService.js'
+import { ensureCustomerWalletAccount, getCustomerWalletBalance, postWalletJournalEntry } from '../src/services/customerWalletService.js'
+import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
 import { getPayablesAccountingConfig, getSupplierDebitNoteStockCost, postPayablesJournal, reverseCurrentPayablesJournal, supplierDebitNoteLines } from '../src/services/payablesAccountingService.js'
 
 const router = express.Router()
@@ -26,6 +28,9 @@ function ensureCreditNoteRefundSchema() {
       await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundAmount" DOUBLE PRECISION NOT NULL DEFAULT 0')
       await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundWithdrawalId" TEXT')
       await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "refundCashAccountId" TEXT')
+      await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "walletAmount" DOUBLE PRECISION NOT NULL DEFAULT 0')
+      await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "creditDisposition" TEXT')
+      await tx.$executeRawUnsafe('ALTER TABLE "credit_notes" ADD COLUMN IF NOT EXISTS "creditDispositionSaleId" TEXT')
     }).catch((error) => { refundSchemaReady = null; throw error })
   }
   return refundSchemaReady
@@ -239,6 +244,105 @@ async function ensureCreditNotePaidRefund(client, scope, noteId, userId) {
   return client.creditNote.update({
     where: { id: note.id },
     data: { refundAmount: targetRefund, refundWithdrawalId: withdrawal.id, refundCashAccountId: account.id },
+  })
+}
+
+async function settleCreditNotePaidAmount(client, scope, note, amount, disposition, targetSaleId, userId, features) {
+  const value = toMoney(amount)
+  if (value <= 0) return note
+  if (!['apply_to_sale', 'wallet', 'cash_refund'].includes(disposition)) {
+    throw httpError(400, 'Choose whether the paid portion should settle another credit sale, go to the customer wallet, or be refunded.')
+  }
+
+  if (disposition === 'cash_refund') {
+    await ensureCreditNotePaidRefund(client, scope, note.id, userId)
+    return client.creditNote.update({ where: { id: note.id }, data: { creditDisposition: disposition } })
+  }
+
+  const arConfig = await getReceivablesAccountingConfig(client, note.tenantId)
+  if (!arConfig?.isEnabled || !arConfig.customerAdvancesAccountId || !arConfig.receivableAccountId) {
+    throw httpError(409, 'Receivables accounting must have Customer Advances and Accounts Receivable configured before settling a paid credit note.')
+  }
+
+  if (disposition === 'apply_to_sale') {
+    if (!targetSaleId || targetSaleId === note.saleId) throw httpError(400, 'Select a different open credit sale for this customer.')
+    await client.$queryRaw`SELECT id FROM sale_records WHERE id = ${targetSaleId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+    const targetSale = await client.saleRecord.findFirst({
+      where: scopedWhere(scope, { id: targetSaleId, customerId: note.customerId, status: 'completed' }),
+      select: { id: true, receiptNo: true, balance: true, total: true, amountPaid: true, branchId: true },
+    })
+    if (!targetSale) throw httpError(404, 'The selected open credit sale was not found for this customer and branch.')
+    const openBalance = toMoney(targetSale.balance)
+    if (openBalance + 0.009 < value) throw httpError(400, `The selected sale only has ${openBalance.toFixed(2)} outstanding. Choose a sale with enough balance or choose another settlement method.`)
+    const application = await client.customerCreditApplication.create({ data: {
+      tenantId: note.tenantId, branchId: note.branchId || targetSale.branchId || scope.branchId || null,
+      customerId: note.customerId, saleId: targetSale.id, sourceType: 'credit_note', sourceId: note.id,
+      amount: value, createdById: userId,
+    } })
+    const nextPaid = toMoney(Number(targetSale.amountPaid || 0) + value)
+    const nextBalance = toMoney(Math.max(0, openBalance - value))
+    await client.saleRecord.update({ where: { id: targetSale.id }, data: {
+      amountPaid: nextPaid, balance: nextBalance,
+      paymentStatus: nextBalance <= 0 ? 'paid' : nextPaid > 0 ? 'partial' : 'unpaid',
+    } })
+    await postReceivablesJournal(client, {
+      tenantId: note.tenantId, branchId: note.branchId || targetSale.branchId || scope.branchId || null, userId,
+      sourceType: 'CUSTOMER_CREDIT_NOTE_APPLICATION', sourceId: application.id,
+      reference: `${note.noteNo} -> ${targetSale.receiptNo}`, description: `Apply paid credit note to credit sale ${targetSale.receiptNo}`,
+      lines: [
+        { accountId: arConfig.customerAdvancesAccountId, debit: value, credit: 0, description: `Apply customer advance from ${note.noteNo}` },
+        { accountId: arConfig.receivableAccountId, debit: 0, credit: value, description: `Settle credit sale ${targetSale.receiptNo}` },
+      ],
+    })
+    return client.creditNote.update({ where: { id: note.id }, data: { creditDisposition: disposition, creditDispositionSaleId: targetSale.id } })
+  }
+
+  if (!hasFeatureAccess(features, 'customers.wallet')) throw httpError(403, 'Customer Wallet must be enabled on this business plan to place a credit note refund in the customer wallet.')
+  const wallet = await client.customerWallet.findFirst({ where: { tenantId: note.tenantId, customerId: note.customerId, isActive: true } })
+  if (!wallet) throw httpError(409, "Activate this customer's wallet before choosing wallet settlement.")
+  await client.$queryRaw`SELECT id FROM customer_wallets WHERE id = ${wallet.id} AND "tenantId" = ${note.tenantId} FOR UPDATE`
+  const walletAccount = await ensureCustomerWalletAccount(client, note.tenantId)
+  const transaction = await client.customerWalletTransaction.create({ data: {
+    tenantId: note.tenantId, branchId: note.branchId || wallet.branchId || scope.branchId || null,
+    walletId: wallet.id, userId, kind: 'credit_note_refund', direction: 'in', amount: value,
+    reference: note.noteNo, sourceType: 'credit_note', sourceId: note.id,
+    notes: `Paid portion of credit note ${note.noteNo} held in customer wallet.`,
+  } })
+  await postWalletJournalEntry(client, {
+    tenantId: note.tenantId, branchId: note.branchId || wallet.branchId || scope.branchId || null, userId,
+    sourceType: 'CUSTOMER_CREDIT_NOTE_WALLET_RECLASS', sourceId: note.id, date: transaction.createdAt,
+    reference: note.noteNo, description: `Move paid credit note ${note.noteNo} to customer wallet`,
+    lines: [
+      { accountId: arConfig.customerAdvancesAccountId, debit: value, credit: 0, description: 'Move credit note advance to wallet liability' },
+      { accountId: walletAccount.id, debit: 0, credit: value, description: 'Customer wallet credit from returned sale' },
+    ],
+  })
+  return client.creditNote.update({ where: { id: note.id }, data: { creditDisposition: disposition, walletAmount: value } })
+}
+
+async function reverseCreditNoteWalletCredit(client, scope, note, userId) {
+  const amount = toMoney(note.walletAmount)
+  if (amount <= 0) return null
+  const wallet = await client.customerWallet.findFirst({ where: { tenantId: scope.tenantId, customerId: note.customerId, isActive: true } })
+  const credit = await client.customerWalletTransaction.findFirst({ where: {
+    tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: note.id, direction: 'in', kind: 'credit_note_refund',
+  } })
+  if (!wallet || !credit) throw httpError(409, 'The wallet credit record is missing; reconcile this credit note before cancelling it.')
+  const laterOutflow = await client.customerWalletTransaction.findFirst({ where: {
+    tenantId: scope.tenantId, walletId: wallet.id, direction: 'out', createdAt: { gt: credit.createdAt },
+  }, select: { id: true } })
+  if (laterOutflow) throw httpError(409, 'This wallet credit has later withdrawals or applications. Reverse those wallet transactions before cancelling the credit note.')
+  const balance = await getCustomerWalletBalance(client, scope.tenantId, wallet.id)
+  if (balance + 0.009 < amount) throw httpError(409, 'The customer wallet no longer has enough available funds to reverse this credit note.')
+  await client.customerWalletTransaction.create({ data: {
+    tenantId: scope.tenantId, branchId: note.branchId || wallet.branchId || scope.branchId || null,
+    walletId: wallet.id, userId, kind: 'credit_note_reversal', direction: 'out', amount,
+    reference: `${note.noteNo}-REV`, sourceType: 'credit_note_reversal', sourceId: note.id,
+    notes: `Reverse wallet credit from cancelled credit note ${note.noteNo}.`,
+  } })
+  await reverseReceivablesJournal(client, {
+    tenantId: scope.tenantId, sourceType: 'CUSTOMER_CREDIT_NOTE_WALLET_RECLASS', sourceId: note.id,
+    userId, reason: `Credit note ${note.noteNo} cancelled`,
   })
 }
 
@@ -826,7 +930,7 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
   try {
     const tenantId = tenantIdOf(req)
     const scope = await resolveBranchScope(prisma, req, { source: 'body', allowOwnerAll: false })
-    const { customerId, saleId, amount, reason, notes, branchId, items = [] } = req.body
+    const { customerId, saleId, amount, reason, notes, branchId, items = [], creditDisposition, settleAgainstSaleId } = req.body
 
     if (!customerId) return res.status(400).json({ error: 'customerId is required' })
     const normalizedReason = validateReason(reason, CREDIT_REASONS, 'credit note')
@@ -863,6 +967,8 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
       return res.status(400).json({ error: 'Credit note amount exceeds the remaining net sale balance. Maximum allowed is ' + creditCapacity.remaining.toFixed(2) + '.' })
     }
     noteAmount = toMoney(Math.min(noteAmount, creditCapacity.remaining))
+
+    const features = await getTenantFeatures(tenantId)
 
     const noteNo = await generateNoteNo('CN', prisma.creditNote, tenantId)
     const note = await prisma.$transaction(async (tx) => {
@@ -902,9 +1008,10 @@ router.post('/credit-notes', authenticateToken, requirePermission('canCreateRece
           lines: creditNoteRecognitionLines(arConfig, { amount: createdNote.amount, taxAmount: noteTaxAmount || 0, refundAmount: targetRefund, returnedCogs, reference: createdNote.noteNo }),
         })
       }
-      await ensureCreditNotePaidRefund(tx, scope, createdNote.id, req.user.id)
+      const { targetRefund } = await creditNoteRefundTarget(tx, scope, createdNote.id)
+      const settledNote = await settleCreditNotePaidAmount(tx, scope, createdNote, targetRefund, creditDisposition, settleAgainstSaleId, req.user.id, features)
       await reconcileCustomerReceivableBalance(tx, scope, customerId)
-      return createdNote
+      return { ...createdNote, ...settledNote }
     })
 
     res.status(201).json(note)
@@ -927,7 +1034,9 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
         where: { tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: existing.id },
         _sum: { amount: true },
       })
-      if (Number(appliedCredit._sum.amount || 0) > 0) return res.status(409).json({ error: 'This credit note has already been applied to a later sale, so its amount and reason are locked to protect the customer balance.' })
+      if (Number(appliedCredit._sum.amount || 0) > 0 || toMoney(existing.walletAmount) > 0) return res.status(409).json({ error: 'This credit note has already been applied or credited to the customer wallet, so its amount and reason are locked to protect the customer balance.' })
+      const { targetRefund } = await creditNoteRefundTarget(prisma, scope, existing.id)
+      if (targetRefund > 0 && !existing.creditDisposition) return res.status(409).json({ error: 'This credit note includes money already paid. Cancel it and recreate it with an explicit settlement choice.' })
     }
 
     const accountingConfig = await getReceivablesAccountingConfig(prisma, tenantId)
@@ -937,8 +1046,8 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
 
     const { amount, reason, notes } = req.body
     const updates = {}
-    if ((amount !== undefined || reason !== undefined) && toMoney(existing.refundAmount) > 0) {
-      return res.status(400).json({ error: 'This credit note already refunded money paid by the customer. Cancel it and create a new note to change the amount or reason.' })
+    if ((amount !== undefined || reason !== undefined) && (toMoney(existing.refundAmount) > 0 || toMoney(existing.walletAmount) > 0)) {
+      return res.status(400).json({ error: 'This credit note has already settled money paid by the customer. Cancel it and create a new note to change the amount or reason.' })
     }
     if (amount !== undefined) {
       const nextAmount = toMoney(amount)
@@ -960,7 +1069,7 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
           where: { tenantId: scope.tenantId, sourceType: 'credit_note', sourceId: existing.id },
           _sum: { amount: true },
         })
-        if (Number(lockedApplications._sum.amount || 0) > 0) throw httpError(409, 'This credit note has already been applied to a later sale, so its amount and reason are locked to protect the customer balance.')
+        if (Number(lockedApplications._sum.amount || 0) > 0 || toMoney(existing.walletAmount) > 0) throw httpError(409, 'This credit note has already been applied or credited to the customer wallet, so its amount and reason are locked to protect the customer balance.')
       }
       const existingAffectsStock = CREDIT_STOCK_REASONS.has(normalizeReason(existing.reason))
       const nextAffectsStock = CREDIT_STOCK_REASONS.has(normalizedReason)
@@ -977,7 +1086,6 @@ router.put('/credit-notes/:id', authenticateToken, requirePermission('canCreateR
         },
       })
       await updateLinkedSaleBalanceFromCreditNotes(tx, scope, existing.saleId)
-      await ensureCreditNotePaidRefund(tx, scope, updatedNote.id, req.user.id)
       await reconcileCustomerReceivableBalance(tx, scope, existing.customerId)
       return updatedNote
     })
@@ -1009,6 +1117,7 @@ router.patch('/credit-notes/:id/cancel', authenticateToken, requirePermission('c
       if (Number(lockedApplications._sum.amount || 0) > 0) throw httpError(409, 'This credit note has already been applied to a later sale and cannot be cancelled without first reversing the related sale settlement.')
       await reverseCreditNoteStockReturn(tx, existing.tenantId, existing.noteNo)
       await reverseCreditNotePaidRefund(tx, scope, existing, req.user.id)
+      await reverseCreditNoteWalletCredit(tx, scope, existing, req.user.id)
       await reverseReceivablesJournal(tx, { tenantId: scope.tenantId, sourceType: 'RECEIVABLE_CREDIT_NOTE', sourceId: existing.id, userId: req.user.id, reason: `Credit note ${existing.noteNo} cancelled` })
       const cancelledNote = await tx.creditNote.update({
         where: { id: req.params.id },

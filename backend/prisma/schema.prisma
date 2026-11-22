@@ -6362,6 +6362,9 @@ model CreditNote {
   refundAmount        Float       @default(0)
   refundWithdrawalId  String?
   refundCashAccountId String?
+  walletAmount        Float       @default(0)
+  creditDisposition   String?
+  creditDispositionSaleId String?
   reason              String // sales_return, price_adjustment, overcharge, cancellation, other
   status              String      @default("issued") // issued, applied, cancelled
   notes               String?

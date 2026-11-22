@@ -1,4 +1,4 @@
-import { calculateCustomerReceivableBalance, calculateCustomerReceivableBalanceBefore, effectiveCreditNoteRows } from '../utils/customerBalance.js'
+import { calculateCustomerReceivableBalance, calculateCustomerReceivableBalanceBefore, effectiveCreditNoteRows, unappliedCreditNoteAmount } from '../utils/customerBalance.js'
 import { getCustomerWalletBalance } from './customerWalletService.js'
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100
@@ -100,7 +100,7 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
     }),
     client.creditNote.findMany({
       where: { tenantId: scope.tenantId, customerId, status: { not: 'cancelled' } },
-      select: { id: true, noteNo: true, saleId: true, amount: true, refundAmount: true, createdAt: true, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, status: true } } },
+      select: { id: true, noteNo: true, saleId: true, amount: true, refundAmount: true, walletAmount: true, createdAt: true, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, status: true } } },
       orderBy: { createdAt: 'asc' },
     }),
     client.saleReturn.findMany({
@@ -139,8 +139,8 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
 
   const effectiveNotes = effectiveCreditNoteRows(creditNotes)
   for (const note of effectiveNotes) {
-    const available = money(note.effectiveAmount - money(note.refundAmount) - (previouslyApplied.get(`credit_note:${note.id}`) || 0))
-    if (available > 0.009) sources.push({ sourceType: 'credit_note', sourceId: note.id, amount: available, expectedAmount: money(note.amount), expectedRefundAmount: money(note.refundAmount), createdAt: note.createdAt })
+    const available = unappliedCreditNoteAmount(note, previouslyApplied.get(`credit_note:${note.id}`))
+    if (available > 0.009) sources.push({ sourceType: 'credit_note', sourceId: note.id, amount: available, expectedAmount: money(note.amount), expectedRefundAmount: money(note.refundAmount), expectedWalletAmount: money(note.walletAmount), createdAt: note.createdAt })
   }
   for (const creditReturn of returns) {
     const available = money(Number(creditReturn.total) - (previouslyApplied.get(`sale_return:${creditReturn.id}`) || 0))
@@ -155,8 +155,8 @@ export async function applyAvailableCustomerCredit(client, { scope, customerId, 
     if (remaining <= 0.009) break
     if (source.sourceType === 'credit_note') {
       await client.$queryRaw`SELECT id FROM credit_notes WHERE id = ${source.sourceId} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
-      const currentNote = await client.creditNote.findFirst({ where: { id: source.sourceId, tenantId: scope.tenantId, customerId, status: { not: 'cancelled' } }, select: { id: true, amount: true, refundAmount: true } })
-      if (!currentNote || money(currentNote.amount) !== source.expectedAmount || money(currentNote.refundAmount) !== source.expectedRefundAmount) {
+      const currentNote = await client.creditNote.findFirst({ where: { id: source.sourceId, tenantId: scope.tenantId, customerId, status: { not: 'cancelled' } }, select: { id: true, amount: true, refundAmount: true, walletAmount: true } })
+      if (!currentNote || money(currentNote.amount) !== source.expectedAmount || money(currentNote.refundAmount) !== source.expectedRefundAmount || money(currentNote.walletAmount) !== source.expectedWalletAmount) {
         throw Object.assign(new Error('A customer credit note changed while this sale was being recorded. Refresh the customer ledger and try again.'), { statusCode: 409 })
       }
     }

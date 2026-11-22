@@ -22,6 +22,10 @@ interface Note {
   id: string
   noteNo: string
   amount: number
+  refundAmount?: number
+  walletAmount?: number
+  creditDisposition?: string | null
+  creditDispositionSaleId?: string | null
   reason: string
   status: string
   notes?: string
@@ -53,6 +57,9 @@ interface LinkedDoc {
   id: string
   refNo: string
   total: number
+  amountPaid?: number
+  balance?: number
+  creditNotes?: { amount: number }[]
   createdAt?: string
   items: LinkedDocItem[]
 }
@@ -109,6 +116,8 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
   const [branchId, setBranchId] = useState('')
   const [linkedDocs, setLinkedDocs] = useState<LinkedDoc[]>([])
   const [linkedDocId, setLinkedDocId] = useState('')
+  const [creditDisposition, setCreditDisposition] = useState('')
+  const [settleAgainstSaleId, setSettleAgainstSaleId] = useState('')
   const [returnItems, setReturnItems] = useState<LinkedDocItem[]>([])
   const [loadingLinkedDocs, setLoadingLinkedDocs] = useState(false)
   const stockReturnMode = isStockReturnReason(activeTab, reason)
@@ -124,6 +133,21 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
       doc.createdAt ? new Date(doc.createdAt).toLocaleDateString() : '',
     ].filter(Boolean).join(' - '),
   })), [linkedDocs])
+  const selectedLinkedDoc = linkedDocs.find(doc => doc.id === linkedDocId)
+  const paidCreditPortion = useMemo(() => {
+    if (activeTab !== 'credit' || !selectedLinkedDoc) return 0
+    const total = money(selectedLinkedDoc.total)
+    const paid = money(selectedLinkedDoc.amountPaid)
+    const noteAmount = money(amount)
+    const previouslyCredited = money((selectedLinkedDoc.creditNotes || []).reduce((sum, note) => sum + money(note.amount), 0))
+    const unpaidPortion = Math.max(0, money(total - paid))
+    const before = Math.max(0, money(Math.min(total, previouslyCredited) - unpaidPortion))
+    const after = Math.max(0, money(Math.min(total, previouslyCredited + noteAmount) - unpaidPortion))
+    return money(Math.max(0, after - before))
+  }, [activeTab, amount, selectedLinkedDoc])
+  const eligibleSettlementSales = useMemo(() => linkedDocs
+    .filter(doc => doc.id !== linkedDocId && money(doc.balance) + 0.009 >= paidCreditPortion)
+    .map(doc => ({ value: doc.id, label: `${doc.refNo} - ${formatCurrency(doc.balance || 0)} due` })), [linkedDocs, linkedDocId, paidCreditPortion])
 
   const fetchEntities = useCallback(async () => {
     try {
@@ -204,7 +228,10 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
         .map((row: any) => ({
           id: row.id,
           refNo: row.receiptNo || row.refNo || row.id.slice(-8),
-          total: money(row.total),
+          total: money(row.originalTotal ?? row.total),
+          amountPaid: money(row.amountPaid),
+          balance: money(row.balance),
+          creditNotes: Array.isArray(row.creditNotes) ? row.creditNotes.map((note: any) => ({ amount: money(note.amount) })) : [],
           createdAt: row.createdAt,
           items: (row.items || [])
             .map((item: any) => {
@@ -249,6 +276,8 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
     setNotesField('')
     setBranchId(defaultBranchId(user, branches))
     setLinkedDocId('')
+    setCreditDisposition('')
+    setSettleAgainstSaleId('')
     setLinkedDocs([])
     setReturnItems([])
     setEditNote(null)
@@ -274,6 +303,8 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
 
   const selectLinkedDoc = (docId: string) => {
     setLinkedDocId(docId)
+    setCreditDisposition('')
+    setSettleAgainstSaleId('')
     const doc = linkedDocs.find(row => row.id === docId)
     const items = doc?.items.map(item => ({ ...item })) || []
     setReturnItems(items)
@@ -313,6 +344,14 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
         toast({ variant: 'destructive', title: 'Select at least one product quantity to return' })
         return
       }
+      if (activeTab === 'credit' && paidCreditPortion > 0 && !creditDisposition) {
+        toast({ variant: 'destructive', title: 'Choose where the paid amount should go' })
+        return
+      }
+      if (activeTab === 'credit' && paidCreditPortion > 0 && creditDisposition === 'apply_to_sale' && !settleAgainstSaleId) {
+        toast({ variant: 'destructive', title: 'Select the open credit sale to settle' })
+        return
+      }
     }
 
     setSubmitting(true)
@@ -332,6 +371,10 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
         if (activeTab === 'credit') {
           payload.customerId = entityId
           payload.saleId = linkedDocId
+          if (paidCreditPortion > 0) {
+            payload.creditDisposition = creditDisposition
+            if (creditDisposition === 'apply_to_sale') payload.settleAgainstSaleId = settleAgainstSaleId
+          }
         } else {
           payload.supplierId = entityId
           payload.purchaseId = linkedDocId
@@ -452,7 +495,12 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                       <td className="px-4 py-3 font-medium">{note.noteNo}</td>
                       <td className="px-4 py-3">{note.customer?.name || note.supplier?.name || '—'}</td>
                       <td className="px-4 py-3">{note.sale?.receiptNo || note.purchase?.refNo || 'Unlinked'}</td>
-                      <td className="px-4 py-3 text-right font-medium">{formatCurrency(note.amount)}</td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {formatCurrency(note.amount)}
+                        {money(note.refundAmount) > 0 && <span className="mt-1 block text-xs font-normal text-muted-foreground">Cash refunded: {formatCurrency(note.refundAmount)}</span>}
+                        {money(note.walletAmount) > 0 && <span className="mt-1 block text-xs font-normal text-muted-foreground">Added to wallet: {formatCurrency(note.walletAmount)}</span>}
+                        {note.creditDisposition === 'apply_to_sale' && <span className="mt-1 block text-xs font-normal text-muted-foreground">Applied to another credit sale</span>}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="capitalize">{note.reason.replace(/_/g, ' ')}</span>
                       </td>
@@ -511,6 +559,8 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                 onChange={(value) => {
                   setEntityId(value ? String(value) : '')
                   setLinkedDocId('')
+                  setCreditDisposition('')
+                  setSettleAgainstSaleId('')
                   setReturnItems([])
                 }}
                 placeholder={`Select ${entityLabel.toLowerCase()}...`}
@@ -524,6 +574,8 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
               <Select value={reason} onValueChange={(value) => {
                 setReason(value)
                 setLinkedDocId('')
+                setCreditDisposition('')
+                setSettleAgainstSaleId('')
                 setReturnItems([])
                 if (!isStockReturnReason(activeTab, value)) setAmount('')
               }}>
@@ -584,6 +636,43 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
                     ))}
                   </div>
                 )}
+                {activeTab === 'credit' && paidCreditPortion > 0 && (
+                  <div className="space-y-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+                    <div>
+                      <p className="text-sm font-semibold">Paid portion to settle: {formatCurrency(paidCreditPortion)}</p>
+                      <p className="text-xs text-muted-foreground">The unpaid portion reduces only the original sale. Choose what should happen to money already paid.</p>
+                    </div>
+                    <div>
+                      <Label>Paid amount destination <span className="text-red-500">*</span></Label>
+                      <Select value={creditDisposition} onValueChange={(value) => {
+                        setCreditDisposition(value)
+                        setSettleAgainstSaleId('')
+                      }}>
+                        <SelectTrigger><SelectValue placeholder="Choose a settlement" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="apply_to_sale">Apply to another open credit sale</SelectItem>
+                          <SelectItem value="wallet">Add to customer wallet</SelectItem>
+                          <SelectItem value="cash_refund">Refund to the original receiving account</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {creditDisposition === 'apply_to_sale' && (
+                      <FormSelectSearch
+                        label="Open credit sale to settle"
+                        required
+                        options={eligibleSettlementSales}
+                        value={settleAgainstSaleId}
+                        onChange={value => setSettleAgainstSaleId(value ? String(value) : '')}
+                        placeholder="Select another credit sale..."
+                        searchPlaceholder="Search open credit sales..."
+                        helperText={eligibleSettlementSales.length ? undefined : 'No other open sale has enough balance for this full amount.'}
+                        clearable={false}
+                      />
+                    )}
+                    {creditDisposition === 'wallet' && <p className="text-xs text-muted-foreground">Requires Customer Wallet to be on the plan and an active wallet for this customer. The credit will then be available for withdrawal or future wallet use.</p>}
+                    {creditDisposition === 'cash_refund' && <p className="text-xs text-muted-foreground">JibuSales will refund from the original receipt account and record the cash movement.</p>}
+                  </div>
+                )}
               </div>
             )}
             {!editNote && (
@@ -615,7 +704,7 @@ export default function CreditDebitNotesPage({ initialTab }: { initialTab?: Note
             <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
             <Button 
               onClick={handleSubmit} 
-              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId || !linkedDocId || (stockReturnMode && !returnItems.some(item => Number(item.quantity || 0) > 0)))) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
+              disabled={submitting || (!editNote && (!entityId || !amount || Number(amount) <= 0 || !reason || !branchId || !linkedDocId || (stockReturnMode && !returnItems.some(item => Number(item.quantity || 0) > 0)) || (activeTab === 'credit' && paidCreditPortion > 0 && (!creditDisposition || (creditDisposition === 'apply_to_sale' && !settleAgainstSaleId))))) || (editNote && (!amount || Number(amount) <= 0 || !reason))}
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editNote ? 'Update' : 'Create'}

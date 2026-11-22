@@ -103,6 +103,15 @@ export function effectiveCreditNoteRows(notes = []) {
     };
   });
 }
+
+export function unappliedCreditNoteAmount(note, appliedAmount = 0) {
+  return roundMoney(Math.max(0,
+    toMoney(note?.effectiveAmount ?? note?.amount)
+    - toMoney(note?.refundAmount)
+    - toMoney(note?.walletAmount)
+    - toMoney(appliedAmount),
+  ));
+}
 const groupSumMap = (groups, field) => new Map(
   groups.map((group) => [group.customerId, toMoney(group._sum?.[field])])
 );
@@ -238,7 +247,7 @@ async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = [], c
     client.creditNote.findMany({
       where: { tenantId: scope.tenantId, customerId: { in: ids }, status: { not: "cancelled" } },
       select: {
-        id: true, customerId: true, saleId: true, amount: true, createdAt: true,
+        id: true, customerId: true, saleId: true, amount: true, refundAmount: true, walletAmount: true, createdAt: true,
         sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } },
       },
       orderBy: { createdAt: "asc" },
@@ -255,7 +264,7 @@ async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = [], c
     appliedByNote.set(application.sourceId, roundMoney(toMoney(appliedByNote.get(application.sourceId)) + toMoney(application.amount)));
   });
   for (const note of effectiveCreditNoteRows(notes)) {
-    const remaining = roundMoney(Math.max(0, note.effectiveAmount - toMoney(appliedByNote.get(note.id))));
+    const remaining = unappliedCreditNoteAmount(note, appliedByNote.get(note.id));
     if (remaining <= 0) continue;
     totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + remaining));
   }
@@ -516,7 +525,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
     client.creditNote.findMany({
       where: { ...tenantCustomerWhere, ...createdBefore, status: { not: 'cancelled' } },
       select: {
-        id: true, customerId: true, saleId: true, amount: true, createdAt: true,
+        id: true, customerId: true, saleId: true, amount: true, refundAmount: true, walletAmount: true, createdAt: true,
         sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, status: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -542,7 +551,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
     appliedByNote.set(row.sourceId, roundMoney(toMoney(appliedByNote.get(row.sourceId)) + toMoney(row.amount)))
   })
   const effectiveCreditNotes = effectiveCreditNoteRows(notes).reduce((sum, note) =>
-    roundMoney(sum + Math.max(0, note.effectiveAmount - toMoney(appliedByNote.get(note.id)))), 0)
+    roundMoney(sum + unappliedCreditNoteAmount(note, appliedByNote.get(note.id))), 0)
   const appliedByReturn = applications.filter((row) => row.sourceType === 'sale_return')
     .reduce((sum, row) => roundMoney(sum + toMoney(row.amount)), 0)
   const creditReturns = roundMoney(returns.reduce((sum, row) => sum + toMoney(row.total), 0) - appliedByReturn)

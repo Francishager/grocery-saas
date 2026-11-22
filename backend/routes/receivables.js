@@ -2204,7 +2204,8 @@ router.get('/sales', authenticateToken, requirePermission('canViewReceivable'), 
             include: {
               product: { select: { id: true, name: true, sku: true } }
             }
-          }
+          },
+          creditNotes: { where: { status: { not: 'cancelled' } }, select: { amount: true } },
         },
         orderBy: { createdAt: 'desc' }
       }),
