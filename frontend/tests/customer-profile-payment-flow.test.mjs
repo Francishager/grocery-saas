@@ -65,11 +65,13 @@ test('wallet deposits explain and report credit-sale settlement before wallet re
 });
 
 test('wallet withdrawal uses the profile ledger balance, keeps the profile open, and refreshes stale amounts', () => {
-  assert.match(historyDialog, /walletBalance: data\.creditHistory\?\.walletBalance \?\? data\.customer\.wallet\.balance/);
+  assert.match(historyDialog, /walletBalance: data\.customer\.wallet\.balance \?\? data\.customer\.wallet\.summary\?\.balance \?\? data\.creditHistory\?\.walletBalance/);
   assert.match(receivablesPage, /const customerWalletBalance = \(profile: any\)/);
   assert.match(receivablesPage, /Number\.isFinite\(Number\(error\.availableFunds\)\)/);
   assert.match(receivablesPage, /refreshKey=\{historyRefreshKey\}/);
-  assert.match(receivablesPage, /<Dialog open=\{showWithdrawalModal\}/);
+  assert.match(receivablesPage, /actionPanel=\{showWithdrawalModal && walletWithdrawalMode/);
+  assert.match(receivablesPage, /id="walletWithdrawalAmount"/);
+  assert.match(historyDialog, /\{actionPanel\}[\s\S]*?\{content\}/);
   const withdrawHandler = receivablesPage.match(/onWithdraw=\{\(profile\) => \{([\s\S]*?)\n        \}\}/)?.[1] || '';
   assert.ok(withdrawHandler);
   assert.doesNotMatch(withdrawHandler, /setHistoryCustomer\(null\)/);

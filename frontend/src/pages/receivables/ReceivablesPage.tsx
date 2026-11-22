@@ -4,7 +4,6 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -1703,7 +1702,7 @@ export default function ReceivablesPage() {
   const withdrawalValue = parseAmount(withdrawalAmount)
   const withdrawalAccountBalance = Number(selectedWithdrawalAccount?.balance || 0)
   const withdrawalAccountBalanceAfter = selectedWithdrawalAccount ? withdrawalAccountBalance - withdrawalValue : null
-  const canViewWithdrawalFunds = !walletWithdrawalMode || hasPermission('canViewCustomerWallet')
+  const canViewWithdrawalFunds = !walletWithdrawalMode || selectedCustomer?.walletBalance != null
   const withdrawalAvailableFunds = walletWithdrawalMode
     ? (canViewWithdrawalFunds && selectedCustomer?.walletBalance != null ? Math.max(0, parseAmount(selectedCustomer.walletBalance)) : Number.POSITIVE_INFINITY)
     : availableCustomerFunds(selectedCustomer)
@@ -2125,6 +2124,77 @@ export default function ReceivablesPage() {
         customer={historyCustomer}
         open={!!historyCustomer}
         refreshKey={historyRefreshKey}
+        actionPanel={showWithdrawalModal && walletWithdrawalMode && selectedCustomer && hasPermission('canWithdrawCustomerWallet') ? (
+          <section aria-label="Customer wallet withdrawal" className="mb-4 rounded-lg border border-primary/30 bg-background p-4 shadow-sm sm:p-5">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold">Withdraw from Customer Wallet</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{selectedCustomer.name} · {canViewWithdrawalFunds && Number.isFinite(withdrawalAvailableFunds) ? `Wallet balance ${formatCurrency(withdrawalAvailableFunds)}` : 'Wallet balance is checked securely when submitted.'}</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => {
+                setShowWithdrawalModal(false)
+                setSelectedCustomer(null)
+                setWalletWithdrawalMode(false)
+                setWithdrawalAmount('')
+                setSelectedCashAccountId(null)
+              }}>Close</Button>
+            </div>
+            <form className="grid gap-4 lg:grid-cols-2" onSubmit={(event) => { event.preventDefault(); recordWithdrawal() }}>
+              <fieldset disabled={savingWithdrawal} className="contents">
+                <div>
+                  <Label htmlFor="walletWithdrawalAmount">Withdrawal amount</Label>
+                  <Input id="walletWithdrawalAmount" type="number" min="0.01" step="0.01" max={Number.isFinite(withdrawalLimit) ? withdrawalLimit : undefined} required value={withdrawalAmount} onChange={(event) => setWithdrawalAmount(event.target.value)} placeholder="0.00" />
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {Number.isFinite(withdrawalAvailableFunds)
+                      ? `${selectedWithdrawalAccount ? 'Maximum payable from selected account' : 'Maximum from wallet'}: ${formatCurrency(withdrawalLimit)}`
+                      : 'Available wallet funds are validated securely when submitted.'}
+                    {selectedWithdrawalAccount && Number.isFinite(withdrawalAvailableFunds) && withdrawalAccountBalance < withdrawalAvailableFunds && <span className="mt-1 block">The selected account has {formatCurrency(Math.max(0, withdrawalAccountBalance))}. Choose an account with enough funds or enter a lower amount.</span>}
+                  </p>
+                </div>
+                <div>
+                  <Label htmlFor="walletWithdrawalMethod">Payment method</Label>
+                  <Select value={paymentMethod} onValueChange={(method) => {
+                    setPaymentMethod(method)
+                    setSelectedCashAccountId(null)
+                    setMobileProvider('')
+                    setPhoneNumber('')
+                    setTransactionId('')
+                    setTimeout(() => loadCashAccounts(method), 50)
+                  }}>
+                    <SelectTrigger id="walletWithdrawalMethod"><SelectValue placeholder="Select payment method" /></SelectTrigger>
+                    <SelectContent>{paymentMethodOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                {paymentMethod === 'mobile_money' && <>
+                  <div><Label htmlFor="walletWithdrawalProvider">Network provider</Label><select id="walletWithdrawalProvider" value={mobileProvider} onChange={(event) => setMobileProvider(event.target.value)} className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="">Select provider</option><option value="MTN">MTN</option><option value="Airtel">Airtel</option><option value="Other">Other</option></select></div>
+                  <div><Label htmlFor="walletWithdrawalPhone">Phone number</Label><Input id="walletWithdrawalPhone" type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="Mobile money number" /></div>
+                  <div><Label htmlFor="walletWithdrawalTxn">Transaction ID</Label><Input id="walletWithdrawalTxn" value={transactionId} onChange={(event) => setTransactionId(event.target.value)} placeholder="Transaction reference" /></div>
+                </>}
+                {paymentMethod === 'card' && <div><Label htmlFor="walletWithdrawalCardTxn">Transaction ID</Label><Input id="walletWithdrawalCardTxn" value={transactionId} onChange={(event) => setTransactionId(event.target.value)} placeholder="Transaction reference" /></div>}
+                <div>
+                  <Label htmlFor="walletWithdrawalAccount">Payout account</Label>
+                  <Select value={selectedCashAccountId || ''} onValueChange={(value) => setSelectedCashAccountId(value || null)}>
+                    <SelectTrigger id="walletWithdrawalAccount"><SelectValue placeholder={cashAccounts.length ? 'Select payout account' : 'No eligible accounts'} /></SelectTrigger>
+                    <SelectContent>{cashAccounts.map((account) => <SelectItem key={account.id} value={account.id}>{account.name} · {formatCurrency(Number(account.balance || 0))}</SelectItem>)}</SelectContent>
+                  </Select>
+                  {!cashAccounts.length && <p role="alert" className="mt-1 text-sm text-destructive">No permitted payout account is available for this payment method.</p>}
+                </div>
+                <div className="flex items-end justify-end gap-2 lg:col-span-2">
+                  <Button type="button" variant="outline" onClick={() => {
+                    setShowWithdrawalModal(false)
+                    setSelectedCustomer(null)
+                    setWalletWithdrawalMode(false)
+                    setWithdrawalAmount('')
+                    setSelectedCashAccountId(null)
+                  }}>Cancel</Button>
+                  <Button type="submit" disabled={savingWithdrawal || !online || selectedCustomer.status !== 'active' || withdrawalValue <= 0 || withdrawalValue > withdrawalAvailableFunds || !selectedCashAccountId || (withdrawalAccountBalanceAfter !== null && withdrawalAccountBalanceAfter < 0) || (paymentMethod === 'mobile_money' && (!mobileProvider || !phoneNumber.trim() || !transactionId.trim())) || (paymentMethod === 'card' && !transactionId.trim())}>
+                    {savingWithdrawal ? 'Recording...' : 'Record Wallet Withdrawal'}
+                  </Button>
+                </div>
+              </fieldset>
+            </form>
+          </section>
+        ) : null}
         onOpenChange={(open) => {
           if (!open) setHistoryCustomer(null)
         }}
@@ -2139,7 +2209,7 @@ export default function ReceivablesPage() {
         }}
         onWithdraw={(profile) => {
           const walletBalance = customerWalletBalance(profile)
-          setSelectedCustomer({ ...profile, ...(hasPermission('canViewCustomerWallet') && walletBalance !== undefined ? { walletBalance } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
+          setSelectedCustomer({ ...profile, ...(walletBalance !== undefined ? { walletBalance } : {}), status: (profile.status as Customer['status']) || 'active' } as Customer)
           setSelectedSale(null)
           setWalletWithdrawalMode(Boolean(profile.walletWithdrawal))
           setWithdrawalAmount('')
@@ -2627,21 +2697,10 @@ export default function ReceivablesPage() {
       )}
 
       {/* Withdrawal Modal */}
-        {showWithdrawalModal && selectedCustomer && (walletWithdrawalMode ? hasPermission('canWithdrawCustomerWallet') : canCreateWithdrawal) && (
-        <Dialog open={showWithdrawalModal} onOpenChange={(open) => {
-          setShowWithdrawalModal(open)
-          if (!open) {
-            setSelectedCustomer(null)
-            setWalletWithdrawalMode(false)
-            setWithdrawalAmount('')
-            setSelectedCashAccountId(null)
-          }
-        }}>
-          <DialogContent className="z-[120] max-h-[90dvh] max-w-md overflow-y-auto" showCloseButton>
-            <DialogHeader>
-              <DialogTitle>{walletWithdrawalMode ? 'Withdraw from Customer Wallet' : 'Record Withdrawal'}</DialogTitle>
-              <DialogDescription>{walletWithdrawalMode ? 'The customer profile stays open behind this form. The payout is recorded against the selected business account.' : 'Record a customer funds withdrawal.'}</DialogDescription>
-            </DialogHeader>
+        {showWithdrawalModal && !walletWithdrawalMode && selectedCustomer && canCreateWithdrawal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-lg bg-background p-6">
+            <h3 className="mb-4 text-lg font-semibold">Record Withdrawal</h3>
             <form
               className="space-y-4"
               onSubmit={(event) => {
@@ -2843,8 +2902,8 @@ export default function ReceivablesPage() {
               </div>
               </fieldset>
             </form>
-          </DialogContent>
-        </Dialog>
+          </div>
+        </div>
       )}
 
       {selectedSaleDetail && (

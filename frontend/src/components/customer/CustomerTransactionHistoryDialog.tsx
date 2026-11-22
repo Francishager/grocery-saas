@@ -413,6 +413,7 @@ export default function CustomerTransactionHistoryDialog({
   onWithdraw,
   onEditCustomer,
   onDeleteCustomer,
+  actionPanel,
   viewMode = 'profile',
   presentation = 'dialog',
   refreshKey = 0,
@@ -424,6 +425,7 @@ export default function CustomerTransactionHistoryDialog({
   onWithdraw?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   onEditCustomer?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
   onDeleteCustomer?: (customer: CustomerHistoryTarget & Record<string, unknown>) => void
+  actionPanel?: React.ReactNode
   viewMode?: 'profile' | 'details'
   presentation?: 'dialog' | 'page'
   refreshKey?: number
@@ -1165,7 +1167,7 @@ export default function CustomerTransactionHistoryDialog({
                 {data.access.withdrawWallet && data.customer.wallet?.active && onWithdraw && <Button size="sm" variant="outline" onClick={() => onWithdraw({
                   ...data.customer,
                   ...data.summary,
-                  walletBalance: data.creditHistory?.walletBalance ?? data.customer.wallet.balance ?? data.customer.wallet.summary?.balance,
+                  walletBalance: data.customer.wallet.balance ?? data.customer.wallet.summary?.balance ?? data.creditHistory?.walletBalance,
                   walletWithdrawal: true,
                 })}>Withdraw</Button>}
                 {walletActionError && <p role="alert" className="w-full text-sm text-destructive">{walletActionError}</p>}
@@ -1698,6 +1700,7 @@ export default function CustomerTransactionHistoryDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[94vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] overflow-y-auto p-3 sm:w-[96vw] sm:max-w-[96vw] sm:p-5 lg:w-[95vw] lg:max-w-[95vw] xl:w-[94vw] xl:max-w-[94vw] 2xl:w-[92vw] 2xl:max-w-[1800px]">
+        {actionPanel}
         {content}
       </DialogContent>
     </Dialog>
