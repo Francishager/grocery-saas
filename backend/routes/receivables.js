@@ -889,7 +889,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
     if (access.viewWallet || access.activateWallet || access.depositWallet || access.withdrawWallet) {
       profileCustomer.wallet = {
         active: Boolean(wallet?.isActive),
-        ...(access.viewWallet && { balance: walletBalance }),
+        ...((access.viewWallet || access.withdrawWallet) && { balance: walletBalance }),
         ...(access.viewWallet && { summary: walletSummary }),
         ...(access.viewWallet && {
           migratedLegacyAmount: toMoney(wallet?.migratedLegacyAmount),

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const source = (path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
 const profilePage = source('../src/pages/receivables/CustomerProfilePage.tsx');
+const walletWithdrawalDialog = source('../src/components/customer/CustomerWalletWithdrawalDialog.tsx');
 const paymentDialog = source('../src/components/customer/CustomerPaymentDialog.tsx');
 const receivablesPage = source('../src/pages/receivables/ReceivablesPage.tsx');
 const authContext = source('../src/contexts/JWTAuthContext.tsx');
@@ -25,9 +26,22 @@ const backendReceipts = source('../../backend/src/routes/receipts.js');
 const mobileApp = source('../../mobile/src/app/index.tsx');
 
 test('record payment opens over the profile without navigating to the receivables table', () => {
-  assert.match(profilePage, /onRecordPayment=\{\(customer\) => setPaymentCustomer\(customer\)\}/);
+  assert.ok(profilePage.includes('onRecordPayment={(customer) => setPaymentCustomer(customer.id ? { ...customer, id: customer.id } : null)}'));
   assert.match(profilePage, /<CustomerPaymentDialog/);
   assert.doesNotMatch(profilePage, /onRecordPayment=\{\(customer\) => navigate\('\/tenant\/receivables\/customers'/);
+});
+
+test('wallet withdrawal from the customer profile keeps the profile open and uses wallet funds', () => {
+  assert.ok(profilePage.includes('onWithdraw={(customer) => setWithdrawalCustomer(customer.id ? { ...customer, id: customer.id } : null)}'));
+  assert.doesNotMatch(profilePage, /onWithdraw=\{\(customer\) => navigate\('\/tenant\/receivables\/customers'/);
+  assert.match(walletWithdrawalDialog, /walletBalance \?\? customer\?\.wallet\?\.balance/);
+  assert.match(walletWithdrawalDialog, /\/api\/receivables\/wallet\/withdrawals/);
+  assert.match(walletWithdrawalDialog, /onRecorded\(\)/);
+  const actionHandler = receivablesPage.match(/else if \(request\.type === 'withdrawal'\) \{([\s\S]*?)\n    \} else if \(request\.type === 'edit'\)/)?.[1] || '';
+  assert.match(actionHandler, /Boolean\(customer\.walletWithdrawal\)/);
+  assert.match(actionHandler, /setWalletWithdrawalMode\(walletWithdrawal\)/);
+  assert.match(actionHandler, /setHistoryCustomer\(customer as CustomerHistoryTarget\)/);
+  assert.match(actionHandler, /walletBalance/);
 });
 
 test('profile payment posts through the permission-checked receivables endpoint with branch and idempotency', () => {
@@ -89,6 +103,7 @@ test('withdrawal defaults to the user cash account and owners retain all permiss
   assert.match(receivablesPage, /const defaultAccount = assignedAccount \|\| userAssignedAccount \|\| defaultCashAccount/);
   assert.match(receivablesPage, /setSelectedCashAccountId\(defaultAccount\?\.id \? String\(defaultAccount\.id\) : null\)/);
   assert.match(authContext, /user\.role === 'owner' \|\| user\.role === 'saas_admin'\) return true/);
+  assert.ok(walletWithdrawalDialog.includes('const assigned = accountOptions.find((account) => account.id === assignedCashId)'));
 });
 
 test('credit sales apply active wallet funds and tell staff the wallet amount used', () => {

@@ -365,14 +365,24 @@ export default function ReceivablesPage() {
       setPaymentUnitsPerBase(1)
       setShowPaymentModal(true)
     } else if (request.type === 'withdrawal') {
+      const walletWithdrawal = Boolean(customer.walletWithdrawal)
+      const walletBalance = customerWalletBalance(customer)
       setSelectedCustomer(customer)
       setSelectedSale(null)
+      setWalletWithdrawalMode(walletWithdrawal)
       setWithdrawalAmount('')
       setPaymentMethod('cash')
       setMobileProvider('')
       setPhoneNumber('')
       setTransactionId('')
       setSelectedCashAccountId(null)
+      if (walletWithdrawal) {
+        setSelectedCustomer({
+          ...customer,
+          ...(walletBalance !== undefined ? { walletBalance } : {}),
+        })
+        setHistoryCustomer(customer as CustomerHistoryTarget)
+      }
       setShowWithdrawalModal(true)
     } else if (request.type === 'edit') {
       setEditingCustomer(customer)

@@ -67,7 +67,7 @@ test('customer operational permissions are independent of profile viewing', () =
   assert.equal(access.sales, false)
 })
 
-test('wallet action permissions expose state only; viewing balance and history needs its own permission', () => {
+test('wallet permissions expose only the balance or history granted to each action', () => {
   const source = {
     id: 'customer-1', name: 'A Customer', status: 'active',
     wallet: { active: true, balance: 125000, migratedLegacyAmount: 25000, transactions: [{ id: 'wallet-tx-1' }] },
@@ -76,7 +76,7 @@ test('wallet action permissions expose state only; viewing balance and history n
   assert.deepEqual(depositor.wallet, { active: true })
 
   const withdrawer = customerProfilePayload(source, customerProfileAccess(['canWithdrawCustomerWallet']))
-  assert.deepEqual(withdrawer.wallet, { active: true })
+  assert.deepEqual(withdrawer.wallet, { active: true, balance: 125000 })
 
   const viewer = customerProfilePayload(source, customerProfileAccess(['canViewCustomerWallet']))
   assert.equal(viewer.wallet.balance, 125000)

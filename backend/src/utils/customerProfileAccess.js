@@ -85,7 +85,7 @@ export function customerProfilePayload(customer, access) {
     ...((access.viewWallet || access.activateWallet || access.depositWallet || access.withdrawWallet) && customer.wallet && {
       wallet: {
         active: Boolean(customer.wallet.active),
-        ...(access.viewWallet && { balance: money(customer.wallet.balance) }),
+        ...((access.viewWallet || access.withdrawWallet) && { balance: money(customer.wallet.balance) }),
         ...(access.viewWallet && {
           migratedLegacyAmount: money(customer.wallet.migratedLegacyAmount),
           transactions: customer.wallet.transactions || [],

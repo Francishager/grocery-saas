@@ -1,12 +1,16 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import CustomerTransactionHistoryDialog from '@/components/customer/CustomerTransactionHistoryDialog'
+import CustomerTransactionHistoryDialog, { type CustomerHistoryTarget } from '@/components/customer/CustomerTransactionHistoryDialog'
 import CustomerPaymentDialog from '@/components/customer/CustomerPaymentDialog'
+import CustomerWalletWithdrawalDialog from '@/components/customer/CustomerWalletWithdrawalDialog'
+
+type ProfileActionCustomer = CustomerHistoryTarget & Record<string, unknown> & { id: string }
 
 export default function CustomerProfilePage() {
   const { customerId } = useParams()
   const navigate = useNavigate()
-  const [paymentCustomer, setPaymentCustomer] = useState<any>(null)
+  const [paymentCustomer, setPaymentCustomer] = useState<ProfileActionCustomer | null>(null)
+  const [withdrawalCustomer, setWithdrawalCustomer] = useState<ProfileActionCustomer | null>(null)
   const [profileVersion, setProfileVersion] = useState(0)
 
   if (!customerId) return null
@@ -18,8 +22,8 @@ export default function CustomerProfilePage() {
         customer={{ id: customerId }}
         open
         presentation="page"
-        onRecordPayment={(customer) => setPaymentCustomer(customer)}
-        onWithdraw={(customer) => navigate('/tenant/receivables/customers', { state: { customerAction: { type: 'withdrawal', customer } } })}
+        onRecordPayment={(customer) => setPaymentCustomer(customer.id ? { ...customer, id: customer.id } : null)}
+        onWithdraw={(customer) => setWithdrawalCustomer(customer.id ? { ...customer, id: customer.id } : null)}
         onEditCustomer={(customer) => {
           const tenancy = (customer.rentalTenancies as Array<{ id: string; status?: string }> | undefined)?.find(row => row.status === 'active')
             || (customer.rentalTenancies as Array<{ id: string }> | undefined)?.[0]
@@ -35,6 +39,12 @@ export default function CustomerProfilePage() {
         customer={paymentCustomer}
         open={!!paymentCustomer}
         onOpenChange={(open) => { if (!open) setPaymentCustomer(null) }}
+        onRecorded={() => setProfileVersion((version) => version + 1)}
+      />
+      <CustomerWalletWithdrawalDialog
+        customer={withdrawalCustomer}
+        open={!!withdrawalCustomer}
+        onOpenChange={(open) => { if (!open) setWithdrawalCustomer(null) }}
         onRecorded={() => setProfileVersion((version) => version + 1)}
       />
     </>
