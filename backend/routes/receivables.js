@@ -302,13 +302,7 @@ router.get('/customers', authenticateToken, requirePermission('canViewCustomer')
       prisma.customer.count({ where })
     ])
     const enrichmentWarnings = []
-    let balancedCustomers = customersRaw
-    try {
-      balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
-    } catch (error) {
-      console.error('Customer balance enrichment failed:', error)
-      enrichmentWarnings.push('Some balances could not be refreshed; showing the last saved customer balances.')
-    }
+    const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customersRaw)
     let scoredCustomers = balancedCustomers
     try {
       scoredCustomers = await attachRepaymentTrustScores(prisma, await trustModuleScope(scope), balancedCustomers)

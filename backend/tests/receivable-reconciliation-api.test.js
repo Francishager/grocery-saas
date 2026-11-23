@@ -37,6 +37,7 @@ const db = {
     create: async ({ data }) => { calls.allocations.push(data); },
   },
 };
+globalThis.prisma = db;
 globalThis.receivableReconciliationFixture = { db };
 
 const fixtures = {
@@ -46,14 +47,16 @@ const fixtures = {
     export const requirePermission = key => (req, res, next) => req.user?.permissions?.includes(key) ? next() : res.status(403).json({ error: 'Forbidden' });
     export const requireAnyPermission = keys => (req, res, next) => keys.some(key => req.user?.permissions?.includes(key)) ? next() : res.status(403).json({ error: 'Forbidden' });
     export const requireTenant = (req, res, next) => req.user?.tenantId ? next() : res.status(403).json({ error: 'Tenant required' });
+    export const requireFeature = () => (req, res, next) => next();
     export const canUsePaymentMethodOrAssignedCash = () => false, canUseTransactionAccountForPayment = () => false, loadUserPermissions = () => {};`),
   'usageLimits.js': dataUrl('export const checkUsageLimit = () => {};'),
   'accountingSync.js': dataUrl('export const syncLinkedTransactionAccountBalance = () => {};'),
   'customerCreditScore.js': dataUrl('export const attachRepaymentTrustScores = async (_, __, customers) => customers; export const getRepaymentTrustScore = () => {};'),
   'receivableSalesView.js': dataUrl('export const createReceivableSalesView = () => ({});'),
   'customerWithdrawalService.js': dataUrl('export const recordCustomerWithdrawal = () => {};'),
-  'customerIdentity.js': dataUrl('export const customerIdentityConflictMessage = () => "Conflict"; export const findCustomerIdentityConflict = () => null;'),
+  'customerIdentity.js': dataUrl('export const customerIdentityConflictMessage = () => "Conflict"; export const findCustomerIdentityConflict = () => null; export const findStrongCustomerIdentityDuplicates = async () => [];'),
   'customerBalance.js': dataUrl(`export const attachCustomerReceivableBalances = async (_, __, customers) => customers;
+    export const customerReceivablePosition = balance => ({ receivableBalance: Math.max(0, balance), customerFundsOnAccount: Math.max(0, -balance) });
     export const outstandingCustomerSummary = () => {}, calculateCustomerReceivableBalance = () => ({ balance: globalThis.receivableReconciliationFixture.balance }), reconcileCustomerReceivableBalance = async () => {}, effectiveCreditNoteRows = () => [];`),
   'saleTaxAllocation.js': dataUrl('export const allocateSaleTaxToItems = () => [];'),
 };

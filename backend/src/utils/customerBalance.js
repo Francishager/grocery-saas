@@ -43,16 +43,12 @@ async function tenantModuleFeatures(client, tenantId) {
     }
   } catch (error) {
     console.error('Customer balance feature check failed:', error)
-    return { propertyManagement: false, rentals: false }
+    throw error
   }
 }
 
 export async function rentalModuleEnabled(tenantId) {
-  try {
-    return hasFeatureAccess(await getTenantFeatures(tenantId), 'rentals')
-  } catch (error) {
-    return false
-  }
+  return hasFeatureAccess(await getTenantFeatures(tenantId), 'rentals')
 }
 
 const hasNumericValue = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));

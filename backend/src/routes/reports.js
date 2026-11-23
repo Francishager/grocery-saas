@@ -11,7 +11,7 @@ import { buildAgingReport } from '../utils/agingReport.js';
 import { authenticateToken, requirePermission } from "../../middleware/auth.js";
 import { handleBranchError, resolveBranchScope, salesUserWhere, scopedWhere, visibleSalesUserId } from "../utils/branchAccess.js";
 import { buildDecisionSupportSummary, buildSupplierStatementData } from "../utils/reportingHelpers.js";
-import { attachCustomerReceivableBalances, effectiveCreditNoteRows, receivableSaleNetTotal } from "../utils/customerBalance.js";
+import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance, effectiveCreditNoteRows, receivableSaleNetTotal } from "../utils/customerBalance.js";
 import {
   transformSalesData,
   transformCashFlowData,
@@ -1088,7 +1088,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const selectedCustomer = customerId
         ? prisma.customer.findFirst({
             where: scopedWhere(scope, { id: customerId }),
-            select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+            select: { id: true, name: true, phone: true, balance: true, openingBalance: true, creditLimit: true },
           })
         : null;
     const resolvedSelectedCustomer = await selectedCustomer;
@@ -1126,7 +1126,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       salesView.findMany({
         where: saleRecordWhere,
         include: {
-          customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+          customer: { select: { id: true, name: true, phone: true, balance: true, openingBalance: true, creditLimit: true } },
           items: { include: { product: { select: { id: true, name: true, sku: true, quantity: true, cost: true } } } },
           User: { select: { id: true, fname: true, lname: true, email: true } },
           branch: { select: { id: true, name: true } },
@@ -1136,7 +1136,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       prisma.customerPayment.findMany({
         where: paymentWhere,
         include: {
-          customer: { select: { id: true, name: true, phone: true, balance: true, creditLimit: true } },
+          customer: { select: { id: true, name: true, phone: true, balance: true, openingBalance: true, creditLimit: true } },
           sale: { select: { id: true, receiptNo: true } },
           branch: { select: { id: true, name: true } },
           allocations: { select: { targetType: true, amount: true } },
@@ -1182,7 +1182,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
       }),
       prisma.customer.findMany({
         where: scopedWhere(scope, customerId ? { id: customerId } : {}),
-        select: { id: true, name: true, phone: true, balance: true, creditLimit: true },
+        select: { id: true, name: true, phone: true, balance: true, openingBalance: true, creditLimit: true },
       }),
       prisma.creditNote.findMany({
         where: scopedWhere(scope, {
@@ -1226,6 +1226,18 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
       }),
     ]);
+    const customerRecordsById = new Map()
+    for (const customer of [
+      ...customersForLookup,
+      ...creditSales.map((sale) => sale.customer),
+      ...payments.map((payment) => payment.customer),
+      resolvedSelectedCustomer,
+    ]) {
+      if (customer?.id) customerRecordsById.set(customer.id, customer)
+    }
+    const balancedCustomerRecords = await attachCustomerReceivableBalances(prisma, scope, [...customerRecordsById.values()])
+    const customerBalanceById = new Map(balancedCustomerRecords.map((customer) => [customer.id, Number(customer.balance || 0)]))
+    const customersByName = new Map(balancedCustomerRecords.map((customer) => [String(customer.name || "").trim().toLowerCase(), customer]))
     const stockReturnNos = creditNotes
       .filter((note) => ["sales_return", "cancellation"].includes(String(note.reason || "").toLowerCase()))
       .map((note) => `RET-${note.noteNo}`);
@@ -1263,7 +1275,6 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
     const staffMap = new Map();
     const customerMap = new Map();
     const productMap = new Map();
-    const customersByName = new Map(customersForLookup.map((customer) => [String(customer.name || "").trim().toLowerCase(), customer]));
     const cashMovementsByReference = new Map();
     cashTransactions.forEach((movement) => {
       [movement.reference, movement.id].filter(Boolean).forEach((reference) => {
@@ -1308,14 +1319,14 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         cashSales: 0,
         creditSales: 0,
         payments: 0,
-        currentBalance: Number(customer?.balance || 0),
+        currentBalance: customer?.id ? customerBalanceById.get(customer.id) ?? Number(customer.balance || 0) : 0,
         creditLimit: Number(customer?.creditLimit || 0),
         transactions: [],
       };
       if (customer?.id) {
         row.customerId = customer.id;
         row.registered = true;
-        row.currentBalance = Number(customer.balance || 0);
+        row.currentBalance = customerBalanceById.get(customer.id) ?? Number(customer.balance || 0);
         row.creditLimit = Number(customer.creditLimit || row.creditLimit || 0);
       }
       customerMap.set(id, row);
@@ -1465,7 +1476,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         reference: sale.receiptNo,
         customer: sale.customer?.name || "Unknown customer",
         customerId: sale.customerId,
-        customerBalance: Number(sale.customer?.balance || 0),
+        customerBalance: customer.currentBalance,
         customerCreditLimit: Number(sale.customer?.creditLimit || 0),
         staff: userLabel(sale.User),
         staffId: sale.User?.id,
@@ -1677,7 +1688,7 @@ router.get("/daily-business", authenticateToken, async (req, res) => {
         reference: customerPaymentDisplayReference(payment),
         customer: payment.customer?.name || "Unknown customer",
         customerId: payment.customerId,
-        customerBalance: Number(payment.customer?.balance || 0),
+        customerBalance: customer.currentBalance,
         amount: receivableAmount,
         debit: receivableAmount,
         credit: 0,
@@ -3137,8 +3148,9 @@ router.get("/financial/tax", authenticateToken, async (req, res) => {
 router.get("/customers/list", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const customers = await prisma.customer.findMany({ where: scopedWhere(s), include: { branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-    const data = customers.map((c) => ({ name: c.name, phone: c.phone || "", email: c.email || "", balance: c.balance || 0 }));
+    const customersRaw = await prisma.customer.findMany({ where: scopedWhere(s), include: { branch: { select: { name: true } } }, orderBy: { name: "asc" } });
+    const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
+    const data = customers.map((c) => ({ name: c.name, phone: c.phone || "", email: c.email || "", balance: Number(c.balance || 0) }));
     res.json({ data, summary: { count: data.length, totalBalance: data.reduce((a, c) => a + c.balance, 0) } });
   } catch (err) { handleBranchError(res, err); }
 });
@@ -3224,7 +3236,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     const { customerId } = req.query;
     const custFilter = customerId ? { customerId } : {};
     const saleUserFilter = saleVisibilityFilter(req);
-    const customerOpeningFilter = customerId ? { id: customerId } : { openingBalance: { gt: 0 } };
+    const customerOpeningFilter = customerId ? { id: customerId } : {};
 
     let customer = null;
     if (customerId) {
@@ -3275,7 +3287,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     // Opening balance = sales - payments - credit notes - sale returns (all before date range)
     const [allSales, allPayments, allWithdrawals, allCreditNotes, allSaleReturns] = await Promise.all([
       prisma.saleRecord.findMany({
-        where: scopedWhere(s, { ...custFilter, ...saleUserFilter }),
+        where: scopedWhere(s, custFilter),
         select: { total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true, createdAt: true },
       }),
       prisma.customerPayment.findMany({
@@ -3287,11 +3299,11 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         select: { amount: true, createdAt: true },
       }),
       prisma.creditNote.findMany({
-        where: scopedWhere(s, { ...custFilter, ...saleUserFilter, status: { not: "cancelled" } }),
+        where: scopedWhere(s, { ...custFilter, status: { not: "cancelled" } }),
         select: { amount: true, createdAt: true, saleId: true, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } },
       }),
       prisma.saleReturn.findMany({
-        where: scopedWhere(s, { ...custFilter, ...saleUserFilter, status: "completed" }),
+        where: scopedWhere(s, { ...custFilter, status: "completed", refundMethod: "credit" }),
         select: { total: true, createdAt: true },
       }),
     ]);
@@ -3301,7 +3313,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     const openingCreditNotes = fromDate ? effectiveCreditNoteRows(allCreditNotes.filter((x) => new Date(x.createdAt) < fromDate)) : [];
     const displayCreditNotes = effectiveCreditNoteRows(creditNotes).filter((x) => x.effectiveAmount > 0);
     const openingBalance = (fromDate
-      ? openingCustomers.filter((x) => new Date(openingBalanceDate(x)) < fromDate).reduce((a, x) => a + positiveOpeningBalance(x), 0) +
+      ? openingCustomers.filter((x) => new Date(openingBalanceDate(x)) < fromDate).reduce((a, x) => a + toMoney(x.openingBalance), 0) +
         allSales.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + receivableSaleNetTotal(x), 0) -
         allPayments.filter((x) => new Date(x.createdAt) < fromDate).reduce((a, x) => a + customerReceivablePaymentAmount(x), 0) -
         openingCreditNotes.reduce((a, x) => a + x.effectiveAmount, 0) -
@@ -3311,16 +3323,16 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     );
 
     for (const c of openingCustomers) {
-      const amount = positiveOpeningBalance(c);
+      const amount = toMoney(c.openingBalance);
       const date = openingBalanceDate(c);
-      if (amount > 0 && isWithinDateRange(date, fromDate, toDate)) {
+      if (amount !== 0 && isWithinDateRange(date, fromDate, toDate)) {
         entries.push({
           date,
           refNo: "OPENING",
-          type: "Opening Balance",
+          type: amount < 0 ? "Customer Credit Opening Balance" : "Opening Balance",
           description: customerId ? "Opening Balance" : `Opening Balance - ${c.name}`,
-          debit: amount,
-          credit: 0,
+          debit: Math.max(0, amount),
+          credit: Math.max(0, -amount),
           balance: 0,
           isSystem: true,
           systemTransaction: true,
@@ -3370,7 +3382,7 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
         balance: 0,
       });
     }
-    for (const sr of saleReturns) {
+    for (const sr of saleReturns.filter((row) => row.refundMethod === "credit")) {
       entries.push({
         date: sr.createdAt,
         refNo: sr.returnNo,
@@ -3406,7 +3418,8 @@ router.get("/customers/ledger", authenticateToken, async (req, res) => {
     res.json({
       customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone || "" } : null,
       openingBalance,
-      closingBalance: entries.length ? entries[entries.length - 1].balance : openingBalance,
+      closingBalance: (await attachCustomerReceivableBalances(prisma, s, openingCustomers))
+        .reduce((sum, row) => sum + Number(row.balance || 0), 0),
       data: entries,
       summary: {
         totalDebit: entries.reduce((a, e) => a + e.debit, 0),
@@ -3430,7 +3443,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } }, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerWithdrawal.findMany({ where: scopedWhere(s, { ...df(req), walletId: null }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { not: "cancelled" } }), include: { customer: { select: { id: true, name: true } }, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } }, orderBy: { createdAt: "asc" } }),
-        prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: "completed" }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+        prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: "completed", refundMethod: "credit" }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
       ]);
       const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
       const tradePayments = payments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
@@ -3556,7 +3569,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         select: { id: true, noteNo: true, amount: true, reason: true, createdAt: true, saleId: true, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } },
       }),
       prisma.saleReturn.findMany({
-        where: scopedWhere(s, { customerId, ...df(req), ...saleUserFilter, status: "completed" }),
+        where: scopedWhere(s, { customerId, ...df(req), ...saleUserFilter, status: "completed", refundMethod: "credit" }),
         orderBy: { createdAt: "asc" },
         select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true },
       }),
@@ -3685,7 +3698,8 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const totalCreditNotes = creditNoteRows.reduce((a, x) => a + x.effectiveAmount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
     const totalDiscounts = sales.reduce((a, x) => a + toMoney(x.discount) + toMoney(x.cashDiscount), 0);
-    const currentBalance = runningBalance;
+    const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, s, customerId);
+    const currentBalance = Number(balanceSnapshot?.balance ?? runningBalance);
 
     res.json({
       customer: { id: customer.id, name: customer.name, phone: customer.phone || "", email: customer.email || "", address: customer.address || "" },
@@ -4688,14 +4702,15 @@ router.get("/receivables/overdue", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const now = new Date();
-    const [records, openSales, customers] = await Promise.all([
+    const [records, openSales, customersRaw] = await Promise.all([
       salesView.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 }, dueDate: { lt: now } }), include: { customer: true }, orderBy: { dueDate: "asc" } }),
       salesView.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 } }), select: { customerId: true, balance: true } }),
       prisma.customer.findMany({
-        where: scopedWhere(s, { openingBalance: { gt: 0 }, balance: { gt: 0 } }),
+        where: scopedWhere(s, { openingBalance: { gt: 0 } }),
         select: { id: true, name: true, balance: true, openingBalance: true, openingBalanceDate: true, createdAt: true },
       }),
     ]);
+    const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
     const openSalesByCustomer = new Map();
     openSales.forEach((sale) => openSalesByCustomer.set(sale.customerId, (openSalesByCustomer.get(sale.customerId) || 0) + Number(sale.balance || 0)));
     const openingRows = customers.map((customer) => {

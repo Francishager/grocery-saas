@@ -17,6 +17,7 @@ const db = {
   },
   userBranch: { findMany: async () => [{ branchId: 'branch-a', branch: { id: 'branch-a' } }] },
 };
+globalThis.prisma = db;
 globalThis.customerPaginationFixture = {
   db,
   balances: async (_, scope, customers) => {
@@ -31,10 +32,13 @@ globalThis.customerPaginationFixture = {
 
 // Import the real router and branch scoping without connecting to a database.
 const fixtures = {
+  'node:crypto': dataUrl('export const randomUUID = () => "test-uuid";'),
   '@prisma/client': dataUrl('export class PrismaClient { constructor() { return globalThis.customerPaginationFixture.db; } }'),
   'auth.js': dataUrl(`export const authenticateToken = (req, res, next) => next();
     export const requirePermission = key => (req, res, next) => req.user?.permissions?.includes(key) ? next() : res.status(403).json({ error: 'Forbidden' });
+    export const requireAnyPermission = keys => (req, res, next) => keys.some(key => req.user?.permissions?.includes(key)) ? next() : res.status(403).json({ error: 'Forbidden' });
     export const requireTenant = (req, res, next) => req.user?.tenantId ? next() : res.status(403).json({ error: 'Tenant required' });
+    export const requireFeature = () => (req, res, next) => next();
     export const canUsePaymentMethodOrAssignedCash = () => false, canUseTransactionAccountForPayment = () => false, loadUserPermissions = () => {};`),
   'usageLimits.js': dataUrl('export const checkUsageLimit = () => {};'),
   'accountingSync.js': dataUrl('export const syncLinkedTransactionAccountBalance = () => {};'),
@@ -42,7 +46,10 @@ const fixtures = {
   'receivableSalesView.js': dataUrl('export const createReceivableSalesView = () => ({});'),
   'customerWithdrawalService.js': dataUrl('export const recordCustomerWithdrawal = () => {};'),
   'customerBalance.js': dataUrl(`export const attachCustomerReceivableBalances = globalThis.customerPaginationFixture.balances;
+    export const customerReceivablePosition = balance => ({ receivableBalance: Math.max(0, balance), customerFundsOnAccount: Math.max(0, -balance) });
     export const outstandingCustomerSummary = () => {}, calculateCustomerReceivableBalance = () => {}, reconcileCustomerReceivableBalance = () => {}, effectiveCreditNoteRows = () => {};`),
+  'customerIdentity.js': dataUrl('export const customerIdentityConflictMessage = () => "Conflict"; export const findCustomerIdentityConflict = () => null; export const findStrongCustomerIdentityDuplicates = async () => [];'),
+  'featureCheck.js': dataUrl('export const getTenantFeatures = async () => new Set(); export const hasFeatureAccess = () => false;'),
 };
 const routeUrl = new URL('../routes/receivables.js', import.meta.url);
 const source = (await readFile(routeUrl, 'utf8')).replace(/(from\s+)(["'])([^"']+)\2/g, (_, prefix, quote, specifier) => {
@@ -55,7 +62,7 @@ const route = router.stack.find(layer => layer.route?.path === '/customers' && l
 
 beforeEach(() => { queries = []; balanceScopes = []; scoreScopes = []; });
 async function request(query = {}, overrides = {}) {
-  const req = { query, user: { id: 'owner-a', tenantId: 'tenant-a', role: 'owner', permissions: ['canViewReceivable'], ...overrides } };
+  const req = { query, user: { id: 'owner-a', tenantId: 'tenant-a', role: 'owner', permissions: ['canViewCustomer', 'canViewCustomerBalance'], ...overrides } };
   const result = { status: 200 };
   const res = { status(code) { result.status = code; return this; }, json(body) { result.body = body; return this; } };
   for (const layer of route.stack) {
@@ -83,7 +90,7 @@ test('normal customer table pagination retains stable ordering and totals', asyn
   assert.equal(result.status, 200);
   assert.equal(result.body.customers.length, 10);
   assert.equal(queries[0].skip, 20);
-  assert.deepEqual(queries[0].orderBy, [{ createdAt: 'desc' }, { id: 'desc' }]);
+  assert.deepEqual(queries[0].orderBy, [{ name: 'asc' }, { id: 'asc' }]);
   assert.equal(result.body.pagination.pages, 1200);
 });
 

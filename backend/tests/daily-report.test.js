@@ -4,10 +4,16 @@ import { Prisma } from '@prisma/client';
 
 const prisma = {
   tenant: { findUnique: async () => ({ name: 'Report Test Business' }) },
+  tenantFeature: { findMany: async () => [] },
   branch: { findMany: async () => [] },
   customer: { findMany: async () => [] },
   saleRecord: { findMany: async () => [] },
   customerPayment: { findMany: async () => [] },
+  customerPaymentAllocation: { findMany: async () => [] },
+  customerWithdrawal: { groupBy: async () => [] },
+  customerCreditApplication: { findMany: async () => [] },
+  customerWallet: { findMany: async () => [] },
+  customerWalletTransaction: { groupBy: async () => [] },
   expense: { findMany: async () => [] },
   journalEntry: { findMany: async () => [] },
   sale: { findMany: async () => [] },

@@ -9,7 +9,7 @@ import { syncLinkedTransactionAccountBalance } from "../src/utils/accountingSync
 import { fuelDeliveryValuation, fuelMeterSaleValuation, fuelShiftReconciliation } from "../src/utils/fuelAccounting.js";
 import { ensureFuelAccountingAccounts, ensureFuelLinkedAccount, fuelMeterSaleLines, fuelOpeningLines, fuelShiftJournalLines, postFuelJournal } from "../src/services/fuelAccountingService.js";
 import { getPayablesAccountingConfig, validatePayablesAccountingConfig } from "../src/services/payablesAccountingService.js";
-import { calculateCustomerReceivableBalance, reconcileCustomerReceivableBalance } from "../src/utils/customerBalance.js";
+import { attachCustomerReceivableBalances, calculateCustomerReceivableBalance, reconcileCustomerReceivableBalance } from "../src/utils/customerBalance.js";
 import { getReceivablesAccountingConfig, postCustomerCreditApplicationJournal, postReceivablesJournal, validateReceivablesAccountingConfig } from "../src/services/receivablesAccountingService.js";
 import { applyAvailableCustomerCredit } from "../src/services/customerCreditApplicationService.js";
 import { fuelVehicleInvoiceError } from "../src/utils/fuelFleet.js";
@@ -66,11 +66,12 @@ router.get('/customers', authenticateToken, loadUserPermissions, requirePermissi
     const scope = await resolveBranchScope(prisma, req, { source: 'query', allowOwnerAll: true });
     const customers = await prisma.customer.findMany({
       where: scopedWhere(scope, { status: 'active' }),
-      select: { id: true, name: true, phone: true, balance: true, creditLimit: true, branchId: true },
+      select: { id: true, name: true, phone: true, balance: true, openingBalance: true, creditLimit: true, branchId: true },
       orderBy: { name: 'asc' },
     });
+    const balancedCustomers = await attachCustomerReceivableBalances(prisma, scope, customers)
     const access = customerProfileAccess(req.user?.permissions);
-    res.json(customers.map((customer) => ({
+    res.json(balancedCustomers.map((customer) => ({
       id: customer.id,
       name: customer.name,
       ...(access.phone ? { phone: customer.phone } : { maskedPhone: maskCustomerPhone(customer.phone) }),
