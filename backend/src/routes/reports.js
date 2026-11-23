@@ -275,6 +275,22 @@ function customerWithdrawalStatementRow(withdrawal) {
   };
 }
 
+function customerWalletApplicationStatementRow(application) {
+  const amount = toMoney(application.amount);
+  return {
+    id: `wallet-application-${application.id}`,
+    date: application.createdAt,
+    type: "Customer Credit Applied",
+    description: `Customer Wallet Applied - ${application.customer?.name || "N/A"}`,
+    debit: 0,
+    credit: amount,
+    reference: application.sale?.receiptNo || application.saleId,
+    details: "Customer wallet funds applied to a sale",
+    paymentMethod: "customer_credit",
+    relatedId: application.saleId,
+  };
+}
+
 function isWithinDateRange(date, fromDate, toDate) {
   const value = new Date(date);
   if (fromDate && value < fromDate) return false;
@@ -3454,16 +3470,21 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const { customerId } = req.query;
     if (!customerId) {
       const saleUserFilter = saleVisibilityFilter(req);
-      const [customersRaw, sales, payments, withdrawals, creditNotes, saleReturns] = await Promise.all([
+      const [customersRaw, sales, payments, withdrawals, creditNotes, saleReturns, creditApplications] = await Promise.all([
         prisma.customer.findMany({ where: scopedWhere(s), orderBy: { name: "asc" }, include: { wallet: { select: { migratedLegacyAmount: true, createdAt: true } } } }),
         prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } }, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerWithdrawal.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { not: "cancelled" } }), include: { customer: { select: { id: true, name: true } }, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: "completed", refundMethod: "credit" }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+        prisma.customerCreditApplication.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { name: true } }, sale: { select: { id: true, receiptNo: true } } }, orderBy: { createdAt: "asc" } }),
       ]);
       const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
       const tradePayments = payments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
+      const visibleSaleIds = new Set(sales.map((sale) => sale.id))
+      const walletApplications = creditApplications.filter((application) => (
+        application.sourceType === "wallet" && visibleSaleIds.has(application.saleId)
+      ))
 
       const transactions = [
         ...customers.filter((customer) => Number(customer.openingBalance || 0) !== 0).map((customer) => ({
@@ -3501,6 +3522,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           details: `Method: ${payment.paymentMethod}`,
           paymentMethod: payment.paymentMethod,
         })),
+        ...walletApplications.map(customerWalletApplicationStatementRow),
         ...withdrawals.map(customerWithdrawalStatementRow),
         ...effectiveCreditNoteRows(creditNotes).filter((cn) => cn.effectiveAmount > 0).map((cn) => ({
           id: `creditnote-${cn.id}`,
@@ -3558,7 +3580,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     if (!customer) return res.status(404).json({ error: "Customer not found" });
 
     const saleUserFilter = saleVisibilityFilter(req);
-    const [sales, payments, withdrawals, creditNotes, saleReturns] = await Promise.all([
+    const [sales, payments, withdrawals, creditNotes, saleReturns, creditApplications] = await Promise.all([
       prisma.saleRecord.findMany({
         where: scopedSaleWhere(req, s, { customerId }),
         include: { items: { include: { product: { select: { name: true } } } } },
@@ -3583,9 +3605,18 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         orderBy: { createdAt: "asc" },
         select: { id: true, returnNo: true, total: true, reason: true, refundMethod: true, createdAt: true },
       }),
+      prisma.customerCreditApplication.findMany({
+        where: scopedWhere(s, { customerId, ...df(req) }),
+        orderBy: { createdAt: "asc" },
+        include: { sale: { select: { id: true, receiptNo: true } } },
+      }),
 
     ]);
     const tradePayments = payments.filter((payment) => customerReceivablePaymentAmount(payment) > 0)
+    const visibleSaleIds = new Set(sales.map((sale) => sale.id))
+    const walletApplications = creditApplications.filter((application) => (
+      application.sourceType === "wallet" && visibleSaleIds.has(application.saleId)
+    ))
 
     // Compile all transactions chronologically
     const transactions = [];
@@ -3640,6 +3671,10 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         paymentMethod: payment.paymentMethod,
         relatedId: payment.id,
       });
+    });
+
+    walletApplications.forEach((application) => {
+      transactions.push(customerWalletApplicationStatementRow(application));
     });
 
     // Add withdrawals as debits

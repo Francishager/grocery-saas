@@ -61,6 +61,10 @@ const walletWithdrawal = {
   customer: { id: customer.id, name: customer.name },
 };
 let customerPayments = [];
+let creditApplications = [];
+let customerOverrides = {};
+let walletForBalance = null;
+let walletGroups = [];
 
 const emptyModel = () => ({
   findMany: async () => [],
@@ -72,8 +76,8 @@ const emptyModel = () => ({
 const prisma = {
   customer: {
     ...emptyModel(),
-    findMany: async () => [{ ...customer }],
-    findFirst: async () => ({ ...customer }),
+    findMany: async () => [{ ...customer, ...customerOverrides }],
+    findFirst: async () => ({ ...customer, ...customerOverrides }),
   },
   saleRecord: {
     ...emptyModel(),
@@ -99,9 +103,9 @@ const prisma = {
   },
   creditNote: emptyModel(),
   saleReturn: emptyModel(),
-  customerCreditApplication: emptyModel(),
-  customerWallet: emptyModel(),
-  customerWalletTransaction: emptyModel(),
+  customerCreditApplication: { ...emptyModel(), findMany: async () => creditApplications },
+  customerWallet: { ...emptyModel(), findFirst: async () => walletForBalance },
+  customerWalletTransaction: { ...emptyModel(), groupBy: async () => walletGroups },
   tenant: { findUnique: async () => ({ planId: null }) },
   tenantFeature: { findMany: async () => [] },
   branch: { findFirst: async () => null, findMany: async () => [] },
@@ -205,6 +209,69 @@ test('customer statement includes sales and payment counts', async () => {
     assert.equal(response.body.summary.paymentCount, 1);
   } finally {
     customerPayments = [];
+  }
+});
+
+test('customer statement closing transaction includes wallet credit applied to a sale', async () => {
+  const originalSales = [...sales];
+  const saleDate = new Date('2026-09-04T10:00:00Z');
+  sales.splice(0, sales.length, {
+    id: 'wallet-sale',
+    customerId: customer.id,
+    userId: 'staff-a',
+    receiptNo: 'INV-WALLET',
+    total: 2350000,
+    subtotal: 2350000,
+    tax: 0,
+    discount: 0,
+    cashDiscount: 0,
+    amountPaid: 1500000,
+    balance: 850000,
+    paymentStatus: 'partial',
+    status: 'completed',
+    createdAt: saleDate,
+    items: [],
+  });
+  customerOverrides = {
+    openingBalance: -1500000,
+    openingBalanceType: 'credit',
+    wallet: { migratedLegacyAmount: 1500000, createdAt: new Date('2026-09-01T10:00:00Z') },
+  };
+  walletForBalance = { id: 'wallet-1', customerId: customer.id, migratedLegacyAmount: 1500000 };
+  walletGroups = [
+    { direction: 'in', _sum: { amount: 1500000 } },
+    { direction: 'out', _sum: { amount: 1500000 } },
+  ];
+  creditApplications = [{
+    id: 'wallet-application-1',
+    customerId: customer.id,
+    saleId: 'wallet-sale',
+    sourceType: 'wallet',
+    sourceId: 'wallet-1',
+    amount: 1500000,
+    createdAt: saleDate,
+    customer: { name: customer.name },
+    sale: { id: 'wallet-sale', receiptNo: 'INV-WALLET' },
+  }];
+
+  try {
+    const response = await invoke('/customers/statement', {
+      id: 'owner',
+      tenantId: customer.tenantId,
+      role: 'owner',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.currentBalance, 850000);
+    assert.equal(response.body.transactions.at(-1).balance, 850000);
+    assert.equal(response.body.transactions.at(-1).type, 'Customer Credit Applied');
+    assert.equal(response.body.transactions.at(-1).credit, 1500000);
+  } finally {
+    sales.splice(0, sales.length, ...originalSales);
+    customerOverrides = {};
+    walletForBalance = null;
+    walletGroups = [];
+    creditApplications = [];
   }
 });
 
