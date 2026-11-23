@@ -40,6 +40,13 @@ function makeClient({ customer, sales, payments = [], allocations = [], creditNo
       })),
     },
     customerWithdrawal: {
+      findMany: async ({ where }) => withdrawals.filter((withdrawal) =>
+        (!where.id?.in || where.id.in.includes(withdrawal.id)) &&
+        (!where.customerId || where.customerId === withdrawal.customerId || where.customerId.in?.includes(withdrawal.customerId)) &&
+        (!where.tenantId || !withdrawal.tenantId || where.tenantId === withdrawal.tenantId) &&
+        (!where.walletId || where.walletId === null ? !withdrawal.walletId : true) &&
+        (!where.createdAt?.lt || new Date(withdrawal.createdAt) < where.createdAt.lt),
+      ),
       groupBy: async (query) => {
         const rows = withdrawals.filter((withdrawal) => query.where.walletId === null ? !withdrawal.walletId : true)
         const grouped = new Map()
@@ -394,6 +401,30 @@ test('credit-note balance applied to a new sale reallocates credit without chang
   assert.equal(result.components.salePayments, 100);
   assert.equal(result.components.creditNotes, 0);
 });
+
+test('cash refund linked to a credit note is not counted twice in customer receivables', async () => {
+  const cancelledSale = sale({
+    id: 'cancelled-sale', total: 2320000, subtotal: 2320000, amountPaid: 1500000, balance: 0,
+  })
+  const data = makeClient({
+    customer,
+    sales: [cancelledSale],
+    payments: [{ id: 'sale-payment', customerId: customer.id, saleId: cancelledSale.id, amount: 1500000, allocationMode: 'legacy' }],
+    creditNotes: [{
+      id: 'cancel-note', customerId: customer.id, saleId: cancelledSale.id, amount: 2320000,
+      refundAmount: 1500000, refundWithdrawalId: 'refund-withdrawal', walletAmount: 0,
+      createdAt: new Date(), sale: cancelledSale,
+    }],
+    withdrawals: [{ id: 'refund-withdrawal', customerId: customer.id, amount: 1500000, walletId: null }],
+  })
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id)
+  const map = await getCustomerReceivableBalanceMap(data, { tenantId: 'tenant' }, [customer])
+
+  assert.equal(result.balance, 0)
+  assert.equal(result.components.creditNotes, 2320000)
+  assert.equal(map.get(customer.id).balance, 0)
+})
 
 test('an already-active wallet catches up only the remaining customer-account credit', async () => {
   const wallet = { id: 'wallet-catchup', customerId: customer.id, migratedLegacyAmount: 50, isActive: true }

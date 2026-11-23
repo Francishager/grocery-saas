@@ -108,6 +108,18 @@ export function unappliedCreditNoteAmount(note, appliedAmount = 0) {
     - toMoney(appliedAmount),
   ));
 }
+
+export function receivableCreditNoteAmount(note, appliedAmount = 0, refundedCashAmount = 0) {
+  const recordedRefund = toMoney(note?.refundAmount)
+  const paidRefund = Math.min(recordedRefund, Math.max(0, toMoney(refundedCashAmount)))
+  return roundMoney(Math.max(0,
+    toMoney(note?.effectiveAmount ?? note?.amount)
+    - toMoney(note?.walletAmount)
+    - toMoney(appliedAmount)
+    - recordedRefund
+    + paidRefund,
+  ));
+}
 const groupSumMap = (groups, field) => new Map(
   groups.map((group) => [group.customerId, toMoney(group._sum?.[field])])
 );
@@ -259,7 +271,7 @@ async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = [], c
     client.creditNote.findMany({
       where: { tenantId: scope.tenantId, customerId: { in: ids }, status: { not: "cancelled" } },
       select: {
-        id: true, customerId: true, saleId: true, amount: true, refundAmount: true, walletAmount: true, createdAt: true,
+        id: true, customerId: true, saleId: true, amount: true, refundAmount: true, refundWithdrawalId: true, walletAmount: true, createdAt: true,
         sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } },
       },
       orderBy: { createdAt: "asc" },
@@ -272,11 +284,21 @@ async function getEffectiveCreditNoteTotalMap(client, scope, customerIds = [], c
 
   const totalsByCustomer = new Map();
   const appliedByNote = new Map();
+  const refundIds = notes.map((note) => note.refundWithdrawalId).filter(Boolean)
+  const refunds = refundIds.length && client.customerWithdrawal?.findMany
+    ? await client.customerWithdrawal.findMany({
+      where: { tenantId: scope.tenantId, customerId: { in: ids }, id: { in: refundIds }, walletId: null },
+      select: { id: true, customerId: true, amount: true },
+    })
+    : []
+  const refundById = new Map(refunds.map((refund) => [refund.id, refund]))
   applications.forEach((application) => {
     appliedByNote.set(application.sourceId, roundMoney(toMoney(appliedByNote.get(application.sourceId)) + toMoney(application.amount)));
   });
   for (const note of effectiveCreditNoteRows(notes)) {
-    const remaining = unappliedCreditNoteAmount(note, appliedByNote.get(note.id));
+    const refund = refundById.get(note.refundWithdrawalId)
+    const paidRefund = refund?.customerId === note.customerId ? refund.amount : 0
+    const remaining = receivableCreditNoteAmount(note, appliedByNote.get(note.id), paidRefund)
     if (remaining <= 0) continue;
     totalsByCustomer.set(note.customerId, roundMoney(toMoney(totalsByCustomer.get(note.customerId)) + remaining));
   }
@@ -537,7 +559,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
     client.creditNote.findMany({
       where: { ...tenantCustomerWhere, ...createdBefore, status: { not: 'cancelled' } },
       select: {
-        id: true, customerId: true, saleId: true, amount: true, refundAmount: true, walletAmount: true, createdAt: true,
+        id: true, customerId: true, saleId: true, amount: true, refundAmount: true, refundWithdrawalId: true, walletAmount: true, createdAt: true,
         sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, status: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -556,6 +578,15 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
   ])
   if (!customer) return null
 
+  const refundIds = notes.map((note) => note.refundWithdrawalId).filter(Boolean)
+  const refunds = refundIds.length && client.customerWithdrawal?.findMany
+    ? await client.customerWithdrawal.findMany({
+      where: { ...tenantCustomerWhere, id: { in: refundIds }, ...createdBefore, walletId: null },
+      select: { id: true, amount: true },
+    })
+    : []
+  const refundById = new Map(refunds.map((refund) => [refund.id, refund.amount]))
+
   const { salesByCustomer, salePaymentsByCustomer, unlinkedPaymentsByCustomer, customerAccountAllocationsByCustomer, unappliedCustomerReceiptsByCustomer } =
     summarizeSaleAndCustomerPayments(sales, payments, allocations, applications)
   const appliedByNote = new Map()
@@ -563,7 +594,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
     appliedByNote.set(row.sourceId, roundMoney(toMoney(appliedByNote.get(row.sourceId)) + toMoney(row.amount)))
   })
   const effectiveCreditNotes = effectiveCreditNoteRows(notes).reduce((sum, note) =>
-    roundMoney(sum + unappliedCreditNoteAmount(note, appliedByNote.get(note.id))), 0)
+    roundMoney(sum + receivableCreditNoteAmount(note, appliedByNote.get(note.id), refundById.get(note.refundWithdrawalId))), 0)
   const appliedByReturn = applications.filter((row) => row.sourceType === 'sale_return')
     .reduce((sum, row) => roundMoney(sum + toMoney(row.amount)), 0)
   const creditReturns = roundMoney(returns.reduce((sum, row) => sum + toMoney(row.total), 0) - appliedByReturn)
