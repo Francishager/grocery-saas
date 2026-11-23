@@ -258,6 +258,23 @@ function openingBalanceDate(entity) {
   return entity?.openingBalanceDate || entity?.createdAt || new Date();
 }
 
+function customerWithdrawalStatementRow(withdrawal) {
+  const amount = toMoney(withdrawal.amount);
+  const isWalletWithdrawal = Boolean(withdrawal.walletId);
+  return {
+    id: `withdrawal-${withdrawal.id}`,
+    date: withdrawal.createdAt,
+    type: isWalletWithdrawal ? "Wallet Withdrawal" : "Withdrawal",
+    description: `${isWalletWithdrawal ? "Customer Wallet Withdrawal" : "Customer Withdrawal"} - ${withdrawal.customer?.name || "N/A"}`,
+    debit: isWalletWithdrawal ? 0 : amount,
+    credit: 0,
+    walletDebit: isWalletWithdrawal ? amount : 0,
+    reference: withdrawal.reference || withdrawal.id.substring(0, 8),
+    details: `Method: ${withdrawal.paymentMethod}`,
+    paymentMethod: withdrawal.paymentMethod,
+  };
+}
+
 function isWithinDateRange(date, fromDate, toDate) {
   const value = new Date(date);
   if (fromDate && value < fromDate) return false;
@@ -3207,7 +3224,7 @@ router.get("/customers/balance", authenticateToken, async (req, res) => {
 router.get("/customers/receivables", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
-    const rows = await loadOutstandingReceivableRows(prisma, salesView, s, saleVisibilityFilter(req));
+    const rows = await loadOutstandingReceivableRows(prisma, salesView, s);
     const range = df(req).createdAt;
     const data = rows.filter((row) => !range || ((!range.gte || new Date(row.date) >= range.gte)
       && (!range.lte || new Date(row.date) <= range.lte)));
@@ -3441,7 +3458,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         prisma.customer.findMany({ where: scopedWhere(s), orderBy: { name: "asc" }, include: { wallet: { select: { migratedLegacyAmount: true, createdAt: true } } } }),
         prisma.saleRecord.findMany({ where: scopedSaleWhere(req, s), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.customerPayment.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } }, allocations: { select: { targetType: true, amount: true } } }, orderBy: { createdAt: "asc" } }),
-        prisma.customerWithdrawal.findMany({ where: scopedWhere(s, { ...df(req), walletId: null }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+        prisma.customerWithdrawal.findMany({ where: scopedWhere(s, df(req)), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.creditNote.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: { not: "cancelled" } }), include: { customer: { select: { id: true, name: true } }, sale: { select: { id: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, status: true } } }, orderBy: { createdAt: "asc" } }),
         prisma.saleReturn.findMany({ where: scopedWhere(s, { ...df(req), ...saleUserFilter, status: "completed", refundMethod: "credit" }), include: { customer: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
       ]);
@@ -3484,17 +3501,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           details: `Method: ${payment.paymentMethod}`,
           paymentMethod: payment.paymentMethod,
         })),
-        ...withdrawals.map((withdrawal) => ({
-          id: `withdrawal-${withdrawal.id}`,
-          date: withdrawal.createdAt,
-          type: "Withdrawal",
-          description: `Customer Withdrawal - ${withdrawal.customer?.name || "N/A"}`,
-          debit: Number(withdrawal.amount || 0),
-          credit: 0,
-          reference: withdrawal.reference || withdrawal.id.substring(0, 8),
-          details: `Method: ${withdrawal.paymentMethod}`,
-          paymentMethod: withdrawal.paymentMethod,
-        })),
+        ...withdrawals.map(customerWithdrawalStatementRow),
         ...effectiveCreditNoteRows(creditNotes).filter((cn) => cn.effectiveAmount > 0).map((cn) => ({
           id: `creditnote-${cn.id}`,
           date: cn.createdAt,
@@ -3532,7 +3539,8 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           openingBalance: customers.reduce((a, x) => a + positiveOpeningBalance(x), 0),
           totalSales: sales.reduce((a, x) => a + receivableSaleNetTotal(x), 0),
           totalPayments: tradePayments.reduce((a, x) => a + customerReceivablePaymentAmount(x), 0),
-          totalWithdrawals: withdrawals.reduce((a, x) => a + Number(x.amount || 0), 0),
+          totalWithdrawals: withdrawals.filter((x) => !x.walletId).reduce((a, x) => a + Number(x.amount || 0), 0),
+          totalWalletWithdrawals: withdrawals.filter((x) => x.walletId).reduce((a, x) => a + Number(x.amount || 0), 0),
           totalCreditNotes: effectiveCreditNoteRows(creditNotes).reduce((a, x) => a + x.effectiveAmount, 0),
           totalSaleReturns: saleReturns.reduce((a, x) => a + Number(x.total || 0), 0),
           currentBalance: customers.reduce((a, x) => a + Number(x.balance || 0), 0),
@@ -3560,7 +3568,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         include: { allocations: { select: { targetType: true, amount: true } } },
       }),
       prisma.customerWithdrawal.findMany({
-        where: scopedWhere(s, { customerId, ...df(req), walletId: null }),
+        where: scopedWhere(s, { customerId, ...df(req) }),
         orderBy: { createdAt: "asc" },
       }),
       prisma.creditNote.findMany({
@@ -3635,15 +3643,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     // Add withdrawals as debits
     withdrawals.forEach((withdrawal) => {
       transactions.push({
-        id: `withdrawal-${withdrawal.id}`,
-        date: withdrawal.createdAt,
-        type: "Withdrawal",
-        description: "Customer Withdrawal",
-        debit: withdrawal.amount,
-        credit: 0,
-        reference: withdrawal.reference || withdrawal.id.substring(0, 8),
-        details: `Method: ${withdrawal.paymentMethod}`,
-        paymentMethod: withdrawal.paymentMethod,
+        ...customerWithdrawalStatementRow(withdrawal),
         relatedId: withdrawal.id,
       });
     });
@@ -3694,7 +3694,8 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
 
     const totalSales = sales.reduce((a, x) => a + receivableSaleNetTotal(x), 0);
     const totalPayments = tradePayments.reduce((a, x) => a + customerReceivablePaymentAmount(x), 0);
-    const totalWithdrawals = withdrawals.reduce((a, x) => a + x.amount, 0);
+    const totalWithdrawals = withdrawals.filter((x) => !x.walletId).reduce((a, x) => a + x.amount, 0);
+    const totalWalletWithdrawals = withdrawals.filter((x) => x.walletId).reduce((a, x) => a + x.amount, 0);
     const totalCreditNotes = creditNoteRows.reduce((a, x) => a + x.effectiveAmount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
     const totalDiscounts = sales.reduce((a, x) => a + toMoney(x.discount) + toMoney(x.cashDiscount), 0);
@@ -3710,6 +3711,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         totalDiscounts,
         totalPayments,
         totalWithdrawals,
+        totalWalletWithdrawals,
         totalCreditNotes,
         totalReturns: totalSaleReturns,
         currentBalance,

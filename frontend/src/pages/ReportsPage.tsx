@@ -257,6 +257,8 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
           { key: 'totalSales', label: 'Total Sales', format: 'currency' },
           { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'totalWithdrawals', label: 'Withdrawals', format: 'currency' },
+          { key: 'totalWalletWithdrawals', label: 'Wallet Withdrawals', format: 'currency' },
           { key: 'totalCreditNotes', label: 'Credit Notes', format: 'currency' },
           { key: 'totalSaleReturns', label: 'Sale Returns', format: 'currency' },
           { key: 'currentBalance', label: 'Current Balance', format: 'currency' },
@@ -1000,6 +1002,8 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
       case 'Return/Refund':
         return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+      case 'Wallet Withdrawal':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
       case 'Discount':
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
       default:
@@ -1059,7 +1063,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
           </div>
           {/* Desktop view */}
           <div className="hidden lg:block overflow-x-auto rounded-lg border">
-            <table className="min-w-[1400px] w-full text-sm">
+            <table className="min-w-[1520px] w-full text-sm">
               <thead className="sticky top-0 bg-muted/50 border-b">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground w-20">Date</th>
@@ -1069,6 +1073,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Method</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Debit</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Credit</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-28">Wallet Out</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Balance</th>
                 </tr>
               </thead>
@@ -1100,6 +1105,9 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                     </td>
                     <td className="px-4 py-3 text-right font-semibold">
                       {txn.credit > 0 ? formatCurrency(txn.credit) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold">
+                      {txn.walletDebit > 0 ? formatCurrency(txn.walletDebit) : '—'}
                     </td>
                     <td className="px-4 py-3 text-right font-bold">
                       <span className={txn.balance > 0 ? 'text-red-600' : 'text-green-600'}>
@@ -1133,7 +1141,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                   </div>
                   <p className="font-medium text-sm mb-1">{txn.description}</p>
                   {txn.details && <p className="text-xs text-muted-foreground mb-3">{txn.details}</p>}
-                  <div className="grid grid-cols-3 gap-2 pt-3 border-t text-sm">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Debit</p>
                       <p className="font-semibold">{txn.debit > 0 ? formatCurrency(txn.debit) : '—'}</p>
@@ -1141,6 +1149,10 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                     <div>
                       <p className="text-xs text-muted-foreground">Credit</p>
                       <p className="font-semibold">{txn.credit > 0 ? formatCurrency(txn.credit) : '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Wallet Out</p>
+                      <p className="font-semibold">{txn.walletDebit > 0 ? formatCurrency(txn.walletDebit) : '—'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Balance</p>
@@ -2343,6 +2355,7 @@ export default function ReportsPage() {
     { key: 'paymentMethod', label: 'Payment Method', format: 'text' },
     { key: 'debit', label: 'Debit', format: 'currency' },
     { key: 'credit', label: 'Credit', format: 'currency' },
+    { key: 'walletDebit', label: 'Wallet Out', format: 'currency' },
     { key: 'balance', label: 'Balance', format: 'currency' },
   ]
 

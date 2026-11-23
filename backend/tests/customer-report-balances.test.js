@@ -50,6 +50,17 @@ const sales = [
   },
 ];
 
+const walletWithdrawal = {
+  id: 'wallet-withdrawal-1',
+  customerId: customer.id,
+  walletId: 'wallet-1',
+  amount: 12,
+  paymentMethod: 'cash',
+  reference: 'WD-WALLET-1',
+  createdAt: new Date('2026-09-03T10:00:00Z'),
+  customer: { id: customer.id, name: customer.name },
+};
+
 const emptyModel = () => ({
   findMany: async () => [],
   findFirst: async () => null,
@@ -79,7 +90,12 @@ const prisma = {
   },
   customerPayment: emptyModel(),
   customerPaymentAllocation: emptyModel(),
-  customerWithdrawal: emptyModel(),
+  customerWithdrawal: {
+    ...emptyModel(),
+    findMany: async ({ where = {} } = {}) => (
+      where.walletId === null ? [] : [walletWithdrawal]
+    ),
+  },
   creditNote: emptyModel(),
   saleReturn: emptyModel(),
   customerCreditApplication: emptyModel(),
@@ -103,10 +119,10 @@ function getRoute(path) {
   return matches[0].route.stack.at(-1).handle;
 }
 
-async function invoke(path, user) {
+async function invoke(path, user, query = { customerId: customer.id }) {
   let status = 200;
   let body;
-  await getRoute(path)({ user, query: { customerId: customer.id } }, {
+  await getRoute(path)({ user, query }, {
     status(code) { status = code; return this; },
     json(value) { body = value; return this; },
   });
@@ -129,6 +145,22 @@ test('customer list reports use the canonical balance instead of the saved balan
   assert.equal(body.summary.totalBalance, 105);
 });
 
+test('customer receivables report includes the full branch balance for each staff member', async () => {
+  const results = [];
+  for (const id of ['staff-a', 'staff-b']) {
+    const response = await invoke('/customers/receivables', {
+      id,
+      tenantId: customer.tenantId,
+      role: 'attendant',
+    }, {});
+
+    assert.equal(response.status, 200);
+    results.push(response.body.summary.totalReceivable);
+  }
+
+  assert.deepEqual(results, [105, 105]);
+});
+
 test('statement and ledger closing balances stay the same for staff in the same branch', async () => {
   const staffResults = [];
   for (const id of ['staff-a', 'staff-b']) {
@@ -148,6 +180,27 @@ test('statement and ledger closing balances stay the same for staff in the same 
     { statement: 105, ledger: 105 },
     { statement: 105, ledger: 105 },
   ]);
+});
+
+test('customer statement shows wallet withdrawals without changing the receivable balance', async () => {
+  const user = {
+    id: 'staff-a',
+    tenantId: customer.tenantId,
+    role: 'attendant',
+  };
+
+  for (const query of [{ customerId: customer.id }, {}]) {
+    const response = await invoke('/customers/statement', user, query);
+
+    assert.equal(response.status, 200);
+    const transaction = response.body.transactions.find((row) => row.id === `withdrawal-${walletWithdrawal.id}`);
+    assert.ok(transaction);
+    assert.equal(transaction.type, 'Wallet Withdrawal');
+    assert.equal(transaction.walletDebit, 12);
+    assert.equal(transaction.debit, 0);
+    assert.equal(response.body.summary.totalWalletWithdrawals, 12);
+    assert.equal(response.body.summary.currentBalance, 105);
+  }
 });
 
 test('overdue opening balance uses the canonical balance instead of stale saved balance', async () => {
