@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows, maskCustomerEmail, maskCustomerPhone } from '../src/utils/customerProfileAccess.js'
+import { customerAmountPaid, customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows, maskCustomerEmail, maskCustomerPhone } from '../src/utils/customerProfileAccess.js'
 
 test('customer profile strips contact and financial fields unless explicitly permitted', () => {
   const access = customerProfileAccess(['canViewCustomer'])
@@ -120,6 +120,20 @@ test('historical rental receivables and collections follow customer sales/paymen
   assert.deepEqual(filterCustomerHistoryRows(rows, activity), rows)
   const finance = customerProfileAccess(['canViewCustomerSalesHistory', 'canViewCustomerPaymentsHistory'])
   assert.deepEqual(filterCustomerHistoryRows(rows, finance), rows)
+})
+
+test('customer Amount Paid totals settlements once and excludes wallet-only deposits and withdrawals', () => {
+  const rows = [
+    { source: 'sale_payment_adjustment', balanceImpact: -100000 },
+    { source: 'customer_payment', balanceImpact: -250000 },
+    { source: 'customer_credit_application', balanceImpact: -50000 },
+    { source: 'customer_payment', balanceImpact: 0 },
+    { source: 'customer_wallet', balanceImpact: 0 },
+    { source: 'customer_withdrawal', balanceImpact: 75000 },
+    { source: 'sale_return', balanceImpact: -20000 },
+  ]
+
+  assert.equal(customerAmountPaid(rows), 400000)
 })
 
 test('credit history requires balance visibility and a permitted credit activity domain', () => {

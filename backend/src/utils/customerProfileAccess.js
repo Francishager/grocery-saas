@@ -109,3 +109,18 @@ export function filterCustomerHistoryRows(rows, access) {
     return false
   })
 }
+
+const customerSettlementSources = new Set([
+  'customer_payment',
+  'property_sale_payment',
+  'sale_payment_adjustment',
+  'customer_credit_application',
+])
+
+export function customerAmountPaid(rows) {
+  const total = rows.reduce((sum, row) => {
+    if (!customerSettlementSources.has(row.source)) return sum
+    return sum + Math.max(0, -Number(row.balanceImpact || 0))
+  }, 0)
+  return Math.round((total + Number.EPSILON) * 100) / 100
+}

@@ -295,6 +295,31 @@ test('migrated legacy customer funds remain separate from receivables as wallet 
   assert.equal(result[1].components.customerWalletBalance, 40)
 })
 
+test('reconciles explicit sale paid amount when the linked application row is missing but sale balance confirms it', async () => {
+  const wallet = { id: 'wallet-recovered', customerId: customer.id, migratedLegacyAmount: 1500000, isActive: true }
+  const data = makeClient({
+    customer: { ...customer, openingBalance: -1500000, openingBalanceType: 'credit' },
+    sales: [sale({ total: 2350000, subtotal: 2350000, amountPaid: 1500000, balance: 850000, legacyPaidAmountAtCutover: 0 })],
+    wallets: [wallet],
+    walletTransactions: [
+      { walletId: wallet.id, direction: 'in', _sum: { amount: 1500000 } },
+      { walletId: wallet.id, direction: 'out', _sum: { amount: 1500000 } },
+    ],
+  })
+
+  const result = await calculateCustomerReceivableBalance(data, { tenantId: 'tenant' }, customer.id)
+
+  assert.equal(result.balance, 850000)
+  assert.deepEqual(result.components.paymentReconciliationIssues, [{
+    saleId: 'sale',
+    recordedSaleAmountPaid: 1500000,
+    trackedPaidAmount: 0,
+    recoveredAmount: 1500000,
+    status: 'missing_explicit_payment_allocation',
+    requiresReview: true,
+  }])
+})
+
 test('customer savings opening balance is held in wallet liability instead of appearing as receivable credit', async () => {
   const wallet = { id: 'wallet-opening', customerId: customer.id, migratedLegacyAmount: 100, isActive: true }
   const data = makeClient({

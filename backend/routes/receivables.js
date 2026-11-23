@@ -14,7 +14,7 @@ import { allocateCustomerReceipt, allocateCustomerReceiptToRentals, allocateWall
 import { allocateSaleTaxToItems } from '../src/utils/saleTaxAllocation.js'
 import { recordCustomerWithdrawal } from '../src/services/customerWithdrawalService.js'
 import { customerIdentityConflictMessage, findCustomerIdentityConflict, findStrongCustomerIdentityDuplicates } from '../src/utils/customerIdentity.js'
-import { customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
+import { customerAmountPaid, customerProfileAccess, customerProfilePayload, filterCustomerHistoryRows } from '../src/utils/customerProfileAccess.js'
 import { customerWalletReclassificationStatementRow, customerWalletTransactionsWithBalances, summarizeCustomerWalletMovements } from '../src/utils/customerWalletReporting.js'
 import { customerPaymentDisplayReference, customerPaymentReceiptReference } from '../src/utils/customerPaymentReference.js'
 import { getTenantFeatures, hasFeatureAccess } from '../middleware/featureCheck.js'
@@ -1022,6 +1022,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         })
       }
       ;(sale.creditApplications || []).forEach((application) => {
+        const walletApplication = application.sourceType === 'wallet'
         rows.push({
           id: application.id,
           source: 'customer_credit_application',
@@ -1030,10 +1031,10 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           reference: sale.receiptNo,
           description: `Applied ${application.sourceType.replace('_', ' ')} credit to ${sale.receiptNo}`,
           debit: 0,
-          credit: 0,
+          credit: walletApplication ? toMoney(application.amount) : 0,
           amount: toMoney(application.amount),
-          balanceImpact: 0,
-          affectsBalance: false,
+          balanceImpact: walletApplication ? -toMoney(application.amount) : 0,
+          affectsBalance: walletApplication,
           paymentMethod: 'customer_credit',
           status: 'applied',
           branch: sale.branch?.name || '',
@@ -1489,7 +1490,10 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
       if (row.source === 'credit_note') acc.creditNotes += toMoney(row.amount)
       if (row.source === 'sale_return') acc.returns += toMoney(row.amount)
       return acc
-    }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, withdrawals: 0, creditNotes: 0, returns: 0 })
+    }, { debit: 0, credit: 0, amount: 0, receivableSales: 0, cashSales: 0, payments: 0, amountPaid: 0, withdrawals: 0, creditNotes: 0, returns: 0 })
+    totals.amountPaid = customerAmountPaid(visibleRows)
+    const amountPaidTotal = totals.amountPaid
+    delete totals.amountPaid
 
     res.json({
       customer: profileCustomer,
@@ -1530,6 +1534,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
           openingBalanceNote: customer.openingBalanceNote,
         }),
         ...(access.balance && access.creditLimit && { availableCredit: toMoney(customer.creditLimit) - receivableBalance }),
+        ...(access.payments && { amountPaid: toMoney(amountPaidTotal) }),
         ...(access.withdraw && { availableForWithdrawal: Math.max(0, -toMoney(reconciledCustomer.balance)) }),
         lastTransactionDate: transactions[0]?.date || null
       },

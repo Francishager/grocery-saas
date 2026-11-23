@@ -188,8 +188,11 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
     const explicitReceiptTotal = Math.max(0, toMoney(explicitPaymentsBySale.get(sale.id)));
     const allocatedPaid = Math.max(0, toMoney(allocationsBySale.get(sale.id)) + toMoney(appliedBySale.get(sale.id)));
     const explicitMode = sale.legacyPaidAmountAtCutover != null || allocatedPaid > 0 || explicitReceiptTotal > 0;
+    const trackedPaid = Math.max(0, toMoney(sale.legacyPaidAmountAtCutover) + allocatedPaid);
+    const recordedPaidMatchesBalance = hasNumericValue(sale.balance)
+      && Math.abs(roundMoney(Math.max(0, net - recordedPaid)) - roundMoney(Math.max(0, toMoney(sale.balance)))) <= 0.02;
     const paidOnce = explicitMode
-      ? Math.max(0, toMoney(sale.legacyPaidAmountAtCutover) + allocatedPaid)
+      ? Math.max(trackedPaid, recordedPaidMatchesBalance ? recordedPaid : 0)
       : Math.max(recordedPaid, linkedLegacyPaid);
     const applicationsFromLinkedReceipts = payments
       .filter((payment) => payment.saleId === sale.id)
@@ -215,6 +218,19 @@ function summarizeSaleAndCustomerPayments(sales = [], payments = [], allocations
         difference: roundMoney(linkedLegacyPaid - recordedPaid),
         provisionalAmountUsed: paidOnce,
         status: linkedLegacyPaid > 0 ? 'source_mismatch' : 'missing_payment_rows',
+        requiresReview: true,
+      });
+      paymentReconciliationIssuesByCustomer.set(customerId, issues);
+    }
+
+    if (explicitMode && recordedPaidMatchesBalance && recordedPaid > trackedPaid + 0.01) {
+      const issues = paymentReconciliationIssuesByCustomer.get(customerId) || [];
+      issues.push({
+        saleId: sale.id,
+        recordedSaleAmountPaid: recordedPaid,
+        trackedPaidAmount: trackedPaid,
+        recoveredAmount: roundMoney(recordedPaid - trackedPaid),
+        status: 'missing_explicit_payment_allocation',
         requiresReview: true,
       });
       paymentReconciliationIssuesByCustomer.set(customerId, issues);
@@ -282,7 +298,7 @@ export async function getCustomerReceivableBalanceMap(client, scope, customers =
   const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications, propertySales, propertySalePayments, rentalReceivables, rentalCreditNotes, cancelledRentalBalances, wallets, walletTransactions] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
+      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, balance: true, legacyPaidAmountAtCutover: true, status: true },
     }),
     client.customerPayment.findMany({
       where: tenantCustomerWhere,
@@ -412,7 +428,7 @@ export async function calculateCustomerReceivableBalance(client, scope, customer
   const [sales, payments, allocations, withdrawals, creditNotes, creditReturns, creditApplications, propertySales, propertySalePayments, rentalReceivables, rentalCreditNotes, cancelledRentalBalances, wallet, walletTransactions] = await Promise.all([
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, status: { not: "cancelled" } },
-      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
+      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, balance: true, legacyPaidAmountAtCutover: true, status: true },
     }),
     client.customerPayment.findMany({
       where: tenantCustomerWhere,
@@ -504,7 +520,7 @@ export async function calculateCustomerReceivableBalanceBefore(client, scope, cu
     }),
     client.saleRecord.findMany({
       where: { ...tenantCustomerWhere, ...createdBefore, status: { not: 'cancelled' } },
-      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, legacyPaidAmountAtCutover: true, status: true },
+      select: { id: true, customerId: true, total: true, subtotal: true, tax: true, discount: true, cashDiscount: true, amountPaid: true, balance: true, legacyPaidAmountAtCutover: true, status: true },
     }),
     client.customerPayment.findMany({
       where: { ...tenantCustomerWhere, ...createdBefore },

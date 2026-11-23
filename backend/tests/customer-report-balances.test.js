@@ -266,6 +266,18 @@ test('customer statement closing transaction includes wallet credit applied to a
     assert.equal(response.body.transactions.at(-1).balance, 850000);
     assert.equal(response.body.transactions.at(-1).type, 'Customer Credit Applied');
     assert.equal(response.body.transactions.at(-1).credit, 1500000);
+
+    creditApplications = [];
+    const recoveredResponse = await invoke('/customers/statement', {
+      id: 'owner',
+      tenantId: customer.tenantId,
+      role: 'owner',
+    });
+    assert.equal(recoveredResponse.status, 200);
+    assert.equal(recoveredResponse.body.summary.currentBalance, 850000);
+    assert.equal(recoveredResponse.body.transactions.at(-1).balance, 850000);
+    assert.equal(recoveredResponse.body.transactions.at(-1).type, 'Sale Payment');
+    assert.equal(recoveredResponse.body.transactions.at(-1).credit, 1500000);
   } finally {
     sales.splice(0, sales.length, ...originalSales);
     customerOverrides = {};

@@ -3719,6 +3719,29 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       });
     });
 
+    const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, s, customerId);
+    for (const issue of balanceSnapshot?.components?.paymentReconciliationIssues || []) {
+      const recoveredAmount = issue.status === 'missing_explicit_payment_allocation'
+        ? toMoney(issue.recoveredAmount)
+        : issue.status === 'missing_payment_rows'
+          ? Math.max(0, toMoney(issue.recordedSaleAmountPaid) - toMoney(issue.linkedPaymentTotal))
+          : 0;
+      if (recoveredAmount <= 0) continue;
+      const sale = sales.find((row) => row.id === issue.saleId);
+      transactions.push({
+        id: `sale-paid-recovery-${issue.saleId}`,
+        date: sale?.createdAt || new Date(),
+        type: 'Sale Payment',
+        description: 'Payment reflected in the sale balance',
+        debit: 0,
+        credit: recoveredAmount,
+        reference: sale?.receiptNo || '-',
+        details: "Reconciled from the sale's recorded paid amount; payment-allocation detail is missing and should be reviewed.",
+        paymentMethod: '-',
+        relatedId: issue.saleId,
+      });
+    }
+
     // Sort by date
     transactions.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -3736,7 +3759,6 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
     const totalCreditNotes = creditNoteRows.reduce((a, x) => a + x.effectiveAmount, 0);
     const totalSaleReturns = saleReturns.reduce((a, x) => a + x.total, 0);
     const totalDiscounts = sales.reduce((a, x) => a + toMoney(x.discount) + toMoney(x.cashDiscount), 0);
-    const balanceSnapshot = await calculateCustomerReceivableBalance(prisma, s, customerId);
     const currentBalance = Number(balanceSnapshot?.balance ?? runningBalance);
 
     res.json({

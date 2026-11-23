@@ -116,6 +116,7 @@ type CustomerHistoryResponse = {
     receivableSales?: number
     cashSales?: number
     payments?: number
+    amountPaid?: number
     withdrawals?: number
     creditNotes?: number
     returns?: number
@@ -1134,6 +1135,7 @@ export default function CustomerTransactionHistoryDialog({
                 {data.access.sales && metric(canViewRent ? 'Sales on trade account' : 'Sales on account', data.summary.receivableSales)}
                 {data.access.sales && metric(canViewRent ? 'Counter sales' : 'Cash sales', data.summary.cashSales)}
                 {data.access.payments && metric(canViewRent ? 'Trade account payments' : 'Customer payments', data.summary.payments, 'text-green-700')}
+                {data.access.payments && metric('Amount Paid', data.summary.amountPaid, 'text-emerald-700')}
                 {data.access.withdrawals && metric(canViewRent ? 'Trade account withdrawals' : 'Customer withdrawals', data.summary.withdrawals)}
                 {data.access.creditNotes && metric(canViewRent ? 'Trade credit notes' : 'Credit notes', data.summary.creditNotes, 'text-green-700')}
                 {data.access.returns && metric(canViewRent ? 'Trade returns' : 'Sales returns', data.summary.returns)}
@@ -1146,6 +1148,7 @@ export default function CustomerTransactionHistoryDialog({
                   {data.access.balance && data.access.creditLimit && metric('Available trade credit', data.summary.availableCredit)}
                   {data.access.sales && hasCommercialHistory && metric('Sales on account', data.summary.receivableSales)}
                   {data.access.payments && hasCommercialHistory && metric('Customer payments', data.summary.payments, 'text-green-700')}
+                  {data.access.payments && hasCommercialHistory && metric('Amount Paid', data.summary.amountPaid, 'text-emerald-700')}
                   {data.access.withdrawals && hasCommercialHistory && metric('Customer withdrawals', data.summary.withdrawals)}
                   {data.access.creditNotes && hasCommercialHistory && metric('Credit notes', data.summary.creditNotes, 'text-green-700')}
                   {data.access.returns && hasCommercialHistory && metric('Sales returns', data.summary.returns)}
