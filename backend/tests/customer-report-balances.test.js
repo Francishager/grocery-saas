@@ -60,6 +60,7 @@ const walletWithdrawal = {
   createdAt: new Date('2026-09-03T10:00:00Z'),
   customer: { id: customer.id, name: customer.name },
 };
+let customerPayments = [];
 
 const emptyModel = () => ({
   findMany: async () => [],
@@ -88,7 +89,7 @@ const prisma = {
       return rows;
     },
   },
-  customerPayment: emptyModel(),
+  customerPayment: { ...emptyModel(), findMany: async () => customerPayments },
   customerPaymentAllocation: emptyModel(),
   customerWithdrawal: {
     ...emptyModel(),
@@ -112,6 +113,7 @@ const prisma = {
 
 globalThis.prisma = prisma;
 const { default: reports } = await import('../src/routes/reports.js');
+const { invalidateFeatureCache } = await import('../middleware/featureCheck.js');
 
 function getRoute(path) {
   const matches = reports.stack.filter((layer) => layer.route?.path === path && layer.route.methods.get);
@@ -180,6 +182,52 @@ test('statement and ledger closing balances stay the same for staff in the same 
     { statement: 105, ledger: 105 },
     { statement: 105, ledger: 105 },
   ]);
+});
+
+test('customer statement includes sales and payment counts', async () => {
+  customerPayments = [{
+    id: 'payment-1',
+    customerId: customer.id,
+    amount: 7,
+    createdAt: new Date('2026-09-04T10:00:00Z'),
+    allocations: [],
+  }];
+
+  try {
+    const response = await invoke('/customers/statement', {
+      id: 'staff-a',
+      tenantId: customer.tenantId,
+      role: 'attendant',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.salesCount, 1);
+    assert.equal(response.body.summary.paymentCount, 1);
+  } finally {
+    customerPayments = [];
+  }
+});
+
+test('customer receivables report succeeds for tenants with rentals enabled', async () => {
+  const originalTenantFeatureFindMany = prisma.tenantFeature.findMany;
+  prisma.tenantFeature.findMany = async () => [{ enabled: true, feature: { name: 'rentals', isActive: true } }];
+  prisma.rental = { findMany: async () => [] };
+  invalidateFeatureCache(customer.tenantId);
+
+  try {
+    const response = await invoke('/customers/receivables', {
+      id: 'owner',
+      tenantId: customer.tenantId,
+      role: 'owner',
+    }, {});
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.totalReceivable, 105);
+  } finally {
+    prisma.tenantFeature.findMany = originalTenantFeatureFindMany;
+    delete prisma.rental;
+    invalidateFeatureCache(customer.tenantId);
+  }
 });
 
 test('customer statement shows wallet withdrawals without changing the receivable balance', async () => {

@@ -8,6 +8,7 @@ import { requireAnyFeature, requireFeature } from '../middleware/featureCheck.js
 import { handleBranchError, resolveBranchScope, scopedWhere } from '../src/utils/branchAccess.js'
 import { syncLinkedTransactionAccountBalance } from '../src/utils/accountingSync.js'
 import { resolveTenantTransactionCurrency, toBaseCurrency } from '../src/services/currencyRates.js'
+import { outstandingCustomerSummary } from '../src/utils/customerBalance.js'
 
 const router = express.Router()
 
@@ -851,10 +852,7 @@ router.get('/cash-flow/summary', authenticateToken, requirePermission('canViewEx
       }),
 
       // Receivables
-      prisma.customer.aggregate({
-        where: scopedWhere(scope),
-        _sum: { balance: true }
-      }),
+      outstandingCustomerSummary(prisma, scope),
 
       // Payables
       prisma.supplier.aggregate({

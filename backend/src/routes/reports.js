@@ -3538,7 +3538,9 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         summary: {
           openingBalance: customers.reduce((a, x) => a + positiveOpeningBalance(x), 0),
           totalSales: sales.reduce((a, x) => a + receivableSaleNetTotal(x), 0),
+          salesCount: sales.length,
           totalPayments: tradePayments.reduce((a, x) => a + customerReceivablePaymentAmount(x), 0),
+          paymentCount: tradePayments.length,
           totalWithdrawals: withdrawals.filter((x) => !x.walletId).reduce((a, x) => a + Number(x.amount || 0), 0),
           totalWalletWithdrawals: withdrawals.filter((x) => x.walletId).reduce((a, x) => a + Number(x.amount || 0), 0),
           totalCreditNotes: effectiveCreditNoteRows(creditNotes).reduce((a, x) => a + x.effectiveAmount, 0),
@@ -3708,8 +3710,10 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       summary: {
         openingBalance: openingBalanceAmount,
         totalSales,
+        salesCount: sales.length,
         totalDiscounts,
         totalPayments,
+        paymentCount: tradePayments.length,
         totalWithdrawals,
         totalWalletWithdrawals,
         totalCreditNotes,
@@ -4704,20 +4708,17 @@ router.get("/receivables/overdue", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const now = new Date();
-    const [records, openSales, customersRaw] = await Promise.all([
+    const [records, customersRaw] = await Promise.all([
       salesView.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 }, dueDate: { lt: now } }), include: { customer: true }, orderBy: { dueDate: "asc" } }),
-      salesView.findMany({ where: scopedWhere(s, { ...saleVisibilityFilter(req), balance: { gt: 0 } }), select: { customerId: true, balance: true } }),
       prisma.customer.findMany({
         where: scopedWhere(s, { openingBalance: { gt: 0 } }),
         select: { id: true, name: true, balance: true, openingBalance: true, openingBalanceDate: true, createdAt: true },
       }),
     ]);
     const customers = await attachCustomerReceivableBalances(prisma, s, customersRaw);
-    const openSalesByCustomer = new Map();
-    openSales.forEach((sale) => openSalesByCustomer.set(sale.customerId, (openSalesByCustomer.get(sale.customerId) || 0) + Number(sale.balance || 0)));
     const openingRows = customers.map((customer) => {
       const dueDate = openingBalanceDate(customer);
-      const historicalBalance = Math.max(0, Number(customer.balance || 0) - (openSalesByCustomer.get(customer.id) || 0));
+      const historicalBalance = Math.max(0, Number(customer.balanceComponents?.openingBalance ?? customer.openingBalance ?? 0));
       return {
         customer: customer.name,
         balance: historicalBalance,

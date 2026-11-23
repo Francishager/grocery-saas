@@ -59,7 +59,7 @@ export async function loadOutstandingReceivableRows(client, salesView, scope, sa
   ]);
   const customers = await attachCustomerReceivableBalances(client, scope, rawCustomers);
   const rentalReceivables = client.rental?.findMany && await rentalModuleEnabled(scope.tenantId)
-    ? client.rental.findMany({
+    ? await client.rental.findMany({
       where: scopedWhere(scope, { customerId: { in: rawCustomers.map(customer => customer.id) }, status: { not: 'cancelled' }, balance: { gt: 0 }, OR: [{ isHistoricalReceivable: true }, { isHistoricalRecord: false, bookingState: { in: ['checked_out', 'returned'] } }] }),
       select: { id: true, customerId: true, rentalNo: true, historicalReference: true, isHistoricalReceivable: true, historicalReceivableAmount: true, totalAmount: true, hireDate: true, expectedReturnDate: true, balance: true },
       orderBy: { hireDate: 'asc' },
