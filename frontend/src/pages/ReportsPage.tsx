@@ -257,6 +257,7 @@ const CATEGORIES: ReportCategory[] = [
           { key: 'openingBalance', label: 'Opening Balance', format: 'currency' },
           { key: 'totalSales', label: 'Total Sales', format: 'currency' },
           { key: 'totalPayments', label: 'Total Payments', format: 'currency' },
+          { key: 'currentWalletBalance', label: 'Customer Wallet Balance', format: 'currency' },
           { key: 'totalWithdrawals', label: 'Withdrawals', format: 'currency' },
           { key: 'totalWalletWithdrawals', label: 'Wallet Withdrawals', format: 'currency' },
           { key: 'totalCreditNotes', label: 'Credit Notes', format: 'currency' },
@@ -1039,7 +1040,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
       {/* Summary cards - Enhanced */}
       {data.summary && keys && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {keys.map(k => (
+          {keys.filter(k => k.key !== 'currentWalletBalance' || data.summary?.currentWalletBalance != null).map(k => (
             <Card key={k.key} className="border-l-4 border-l-blue-500">
               <CardContent className="p-4">
                 <p className="text-xs font-medium text-muted-foreground uppercase">{k.label}</p>
@@ -1063,7 +1064,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
           </div>
           {/* Desktop view */}
           <div className="hidden lg:block overflow-x-auto rounded-lg border">
-            <table className="min-w-[1520px] w-full text-sm">
+            <table className={`${isCustomer ? 'min-w-[1740px]' : 'min-w-[1520px]'} w-full text-sm`}>
               <thead className="sticky top-0 bg-muted/50 border-b">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground w-20">Date</th>
@@ -1073,7 +1074,11 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground w-24">Method</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Debit</th>
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Credit</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground w-28">Wallet Out</th>
+                  {isCustomer && <>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground w-28">Wallet In</th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground w-28">Wallet Out</th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground w-32">Wallet Balance</th>
+                  </>}
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground w-24">Balance</th>
                 </tr>
               </thead>
@@ -1106,9 +1111,11 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                     <td className="px-4 py-3 text-right font-semibold">
                       {txn.credit > 0 ? formatCurrency(txn.credit) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold">
-                      {txn.walletDebit > 0 ? formatCurrency(txn.walletDebit) : '—'}
-                    </td>
+                    {isCustomer && <>
+                      <td className="px-4 py-3 text-right font-semibold">{txn.walletCredit > 0 ? formatCurrency(txn.walletCredit) : '—'}</td>
+                      <td className="px-4 py-3 text-right font-semibold">{txn.walletDebit > 0 ? formatCurrency(txn.walletDebit) : '—'}</td>
+                      <td className="px-4 py-3 text-right font-semibold">{txn.walletBalance != null ? formatCurrency(txn.walletBalance) : '—'}</td>
+                    </>}
                     <td className="px-4 py-3 text-right font-bold">
                       <span className={txn.balance > 0 ? 'text-red-600' : 'text-green-600'}>
                         {formatCurrency(txn.balance)}
@@ -1141,7 +1148,7 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                   </div>
                   <p className="font-medium text-sm mb-1">{txn.description}</p>
                   {txn.details && <p className="text-xs text-muted-foreground mb-3">{txn.details}</p>}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t text-sm">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-3 border-t text-sm">
                     <div>
                       <p className="text-xs text-muted-foreground">Debit</p>
                       <p className="font-semibold">{txn.debit > 0 ? formatCurrency(txn.debit) : '—'}</p>
@@ -1150,10 +1157,11 @@ function StatementReport({ data, keys }: { data: any; keys: ReportItem['summaryK
                       <p className="text-xs text-muted-foreground">Credit</p>
                       <p className="font-semibold">{txn.credit > 0 ? formatCurrency(txn.credit) : '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Wallet Out</p>
-                      <p className="font-semibold">{txn.walletDebit > 0 ? formatCurrency(txn.walletDebit) : '—'}</p>
-                    </div>
+                    {isCustomer && <>
+                      <div><p className="text-xs text-muted-foreground">Wallet In</p><p className="font-semibold">{txn.walletCredit > 0 ? formatCurrency(txn.walletCredit) : '—'}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Wallet Out</p><p className="font-semibold">{txn.walletDebit > 0 ? formatCurrency(txn.walletDebit) : '—'}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Wallet Balance</p><p className="font-semibold">{txn.walletBalance != null ? formatCurrency(txn.walletBalance) : '—'}</p></div>
+                    </>}
                     <div>
                       <p className="text-xs text-muted-foreground">Balance</p>
                       <p className={`font-bold ${txn.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>

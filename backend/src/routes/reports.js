@@ -1,5 +1,5 @@
 import { SERVICE_REPORT_PERMISSIONS } from '../utils/servicePermissions.js';
-import { requireFeature, requireFeature as requireServiceFeature } from '../../middleware/featureCheck.js';
+import { getTenantFeatures, hasFeatureAccess, requireFeature, requireFeature as requireServiceFeature } from '../../middleware/featureCheck.js';
 import { Router } from "express";
 import prisma from "../db.js";
 import { customerPaymentDisplayReference } from '../utils/customerPaymentReference.js';
@@ -284,11 +284,40 @@ function customerWalletApplicationStatementRow(application) {
     description: `Customer Wallet Applied - ${application.customer?.name || "N/A"}`,
     debit: 0,
     credit: amount,
+    walletDebit: amount,
     reference: application.sale?.receiptNo || application.saleId,
     details: "Customer wallet funds applied to a sale",
     paymentMethod: "customer_credit",
     relatedId: application.saleId,
   };
+}
+
+function customerWalletStatementRow(movement, customerName) {
+  const amount = toMoney(movement.amount)
+  const incoming = movement.direction === 'in'
+  const labels = {
+    deposit: 'Wallet Deposit',
+    opening_balance: 'Wallet Opening Funds',
+    legacy_opening: 'Wallet Opening Funds',
+    withdrawal: 'Wallet Withdrawal',
+    sale_application: 'Customer Wallet Applied',
+    credit_note_refund: 'Credit Note to Wallet',
+  }
+  return {
+    id: `wallet-${movement.id}`,
+    date: movement.createdAt,
+    type: labels[movement.kind] || (incoming ? 'Wallet Credit' : 'Wallet Debit'),
+    description: `${labels[movement.kind] || 'Customer Wallet Activity'}${customerName ? ` - ${customerName}` : ''}`,
+    debit: 0,
+    credit: 0,
+    walletCredit: incoming ? amount : 0,
+    walletDebit: incoming ? 0 : amount,
+    amount,
+    reference: movement.reference || movement.payment?.reference || movement.id.slice(0, 8),
+    details: movement.notes || `Wallet ${incoming ? 'credit' : 'debit'}`,
+    paymentMethod: movement.paymentMethod || movement.payment?.paymentMethod || '-',
+    relatedId: movement.sourceId || movement.paymentId || null,
+  }
 }
 
 function isWithinDateRange(date, fromDate, toDate) {
@@ -3468,6 +3497,45 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
   try {
     const s = await getScope(req);
     const { customerId } = req.query;
+    const walletPermission = req.user?.role === 'owner' || req.user?.role === 'saas_admin' || req.user?.isPlatformUser
+      || (req.user?.permissions || []).some((permission) => ['*', 'canViewCustomerWallet'].includes(permission))
+      || req.userPermissions?.canViewCustomerWallet === true;
+    const walletStatementEnabled = walletPermission
+      && hasFeatureAccess(await getTenantFeatures(s.tenantId), 'customers.wallet');
+    const walletScopeFilter = customerId ? { wallet: { is: { customerId: String(customerId) } } } : {};
+    const walletDateFilter = df(req);
+    const walletMovements = walletStatementEnabled ? await prisma.customerWalletTransaction.findMany({
+      where: scopedWhere(s, { ...walletDateFilter, ...walletScopeFilter, kind: { notIn: ['sale_application', 'withdrawal'] } }),
+      include: {
+        wallet: { select: { customer: { select: { name: true } } } },
+        payment: { select: { reference: true, paymentMethod: true } },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    }) : [];
+    const walletBalanceGroups = walletStatementEnabled ? await prisma.customerWalletTransaction.groupBy({
+      by: ['direction'],
+      where: scopedWhere(s, walletScopeFilter),
+      _sum: { amount: true },
+    }) : [];
+    const currentWalletBalance = walletBalanceGroups.reduce((balance, group) =>
+      balance + (group.direction === 'in' ? 1 : -1) * toMoney(group._sum.amount), 0);
+    let openingWalletBalance = 0;
+    if (walletStatementEnabled && req.query.from) {
+      const fromDate = new Date(req.query.from);
+      if (!Number.isNaN(fromDate.getTime())) {
+        const beforeGroups = await prisma.customerWalletTransaction.groupBy({
+          by: ['direction'],
+          where: scopedWhere(s, { ...walletScopeFilter, createdAt: { lt: fromDate } }),
+          _sum: { amount: true },
+        });
+        openingWalletBalance = beforeGroups.reduce((balance, group) =>
+          balance + (group.direction === 'in' ? 1 : -1) * toMoney(group._sum.amount), 0);
+      }
+    }
+    const walletStatementRows = walletMovements.map((movement) => customerWalletStatementRow(
+      movement,
+      customerId ? undefined : movement.wallet?.customer?.name,
+    ));
     if (!customerId) {
       const saleUserFilter = saleVisibilityFilter(req);
       const [customersRaw, sales, payments, withdrawals, creditNotes, saleReturns, creditApplications] = await Promise.all([
@@ -3523,6 +3591,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           paymentMethod: payment.paymentMethod,
         })),
         ...walletApplications.map(customerWalletApplicationStatementRow),
+        ...walletStatementRows,
         ...withdrawals.map(customerWithdrawalStatementRow),
         ...effectiveCreditNoteRows(creditNotes).filter((cn) => cn.effectiveAmount > 0).map((cn) => ({
           id: `creditnote-${cn.id}`,
@@ -3549,9 +3618,12 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       ].sort((a, b) => new Date(a.date) - new Date(b.date));
 
       let runningBalance = 0;
+      let runningWalletBalance = openingWalletBalance;
       transactions.forEach((txn) => {
         runningBalance += Number(txn.debit || 0) - Number(txn.credit || 0);
         txn.balance = runningBalance;
+        runningWalletBalance += Number(txn.walletCredit || 0) - Number(txn.walletDebit || 0);
+        if (walletStatementEnabled && (txn.walletCredit || txn.walletDebit)) txn.walletBalance = toMoney(runningWalletBalance);
       });
 
       res.json({
@@ -3568,6 +3640,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
           totalCreditNotes: effectiveCreditNoteRows(creditNotes).reduce((a, x) => a + x.effectiveAmount, 0),
           totalSaleReturns: saleReturns.reduce((a, x) => a + Number(x.total || 0), 0),
           currentBalance: customers.reduce((a, x) => a + Number(x.balance || 0), 0),
+          ...(walletStatementEnabled && { currentWalletBalance: toMoney(currentWalletBalance) }),
           totalTransactions: transactions.length,
           customerCount: customers.length,
         },
@@ -3677,6 +3750,8 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
       transactions.push(customerWalletApplicationStatementRow(application));
     });
 
+    transactions.push(...walletStatementRows);
+
     // Add withdrawals as debits
     withdrawals.forEach((withdrawal) => {
       transactions.push({
@@ -3747,9 +3822,12 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
 
     // Calculate running balances - START with opening balance
     let runningBalance = 0;
+    let runningWalletBalance = openingWalletBalance;
     transactions.forEach((txn) => {
       runningBalance = runningBalance + txn.debit - txn.credit;
       txn.balance = runningBalance;
+      runningWalletBalance += Number(txn.walletCredit || 0) - Number(txn.walletDebit || 0);
+      if (walletStatementEnabled && (txn.walletCredit || txn.walletDebit)) txn.walletBalance = toMoney(runningWalletBalance);
     });
 
     const totalSales = sales.reduce((a, x) => a + receivableSaleNetTotal(x), 0);
@@ -3776,6 +3854,7 @@ router.get("/customers/statement", authenticateToken, async (req, res) => {
         totalCreditNotes,
         totalReturns: totalSaleReturns,
         currentBalance,
+        ...(walletStatementEnabled && { currentWalletBalance: toMoney(currentWalletBalance) }),
         totalTransactions: transactions.length,
         lastUpdated: customer.updatedAt,
       },

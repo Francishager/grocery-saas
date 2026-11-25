@@ -1641,6 +1641,8 @@ model Sale {
   phoneNumber        String?
   transactionId      String?
   customerName       String?
+  customerId         String?
+  customer           Customer?        @relation("PointOfSaleCustomer", fields: [customerId], references: [id], onDelete: SetNull)
   servedBy           String?
   amountPaid         Float? // Amount customer paid (for cash change calculation)
   changeGiven        Float? // Change given back to customer
@@ -1659,6 +1661,7 @@ model Sale {
 
   @@unique([tenantId, receiptNo])
   @@index([tenantId, branchId])
+  @@index([tenantId, customerId, createdAt])
   @@map("sales")
 }
 
@@ -1762,6 +1765,7 @@ model Customer {
   updatedAt          DateTime       @updatedAt
 
   sales                           SaleRecord[]
+  pointOfSaleSales                Sale[]                     @relation("PointOfSaleCustomer")
   payments                        CustomerPayment[]
   wallet                          CustomerWallet?
   paymentAllocations              CustomerPaymentAllocation[]

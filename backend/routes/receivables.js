@@ -612,9 +612,6 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
 
     if (!customer) return res.status(404).json({ error: 'Customer not found' })
 
-    const customerNameFilter = customer.name
-      ? { customerName: { equals: customer.name, mode: 'insensitive' } }
-      : { id: '__no_matching_customer_name__' }
     const unavailableActivitySections = []
     const loadOptionalActivity = async (section, load) => {
       try {
@@ -687,7 +684,7 @@ router.get('/customers/:id/history', authenticateToken, requirePermission('canVi
         take: limit
       }) : Promise.resolve([]),
       access.sales ? prisma.sale.findMany({
-        where: scopedWhere(scope, customerNameFilter),
+        where: scopedWhere(scope, { customerId: id, status: 'completed' }),
         include: {
           branch: { select: { id: true, name: true } },
           user: userSelect,

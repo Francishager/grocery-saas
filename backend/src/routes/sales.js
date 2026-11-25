@@ -41,6 +41,24 @@ function normalizeItems(items, idKey = "productId") {
   }));
 }
 
+async function resolvePosCustomerId(client, tenantId, branchId, customerId, customerName) {
+  if (customerId) {
+    const customer = await client.customer.findFirst({
+      where: { id: customerId, tenantId, ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}) },
+      select: { id: true },
+    })
+    if (!customer) throw Object.assign(new Error('Selected customer was not found in this business.'), { statusCode: 400 })
+    return customer.id
+  }
+  const name = String(customerName || '').trim()
+  if (!name) return null
+  const matches = await client.customer.findMany({
+    where: { tenantId, name: { equals: name, mode: 'insensitive' }, ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}) },
+    select: { id: true }, take: 2,
+  })
+  return matches.length === 1 ? matches[0].id : null
+}
+
 function userHasEffectivePermission(req, permission) {
   const permissions = req.user?.permissions || [];
   return permissions.includes(permission) || permissions.includes("*");
@@ -401,7 +419,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName } = req.body;
+    const { items = [], paymentMethod = "cash", notes, cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, customerId } = req.body;
     if (!items.length) return res.status(400).json({ error: "Items required" });
     if (!canUsePaymentMethodOrAssignedCash(req, paymentMethod, req.userCashAccountId)) {
       return res.status(403).json({ error: "You do not have permission to use this payment method", code: "NO_PAYMENT_METHOD_PERMISSION" });
@@ -432,6 +450,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
     saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index]; });
 
     const sale = await prisma.$transaction(async (tx) => {
+      const linkedCustomerId = await resolvePosCustomerId(tx, scope.tenantId, scope.branchId, customerId, customerName)
       const created = await tx.sale.create({
         data: {
           receiptNo: `RCP-${Date.now()}`,
@@ -454,6 +473,7 @@ router.post("/", authenticateToken, requirePermission("canCreateSale"), requireC
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           notes,
           customerName: customerName?.trim() || null,
+          customerId: linkedCustomerId,
           items: { create: saleItems.map(({ baseQty, itemType, productName, jobRequests, ...rest }) => rest) },
         },
         include: { items: true, branch: true },
@@ -542,7 +562,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
       allowOwnerAll: false,
     });
     const userId = req.user?.id;
-    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, amountPaid, changeGiven } = req.body;
+    const { cart = [], paymentMethod = "cash", cashDiscount = 0, mobileProvider, phoneNumber, transactionId, customerName, customerId, amountPaid, changeGiven } = req.body;
     if (!cart.length) return res.status(400).json({ error: "Cart is empty" });
     if (amountPaid === undefined || amountPaid === null || amountPaid === '' || !Number.isFinite(Number(amountPaid)) || Number(amountPaid) <= 0) {
       return res.status(400).json({ error: "Enter the amount received before completing this sale." });
@@ -576,6 +596,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
     saleItems.forEach((item, index) => { item.taxAmount = itemTaxAmounts[index]; });
 
     const sale = await prisma.$transaction(async (tx) => {
+      const linkedCustomerId = await resolvePosCustomerId(tx, scope.tenantId, scope.branchId, customerId, customerName)
       const created = await tx.sale.create({
         data: {
           receiptNo: `RCP-${Date.now()}`,
@@ -592,6 +613,7 @@ router.post("/checkout", authenticateToken, requirePermission("canCreateSale"), 
           phoneNumber: paymentMethod === "mobile_money" ? phoneNumber : null,
           transactionId: ["mobile_money", "card"].includes(paymentMethod) ? transactionId : null,
           customerName: customerName?.trim() || null,
+          customerId: linkedCustomerId,
           amountPaid: amountPaid != null ? Number(amountPaid) * fx.rateToBase : null,
           changeGiven: changeGiven != null ? Number(changeGiven) * fx.rateToBase : null,
           currency: fx.currency,

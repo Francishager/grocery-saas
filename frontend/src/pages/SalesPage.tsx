@@ -434,6 +434,12 @@ export default function SalesPage() {
     if (!name) return null
     return customers.find((customer) => customer.name.trim().toLowerCase() === name) || customers.find((customer) => customer.name.trim().toLowerCase().includes(name)) || null
   }, [customers, customerName])
+  const exactMatchedCustomer = useMemo(() => {
+    const name = customerName.trim().toLowerCase()
+    if (!name) return null
+    const matches = customers.filter((customer) => customer.name.trim().toLowerCase() === name)
+    return matches.length === 1 ? matches[0] : null
+  }, [customers, customerName])
 
   const findCustomerByName = (name?: string | null) => {
     const normalized = String(name || '').trim().toLowerCase()
@@ -633,6 +639,7 @@ export default function SalesPage() {
           })),
           paymentMethod: paymentMode,
           customerName: customerName?.trim() || undefined,
+          customerId: exactMatchedCustomer?.id,
           cashDiscount: invoiceCashDiscount,
           amountPaid: amountPaid !== '' ? amountPaid : undefined,
           changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
@@ -670,6 +677,7 @@ export default function SalesPage() {
         phoneNumber: paymentMode === 'mobile_money' ? phoneNumber : undefined,
         transactionId: ['mobile_money', 'card'].includes(paymentMode) ? transactionId : undefined,
         customerName: customerName?.trim() || undefined,
+        customerId: exactMatchedCustomer?.id,
         amountPaid: amountPaid !== '' ? amountPaid : undefined,
         changeGiven: amountPaid !== '' && changeDue > 0 ? changeDue : undefined,
         currency: transactionCurrency,
