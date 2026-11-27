@@ -34,6 +34,39 @@ const menuImageUpload = multer({
     ? callback(null, true) : callback(new Error('UNSUPPORTED_MENU_IMAGE')),
 })
 
+async function deductRestaurantOrderInventory(tx, tenantId, items) {
+  const requiredByProduct = new Map()
+
+  for (const item of items) {
+    const recipe = await tx.recipe.findFirst({
+      where: { productId: item.productId, tenantId, isActive: true },
+      include: { ingredients: true },
+    })
+    if (recipe) {
+      for (const ingredient of recipe.ingredients) {
+        const required = Number(ingredient.quantity || 0) * Number(item.quantity || 0)
+        requiredByProduct.set(ingredient.productId, (requiredByProduct.get(ingredient.productId) || 0) + required)
+      }
+    } else if (item.product?.itemType !== 'service') {
+      requiredByProduct.set(item.productId, (requiredByProduct.get(item.productId) || 0) + Number(item.quantity || 0))
+    }
+  }
+
+  for (const [productId, quantity] of requiredByProduct) {
+    if (!Number.isFinite(quantity) || quantity <= 0) continue
+    const result = await tx.product.updateMany({
+      where: { id: productId, tenantId, quantity: { gte: quantity } },
+      data: { quantity: { decrement: quantity } },
+    })
+    if (result.count !== 1) {
+      const product = await tx.product.findFirst({ where: { id: productId, tenantId }, select: { name: true, quantity: true } })
+      const error = new Error(`${product?.name || 'An inventory item'} has insufficient stock to complete this order.`)
+      error.statusCode = 409
+      throw error
+    }
+  }
+}
+
 function parseMenuImage(req, res, next) {
   menuImageUpload.single('image')(req, res, error => {
     if (!error) return next()
@@ -602,92 +635,66 @@ router.post('/orders/:id/complete', authenticateToken, requireAnyPermission(['ca
   try {
     const { paymentMethod, discount, tipAmount, tipWaiterId } = req.body
     const scope = await resolveBranchScope(prisma, req)
-    const order = await prisma.restaurantOrder.findFirst({
-      where: scopedWhere(scope, { id: req.params.id }),
-      include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
-    })
-    if (!order) return res.status(404).json({ message: 'Order not found' })
-    if (hasBarOnlyAccess(req) && order.items.some(item => item.station !== 'bar')) return res.status(404).json({ message: 'Order not found' })
-    const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
-    const barOnlyOrder = order.items.length > 0 && order.items.every(item => item.station === 'bar')
-    if (!granted.includes('*') && !granted.includes('canEditRestaurant') && !(barOnlyOrder && granted.includes('canEditBarOrders'))) return res.status(403).json({ error: 'You do not have permission to complete this order.' })
-    if (order.status === 'completed') return res.status(400).json({ message: 'Order already completed' })
-
-    const finalDiscount = discount || 0
-    const finalTip = tipAmount || 0
-    const total = order.subtotal - finalDiscount + finalTip
-
-    // Generate receipt number
-    const saleCount = await prisma.sale.count({ where: { tenantId: order.tenantId } })
-    const receiptNo = `RCP-${String(saleCount + 1).padStart(5, '0')}`
-
-    // Create sale
-    const saleItems = await Promise.all(order.items.map(async item => {
-      const recipe = await prisma.recipe.findFirst({
-        where: { productId: item.productId, tenantId: order.tenantId, isActive: true },
-        include: { ingredients: { include: { product: { select: { cost: true } } } } },
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM restaurant_orders WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const order = await tx.restaurantOrder.findFirst({
+        where: scopedWhere(scope, { id: req.params.id }),
+        include: { items: { include: { product: true } }, table: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
       })
-      const cost = recipe
-        ? recipe.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.product.cost || 0) * Number(ingredient.quantity || 0), 0)
-        : Number(item.product.cost || 0)
-      return { productId: item.productId, quantity: item.quantity, price: item.price, cost, discount: item.discount, total: item.total }
-    }))
-    const sale = await prisma.sale.create({
-      data: {
-        receiptNo, tenantId: order.tenantId, branchId: order.branchId,
-        userId: req.user.id,
-        servedBy: order.waiter?.name || [req.user.fname, req.user.lname].filter(Boolean).join(' ').trim() || req.user.email || 'Server not recorded',
-        customerName: order.customer?.name || null,
-        subtotal: order.subtotal,
-        discount: finalDiscount,
-        tax: 0,
-        total,
-        paymentMethod: paymentMethod || 'cash',
-        status: 'completed',
-        items: { create: saleItems }
+      if (!order) throw Object.assign(new Error('Order not found'), { statusCode: 404 })
+      if (hasBarOnlyAccess(req) && order.items.some(item => item.station !== 'bar')) throw Object.assign(new Error('Order not found'), { statusCode: 404 })
+      const granted = Array.isArray(req.user?.permissions) ? req.user.permissions : []
+      const barOnlyOrder = order.items.length > 0 && order.items.every(item => item.station === 'bar')
+      if (!granted.includes('*') && !granted.includes('canEditRestaurant') && !(barOnlyOrder && granted.includes('canEditBarOrders'))) {
+        throw Object.assign(new Error('You do not have permission to complete this order.'), { statusCode: 403 })
       }
-    })
+      if (order.status === 'completed' || order.status === 'cancelled') throw Object.assign(new Error('Order is already completed or cancelled.'), { statusCode: 409 })
 
-    // Deduct inventory
-    for (const item of order.items) {
-      // Check if product has a recipe
-      const recipe = await prisma.recipe.findFirst({ where: { productId: item.productId, tenantId: order.tenantId }, include: { ingredients: true } })
-      if (recipe) {
-        // Deduct recipe ingredients
-        for (const ing of recipe.ingredients) {
-          await prisma.product.update({
-            where: { id: ing.productId },
-            data: { quantity: { decrement: ing.quantity * item.quantity } }
-          })
+      const finalDiscount = Number(discount) || 0
+      const finalTip = Number(tipAmount) || 0
+      const total = order.subtotal - finalDiscount + finalTip
+      const receiptNo = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+      const saleItems = await Promise.all(order.items.map(async item => {
+        const recipe = await tx.recipe.findFirst({
+          where: { productId: item.productId, tenantId: order.tenantId, isActive: true },
+          include: { ingredients: { include: { product: { select: { cost: true } } } } },
+        })
+        const cost = recipe
+          ? recipe.ingredients.reduce((sum, ingredient) => sum + Number(ingredient.product.cost || 0) * Number(ingredient.quantity || 0), 0)
+          : Number(item.product.cost || 0)
+        return { productId: item.productId, quantity: item.quantity, price: item.price, cost, discount: item.discount, total: item.total }
+      }))
+      const sale = await tx.sale.create({
+        data: {
+          receiptNo, tenantId: order.tenantId, branchId: order.branchId,
+          userId: req.user.id,
+          servedBy: order.waiter?.name || [req.user.fname, req.user.lname].filter(Boolean).join(' ').trim() || req.user.email || 'Server not recorded',
+          customerName: order.customer?.name || null,
+          subtotal: order.subtotal,
+          discount: finalDiscount,
+          tax: 0,
+          total,
+          paymentMethod: paymentMethod || 'cash',
+          status: 'completed',
+          items: { create: saleItems }
         }
-      } else {
-        // Deduct product directly
-        await prisma.product.update({
-          where: { id: item.productId },
-          data: { quantity: { decrement: item.quantity } }
+      })
+
+      await deductRestaurantOrderInventory(tx, order.tenantId, order.items)
+      if (finalTip > 0 && tipWaiterId) {
+        await tx.tip.create({
+          data: { tenantId: order.tenantId, orderId: order.id, waiterId: tipWaiterId, userId: req.user.id, amount: finalTip, tipType: 'amount' }
         })
       }
-    }
-
-    // Record tip
-    if (finalTip > 0 && tipWaiterId) {
-      await prisma.tip.create({
-        data: { tenantId: order.tenantId, orderId: order.id, waiterId: tipWaiterId, userId: req.user.id, amount: finalTip, tipType: 'amount' }
+      const updatedOrder = await tx.restaurantOrder.update({
+        where: { id: order.id },
+        data: { status: 'completed', paymentStatus: 'paid', paymentMethod, discount: finalDiscount, tipAmount: finalTip, total, saleId: sale.id }
       })
-    }
+      if (order.tableId) await tx.restaurantTable.update({ where: { id: order.tableId }, data: { status: 'cleaning' } })
+      return { order: updatedOrder, sale }
+    }, { isolationLevel: 'Serializable' })
 
-    // Update order
-    const updatedOrder = await prisma.restaurantOrder.update({
-      where: { id: order.id },
-      data: { status: 'completed', paymentStatus: 'paid', paymentMethod, discount: finalDiscount, tipAmount: finalTip, total, saleId: sale.id }
-    })
-
-    // Free table
-    if (order.tableId) {
-      await prisma.restaurantTable.update({ where: { id: order.tableId }, data: { status: 'cleaning' } })
-    }
-
-    res.json({ order: updatedOrder, sale })
+    res.json(result)
   } catch (error) { handleBranchError(res, error) }
 })
 
@@ -696,35 +703,46 @@ router.post('/orders/:id/split', authenticateToken, requirePermission('canEditRe
   try {
     const { splits } = req.body // array of { itemIds: [], paymentMethod, tipAmount }
     const scope = await resolveBranchScope(prisma, req)
-    const order = await prisma.restaurantOrder.findFirst({
-      where: scopedWhere(scope, { id: req.params.id }),
-      include: { items: true, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
-    })
-    if (!order) return res.status(404).json({ message: 'Order not found' })
-
-    const sales = []
-    for (const split of splits) {
-      const splitItems = order.items.filter(i => split.itemIds.includes(i.id))
-      const subtotal = splitItems.reduce((sum, i) => sum + i.total, 0)
-      const tip = split.tipAmount || 0
-      const total = subtotal + tip
-
-      const saleCount = await prisma.sale.count({ where: { tenantId: order.tenantId } })
-      const receiptNo = `RCP-${String(saleCount + 1).padStart(5, '0')}`
-
-      const sale = await prisma.sale.create({
-        data: {
-          receiptNo, tenantId: order.tenantId, branchId: order.branchId,
-          userId: req.user.id, servedBy: order.waiter?.name || [req.user.fname, req.user.lname].filter(Boolean).join(' ').trim() || req.user.email || 'Server not recorded', customerName: order.customer?.name || null, subtotal, discount: 0, tax: 0, total,
-          paymentMethod: split.paymentMethod || 'cash', status: 'completed',
-          items: { create: splitItems.map(i => ({ productId: i.productId, quantity: i.quantity, price: i.price, discount: i.discount, total: i.total })) }
-        }
+    if (!Array.isArray(splits) || splits.length === 0) return res.status(400).json({ error: 'Add at least one bill split.' })
+    const sales = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM restaurant_orders WHERE id = ${req.params.id} AND "tenantId" = ${scope.tenantId} FOR UPDATE`
+      const order = await tx.restaurantOrder.findFirst({
+        where: scopedWhere(scope, { id: req.params.id }),
+        include: { items: { include: { product: true } }, waiter: { select: { id: true, name: true, phone: true, code: true, isActive: true } }, customer: true }
       })
-      sales.push(sale)
-    }
+      if (!order) throw Object.assign(new Error('Order not found'), { statusCode: 404 })
+      if (order.status === 'completed' || order.status === 'cancelled') throw Object.assign(new Error('Order is already completed or cancelled.'), { statusCode: 409 })
 
-    await prisma.restaurantOrder.update({ where: { id: order.id }, data: { status: 'completed', paymentStatus: 'paid' } })
-    if (order.tableId) await prisma.restaurantTable.update({ where: { id: order.tableId }, data: { status: 'cleaning' } })
+      const allocations = splits.flatMap(split => Array.isArray(split.itemIds) ? split.itemIds : [])
+      const expectedIds = order.items.map(item => item.id)
+      if (!expectedIds.length || splits.some(split => !Array.isArray(split.itemIds) || split.itemIds.length === 0) || allocations.length !== expectedIds.length || new Set(allocations).size !== expectedIds.length || expectedIds.some(id => !allocations.includes(id))) {
+        throw Object.assign(new Error('Each order item must appear in exactly one bill split.'), { statusCode: 400 })
+      }
+
+      const createdSales = []
+      for (const split of splits) {
+        const splitItems = order.items.filter(item => split.itemIds.includes(item.id))
+        if (!splitItems.length) throw Object.assign(new Error('Each bill split must contain at least one order item.'), { statusCode: 400 })
+        const subtotal = splitItems.reduce((sum, item) => sum + item.total, 0)
+        const tip = Number(split.tipAmount) || 0
+        const total = subtotal + tip
+        const receiptNo = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+        const sale = await tx.sale.create({
+          data: {
+            receiptNo, tenantId: order.tenantId, branchId: order.branchId,
+            userId: req.user.id, servedBy: order.waiter?.name || [req.user.fname, req.user.lname].filter(Boolean).join(' ').trim() || req.user.email || 'Server not recorded', customerName: order.customer?.name || null, subtotal, discount: 0, tax: 0, total,
+            paymentMethod: split.paymentMethod || 'cash', status: 'completed',
+            items: { create: splitItems.map(item => ({ productId: item.productId, quantity: item.quantity, price: item.price, discount: item.discount, total: item.total })) }
+          }
+        })
+        createdSales.push(sale)
+      }
+
+      await deductRestaurantOrderInventory(tx, order.tenantId, order.items)
+      await tx.restaurantOrder.update({ where: { id: order.id }, data: { status: 'completed', paymentStatus: 'paid' } })
+      if (order.tableId) await tx.restaurantTable.update({ where: { id: order.tableId }, data: { status: 'cleaning' } })
+      return createdSales
+    }, { isolationLevel: 'Serializable' })
 
     res.json({ sales })
   } catch (error) { handleBranchError(res, error) }
